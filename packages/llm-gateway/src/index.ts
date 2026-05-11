@@ -7,3 +7,4 @@ export * from "./catalog.ts";
 export * from "./virtual-keys.ts";
 export * from "./gateway.ts";
 export * from "./dto.ts";
+export * from "./enterprise-providers.ts";

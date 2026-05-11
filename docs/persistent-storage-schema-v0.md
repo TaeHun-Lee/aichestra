@@ -98,6 +98,90 @@ Purpose: sanitized request/result trace records for future real LLM calls.
 - Retention: debug/audit retention
 - Migration notes: v0 usage ledger remains the source of cost attribution.
 
+### `provider_catalog_entries`
+
+Purpose: future durable provider catalog for Enterprise LLM Provider Abstraction.
+
+- Primary key: `id`
+- Important columns: `display_name`, `vendor`, `kind`, `auth jsonb`, `supported_models jsonb`, `billing_mode`, `capabilities jsonb`, `default_enabled`, `status`, `policy_notes jsonb`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `kind,status`
+- Retention: provider lifecycle
+- Migration notes: `auth` stores references/config only; it must not store raw provider tokens, OAuth tokens, keychain paths, or credential cache contents.
+
+### `provider_audit_events`
+
+Purpose: append-only provider validation, credential, invocation, parser, Local Agent, and redaction audit records.
+
+- Primary key: `id`
+- Important columns: `event_type`, `actor_id`, `task_id`, `task_run_id`, `provider_id`, `provider_kind`, `auth_type`, `operation`, `result`, `reason`, `metadata jsonb`, `created_at`
+- Indexes: `provider_id,created_at`, `task_id,task_run_id`
+- Retention: compliance/audit retention
+- Migration notes: metadata must be sanitized and must not include raw prompts, provider secrets, bearer tokens, or credential cache content.
+
+### `local_agent_descriptors`
+
+Purpose: future durable Local Agent connection descriptors.
+
+- Primary key: `id`
+- Important columns: `user_id`, `host_id`, `version`, `status`, `capabilities jsonb`, `last_seen_at`
+- Indexes: `user_id,status`
+- Retention: local agent lifecycle and connection history
+- Migration notes: descriptors must not include vendor tokens or credential cache content.
+
+## Local Agent Runner Tables
+
+### `agent_runs`
+
+Purpose: durable runner execution records for future controlled local or provider runner integrations.
+
+- Primary key: `id`
+- Important columns: `task_id`, `task_run_id`, `runner_kind`, `status`, `diff_summary`, `changed_files jsonb`, `test_results jsonb`, `llm_gateway_request_ids jsonb`, `usage_ledger_entry_ids jsonb`, `audit_event_ids jsonb`, `metadata jsonb`, `created_at`, `completed_at`
+- Indexes: `task_id,task_run_id`, `runner_kind,status`
+- Retention: retain with TaskRun history
+- Migration notes: Local Agent Runner v0 uses in-memory repositories; Postgres wiring is future work.
+
+### `agent_run_audit_events`
+
+Purpose: append-only runner audit events for validation, preparation, completion, failure, and blocked runs.
+
+- Primary key: `id`
+- Important columns: `task_id`, `task_run_id`, `runner_kind`, `event_type`, `result`, `reason`, `metadata jsonb`, `created_at`
+- Indexes: `task_id,task_run_id`, `event_type,created_at`
+- Retention: operational/compliance retention
+- Migration notes: metadata must be sanitized and must not include secrets or raw unsafe command output.
+
+### `instruction_assemblies`
+
+Purpose: records the refs and deterministic hash used to assemble runner instructions.
+
+- Primary key: `id`
+- Important columns: `task_id`, `task_run_id`, `selected_instruction_refs jsonb`, `selected_skill_refs jsonb`, `selected_harness_ref jsonb`, `instruction_set_hash`, `warnings jsonb`, `created_at`
+- Indexes: `task_id,task_run_id`, `instruction_set_hash`
+- Retention: retain with TaskRun history
+- Migration notes: stores refs and hashes, not provider secrets.
+
+### `agent_workspaces`
+
+Purpose: records fixture/temp workspace boundaries used by controlled local runner execution.
+
+- Primary key: `id`
+- Important columns: `root_path`, `mode`, `task_id`, `task_run_id`, `cleanup_policy`, `status`, `metadata jsonb`, `created_at`
+- Indexes: `task_id,task_run_id`, `status,created_at`
+- Retention: retain with AgentRun history; temp workspace contents are not retained by this table.
+- Migration notes: v1 runtime remains in-memory; future Postgres runner repositories should never store secrets or raw workspace contents.
+
+### `command_execution_results`
+
+Purpose: bounded command result records for controlled fixture-local runner execution.
+
+- Primary key: `id`
+- Important columns: `task_id`, `task_run_id`, `agent_run_id`, `executor_kind`, `status`, `command`, `args jsonb`, `exit_code`, `stdout_preview`, `stderr_preview`, `stdout_bytes`, `stderr_bytes`, `duration_ms`, `blocked_reason`, `metadata jsonb`, `created_at`
+- Indexes: `agent_run_id`, `task_id,task_run_id`, `status,created_at`
+- Retention: retain with AgentRun history, subject to stdout/stderr preview retention policies.
+- Migration notes: previews must remain size-limited and sanitized; full raw logs and secrets are not stored.
+
+## Common Audit Tables
+
 ### `audit_events`
 
 Purpose: common task and system audit events.
@@ -107,6 +191,16 @@ Purpose: common task and system audit events.
 - Indexes: `actor_user_id`, `target_type,target_id`, `task_id`, `repo_id`, `created_at`
 - Retention: compliance retention
 - Migration notes: keep append-only
+
+### `policy_decision_audit_entries`
+
+Purpose: append-only audit entries for Policy-as-code v0 evaluations.
+
+- Primary key: `id`
+- Important columns: `policy_decision_id`, `action`, `resource_kind`, `resource_id`, `actor_id`, `allowed`, `decision`, `reason`, `matched_rule_ids jsonb`, `task_id`, `task_run_id`, `created_at`
+- Indexes: `policy_decision_id`, `action,created_at`, `actor_id,created_at`, `task_id,task_run_id`
+- Retention: compliance and integration audit retention
+- Migration notes: v0 runtime uses an in-memory audit repository; future persistent wiring must keep this append-only and must not store secrets, tokens, provider API keys, or raw prompts.
 
 ### `pull_requests`
 
@@ -276,6 +370,85 @@ Purpose: optional read model/view for pending registry approvals.
 - Columns: `action`, `proposal_id`, `draft_registry_change_id`, `actor_id`, `message`, `metadata jsonb`, `created_at`
 - Indexes: `proposal_id`, `action`, `actor_id`, `created_at`
 - Retention: append-only governance retention
+
+## Secrets and Sandbox Tables
+
+These tables are schema skeletons only in Secrets and Sandbox Design v0. Runtime repositories remain in-memory and no real secret backend or sandbox runtime is wired.
+
+### `secret_refs`
+
+- Primary key: `id`
+- Columns: `provider`, `name`, `scope`, `description`, `status`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `provider,status`, `scope`
+- Retention: secret reference lifecycle
+- Migration notes: never store raw secret values, OAuth tokens, API keys, keychain paths, or vendor credential cache paths.
+
+### `secret_scopes`
+
+- Primary key: `id`
+- Columns: `name`, `allowed_resource_kinds jsonb`, `allowed_actions jsonb`, `allowed_provider_ids jsonb`, `allowed_repo_ids jsonb`, `allowed_runner_kinds jsonb`, `max_ttl_seconds`, `requires_approval`, `metadata jsonb`
+- Indexes: `requires_approval`
+- Retention: scope/policy lifecycle
+
+### `secret_leases`
+
+- Primary key: `id`
+- Columns: `secret_ref_id`, `scope_id`, `task_id`, `task_run_id`, `actor_id`, `status`, `issued_at`, `expires_at`, `revoked_at`, `reason`
+- Indexes: `secret_ref_id`, `scope_id`, `task_id,task_run_id`, `actor_id`, `status`, `expires_at`
+- Retention: lease lifecycle plus compliance retention
+- Migration notes: lease rows must not contain secret values or materialized environment variables.
+
+### `secret_access_decisions`
+
+- Primary key: `id`
+- Columns: `allowed`, `decision`, `reason`, `secret_ref_id`, `scope_id`, `task_id`, `task_run_id`, `actor_id`, `policy_decision_id`, `created_at`
+- Indexes: `secret_ref_id,created_at`, `scope_id,created_at`, `actor_id,created_at`, `task_id,task_run_id`
+- Retention: compliance/audit retention
+
+### `sandbox_profiles`
+
+- Primary key: `id`
+- Columns: `name`, `kind`, `allow_network`, `allow_file_write`, `allow_shell_execution`, `allow_git_remote`, `allow_secrets`, `allowed_commands jsonb`, `denied_commands jsonb`, `allowed_paths jsonb`, `denied_paths jsonb`, `network_policy_ref`, `max_runtime_ms`, `max_output_bytes`, `cleanup_policy`, `status`, `metadata jsonb`
+- Indexes: `kind,status`
+- Retention: sandbox profile lifecycle
+- Migration notes: container, Firecracker, and Kubernetes profiles remain disabled placeholders until real runtime work.
+
+### `sandbox_sessions`
+
+- Primary key: `id`
+- Columns: `profile_id`, `task_id`, `task_run_id`, `runner_kind`, `workspace_id`, `status`, `created_at`, `completed_at`, `cleanup_at`, `metadata jsonb`
+- Indexes: `profile_id`, `task_id,task_run_id`, `runner_kind,status`, `created_at`
+- Retention: retain with AgentRun history
+
+### `sandbox_decisions`
+
+- Primary key: `id`
+- Columns: `allowed`, `decision`, `reason`, `profile_id`, `task_id`, `task_run_id`, `actor_id`, `policy_decision_id`, `created_at`
+- Indexes: `profile_id,created_at`, `task_id,task_run_id`, `actor_id,created_at`
+- Retention: compliance/audit retention
+
+### `network_egress_policies`
+
+- Primary key: `id`
+- Columns: `name`, `default_action`, `allowed_hosts jsonb`, `denied_hosts jsonb`, `allowed_ports jsonb`, `denied_ports jsonb`, `allow_localhost`, `allow_private_network`, `status`, `metadata jsonb`
+- Indexes: `status`, `default_action`
+- Retention: network policy lifecycle
+- Migration notes: v0 models egress decisions only; it does not implement OS/container network enforcement.
+
+### `redaction_policies`
+
+- Primary key: `id`
+- Columns: `name`, `mask_bearer_tokens`, `mask_api_keys`, `mask_credential_paths`, `mask_env_dumps`, `mask_provider_tokens`, `max_preview_bytes`, `retention_class`, `status`
+- Indexes: `status`, `retention_class`
+- Retention: redaction policy lifecycle
+
+### `security_audit_events`
+
+- Primary key: `id`
+- Columns: `event_type`, `actor_id`, `task_id`, `task_run_id`, `target_id`, `target_kind`, `result`, `reason`, `metadata jsonb`, `created_at`
+- Indexes: `event_type,created_at`, `target_kind,target_id`, `actor_id,created_at`, `task_id,task_run_id`
+- Retention: long-lived compliance retention
+- Migration notes: append-only; metadata must be sanitized and must not contain secret values, provider tokens, credential cache content, or raw prompts.
 
 ## Migration Considerations
 

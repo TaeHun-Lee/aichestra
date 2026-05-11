@@ -112,6 +112,41 @@ export default async function DashboardPage() {
         <p>Remote LLM blocked reason: {data.remoteLlmBlockedOperation.reason ?? "none"}</p>
       </section>
       <section>
+        <h2>Agent Runner</h2>
+        <p>Runner: {data.agentRunnerConfig.runnerKind}</p>
+        <p>Local runner: {data.agentRunnerConfig.localRunnerEnabled ? "enabled" : "disabled"}</p>
+        <p>Command execution: {data.agentRunnerConfig.localCommandExecutionEnabled ? "enabled" : "disabled"}</p>
+        <p>Command executor: {data.agentRunnerConfig.commandExecutorKind}</p>
+        <p>Agent runs: {data.agentRuns.length}</p>
+        <p>Latest run: {data.agentRun?.status ?? "not run"} / {data.agentRun?.diffSummary ?? "no diff"}</p>
+        <p>Instruction assemblies: {data.agentInstructionAssemblies.length}</p>
+        <p>Command results: {data.agentCommandResults.length}</p>
+        <p>Workspaces: {data.agentWorkspaces.length}</p>
+        <p>Blocked command reason: {data.blockedCommandExample?.blockedReason ?? "none"}</p>
+        <p>Local runner blocked reason: {data.localRunnerBlockedExample.reason ?? "none"}</p>
+      </section>
+      <section>
+        <h2>Policy-as-code</h2>
+        <p>Engine: {data.policyConfig.engineKind}</p>
+        <p>Rules loaded: {data.policyConfig.ruleCount}</p>
+        <p>Audit: {data.policyConfig.auditEnabled ? "enabled" : "disabled"}</p>
+        <p>Recent decisions: {data.policyDecisions.map((decision) => `${decision.action}:${decision.decision}`).join(", ")}</p>
+        <p>Blocked operations: {data.policyDecisions.filter((decision) => !decision.allowed).map((decision) => decision.action).join(", ")}</p>
+        <p>Policy audit entries: {data.policyAuditEntries.length}</p>
+      </section>
+      <section>
+        <h2>Enterprise LLM Providers</h2>
+        <p>Status: {data.providerAbstractionConfig.status}</p>
+        <p>Catalog entries: {data.providerCatalog.length}</p>
+        <p>Provider kinds: {data.providerCatalog.map((provider) => provider.kind).join(", ")}</p>
+        <p>Auth types: {data.providerAuthTypes.join(", ")}</p>
+        <p>Local CLI templates: {data.providerLocalCliTemplates.length}</p>
+        <p>Local agents connected: {data.providerLocalAgents.length}</p>
+        <p>Local CLI readiness: {data.providerInvocation.error?.code ?? "none"}</p>
+        <p>Credential cache access: denied</p>
+        <p>Provider audit events: {data.providerAuditEvents.length}</p>
+      </section>
+      <section>
         <h2>Phase 4 Preparation</h2>
         <p>Failure signals: {data.improvementFailureSignals.length}</p>
         <p>Failure clusters: {data.improvementFailureClusters.length}</p>

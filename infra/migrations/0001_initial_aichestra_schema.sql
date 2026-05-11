@@ -192,6 +192,144 @@ CREATE TABLE IF NOT EXISTS llm_gateway_requests (
 CREATE INDEX IF NOT EXISTS idx_llm_gateway_requests_task ON llm_gateway_requests (task_id, task_run_id);
 CREATE INDEX IF NOT EXISTS idx_llm_gateway_requests_provider_model ON llm_gateway_requests (provider_kind, model_id);
 
+-- Enterprise Provider Abstraction v0 schema skeleton. Runtime remains in-memory in v0.
+CREATE TABLE IF NOT EXISTS provider_catalog_entries (
+  id text PRIMARY KEY,
+  display_name text NOT NULL,
+  vendor text NOT NULL,
+  kind text NOT NULL,
+  auth jsonb NOT NULL,
+  supported_models jsonb NOT NULL DEFAULT '[]'::jsonb,
+  billing_mode text NOT NULL,
+  capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+  default_enabled boolean NOT NULL DEFAULT false,
+  status text NOT NULL,
+  policy_notes jsonb NOT NULL DEFAULT '[]'::jsonb,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_audit_events (
+  id text PRIMARY KEY,
+  event_type text NOT NULL,
+  actor_id text,
+  task_id text,
+  task_run_id text,
+  provider_id text NOT NULL,
+  provider_kind text NOT NULL,
+  auth_type text NOT NULL,
+  operation text NOT NULL,
+  result text NOT NULL,
+  reason text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS local_agent_descriptors (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  host_id text NOT NULL,
+  version text NOT NULL,
+  status text NOT NULL,
+  capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+  last_seen_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_catalog_kind_status ON provider_catalog_entries (kind, status);
+CREATE INDEX IF NOT EXISTS idx_provider_audit_provider ON provider_audit_events (provider_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_provider_audit_task ON provider_audit_events (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_local_agent_user_status ON local_agent_descriptors (user_id, status);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id text PRIMARY KEY,
+  task_id text NOT NULL,
+  task_run_id text NOT NULL,
+  runner_kind text NOT NULL,
+  status text NOT NULL,
+  diff_summary text NOT NULL,
+  changed_files jsonb NOT NULL DEFAULT '[]'::jsonb,
+  test_results jsonb NOT NULL DEFAULT '[]'::jsonb,
+  llm_gateway_request_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  usage_ledger_entry_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  audit_event_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_runner_status ON agent_runs (runner_kind, status);
+
+CREATE TABLE IF NOT EXISTS agent_run_audit_events (
+  id text PRIMARY KEY,
+  task_id text NOT NULL,
+  task_run_id text NOT NULL,
+  runner_kind text NOT NULL,
+  event_type text NOT NULL,
+  result text NOT NULL,
+  reason text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_run_audit_task ON agent_run_audit_events (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_agent_run_audit_event_type ON agent_run_audit_events (event_type, created_at);
+
+CREATE TABLE IF NOT EXISTS instruction_assemblies (
+  id text PRIMARY KEY,
+  task_id text NOT NULL,
+  task_run_id text NOT NULL,
+  selected_instruction_refs jsonb NOT NULL DEFAULT '[]'::jsonb,
+  selected_skill_refs jsonb NOT NULL DEFAULT '[]'::jsonb,
+  selected_harness_ref jsonb NOT NULL,
+  instruction_set_hash text NOT NULL,
+  warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_instruction_assemblies_task ON instruction_assemblies (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_instruction_assemblies_hash ON instruction_assemblies (instruction_set_hash);
+
+CREATE TABLE IF NOT EXISTS agent_workspaces (
+  id text PRIMARY KEY,
+  root_path text NOT NULL,
+  mode text NOT NULL,
+  task_id text NOT NULL,
+  task_run_id text NOT NULL,
+  cleanup_policy text NOT NULL,
+  status text NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_workspaces_task ON agent_workspaces (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_agent_workspaces_status ON agent_workspaces (status, created_at);
+
+CREATE TABLE IF NOT EXISTS command_execution_results (
+  id text PRIMARY KEY,
+  task_id text NOT NULL,
+  task_run_id text NOT NULL,
+  agent_run_id text NOT NULL,
+  executor_kind text NOT NULL,
+  status text NOT NULL,
+  command text NOT NULL,
+  args jsonb NOT NULL DEFAULT '[]'::jsonb,
+  exit_code integer,
+  stdout_preview text NOT NULL,
+  stderr_preview text NOT NULL,
+  stdout_bytes integer NOT NULL,
+  stderr_bytes integer NOT NULL,
+  duration_ms integer NOT NULL,
+  blocked_reason text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_command_execution_results_run ON command_execution_results (agent_run_id);
+CREATE INDEX IF NOT EXISTS idx_command_execution_results_task ON command_execution_results (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_command_execution_results_status ON command_execution_results (status, created_at);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id text PRIMARY KEY,
   actor_user_id text,
@@ -583,3 +721,205 @@ CREATE TABLE IF NOT EXISTS improvement_governance_audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_improvement_governance_audit_proposal ON improvement_governance_audit_events (proposal_id, created_at);
+
+-- Policy-as-code v0 audit skeleton. Runtime remains in-memory until a future
+-- persistent policy repository task wires this table behind the policy package.
+CREATE TABLE IF NOT EXISTS policy_decision_audit_entries (
+  id text PRIMARY KEY,
+  policy_decision_id text NOT NULL,
+  action text NOT NULL,
+  resource_kind text NOT NULL,
+  resource_id text,
+  actor_id text,
+  allowed boolean NOT NULL,
+  decision text NOT NULL,
+  reason text NOT NULL,
+  matched_rule_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  task_id text,
+  task_run_id text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_decision_audit_decision ON policy_decision_audit_entries (policy_decision_id);
+CREATE INDEX IF NOT EXISTS idx_policy_decision_audit_action ON policy_decision_audit_entries (action, created_at);
+CREATE INDEX IF NOT EXISTS idx_policy_decision_audit_actor ON policy_decision_audit_entries (actor_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_policy_decision_audit_task_run ON policy_decision_audit_entries (task_id, task_run_id);
+
+-- Secrets and Sandbox Design v0 schema skeleton. Runtime remains in-memory
+-- until a future persistent security repository task wires these tables.
+CREATE TABLE IF NOT EXISTS secret_refs (
+  id text PRIMARY KEY,
+  provider text NOT NULL,
+  name text NOT NULL,
+  scope text NOT NULL,
+  description text,
+  status text NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_secret_refs_provider_status ON secret_refs (provider, status);
+CREATE INDEX IF NOT EXISTS idx_secret_refs_scope ON secret_refs (scope);
+
+CREATE TABLE IF NOT EXISTS secret_scopes (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  allowed_resource_kinds jsonb NOT NULL DEFAULT '[]'::jsonb,
+  allowed_actions jsonb NOT NULL DEFAULT '[]'::jsonb,
+  allowed_provider_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  allowed_repo_ids jsonb,
+  allowed_runner_kinds jsonb,
+  max_ttl_seconds integer NOT NULL,
+  requires_approval boolean NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_secret_scopes_requires_approval ON secret_scopes (requires_approval);
+
+CREATE TABLE IF NOT EXISTS secret_leases (
+  id text PRIMARY KEY,
+  secret_ref_id text NOT NULL,
+  scope_id text NOT NULL,
+  task_id text,
+  task_run_id text,
+  actor_id text,
+  status text NOT NULL,
+  issued_at timestamptz,
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  reason text
+);
+
+CREATE INDEX IF NOT EXISTS idx_secret_leases_ref ON secret_leases (secret_ref_id);
+CREATE INDEX IF NOT EXISTS idx_secret_leases_scope ON secret_leases (scope_id);
+CREATE INDEX IF NOT EXISTS idx_secret_leases_task_run ON secret_leases (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_secret_leases_actor ON secret_leases (actor_id);
+CREATE INDEX IF NOT EXISTS idx_secret_leases_status ON secret_leases (status);
+
+CREATE TABLE IF NOT EXISTS secret_access_decisions (
+  id text PRIMARY KEY,
+  allowed boolean NOT NULL,
+  decision text NOT NULL,
+  reason text NOT NULL,
+  secret_ref_id text,
+  scope_id text,
+  task_id text,
+  task_run_id text,
+  actor_id text,
+  policy_decision_id text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_secret_access_decisions_ref ON secret_access_decisions (secret_ref_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_secret_access_decisions_scope ON secret_access_decisions (scope_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_secret_access_decisions_actor ON secret_access_decisions (actor_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_secret_access_decisions_task_run ON secret_access_decisions (task_id, task_run_id);
+
+CREATE TABLE IF NOT EXISTS sandbox_profiles (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  kind text NOT NULL,
+  allow_network boolean NOT NULL,
+  allow_file_write boolean NOT NULL,
+  allow_shell_execution boolean NOT NULL,
+  allow_git_remote boolean NOT NULL,
+  allow_secrets boolean NOT NULL,
+  allowed_commands jsonb NOT NULL DEFAULT '[]'::jsonb,
+  denied_commands jsonb NOT NULL DEFAULT '[]'::jsonb,
+  allowed_paths jsonb NOT NULL DEFAULT '[]'::jsonb,
+  denied_paths jsonb NOT NULL DEFAULT '[]'::jsonb,
+  network_policy_ref text,
+  max_runtime_ms integer NOT NULL,
+  max_output_bytes integer NOT NULL,
+  cleanup_policy text NOT NULL,
+  status text NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_sandbox_profiles_kind_status ON sandbox_profiles (kind, status);
+
+CREATE TABLE IF NOT EXISTS sandbox_sessions (
+  id text PRIMARY KEY,
+  profile_id text NOT NULL,
+  task_id text,
+  task_run_id text,
+  runner_kind text,
+  workspace_id text,
+  status text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz,
+  cleanup_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_sandbox_sessions_profile ON sandbox_sessions (profile_id);
+CREATE INDEX IF NOT EXISTS idx_sandbox_sessions_task_run ON sandbox_sessions (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_sandbox_sessions_runner_status ON sandbox_sessions (runner_kind, status);
+
+CREATE TABLE IF NOT EXISTS sandbox_decisions (
+  id text PRIMARY KEY,
+  allowed boolean NOT NULL,
+  decision text NOT NULL,
+  reason text NOT NULL,
+  profile_id text NOT NULL,
+  task_id text,
+  task_run_id text,
+  actor_id text,
+  policy_decision_id text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sandbox_decisions_profile ON sandbox_decisions (profile_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sandbox_decisions_task_run ON sandbox_decisions (task_id, task_run_id);
+CREATE INDEX IF NOT EXISTS idx_sandbox_decisions_actor ON sandbox_decisions (actor_id, created_at);
+
+CREATE TABLE IF NOT EXISTS network_egress_policies (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  default_action text NOT NULL,
+  allowed_hosts jsonb NOT NULL DEFAULT '[]'::jsonb,
+  denied_hosts jsonb NOT NULL DEFAULT '[]'::jsonb,
+  allowed_ports jsonb NOT NULL DEFAULT '[]'::jsonb,
+  denied_ports jsonb NOT NULL DEFAULT '[]'::jsonb,
+  allow_localhost boolean NOT NULL,
+  allow_private_network boolean NOT NULL,
+  status text NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_network_egress_policies_status ON network_egress_policies (status, default_action);
+
+CREATE TABLE IF NOT EXISTS redaction_policies (
+  id text PRIMARY KEY,
+  name text NOT NULL,
+  mask_bearer_tokens boolean NOT NULL,
+  mask_api_keys boolean NOT NULL,
+  mask_credential_paths boolean NOT NULL,
+  mask_env_dumps boolean NOT NULL,
+  mask_provider_tokens boolean NOT NULL,
+  max_preview_bytes integer NOT NULL,
+  retention_class text NOT NULL,
+  status text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_redaction_policies_status ON redaction_policies (status, retention_class);
+
+CREATE TABLE IF NOT EXISTS security_audit_events (
+  id text PRIMARY KEY,
+  event_type text NOT NULL,
+  actor_id text,
+  task_id text,
+  task_run_id text,
+  target_id text,
+  target_kind text NOT NULL,
+  result text NOT NULL,
+  reason text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_audit_event_type ON security_audit_events (event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_security_audit_target ON security_audit_events (target_kind, target_id);
+CREATE INDEX IF NOT EXISTS idx_security_audit_actor ON security_audit_events (actor_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_security_audit_task_run ON security_audit_events (task_id, task_run_id);

@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@aichestra/core": "workspace:*",
-    "@aichestra/llm-gateway": "workspace:*"
+    "@aichestra/llm-gateway": "workspace:*",
+    "@aichestra/policy": "workspace:*",
+    "@aichestra/security": "workspace:*"
   }
 }

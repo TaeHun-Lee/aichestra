@@ -15,7 +15,9 @@
     "@aichestra/git-adapter": "workspace:*",
     "@aichestra/improvement": "workspace:*",
     "@aichestra/llm-gateway": "workspace:*",
+    "@aichestra/policy": "workspace:*",
     "@aichestra/registry": "workspace:*",
+    "@aichestra/security": "workspace:*",
     "@aichestra/worker": "workspace:*"
   }
 }

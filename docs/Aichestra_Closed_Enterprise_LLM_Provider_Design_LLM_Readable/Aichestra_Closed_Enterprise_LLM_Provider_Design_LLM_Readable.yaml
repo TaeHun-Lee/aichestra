@@ -1,0 +1,765 @@
+document_metadata:
+  title: Aichestra Closed Enterprise LLM Provider Integration Design (LLM-readable
+    version)
+  language: ko-KR
+  as_of: '2026-05-11'
+  audience:
+  - Aichestra product/engineering team
+  - LLM systems designer
+  - security reviewer
+  - implementation agent
+  document_type: machine_readable_design_spec
+  canonical_formats:
+  - markdown
+  - json
+  - yaml
+  - llms.txt
+  scope:
+  - API Key 기반 폐쇄 기업형 LLM Provider
+  - OAuth / Workload Identity / Cloud IAM 기반 Provider
+  - 사용자 컴퓨터에 설치된 Claude Code, Codex CLI, Gemini CLI 등 Local CLI Provider
+  - PTY 기반 interactive terminal fallback
+  - 보안/운영/정책/스키마/구현 청사진
+  non_goals:
+  - 각 Provider의 약관을 우회하는 인증 방법 설계
+  - 사용자의 로컬 credential cache를 직접 읽거나 복사하는 설계
+  - 단일 사용자의 CLI 세션을 여러 사용자에게 재판매/중계하는 설계
+executive_summary:
+  one_sentence: Aichestra는 폐쇄 기업형 LLM을 API Key, OAuth/WIF/IAM, 또는 사용자 로컬 CLI 실행 방식으로
+    Provider화할 수 있으나, 인증과 실행 책임을 분리하고 Local Agent를 통해 사용자 소유 세션을 안전하게 브로커링해야 한다.
+  core_decision: Provider를 cloud_api, oauth_api, workload_identity, cloud_iam, local_cli,
+    pty_interactive_fallback로 분류하고, 인증은 CredentialManager/TokenResolver, 실행은 ProviderAdapter/CliRunner,
+    정책은 PolicyEngine으로 분리한다.
+  preferred_order:
+  - 1. 공식 API/SDK 직접 연동
+  - 2. 공식 OAuth/WIF/Cloud IAM 인증 흐름
+  - 3. 공식 headless/non-interactive CLI 모드
+  - 4. 공식 Agent SDK/MCP/plugin 인터페이스
+  - 5. PTY 기반 interactive terminal automation은 최후의 수단
+  critical_rules:
+  - Aichestra는 ~/.codex/auth.json, ~/.claude credential 파일, Google credential cache
+    등 Provider 소유 credential을 직접 읽지 않는다.
+  - Aichestra Cloud는 사용자의 로컬 CLI 토큰을 서버로 업로드하지 않는다.
+  - Gemini CLI OAuth 세션은 제3자 backend 접근 우회 수단으로 piggyback하지 않는다.
+  - Codex ChatGPT 로그인 세션은 사용자 로컬 신뢰 환경의 CLI 실행에만 사용하고, 자동화/CI/CD는 API key 또는 공식 권장
+    경로를 사용한다.
+  - Local CLI Provider는 사용자 컴퓨터에서 실행되는 Aichestra Local Agent가 필요하다.
+architecture:
+  components:
+  - name: Aichestra UI
+    responsibilities:
+    - 작업 생성
+    - 결과 표시
+    - 사용자 승인 UI
+    - Provider 선택 UI
+  - name: Aichestra Cloud Orchestrator
+    responsibilities:
+    - 워크플로 라우팅
+    - 정책 평가
+    - 감사 이벤트 수집
+    - 멀티 Provider fallback
+    must_not:
+    - 사용자 로컬 CLI credential을 저장
+    - 사용자 대신 OAuth cache를 읽어 API 호출
+  - name: Aichestra Local Agent
+    responsibilities:
+    - 사용자 PC에서 CLI 실행
+    - stdin/stdout/stderr 브로커링
+    - workspace sandbox
+    - 프로세스 종료/timeout 관리
+    - 로컬 승인 프롬프트
+    required_for:
+    - local_cli
+    - pty_interactive_fallback
+  - name: CredentialManager
+    responsibilities:
+    - API key secret 참조
+    - OAuth token refresh
+    - WIF token exchange
+    - Cloud IAM ADC/STS 연결
+    - credential access audit
+    principle: ProviderAdapter가 credential 원본을 직접 보지 않게 한다.
+  - name: TokenResolver
+    responsibilities:
+    - Provider별 auth header 또는 env allowlist 생성
+    - 토큰 만료 전 refresh
+    - credential type별 정책 enforcement
+  - name: ProviderAdapter
+    responsibilities:
+    - API 호출 또는 CLI 실행 요청을 표준 InvocationResult로 정규화
+    - stream event 정규화
+    - error mapping
+  - name: PolicyEngine
+    responsibilities:
+    - 파일 접근 범위
+    - shell 실행 권한
+    - 네트워크 권한
+    - 도구 승인
+    - 민감정보 redaction
+    - rate/cost limits
+  - name: AuditLogger
+    responsibilities:
+    - who/what/when/where/which-provider 기록
+    - credential 비저장
+    - stdout/stderr 민감정보 redaction 후 저장
+  flow_cloud_api:
+  - User submits task in Aichestra UI
+  - Orchestrator selects cloud_api ProviderAdapter
+  - PolicyEngine validates task and data classification
+  - CredentialManager resolves API key or bearer token reference
+  - ProviderAdapter calls model API
+  - StreamNormalizer emits standard events to UI and workflow engine
+  - AuditLogger records non-secret metadata and usage
+  flow_oauth_wif_iam:
+  - User or workload has an approved identity path
+  - TokenResolver obtains access token through OAuth/WIF/IAM flow
+  - ProviderAdapter receives only request headers or temporary env references
+  - API call proceeds under workspace/project/service-account attribution
+  - Usage and cost are attributed to the Provider workspace/cloud project/subscription,
+    not to Aichestra unless Aichestra owns the credential
+  flow_local_cli:
+  - User installs and logs into Claude Code/Codex CLI/Gemini CLI on local machine
+  - Aichestra Local Agent detects command availability without reading credential
+    caches
+  - Aichestra sends an InvocationRequest to Local Agent
+  - Local Agent runs official headless CLI mode using spawn/exec without shell injection
+  - stdin passes prompt/context; stdout/stderr are streamed back and normalized
+  - Local Agent enforces allowed directories, timeout, process limits, and user approval
+provider_auth_types:
+- type: api_key
+  description: 정적 API key를 secret manager/env reference로 제공한다.
+  best_for:
+  - 빠른 시작
+  - 서버 단일 테넌트
+  - CI/CD where provider recommends API key
+  risks:
+  - 장기 secret 유출
+  - rotation 필요
+  - 권한 과다 부여
+- type: oauth_user
+  description: 사용자 계정 기반 OAuth 또는 브라우저 로그인 세션을 통해 Provider를 사용한다.
+  best_for:
+  - 사용자 개인/팀 구독 세션
+  - 로컬 CLI 앱
+  - 사용자 귀속 작업
+  risks:
+  - 제3자 backend piggyback 오해
+  - 토큰 cache 취급 위험
+  - 조직 정책 위반 가능성
+- type: device_code
+  description: 브라우저 callback이 어려운 터미널/SSH/컨테이너 환경에서 device code 방식으로 로그인한다.
+  best_for:
+  - 원격 개발환경
+  - headless host bootstrap
+  risks:
+  - 사용자 승인 UX 필요
+  - 토큰 복사/공유 금지
+- type: workload_identity
+  description: IdP가 발행한 OIDC/JWT를 Provider의 access token으로 교환하는 short-lived credential
+    방식이다.
+  best_for:
+  - 클라우드 workload
+  - Kubernetes
+  - GitHub Actions
+  - CI/CD
+  - 정적 API key 제거
+  risks:
+  - IdP trust rule misconfiguration
+  - upstream long-lived secret dependency
+- type: cloud_iam
+  description: AWS IAM, Google Cloud ADC/service account, Azure/Foundry identity 등
+    cloud-native identity를 사용한다.
+  best_for:
+  - Vertex AI
+  - Bedrock
+  - Azure/OpenAI/Foundry
+  - enterprise cloud perimeter
+  risks:
+  - 권한 범위 과대
+  - cloud project billing attribution 혼동
+- type: external_cli_session
+  description: 사용자 로컬 CLI가 이미 Provider 인증을 완료했다고 보고, Aichestra는 credential을 읽지 않고
+    CLI 프로세스만 실행한다.
+  best_for:
+  - Bring-your-own-authenticated-CLI
+  - 사용자 PC의 Claude Code/Codex/Gemini CLI 활용
+  risks:
+  - CLI version drift
+  - interactive prompt hang
+  - stderr/stdout parsing differences
+  - Provider 약관/정책 검토 필요
+provider_matrix:
+- provider: Claude API
+  integration_modes:
+  - api_key
+  - workload_identity
+  recommended_aichestra_adapter: cloud_api_provider
+  billing_attribution: Anthropic Console workspace / service account / API key owner
+  notes:
+  - WIF는 정적 API key를 줄이는 production-friendly 방식이다.
+- provider: Claude Code CLI
+  integration_modes:
+  - external_cli_session
+  - oauth_user
+  - api_key
+  - cloud_iam via Bedrock/Vertex/Foundry
+  recommended_aichestra_adapter: local_cli_provider
+  billing_attribution: 사용자의 Claude subscription/team/console/cloud provider config
+  headless_command_patterns:
+  - claude -p "{{prompt}}" --output-format json
+  - cat context.txt | claude -p "{{instruction}}" --output-format json
+  - claude -p "{{prompt}}" --output-format stream-json --verbose --include-partial-messages
+  notes:
+  - 가능하면 --bare는 CI/script 재현성에 유리하지만 OAuth/keychain reads를 skip하므로 인증 경로를 별도로 설계해야
+    한다.
+- provider: OpenAI API / Codex API key workflows
+  integration_modes:
+  - api_key
+  recommended_aichestra_adapter: cloud_api_provider or local_cli_provider for codex
+    exec
+  billing_attribution: OpenAI Platform account / project
+  notes:
+  - Codex CLI programmatic workflows는 공식 문서상 API key 인증이 권장된다.
+- provider: Codex CLI
+  integration_modes:
+  - external_cli_session
+  - oauth_user via ChatGPT login
+  - api_key
+  recommended_aichestra_adapter: local_cli_provider
+  billing_attribution: ChatGPT workspace/subscription 또는 OpenAI Platform API key
+  headless_command_patterns:
+  - codex exec "{{prompt}}"
+  - cat context.txt | codex exec "{{instruction}}"
+  - codex exec --json "{{prompt}}"
+  - cat prompt.txt | codex exec -
+  notes:
+  - stderr는 progress, stdout은 final message 또는 JSONL event stream으로 처리한다.
+  - auth.json은 password처럼 취급하고 Aichestra가 읽거나 업로드하지 않는다.
+- provider: Gemini API
+  integration_modes:
+  - api_key
+  - oauth_user
+  - cloud_iam
+  recommended_aichestra_adapter: cloud_api_provider
+  billing_attribution: Google AI Studio / Google Cloud project
+  notes:
+  - API key가 기본 시작점이고, stricter access control이 필요하면 OAuth/Cloud IAM을 고려한다.
+- provider: Gemini CLI
+  integration_modes:
+  - external_cli_session
+  - oauth_user via Google sign-in
+  - api_key
+  - vertex_ai
+  recommended_aichestra_adapter: local_cli_provider with strict policy
+  billing_attribution: 사용자 Google account/API key/Vertex AI project
+  headless_command_patterns:
+  - gemini -p "{{prompt}}" --output-format json
+  - gemini --prompt "{{prompt}}" --output-format json
+  notes:
+  - Gemini CLI OAuth piggybacking을 backend 우회 인증 수단으로 쓰지 않는다.
+  - Headless 환경에서는 API key 또는 Vertex AI 경로가 권장된다.
+- provider: Vertex AI / Bedrock / Microsoft Foundry
+  integration_modes:
+  - cloud_iam
+  - workload_identity
+  - api_key depending provider
+  recommended_aichestra_adapter: cloud_iam_provider or llm_gateway_provider
+  billing_attribution: cloud project/account/subscription
+  notes:
+  - 기업 보안 perimeter, IAM, audit logging과 결합하기 좋다.
+- provider: Other enterprise LLM CLI
+  integration_modes:
+  - external_cli_session
+  - pty_interactive_fallback
+  - api_key if available
+  recommended_aichestra_adapter: local_cli_provider if headless exists; pty_interactive_fallback
+    only if unavoidable
+  billing_attribution: vendor-specific
+  notes:
+  - 공식 non-interactive mode와 machine-readable output이 있는지 먼저 확인한다.
+standard_interfaces:
+  ProviderKind:
+  - cloud_api
+  - oauth_api
+  - workload_identity_api
+  - cloud_iam
+  - local_cli
+  - pty_interactive_fallback
+  ProviderAuth_union:
+  - type: api_key
+    envKey: string
+    secretRef: string optional
+  - type: oauth_user
+    provider: openai_codex|google|anthropic|custom
+    scopes: string[] optional
+  - type: device_code
+    provider: openai_codex|google|custom
+  - type: workload_identity
+    provider: anthropic|google|azure|aws|custom
+    ruleId: string optional
+    serviceAccount: string optional
+  - type: cloud_iam
+    provider: vertex_ai|bedrock|azure_foundry|custom
+    project: string optional
+    region: string optional
+  - type: external_cli_session
+    credentialAccess: never_read_tokens
+  InvocationRequest:
+    providerId: string
+    taskId: string
+    prompt: string
+    context: string optional
+    cwd: string optional
+    stream: boolean
+    outputContract: text|json|jsonl|schema
+    timeoutMs: number
+    policyContext: object
+  InvocationResult:
+    providerId: string
+    taskId: string
+    status: completed|failed|cancelled|timeout
+    stdout: string optional
+    stderr: string optional
+    parsed: object optional
+    events: NormalizedEvent[] optional
+    exitCode: number|null optional
+    usage: object optional
+    audit: object
+  NormalizedEvent:
+    type: token|message|tool_call|tool_result|progress|warning|error|usage|done
+    timestamp: RFC3339 string
+    source: stdout|stderr|api_stream|pty
+    payload: object|string
+    redacted: boolean
+local_cli_provider_contract:
+  preconditions:
+  - Aichestra Local Agent is installed and running on the user machine.
+  - The CLI command is installed and discoverable in PATH or configured commandPath.
+  - The user has already authenticated the CLI through the vendor-supported flow.
+  - Aichestra is authorized by the user to launch the CLI for this workspace/task.
+  must_do:
+  - Use spawn/exec with shell=false where possible.
+  - Pass prompt/context via stdin or safe argv template.
+  - Normalize stdout/stderr separately.
+  - Set timeout and cancellation controls.
+  - Enforce allowed directories and workspace boundaries.
+  - Provide consent prompts for file writes, shell execution, network-sensitive tasks,
+    and danger modes.
+  - Redact secrets before storing logs.
+  - Record CLI version, command path, adapter version, cwd, policy result, and exitCode.
+  must_not_do:
+  - Do not read vendor credential files or OS keychain entries.
+  - Do not upload local credential cache to Aichestra Cloud.
+  - Do not use a user CLI login to serve other users.
+  - Do not default to danger-full-access, yolo, auto-approve-all, or equivalent.
+  - Do not scrape terminal UI if a headless/machine-readable mode exists.
+  stdout_stderr_policy:
+    stdout: final result or machine-readable event stream depending on CLI flags
+    stderr: progress logs, warnings, retry notices, interactive prompt detection,
+      or errors
+    exit_code: primary success/failure signal combined with parser result
+  preferred_modes_by_cli:
+    claude:
+      mode: headless
+      args:
+      - -p
+      - '{{prompt}}'
+      - --output-format
+      - json
+    claude_stream:
+      mode: streaming
+      args:
+      - -p
+      - '{{prompt}}'
+      - --output-format
+      - stream-json
+      - --verbose
+      - --include-partial-messages
+    codex:
+      mode: headless
+      args:
+      - exec
+      - '{{prompt}}'
+    codex_jsonl:
+      mode: streaming
+      args:
+      - exec
+      - --json
+      - '{{prompt}}'
+    gemini:
+      mode: headless
+      args:
+      - -p
+      - '{{prompt}}'
+      - --output-format
+      - json
+configuration_examples:
+  yaml:
+    providers:
+    - id: claude-api-wif
+      kind: workload_identity_api
+      vendor: anthropic
+      model: claude-sonnet-latest
+      auth:
+        type: workload_identity
+        provider: anthropic
+        federationRuleId: fdrl_xxx
+        serviceAccountId: svac_xxx
+        workspaceId: wrkspc_xxx
+      billingMode: provider_workspace
+      policy:
+        dataClass:
+        - internal
+        - confidential
+        maxOutputTokens: 8192
+    - id: claude-code-local
+      kind: local_cli
+      vendor: anthropic
+      command: claude
+      auth:
+        type: external_cli_session
+        credentialAccess: never_read_tokens
+      invocation:
+        argsTemplate:
+        - -p
+        - '{{prompt}}'
+        - --output-format
+        - stream-json
+        - --verbose
+        - --include-partial-messages
+        stdinMode: context
+        stdoutParser: ndjson
+        stderrPolicy: progress_log
+      safety:
+        requireUserConsent: true
+        allowShellExecution: false
+        allowFileWrite: false
+        timeoutMs: 300000
+    - id: codex-local-jsonl
+      kind: local_cli
+      vendor: openai
+      command: codex
+      auth:
+        type: external_cli_session
+        credentialAccess: never_read_tokens
+      invocation:
+        argsTemplate:
+        - exec
+        - --json
+        - '{{prompt}}'
+        stdinMode: context
+        stdoutParser: jsonl
+        stderrPolicy: progress_log
+      safety:
+        requireUserConsent: true
+        allowShellExecution: false
+        allowFileWrite: false
+        timeoutMs: 300000
+    - id: gemini-cli-local
+      kind: local_cli
+      vendor: google
+      command: gemini
+      auth:
+        type: external_cli_session
+        credentialAccess: never_read_tokens
+      invocation:
+        argsTemplate:
+        - -p
+        - '{{prompt}}'
+        - --output-format
+        - json
+        stdinMode: context
+        stdoutParser: json
+        stderrPolicy: error_and_progress
+      safety:
+        requireUserConsent: true
+        allowShellExecution: false
+        allowFileWrite: false
+        timeoutMs: 300000
+      policyNotes:
+      - Do not piggyback Gemini CLI OAuth as a backend credential. Use only user-owned
+        local execution or official API key/Vertex path.
+    - id: vertex-gemini-cloud
+      kind: cloud_iam
+      vendor: google
+      model: gemini-pro-or-latest-approved
+      auth:
+        type: cloud_iam
+        provider: vertex_ai
+        project: my-gcp-project
+        location: us-central1
+      billingMode: cloud_project
+  typescript_types: "\ntype ProviderKind =\n  | \"cloud_api\"\n  | \"oauth_api\"\n\
+    \  | \"workload_identity_api\"\n  | \"cloud_iam\"\n  | \"local_cli\"\n  | \"pty_interactive_fallback\"\
+    ;\n\ntype ProviderAuth =\n  | { type: \"api_key\"; envKey?: string; secretRef?:\
+    \ string }\n  | { type: \"oauth_user\"; provider: \"openai_codex\" | \"google\"\
+    \ | \"anthropic\" | string; scopes?: string[] }\n  | { type: \"device_code\";\
+    \ provider: \"openai_codex\" | \"google\" | string }\n  | { type: \"workload_identity\"\
+    ; provider: \"anthropic\" | \"google\" | \"azure\" | \"aws\" | string; ruleId?:\
+    \ string; serviceAccount?: string }\n  | { type: \"cloud_iam\"; provider: \"vertex_ai\"\
+    \ | \"bedrock\" | \"azure_foundry\" | string; project?: string; region?: string\
+    \ }\n  | { type: \"external_cli_session\"; credentialAccess: \"never_read_tokens\"\
+    \ };\n\ninterface LocalCliProvider {\n  id: string;\n  kind: \"local_cli\";\n\
+    \  vendor: \"anthropic\" | \"openai\" | \"google\" | string;\n  command: \"claude\"\
+    \ | \"codex\" | \"gemini\" | string;\n  commandPath?: string;\n  auth: Extract<ProviderAuth,\
+    \ { type: \"external_cli_session\" }>;\n  cwdPolicy: {\n    type: \"workspace_only\"\
+    \ | \"user_selected_dir\";\n    allowedDirs: string[];\n  };\n  invocation: {\n\
+    \    argsTemplate: string[];\n    stdinMode: \"none\" | \"prompt\" | \"context\"\
+    \ | \"prompt_and_context\";\n    stdoutParser: \"raw\" | \"json\" | \"jsonl\"\
+    \ | \"ndjson\";\n    stderrPolicy: \"progress_log\" | \"error_only\" | \"error_and_progress\"\
+    ;\n  };\n  safety: {\n    requireUserConsent: boolean;\n    allowShellExecution:\
+    \ boolean;\n    allowFileWrite: boolean;\n    timeoutMs: number;\n  };\n}\n\n\
+    interface TokenResolver {\n  getAuthHeaders(providerId: string): Promise<Record<string,\
+    \ string>>;\n  getSafeEnvironment(providerId: string): Promise<Record<string,\
+    \ string>>;\n  refreshIfNeeded(providerId: string): Promise<void>;\n}\n\ninterface\
+    \ CliRunner {\n  run(request: InvocationRequest, provider: LocalCliProvider):\
+    \ AsyncIterable<NormalizedEvent>;\n  cancel(taskId: string): Promise<void>;\n\
+    }\n"
+implementation_blueprint:
+  local_agent_node_spawn: "\nimport { spawn } from \"node:child_process\";\n\nexport\
+    \ async function runCliProvider(input: {\n  command: string;\n  args: string[];\n\
+    \  stdin?: string;\n  cwd: string;\n  timeoutMs: number;\n  envAllowList?: Record<string,\
+    \ string>;\n}): Promise<{ stdout: string; stderr: string; exitCode: number | null\
+    \ }> {\n  return await new Promise((resolve, reject) => {\n    const child = spawn(input.command,\
+    \ input.args, {\n      cwd: input.cwd,\n      shell: false,\n      env: {\n  \
+    \      PATH: process.env.PATH ?? \"\",\n        HOME: process.env.HOME ?? \"\"\
+    ,\n        USERPROFILE: process.env.USERPROFILE ?? \"\",\n        ...input.envAllowList,\n\
+    \      },\n    });\n\n    let stdout = \"\";\n    let stderr = \"\";\n\n    const\
+    \ timer = setTimeout(() => {\n      child.kill(\"SIGTERM\");\n      reject(new\
+    \ Error(\"CLI provider timed out\"));\n    }, input.timeoutMs);\n\n    child.stdout.on(\"\
+    data\", chunk => {\n      stdout += chunk.toString();\n      // emit NormalizedEvent:\
+    \ source=stdout\n    });\n\n    child.stderr.on(\"data\", chunk => {\n      stderr\
+    \ += chunk.toString();\n      // emit NormalizedEvent: source=stderr\n    });\n\
+    \n    child.on(\"error\", err => {\n      clearTimeout(timer);\n      reject(err);\n\
+    \    });\n\n    child.on(\"close\", exitCode => {\n      clearTimeout(timer);\n\
+    \      resolve({ stdout, stderr, exitCode });\n    });\n\n    if (input.stdin)\
+    \ child.stdin.write(input.stdin);\n    child.stdin.end();\n  });\n}\n"
+  parser_strategy:
+  - parser: raw
+    rule: return stdout as text; store stderr as progress/error log
+  - parser: json
+    rule: parse stdout as single JSON document; fail if invalid unless fallbackRaw=true
+  - parser: jsonl/ndjson
+    rule: split stdout by lines; parse each non-empty line as JSON event; normalize
+      to Aichestra event schema
+  - parser: pty
+    rule: strip ANSI; detect prompts; mark unstable; use only when no headless mode
+      exists
+  prompt_passing_strategy:
+  - Prefer stdin for large context and argv for short instruction.
+  - Use vendor command pattern where instruction and piped context semantics are documented.
+  - Never concatenate untrusted text into shell command strings; use argv array.
+  - Limit stdin size; store larger context in allowed workspace files and reference
+    paths explicitly.
+security_model:
+  trust_boundaries:
+  - boundary: Aichestra Cloud <-> Local Agent
+    risk: remote command execution on user machine
+    control: mutual auth, user consent, scoped task tokens, signed updates, audit
+  - boundary: Local Agent <-> CLI process
+    risk: unwanted file/shell access
+    control: cwd allowlist, sandbox, CLI permission flags, timeout, no danger mode
+      default
+  - boundary: CLI process <-> Provider backend
+    risk: credential leakage or policy violation
+    control: Provider-owned auth; Aichestra never reads token cache; use official
+      modes
+  - boundary: stdout/stderr <-> Aichestra logs
+    risk: sensitive output storage
+    control: redaction, retention limits, opt-out log persistence
+  credential_handling_rules:
+  - Secrets live in secret manager, cloud IAM, or Provider CLI credential storage,
+    not in ProviderAdapter config.
+  - Local Agent may inherit a minimal env allowlist; it must not dump env vars in
+    logs.
+  - TokenResolver returns derived headers/env only, not raw long-lived secrets unless
+    absolutely necessary and scoped.
+  - Provider credential files are treated as opaque and vendor-owned.
+  consent_levels:
+  - level: read_only
+    requires:
+    - workspace read access approval
+    default: true
+  - level: workspace_write
+    requires:
+    - file modification approval or explicit workflow permission
+    default: false
+  - level: shell_execution
+    requires:
+    - command allowlist and per-command approval for risky commands
+    default: false
+  - level: network_or_secret_access
+    requires:
+    - explicit user/org policy approval
+    default: false
+  - level: danger_full_access
+    requires:
+    - isolated sandbox/CI runner and admin policy
+    default: false
+  gemini_specific_policy:
+  - Aichestra may run Gemini CLI locally for the signed-in user in a user-owned context.
+  - Aichestra must not harvest or piggyback Gemini CLI OAuth credentials to access
+    Google backend services as an API proxy.
+  - For third-party backend or multi-user agent use, prefer Gemini API key, Vertex
+    AI, or another official Google-supported authentication path.
+  codex_specific_policy:
+  - Aichestra may run codex exec locally for the signed-in user when user consent
+    and workspace boundaries are enforced.
+  - Aichestra must treat ~/.codex/auth.json as a password-equivalent credential and
+    never read/upload it.
+  - For automated CI/CD or server-side workflows, prefer API key auth or official
+    Codex automation path.
+  claude_specific_policy:
+  - Aichestra may run claude -p locally for user-owned workflows.
+  - Aichestra should prefer structured output flags for reliable parsing.
+  - For production API workloads, prefer Anthropic API key, WIF, or cloud provider
+    identity rather than scraping CLI credentials.
+decision_rules:
+- condition: Aichestra is pure web app with no local agent
+  decision: local_cli_provider is not available; use API/OAuth/WIF/IAM only.
+- condition: User wants to use their own installed Claude Code/Codex/Gemini CLI
+  decision: Install/use Aichestra Local Agent and local_cli_provider.
+- condition: CLI has official non-interactive/headless mode
+  decision: Use it instead of PTY screen automation.
+- condition: CLI has JSON/JSONL/stream-json output
+  decision: Enable machine-readable output and parse events.
+- condition: Provider prohibits OAuth piggybacking or terms are unclear
+  decision: Do not use CLI OAuth as a backend credential; use official API key/Cloud
+    IAM path.
+- condition: Workload is CI/CD or server-side automation
+  decision: Prefer API key, WIF, or Cloud IAM over user interactive OAuth session.
+- condition: Task requires file writes or shell execution
+  decision: Require explicit policy grant and user/org approval.
+- condition: Provider adapter cannot prove output parser correctness
+  decision: Fail closed or return raw output with unstable flag; do not silently misparse.
+testing_and_readiness:
+  unit_tests:
+  - Auth union config validation rejects missing credentialAccess=never_read_tokens
+    for local_cli.
+  - Args templating never invokes shell and escapes user text by argv boundaries.
+  - JSON/JSONL parsers reject malformed output with clear error.
+  - Secret redactor masks API keys, bearer tokens, paths configured as sensitive,
+    and env dumps.
+  integration_tests:
+  - claude -p mock/real dry-run returns parseable JSON or stream-json events.
+  - codex exec mock/real dry-run captures stdout final message and stderr progress
+    separately.
+  - codex exec --json parse test emits JSONL events and maps item/error lifecycle
+    correctly.
+  - gemini -p --output-format json parse test returns JSON object and handles auth
+    errors.
+  - timeout kills child process and cleans child process tree.
+  - workspace allowlist blocks cwd outside approved paths.
+  security_tests:
+  - Local Agent cannot read ~/.codex/auth.json or ~/.claude credentials through its
+    normal adapter APIs.
+  - A malicious prompt cannot expand command args into shell execution.
+  - danger mode requires admin policy and explicit user approval.
+  - logs contain no raw bearer tokens, API keys, or OAuth caches.
+  operational_checks:
+  - Record CLI version at adapter startup.
+  - Maintain a compatibility matrix per CLI version.
+  - Expose fallback behavior when a CLI changes output format.
+  - Provide a user-facing disconnect/logout explanation without manipulating vendor
+    credentials directly.
+migration_plan:
+- phase: Phase 0 - Provider abstraction cleanup
+  actions:
+  - Introduce ProviderKind and ProviderAuth union
+  - Move secrets to CredentialManager
+  - Define InvocationRequest/InvocationResult
+- phase: Phase 1 - API/OAuth/WIF/IAM support
+  actions:
+  - Implement api_key provider
+  - Implement OAuth/WIF TokenResolver
+  - Implement cloud_iam provider adapters
+  - Add cost/rate attribution metadata
+- phase: Phase 2 - Local Agent and CLI Provider MVP
+  actions:
+  - Build Local Agent with signed communication
+  - Implement claude/codex/gemini adapters using headless commands
+  - Add stdout/stderr streaming and parsers
+  - Add cwd allowlist and timeout
+- phase: Phase 3 - Policy hardening
+  actions:
+  - Consent UI
+  - secret redaction
+  - sandbox/permission presets
+  - org policy templates
+  - audit dashboard
+- phase: Phase 4 - Enterprise rollout
+  actions:
+  - SSO/device management for Local Agent
+  - version compatibility matrix
+  - admin-managed provider catalog
+  - support for LLM gateway and cloud IAM routing
+open_questions:
+- Aichestra Local Agent를 Electron/Tauri 데스크톱 앱으로 배포할지, 별도 daemon/CLI로 배포할지 결정해야 한다.
+- 각 Provider의 최신 약관과 enterprise 계약에서 로컬 CLI 자동화가 허용되는 범위를 법무/보안팀이 확인해야 한다.
+- 사용자 로컬 작업 결과를 Aichestra Cloud에 어느 정도 저장할지 retention 정책을 정해야 한다.
+- interactive PTY fallback을 제품 기능으로 공개할지, 내부 experimental로 제한할지 결정해야 한다.
+references:
+- id: anthropic_claude_code_programmatic_usage
+  title: Claude Code Docs - Run Claude Code programmatically
+  url: https://code.claude.com/docs/en/headless
+  claims_used:
+  - claude -p runs non-interactively
+  - --output-format supports text/json/stream-json
+  - stdin piping and JSON/streaming output are supported
+  - --bare changes credential/config loading behavior
+- id: anthropic_claude_code_authentication
+  title: Claude Code Docs - Authentication
+  url: https://code.claude.com/docs/en/iam
+  claims_used:
+  - Claude Code supports Claude.ai, Teams/Enterprise, Console, Bedrock, Vertex AI,
+    and Microsoft Foundry authentication patterns
+  - credential storage locations and precedence must be treated as provider-owned
+- id: anthropic_api_authentication_wif
+  title: Claude API Docs - Authentication and Workload Identity Federation
+  url: https://platform.claude.com/docs/en/manage-claude/authentication
+  claims_used:
+  - Claude API supports API key and Workload Identity Federation
+  - WIF exchanges an IdP-issued identity token at POST /v1/oauth/token for a short-lived
+    access token
+- id: openai_codex_authentication
+  title: OpenAI Developers - Codex Authentication
+  url: https://developers.openai.com/codex/auth
+  claims_used:
+  - Codex CLI/App/IDE can authenticate with ChatGPT or API key
+  - API key usage is billed through OpenAI Platform at standard API rates
+  - programmatic Codex CLI workflows are recommended to use API key auth
+  - ~/.codex/auth.json contains access tokens and must be treated like a password
+- id: openai_codex_noninteractive
+  title: OpenAI Developers - Codex Non-interactive mode
+  url: https://developers.openai.com/codex/noninteractive
+  claims_used:
+  - codex exec runs Codex from scripts and CI without opening the interactive TUI
+  - progress is streamed to stderr and final agent message to stdout
+  - --json produces JSON Lines event stream
+  - stdin can be used as prompt or context
+  - default sandbox is read-only and danger-full-access should be controlled
+- id: google_gemini_api_oauth
+  title: Google AI for Developers - Gemini API OAuth quickstart
+  url: https://ai.google.dev/gemini-api/docs/oauth
+  claims_used:
+  - Gemini API can use API keys and OAuth where stricter access controls are needed
+- id: google_gemini_cli_authentication
+  title: Gemini CLI - Authentication
+  url: https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/authentication.mdx
+  claims_used:
+  - Gemini CLI supports Sign in with Google, Gemini API key, and Vertex AI paths
+  - headless mode recommends Gemini API key or Vertex AI
+  - credentials are cached locally after Google sign-in
+- id: google_gemini_cli_configuration
+  title: Gemini CLI - Configuration
+  url: https://google-gemini.github.io/gemini-cli/docs/get-started/configuration.html
+  claims_used:
+  - gemini --prompt / -p invokes non-interactive mode
+  - --output-format json returns machine-readable JSON output
+  - --sandbox enables sandbox mode
+- id: google_gemini_cli_faq_oauth_piggyback
+  title: Gemini CLI FAQ - third-party OAuth piggyback warning
+  url: https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/faq.md
+  claims_used:
+  - third-party harvesting or piggybacking on Gemini CLI OAuth to access backend services
+    is prohibited by Google policy

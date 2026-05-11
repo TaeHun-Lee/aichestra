@@ -26,6 +26,7 @@ export type LLMCompletionRequest = {
   taskRunId: string;
   actorId?: string;
   modelRef?: string;
+  providerId?: string;
   virtualKeyId?: string;
   providerKind?: LLMProviderKind;
   prompt: string;
@@ -41,6 +42,7 @@ export type LLMCompletionRequest = {
 export type LLMCompletionResult = {
   id: string;
   providerKind: LLMProviderKind;
+  providerId?: string;
   modelId: string;
   content: string;
   inputTokens: number;
@@ -57,6 +59,7 @@ export type LLMUsageAttribution = {
   taskRunId: string;
   actorId?: string;
   providerKind: LLMProviderKind;
+  providerId?: string;
   modelId: string;
   inputTokens: number;
   outputTokens: number;
@@ -72,6 +75,7 @@ export type LLMAuditEvent = {
   taskRunId?: string;
   actorId?: string;
   providerKind: LLMProviderKind;
+  providerId?: string;
   modelId?: string;
   result: LLMCallResultState;
   reason?: string;

@@ -17,12 +17,20 @@ import type {
   GitProviderRuntimeConfig,
   RepoRef
 } from "@aichestra/adapters";
+import {
+  PolicyService,
+  createPolicyContext,
+  createPolicyResource,
+  createPolicySubject
+} from "@aichestra/policy";
+import type { PolicyAction, PolicyDecision } from "@aichestra/policy";
 
 export type GitIntegrationServiceInput = {
   store: InMemoryAichestraStore;
   provider: GitProvider;
   config: GitProviderRuntimeConfig;
   actorId?: string;
+  policyService?: PolicyService;
 };
 
 export type CreateGitBranchInput = {
@@ -72,12 +80,14 @@ export class GitIntegrationService {
   private readonly provider: GitProvider;
   private readonly config: GitProviderRuntimeConfig;
   private readonly actorId: string;
+  private readonly policyService: PolicyService;
 
   constructor(input: GitIntegrationServiceInput) {
     this.store = input.store;
     this.provider = input.provider;
     this.config = input.config;
     this.actorId = input.actorId ?? "mock-git-actor";
+    this.policyService = input.policyService ?? new PolicyService();
   }
 
   getConfig(): GitProviderConfigView & { localBranchCreateEnabled: boolean } {
@@ -139,6 +149,41 @@ export class GitIntegrationService {
       taskRunId: input.taskRunId,
       branchName: input.branchName
     });
+    const remotePolicy = this.evaluateRemotePolicy("git.branch.create", repoId, input);
+    if (!remotePolicy.allowed) {
+      this.recordAudit("remote_git_operation_blocked", repoId, {
+        providerKind: this.provider.getProviderKind(),
+        repoId,
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        branchName: input.branchName,
+        reason: remotePolicy.reason,
+        policyDecisionId: remotePolicy.id
+      });
+      return { ok: false, reason: remotePolicy.reason };
+    }
+    const branchPolicy = this.evaluatePolicy("git.branch.create", "branch", repoId, {
+      taskId: input.taskId,
+      taskRunId: input.taskRunId,
+      branchName: input.branchName,
+      providerKind: this.provider.getProviderKind(),
+      environment: {
+        localFixture: this.provider.getProviderKind() === "local" && Boolean(input.localPath),
+        readOnly: this.provider.getProviderKind() === "local"
+      }
+    });
+    if (!branchPolicy.allowed) {
+      this.recordAudit("branch_create_blocked", repoId, {
+        providerKind: this.provider.getProviderKind(),
+        repoId,
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        branchName: input.branchName,
+        reason: branchPolicy.reason,
+        policyDecisionId: branchPolicy.id
+      });
+      return { ok: false, reason: branchPolicy.reason };
+    }
 
     try {
       await this.provider.createBranch({
@@ -218,6 +263,38 @@ export class GitIntegrationService {
       branchLeaseId: input.branchLeaseId,
       branchName: input.branchName
     });
+    const remotePolicy = this.evaluateRemotePolicy("git.pull_request.create", repoId, input);
+    if (!remotePolicy.allowed) {
+      this.recordAudit("remote_git_operation_blocked", repoId, {
+        providerKind: this.provider.getProviderKind(),
+        repoId,
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        branchName: input.branchName,
+        reason: remotePolicy.reason,
+        policyDecisionId: remotePolicy.id
+      });
+      return { ok: false, reason: remotePolicy.reason };
+    }
+    const pullRequestPolicy = this.evaluatePolicy("git.pull_request.create", "pull_request", repoId, {
+      taskId: input.taskId,
+      taskRunId: input.taskRunId,
+      branchName: input.branchName,
+      providerKind: this.provider.getProviderKind(),
+      environment: {}
+    });
+    if (!pullRequestPolicy.allowed) {
+      this.recordAudit("pull_request_create_blocked", repoId, {
+        providerKind: this.provider.getProviderKind(),
+        repoId,
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        branchName: input.branchName,
+        reason: pullRequestPolicy.reason,
+        policyDecisionId: pullRequestPolicy.id
+      });
+      return { ok: false, reason: pullRequestPolicy.reason };
+    }
 
     const request: CreatePullRequestRequest = {
       taskId: input.taskId,
@@ -341,6 +418,64 @@ export class GitIntegrationService {
       taskId: typeof metadata.taskId === "string" ? metadata.taskId : undefined,
       repoId: typeof metadata.repoId === "string" ? metadata.repoId : undefined,
       metadata: sanitizeMetadata(metadata)
+    });
+  }
+
+  private evaluateRemotePolicy(action: PolicyAction, repoId: string, input: { taskId?: string; taskRunId?: string; branchName?: string }): PolicyDecision {
+    if (this.provider.getProviderKind() !== "github" && !this.config.remoteGitEnabled) {
+      return {
+        id: "policy_skip_local_git",
+        allowed: true,
+        decision: "allow",
+        reason: "local_or_mock_git_operation",
+        matchedRuleIds: [],
+        subject: createPolicySubject({ actorId: this.actorId, actorKind: "service", roles: ["system"] }),
+        resource: createPolicyResource({ resourceKind: "git_operation", resourceId: repoId }),
+        action,
+        context: createPolicyContext({ taskId: input.taskId, taskRunId: input.taskRunId, repoId, branchName: input.branchName }),
+        createdAt: new Date()
+      };
+    }
+    return this.evaluatePolicy("git.remote_operation", "git_operation", repoId, {
+      taskId: input.taskId,
+      taskRunId: input.taskRunId,
+      branchName: input.branchName,
+      providerKind: this.provider.getProviderKind(),
+      environment: {
+        remoteGitEnabled: this.config.remoteGitEnabled
+      },
+      metadata: { requestedAction: action }
+    });
+  }
+
+  private evaluatePolicy(action: PolicyAction, resourceKind: "branch" | "pull_request" | "git_operation", resourceId: string, input: {
+    taskId?: string;
+    taskRunId?: string;
+    branchName?: string;
+    providerKind?: string;
+    environment?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  }): PolicyDecision {
+    return this.policyService.evaluate({
+      subject: createPolicySubject({ actorId: this.actorId, actorKind: "service", roles: ["system"] }),
+      action,
+      resource: createPolicyResource({
+        resourceKind,
+        resourceId,
+        metadata: {
+          providerKind: input.providerKind ?? this.provider.getProviderKind(),
+          ...input.metadata
+        }
+      }),
+      context: createPolicyContext({
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        repoId: resourceId,
+        branchName: input.branchName,
+        providerKind: input.providerKind ?? this.provider.getProviderKind(),
+        environment: input.environment ?? {},
+        metadata: input.metadata ?? {}
+      })
     });
   }
 }

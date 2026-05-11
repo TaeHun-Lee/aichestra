@@ -194,6 +194,12 @@ Coverage includes:
 - No real billing or rate limiter.
 - OpenAI-compatible provider is a skeleton only.
 
+## Enterprise Provider Abstraction Follow-up
+
+Enterprise LLM Provider Abstraction v0 extends this package with provider catalog/auth/credential/token/adapter skeletons for Claude, Codex, Gemini, Vertex, Bedrock, Foundry, and local CLI provider boundaries.
+
+LLM Gateway still defaults to `MockLLMProvider`. Provider catalog entries may be referenced for provider id and billing-mode attribution, but no catalog entry enables a real call in v0. Local CLI entries require a future Aichestra Local Agent and never read local credential caches.
+
 ## Next Recommended Task
 
-Local Agent Runner v0, or Real Git Adapter v1 if controlled GitHub branch/PR creation should be enabled next.
+Secrets and Sandbox Design v0 before any real provider secret, Local Agent, or vendor CLI work.

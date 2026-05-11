@@ -6,7 +6,7 @@ import { ConflictError, assembleInstructionSet, createId, slugify } from "@aiche
 import type { AgentKind, InstructionArtifact, MergeSimulationMode, MergeSimulator, SkillPackage, Task, TaskStatus } from "@aichestra/core";
 import type { LlmGateway } from "@aichestra/llm-gateway";
 import type { ModelRouter } from "@aichestra/llm-gateway";
-import type { PolicyEngine } from "@aichestra/policy";
+import type { LegacyTaskPolicyEngine } from "@aichestra/policy";
 import { createRegistryService, registryRefLabel } from "@aichestra/registry";
 import type { RegistryService } from "@aichestra/registry";
 import { InMemoryAichestraStore, MockUsageLedger } from "@aichestra/db";
@@ -20,7 +20,7 @@ export type RunAgentTaskWorkflowDeps = {
   gitProvider?: GitProvider;
   llmGateway?: LlmGateway;
   modelRouter?: ModelRouter;
-  policyEngine?: PolicyEngine;
+  policyEngine?: LegacyTaskPolicyEngine;
   agentRunner?: AgentRunner;
   testRunner?: TestRunner;
   usageLedger?: UsageLedger;

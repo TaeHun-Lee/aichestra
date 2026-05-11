@@ -38,6 +38,7 @@ import type {
   ProposalReviewReadinessStatus,
   ProposalReviewRecommendedAction
 } from "@aichestra/core";
+import { PolicyService, createPolicyContext, createPolicyResource, createPolicySubject } from "@aichestra/policy";
 
 export type CreateFailureSignalInput = Omit<FailureSignal, "id" | "observedAt" | "metadata"> &
   Partial<Pick<FailureSignal, "id" | "observedAt" | "metadata">>;
@@ -123,6 +124,10 @@ export type CreateGovernanceDecisionInput = {
 
 export type CreateProposalEvalRunInput = Omit<ProposalEvalRun, "id" | "attachedAt" | "attachedBy"> &
   Partial<Pick<ProposalEvalRun, "id" | "attachedAt" | "attachedBy">>;
+
+export type ImprovementPolicyInput = {
+  policyService?: PolicyService;
+};
 
 export type ProposalReviewQueueFilter = {
   status?: ImprovementProposalStatus;
@@ -839,6 +844,21 @@ function validateCanaryStages(stages: CanaryStage[]): void {
   }
 }
 
+function mockImprovementSubject(actorId = "mock-admin") {
+  const roles = actorId.includes("admin")
+    ? ["registry_admin"]
+    : actorId.includes("reviewer")
+      ? ["registry_reviewer"]
+      : actorId.startsWith("mock")
+        ? ["system"]
+        : [];
+  return createPolicySubject({
+    actorId,
+    actorKind: actorId.startsWith("mock") ? "system" : "user",
+    roles
+  });
+}
+
 export class InMemoryImprovementRepository implements ImprovementRepository {
   private failureSignals: FailureSignal[];
   private failureClusters: FailureCluster[];
@@ -1459,9 +1479,11 @@ export class ProposalReadinessService {
 
 export class ProposalGovernanceService {
   private readonly repository: ImprovementRepository;
+  private readonly policyService: PolicyService;
 
-  constructor(repository: ImprovementRepository) {
+  constructor(repository: ImprovementRepository, input: ImprovementPolicyInput = {}) {
     this.repository = repository;
+    this.policyService = input.policyService ?? new PolicyService();
   }
 
   listReviewQueue(filter: ProposalReviewQueueFilter = {}): ProposalReviewQueueItem[] {
@@ -1478,6 +1500,24 @@ export class ProposalGovernanceService {
 
   recordDecision(input: CreateGovernanceDecisionInput): ProposalGovernanceDecision {
     const proposal = this.requireProposal(input.proposalId);
+    if (input.decision === "approve") {
+      const policyDecision = this.policyService.evaluate({
+        subject: mockImprovementSubject(input.actorId),
+        action: "improvement.proposal.approve",
+        resource: createPolicyResource({
+          resourceKind: "improvement_proposal",
+          resourceId: proposal.id,
+          metadata: { status: proposal.status, targetKind: proposal.targetKind }
+        }),
+        context: createPolicyContext({
+          metadata: {
+            source: "improvement_governance",
+            decision: input.decision
+          }
+        })
+      });
+      if (!policyDecision.allowed) throw new Error(policyDecision.reason);
+    }
     const decision = this.repository.createProposalGovernanceDecision(createGovernanceDecision(input));
     const nextStatus = this.statusForDecision(proposal, decision.decision);
     if (nextStatus !== proposal.status) {
@@ -1629,9 +1669,11 @@ export class CanaryReadinessService {
 
 export class ProposalApplyGateService {
   private readonly repository: ImprovementRepository;
+  private readonly policyService: PolicyService;
 
-  constructor(repository: ImprovementRepository) {
+  constructor(repository: ImprovementRepository, input: ImprovementPolicyInput = {}) {
     this.repository = repository;
+    this.policyService = input.policyService ?? new PolicyService();
   }
 
   evaluate(proposalId: string): ProposalApplyGate {
@@ -1640,6 +1682,24 @@ export class ProposalApplyGateService {
     const policy = activeSafetyPolicy(this.repository);
     const readiness = evaluateReadinessSnapshot(this.repository, proposal);
     const blockingReasons = new Set<string>(["active_apply_not_implemented"]);
+    const policyDecision = this.policyService.evaluate({
+      subject: mockImprovementSubject("mock-admin"),
+      action: "improvement.apply",
+      resource: createPolicyResource({
+        resourceKind: "draft_registry_change",
+        resourceId: this.repository.getDraftRegistryChangeForProposal(proposal.id)?.id,
+        metadata: {
+          proposalId: proposal.id,
+          targetKind: proposal.targetKind
+        }
+      }),
+      context: createPolicyContext({
+        metadata: {
+          source: "proposal_apply_gate"
+        }
+      })
+    });
+    if (!policyDecision.allowed) blockingReasons.add("policy_denied_improvement_apply");
     for (const reason of readiness.blockingReasons) blockingReasons.add(reason);
     const gate: ProposalApplyGate = {
       proposalId: proposal.id,
@@ -1657,7 +1717,7 @@ export class ProposalApplyGateService {
       proposalId: proposal.id,
       actorId: "mock-admin",
       message: `Checked apply gate for proposal ${proposal.id}.`,
-      metadata: { canApply: result.canApply, blockingReasons: result.blockingReasons }
+      metadata: { canApply: result.canApply, blockingReasons: result.blockingReasons, policyDecisionId: policyDecision.id }
     }));
     if (!result.canApply) {
       this.repository.appendImprovementGovernanceAuditEvent(createGovernanceAuditEvent({
@@ -1678,9 +1738,11 @@ export class ProposalApplyGateService {
 
 export class MockAutoImprovementEngine implements AutoImprovementEngine {
   private readonly repository: ImprovementRepository;
+  private readonly policyService: PolicyService;
 
-  constructor(repository: ImprovementRepository) {
+  constructor(repository: ImprovementRepository, input: ImprovementPolicyInput = {}) {
     this.repository = repository;
+    this.policyService = input.policyService ?? new PolicyService();
   }
 
   analyzeFailureCluster(clusterId: string): AutoImprovementAnalysis {
@@ -1777,6 +1839,24 @@ export class MockAutoImprovementEngine implements AutoImprovementEngine {
     const proposal = this.requireProposal(proposalId);
     const existing = this.repository.getDraftRegistryChangeForProposal(proposal.id);
     if (existing) return existing;
+    const policyDecision = this.policyService.evaluate({
+      subject: mockImprovementSubject("mock-auto-improvement"),
+      action: "improvement.draft_change.prepare",
+      resource: createPolicyResource({
+        resourceKind: "draft_registry_change",
+        resourceId: proposal.id,
+        metadata: {
+          targetKind: proposal.targetKind,
+          proposedChangeType: proposal.proposedChangeType
+        }
+      }),
+      context: createPolicyContext({
+        metadata: {
+          source: "mock_auto_improvement_engine"
+        }
+      })
+    });
+    if (!policyDecision.allowed) throw new Error(policyDecision.reason);
     const changeType = draftChangeTypeForProposal(proposal);
     return this.repository.createDraftRegistryChange(createDraftRegistryChange({
       id: stableDraftChangeId(proposal.id),
@@ -1845,7 +1925,7 @@ export type ImprovementServices = {
   applyGate: ProposalApplyGateService;
 };
 
-export function createImprovementServices(repository: ImprovementRepository = new InMemoryImprovementRepository()): ImprovementServices {
+export function createImprovementServices(repository: ImprovementRepository = new InMemoryImprovementRepository(), input: ImprovementPolicyInput = {}): ImprovementServices {
   return {
     signals: new FailureSignalService(repository),
     clustering: new FailureClusteringService(repository),
@@ -1856,11 +1936,11 @@ export function createImprovementServices(repository: ImprovementRepository = ne
     safetyPolicies: new AutoImprovementSafetyPolicyService(repository),
     draftRegistryChanges: new DraftRegistryChangeService(repository),
     proposalReadiness: new ProposalReadinessService(repository),
-    autoImprovement: new MockAutoImprovementEngine(repository),
-    governance: new ProposalGovernanceService(repository),
+    autoImprovement: new MockAutoImprovementEngine(repository, input),
+    governance: new ProposalGovernanceService(repository, input),
     proposalEvalRuns: new ProposalEvalRunService(repository),
     canaryReadiness: new CanaryReadinessService(repository),
-    applyGate: new ProposalApplyGateService(repository)
+    applyGate: new ProposalApplyGateService(repository, input)
   };
 }
 

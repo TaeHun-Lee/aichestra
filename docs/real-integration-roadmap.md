@@ -5,11 +5,14 @@
 1. Persistent DB implementation v1 - implemented
 2. Real Git Adapter v0 - implemented
 3. LLM Gateway v0 - implemented
-4. Local Agent Runner v0
-5. Secrets and sandbox design
-6. Policy-as-code skeleton
-7. MCP Gateway planning
-8. Phase 5 enterprise planning
+4. Local Agent Runner v0 - implemented
+5. Local Agent Runner v1 - implemented
+6. Policy-as-code skeleton - implemented
+7. Enterprise LLM Provider Abstraction v0 - implemented
+8. Secrets and sandbox design - implemented
+9. Aichestra Local Agent Protocol v0
+10. MCP Gateway planning
+11. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -55,29 +58,84 @@ Recommended next step: Local Agent Runner v0, or Real Git Adapter v1 if controll
 
 ## 4. Local Agent Runner v0
 
-Goals:
-
-- Execute local commands in a constrained harness.
-- Record runner metadata and test output.
-- Keep sandbox/secrets boundaries explicit.
-
-## 5. Secrets and Sandbox Design
+Implemented with `docs/local-agent-runner-v0.md`, provider-neutral runner interfaces, deterministic `MockAgentRunner`, disabled-by-default `LocalAgentRunner`, harness policy gates, instruction assembly, in-memory runner repositories, API routes, health metadata, dashboard visibility, and tests.
 
 Goals:
 
-- Define secret scope model.
-- Define harness network policy enforcement.
-- Define audit requirements for secret reads and tool calls.
+- Keep the default runtime mock-first.
+- Record runner metadata, changed files, diff summary, test output, instruction assembly, usage linkage, and audit events.
+- Keep local execution disabled by default and scoped to safe fixture or controlled workspaces.
+- Preserve LLM Gateway and GitProvider boundaries without real provider calls.
+
+Recommended next step: Local Agent Runner v1 with controlled fixture command execution, or Real Git Adapter v1 / LLM Gateway v1 depending on project priorities.
+
+## 5. Local Agent Runner v1
+
+Implemented with `docs/local-agent-runner-v1.md`, `CommandExecutor`, `BlockedCommandExecutor`, `FixtureLocalCommandExecutor`, `LocalAgentWorkspaceManager`, command result/workspace repositories, API routes, dashboard visibility, schema skeleton updates, and tests.
+
+Goals:
+
+- Keep mock runner as the default.
+- Keep local runner and local command execution disabled by default.
+- Allow only controlled fixture command execution in explicit workspace roots.
+- Enforce harness command, network, remote Git, output, file write, and secret gates.
+- Capture bounded command results and workspace status.
+- Preserve LLM Gateway and GitProvider boundaries.
+
+Recommended next step: Policy-as-code Skeleton v0 was completed after this milestone; continue with Secrets and Sandbox Design v0, or Real Git Adapter v1 if controlled GitHub branch/PR creation is the next priority.
 
 ## 6. Policy-as-Code Skeleton
 
+Implemented with `docs/policy-as-code-v0.md`, central provider-neutral policy models, `StaticPolicyEngine`, default restrictive policy rules, policy decision audit, API routes, health metadata, dashboard visibility, and deterministic tests.
+
 Goals:
 
-- Move hard-coded mock policy rules behind a policy engine interface.
-- Add deterministic policy tests.
-- Keep production policy execution out of scope until auth and persistence are ready.
+- Centralize allow/deny/require-approval decisions for Git, LLM, Runner, Registry, and Auto-improvement boundaries.
+- Keep mock Git/LLM operations allowed while denying remote provider calls by default.
+- Deny runner command execution, secret reads, MCP tool calls, and improvement apply by default.
+- Preserve existing budget, harness, resolver, mock RBAC, and governance gates.
+- Prepare for future OPA/Rego or Cedar adapters without adding those integrations yet.
 
-## 7. MCP Gateway Planning
+Recommended next step: Secrets and Sandbox Design v0, or Real Git Adapter v1 if controlled GitHub branch/PR creation is the next priority.
+
+## 7. Enterprise LLM Provider Abstraction v0
+
+Implemented with `docs/enterprise-llm-provider-abstraction-v0.md`, enterprise ProviderKind/Auth models, provider catalog skeletons, CredentialManager/TokenResolver interfaces, blocked ProviderAdapter skeletons, Local CLI provider templates, Aichestra Local Agent boundary models, parser/redaction utilities, policy hooks, API routes, health metadata, dashboard visibility, schema skeleton updates, and tests.
+
+Goals:
+
+- Classify enterprise providers as cloud API, OAuth, workload identity, cloud IAM, local CLI, or PTY fallback.
+- Keep all real provider calls disabled.
+- Prevent credential cache reads and raw token storage.
+- Make Local CLI providers require a future Aichestra Local Agent.
+- Add redaction, parser, audit, and policy hook readiness before any real provider integration.
+
+Recommended next step: Secrets and Sandbox Design v0 before any real provider secret, Local Agent, or vendor CLI work.
+
+## 8. Secrets and Sandbox Design
+
+Implemented with `docs/secrets-sandbox-design-v0.md`, `packages/security`, security API routes, dashboard visibility, policy action/rule updates, runner sandbox-session integration, and tests.
+
+Goals:
+
+- Define metadata-only secret refs, scopes, leases, and access decisions.
+- Define sandbox profiles, sessions, and sandbox decisions.
+- Define network egress policy and redaction policy models.
+- Keep default policies deny-by-default for real secrets, network, credential resolution, and runner secret injection.
+- Add security audit events, API/dashboard visibility, and deterministic tests without real secret or sandbox runtime integration.
+
+Recommended next step: Aichestra Local Agent Protocol v0, or Real Git Adapter v1 if controlled remote Git branch/PR creation should be enabled next.
+
+## 9. Aichestra Local Agent Protocol v0
+
+Goals:
+
+- Define the user-machine Local Agent protocol boundary for future local CLI providers.
+- Keep vendor CLI execution disabled until explicit consent, sandbox, redaction, network, and secret gates exist.
+- Reuse `ProviderKind`, `ProviderAuth`, `SecretRef`, `SandboxProfile`, `NetworkEgressPolicy`, and policy decisions.
+- Do not read or upload vendor credential caches.
+
+## 10. MCP Gateway Planning
 
 Goals:
 
@@ -85,7 +143,7 @@ Goals:
 - Keep MCP calls disabled by default.
 - Define audit, auth, and permission model.
 
-## 8. Phase 5 Enterprise Planning
+## 11. Phase 5 Enterprise Planning
 
 Goals:
 

@@ -63,6 +63,7 @@ export class MockLLMProvider implements LLMProvider {
       result: {
         id: createId("llmreq"),
         providerKind: "mock",
+        providerId: request.providerId,
         modelId: model.id,
         content: `Mock LLM Gateway completion for ${request.taskId} using ${model.id}.`,
         inputTokens: usage.inputTokens,
@@ -76,6 +77,7 @@ export class MockLLMProvider implements LLMProvider {
           task_id: request.taskId,
           task_run_id: request.taskRunId,
           virtual_key_id: request.virtualKeyId,
+          provider_id: request.providerId,
           provider_kind: "mock"
         }
       }

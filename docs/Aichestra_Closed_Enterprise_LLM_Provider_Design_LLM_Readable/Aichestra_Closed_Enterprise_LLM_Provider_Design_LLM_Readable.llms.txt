@@ -1,0 +1,46 @@
+# Aichestra Closed Enterprise LLM Provider Integration Design
+
+As of: 2026-05-11
+Language: ko-KR
+Purpose: LLM-readable index and compact summary for Aichestra Provider architecture.
+
+## Canonical files
+- Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable.md: human + LLM readable design document
+- Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable.json: machine-readable design object
+- Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable.yaml: machine-readable design object in YAML
+
+## Core answer
+Aichestra can support closed enterprise LLMs through API key, OAuth/WIF/IAM, and user-owned Local CLI Provider modes. Local CLI Provider requires an Aichestra Local Agent running on the user machine. The Local Agent launches vendor CLIs such as claude, codex, and gemini, passes prompt/context through argv/stdin, reads stdout/stderr, and returns normalized events. Aichestra must not read or upload vendor credential caches.
+
+## Provider kinds
+- cloud_api
+- oauth_api
+- workload_identity_api
+- cloud_iam
+- local_cli
+- pty_interactive_fallback
+
+## Critical rules
+- Aichestra는 ~/.codex/auth.json, ~/.claude credential 파일, Google credential cache 등 Provider 소유 credential을 직접 읽지 않는다.
+- Aichestra Cloud는 사용자의 로컬 CLI 토큰을 서버로 업로드하지 않는다.
+- Gemini CLI OAuth 세션은 제3자 backend 접근 우회 수단으로 piggyback하지 않는다.
+- Codex ChatGPT 로그인 세션은 사용자 로컬 신뢰 환경의 CLI 실행에만 사용하고, 자동화/CI/CD는 API key 또는 공식 권장 경로를 사용한다.
+- Local CLI Provider는 사용자 컴퓨터에서 실행되는 Aichestra Local Agent가 필요하다.
+
+## Recommended CLI command patterns
+- Claude Code: claude -p "{prompt}" --output-format json
+- Claude Code stream: claude -p "{prompt}" --output-format stream-json --verbose --include-partial-messages
+- Codex CLI: codex exec "{prompt}"
+- Codex CLI JSONL: codex exec --json "{prompt}"
+- Gemini CLI: gemini -p "{prompt}" --output-format json
+
+## References
+- https://code.claude.com/docs/en/headless
+- https://code.claude.com/docs/en/iam
+- https://platform.claude.com/docs/en/manage-claude/authentication
+- https://developers.openai.com/codex/auth
+- https://developers.openai.com/codex/noninteractive
+- https://ai.google.dev/gemini-api/docs/oauth
+- https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/authentication.mdx
+- https://google-gemini.github.io/gemini-cli/docs/get-started/configuration.html
+- https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/faq.md
