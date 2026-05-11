@@ -528,6 +528,292 @@ export type RegistryPackageDiff = {
   summary: string;
 };
 
+export type FailureSignalSourceType = "task_run" | "conflict_manager" | "registry_resolver" | "test_result" | "usage_ledger" | "manual";
+export type FailureSignalTargetKind = RegistryKind | "model" | "conflict_manager" | "unknown";
+export type FailureSeverity = "low" | "medium" | "high" | "critical";
+
+export type FailureSignal = {
+  id: string;
+  sourceType: FailureSignalSourceType;
+  sourceId: string;
+  taskId?: string;
+  taskRunId?: string;
+  targetKind: FailureSignalTargetKind;
+  targetRef?: string;
+  severity: FailureSeverity;
+  category: string;
+  summary: string;
+  details?: string;
+  observedAt: Date;
+  metadata: Record<string, unknown>;
+};
+
+export type FailureClusterStatus = "open" | "investigating" | "proposal_created" | "ignored" | "resolved";
+
+export type FailureCluster = {
+  id: string;
+  title: string;
+  category: string;
+  targetKind: FailureSignalTargetKind;
+  targetRef?: string;
+  signalIds: string[];
+  severity: FailureSeverity;
+  status: FailureClusterStatus;
+  summary: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ImprovementTargetKind = RegistryKind;
+export type ImprovementCandidateType =
+  | "update_instruction"
+  | "update_skill"
+  | "update_harness"
+  | "adjust_resolver"
+  | "add_eval_requirement";
+export type ImprovementPriority = "low" | "medium" | "high";
+export type ImprovementCandidateStatus = "new" | "triaged" | "proposal_requested" | "proposal_created" | "dismissed";
+
+export type ImprovementCandidate = {
+  id: string;
+  sourceClusterId: string;
+  targetKind: ImprovementTargetKind;
+  targetId: string;
+  targetName: string;
+  targetVersion: string;
+  candidateType: ImprovementCandidateType;
+  priority: ImprovementPriority;
+  summary: string;
+  evidence: string[];
+  status: ImprovementCandidateStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ImprovementProposalChangeType = "patch" | "new_version" | "status_change" | "eval_requirement" | "instruction_update";
+export type ImprovementProposalStatus =
+  | "draft"
+  | "awaiting_review"
+  | "eval_required"
+  | "approved_for_canary"
+  | "rejected"
+  | "applied"
+  | "archived";
+
+export type ImprovementProposal = {
+  id: string;
+  candidateId: string;
+  targetKind: ImprovementTargetKind;
+  targetId: string;
+  targetName: string;
+  targetVersion: string;
+  proposedChangeType: ImprovementProposalChangeType;
+  proposedPatch?: Record<string, unknown>;
+  proposedSummary: string;
+  rationale: string;
+  safetyNotes: string[];
+  status: ImprovementProposalStatus;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type EvalRequirementType = "unit_test" | "integration_test" | "golden_case" | "manual_review" | "mock_eval";
+export type EvalRequirementRequiredStatus = "passed" | "approved";
+
+export type EvalRequirement = {
+  id: string;
+  targetKind: ImprovementTargetKind;
+  targetId?: string;
+  requirementName: string;
+  requirementType: EvalRequirementType;
+  requiredStatus: EvalRequirementRequiredStatus;
+  description: string;
+  blocking: boolean;
+  createdAt: Date;
+};
+
+export type CanaryRolloutStatus = "draft" | "ready" | "running" | "paused" | "completed" | "failed";
+
+export type CanaryStage = {
+  name: string;
+  percentage?: number;
+  scope: string;
+  successCriteria: string[];
+  rollbackCriteria: string[];
+};
+
+export type CanaryRolloutPlan = {
+  id: string;
+  proposalId: string;
+  targetKind: ImprovementTargetKind;
+  targetId: string;
+  stages: CanaryStage[];
+  status: CanaryRolloutStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type AutoImprovementSafetyPolicy = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  allowedTargetKinds: ImprovementTargetKind[];
+  allowAutoApply: boolean;
+  requireHumanApproval: boolean;
+  requireEvalPassed: boolean;
+  requireCanary: boolean;
+  maxChangesPerProposal: number;
+  blockedPathsOrScopes?: string[];
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type DraftRegistryChangeType = "patch" | "new_version" | "metadata_update" | "eval_requirement" | "instruction_update";
+export type DraftRegistryChangeStatus = "draft" | "awaiting_review" | "rejected" | "superseded";
+
+export type AutoImprovementAnalysis = {
+  id: string;
+  clusterId: string;
+  summary: string;
+  targetKind: ImprovementTargetKind;
+  targetRef?: string;
+  evidence: string[];
+  recommendedCandidateType: ImprovementCandidateType;
+  confidence: number;
+  createdAt: Date;
+};
+
+export type DraftRegistryChange = {
+  id: string;
+  proposalId: string;
+  targetKind: ImprovementTargetKind;
+  targetId: string;
+  targetName: string;
+  targetVersion: string;
+  changeType: DraftRegistryChangeType;
+  draftPayload: Record<string, unknown>;
+  status: DraftRegistryChangeStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ProposalReadiness = {
+  proposalId: string;
+  readyForReview: boolean;
+  requiredEvalIds: string[];
+  requiredApproval: boolean;
+  requiredCanary: boolean;
+  blockingReasons: string[];
+  safetyPolicyId: string;
+  latestDecision?: ProposalGovernanceDecisionType;
+  evalStatus?: "not_required" | "pending" | "passed" | "failed";
+  canaryReady?: boolean;
+  draftChangeStatus?: DraftRegistryChangeStatus;
+  evaluatedAt: Date;
+};
+
+export type ProposalReviewReadinessStatus = "ready_for_review" | "blocked" | "ready_for_canary" | "closed";
+export type ProposalReviewRecommendedAction =
+  | "review_proposal"
+  | "attach_eval_result"
+  | "prepare_canary_plan"
+  | "ready_for_canary_review"
+  | "no_action";
+
+export type ProposalReviewQueueItem = {
+  id: string;
+  proposalId: string;
+  candidateId: string;
+  targetKind: ImprovementTargetKind;
+  targetId: string;
+  targetName: string;
+  targetVersion: string;
+  proposedChangeType: ImprovementProposalChangeType;
+  proposalStatus: ImprovementProposalStatus;
+  readinessStatus: ProposalReviewReadinessStatus;
+  blockingReasons: string[];
+  requiredEvalIds: string[];
+  requiredApproval: boolean;
+  requiredCanary: boolean;
+  latestDecision?: ProposalGovernanceDecisionType;
+  recommendedAction: ProposalReviewRecommendedAction;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type ProposalGovernanceDecisionType =
+  | "approve"
+  | "reject"
+  | "request_changes"
+  | "mark_eval_required"
+  | "mark_canary_required"
+  | "archive";
+
+export type ProposalGovernanceDecision = {
+  id: string;
+  proposalId: string;
+  actorId: string;
+  decision: ProposalGovernanceDecisionType;
+  reason: string;
+  createdAt: Date;
+};
+
+export type ProposalEvalRunStatus = "pending" | "passed" | "failed" | "skipped";
+
+export type ProposalEvalRun = {
+  id: string;
+  proposalId: string;
+  evalRequirementId: string;
+  status: ProposalEvalRunStatus;
+  summary: string;
+  score?: number;
+  maxScore?: number;
+  attachedBy: string;
+  attachedAt: Date;
+  metadata?: Record<string, unknown>;
+};
+
+export type CanaryReadiness = {
+  proposalId: string;
+  required: boolean;
+  ready: boolean;
+  blockingReasons: string[];
+  evaluatedAt: Date;
+};
+
+export type ProposalApplyGate = {
+  proposalId: string;
+  canApply: boolean;
+  blockingReasons: string[];
+  requiredApproval: boolean;
+  requiredEvalPassed: boolean;
+  requiredCanaryReady: boolean;
+  safetyPolicyId: string;
+  evaluatedAt: Date;
+};
+
+export type ImprovementGovernanceAuditAction =
+  | "proposal_decision_recorded"
+  | "proposal_approved"
+  | "proposal_rejected"
+  | "proposal_changes_requested"
+  | "proposal_eval_attached"
+  | "proposal_canary_readiness_checked"
+  | "proposal_apply_gate_checked"
+  | "proposal_apply_blocked";
+
+export type ImprovementGovernanceAuditEvent = {
+  id: string;
+  action: ImprovementGovernanceAuditAction;
+  proposalId?: string;
+  draftRegistryChangeId?: string;
+  actorId: string;
+  message: string;
+  metadata?: Record<string, unknown>;
+  createdAt: Date;
+};
+
 export type InstructionSet = {
   id: string;
   taskRunId: string;

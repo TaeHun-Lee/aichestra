@@ -4,7 +4,7 @@ import path from "node:path";
 
 const root = process.cwd();
 const requiredPaths = [
-  "AICHESTRA_BOOTSTRAP.md",
+  "design_docs/AICHESTRA_BOOTSTRAP.md",
   "AGENTS.md",
   "README.md",
   "docs/conflict-manager-v0.md",
@@ -14,6 +14,20 @@ const requiredPaths = [
   "docs/phase-3-hardening-plan.md",
   "docs/phase-3-registry-hardening-v1.md",
   "docs/phase-3-registry-v0.md",
+  "docs/phase-4-preparation-plan.md",
+  "docs/phase-4-preparation.md",
+  "docs/phase-4-auto-improvement-v0-plan.md",
+  "docs/phase-4-auto-improvement-v0.md",
+  "docs/phase-4-governance-v1-plan.md",
+  "docs/phase-4-governance-v1.md",
+  "docs/real-integration-foundation-v0-plan.md",
+  "docs/repository-inventory.md",
+  "docs/persistent-storage-schema-v0.md",
+  "docs/auth-rbac-readiness.md",
+  "docs/real-git-adapter-v0-readiness.md",
+  "docs/dashboard-read-model-plan.md",
+  "docs/real-integration-roadmap.md",
+  "infra/migrations/0001_initial_aichestra_schema.sql",
   "docs/vertical-slice-review.md",
   "apps/api/src/main.ts",
   "apps/worker/src/main.ts",
@@ -21,6 +35,7 @@ const requiredPaths = [
   "packages/core/src/index.ts",
   "packages/db/prisma/schema.prisma",
   "packages/git-adapter/src/index.ts",
+  "packages/improvement/src/index.ts",
   "packages/llm-gateway/src/index.ts",
   "packages/policy/src/index.ts",
   "packages/registry/src/index.ts"

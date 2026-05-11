@@ -13,6 +13,9 @@
   "dependencies": {
     "@aichestra/core": "workspace:*",
     "@aichestra/db": "workspace:*",
+    "@aichestra/git-adapter": "workspace:*",
+    "@aichestra/improvement": "workspace:*",
+    "@aichestra/llm-gateway": "workspace:*",
     "@aichestra/registry": "workspace:*",
     "@aichestra/worker": "workspace:*"
   }

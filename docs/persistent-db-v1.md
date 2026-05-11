@@ -1,0 +1,110 @@
+# Persistent DB v1
+
+Persistent DB v1 adds an opt-in Postgres storage provider behind the existing storage provider and repository factory boundaries. The default runtime and default tests remain in-memory.
+
+## Implemented
+
+- `PostgresStorageProvider` and `PostgresRepositoryFactory` in `packages/db/src/postgres.ts`.
+- A small `DatabaseClient` boundary backed by the local `psql` CLI.
+- Runtime selection with `AICHESTRA_STORAGE_PROVIDER=postgres`.
+- Database URL configuration with `AICHESTRA_DATABASE_URL`.
+- Explicit migration command: `pnpm db:migrate`.
+- Optional Postgres repository contract tests gated by `AICHESTRA_TEST_DATABASE_URL`.
+- `/health` now reports storage provider kind and health without leaking secrets.
+
+## Postgres-backed repositories
+
+Persistent DB v1 implements the core durable slice:
+
+- TaskRepository
+- TaskRunRepository
+- UsageLedgerRepository
+- BranchLeaseRepository
+- MergeSimulationResultRepository
+- MergeQueueRepository
+- SkillRegistryRepository
+- HarnessRegistryRepository
+- InstructionRegistryRepository
+- RegistryAuditRepository
+- RegistryHistoryRepository
+- RegistryPackageRepository
+- RegistryEvalResultRepository
+
+## Still in-memory for v1
+
+Phase 4 improvement and governance repositories remain in-memory:
+
+- Failure signals and clusters
+- Improvement candidates and proposals
+- Draft registry changes
+- Proposal readiness
+- Governance decisions
+- Proposal eval runs
+- Canary readiness
+- Apply gates
+- Improvement governance audit events
+
+These are durable candidates for a later persistence pass after real provider boundaries are stable.
+
+## Configuration
+
+Default in-memory runtime:
+
+```bash
+pnpm --filter @aichestra/api dev
+```
+
+Opt-in Postgres runtime:
+
+```bash
+AICHESTRA_STORAGE_PROVIDER=postgres AICHESTRA_DATABASE_URL=postgres://... pnpm --filter @aichestra/api dev
+```
+
+Optional `psql` binary override:
+
+```bash
+AICHESTRA_PSQL_BIN=/path/to/psql
+```
+
+If Postgres is selected without `AICHESTRA_DATABASE_URL`, startup fails clearly. If the database health check fails, startup also fails.
+
+## Migrations
+
+Run migrations explicitly:
+
+```bash
+AICHESTRA_DATABASE_URL=postgres://... pnpm db:migrate
+```
+
+Migrations do not run automatically during build, test, or app startup.
+
+## Testing
+
+Default validation does not require Postgres:
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+Optional Postgres contract tests:
+
+```bash
+AICHESTRA_TEST_DATABASE_URL=postgres://... pnpm test
+```
+
+The optional contract suite exercises the same repository behavior against Postgres when a test database is configured. It is skipped otherwise.
+
+## Known limitations
+
+- The Postgres client boundary uses local `psql` to preserve the current synchronous repository contracts. A future async repository pass should replace this with a pooled Node client.
+- No production migration governance, backup, restore, or connection pooling is implemented.
+- No real Git, LLM, MCP, Vault, Kubernetes, Temporal, or artifact registry integrations were added.
+- Phase 4 governance repositories are not Postgres-backed yet.
+- The runtime does not seed Postgres automatically.
+
+## Next recommended task
+
+Real Git Adapter v0 planning or implementation, using durable Task, TaskRun, BranchLease, MergeQueue, usage, and registry state.

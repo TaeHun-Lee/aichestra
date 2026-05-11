@@ -2,15 +2,14 @@
 
 ## Scope
 
-This audit reflects the current repository state after Phase 3 Packaging & Versioning v3.
+This audit reflects the current repository state after LLM Gateway v0.
 
 Guidance and evidence reviewed:
 
 - `AGENTS.md`
 - `README.md`
-- `AICHESTRA_BOOTSTRAP.md`
-- `AICHESTRA_CODEX_NEXT_STEPS.md`
-- `AICHESTRA_CODEX_CONFLICT_MANAGER_V0.md`
+- `design_docs/AICHESTRA_BOOTSTRAP.md`
+- `AICHESTRA_CODEX_PHASE3_TO_PHASE4_WORK_ORDERS.md`
 - `docs/bootstrap-gap-report.md`
 - `docs/phase-2-completion-gap.md`
 - `docs/conflict-manager-v0.md`
@@ -20,6 +19,25 @@ Guidance and evidence reviewed:
 - `docs/phase-3-operational-hardening-v2.md`
 - `docs/phase-3-packaging-versioning-v3.md`
 - `docs/phase-3-completion-gap.md`
+- `docs/phase-4-preparation-plan.md`
+- `docs/phase-4-preparation.md`
+- `docs/phase-4-auto-improvement-v0-plan.md`
+- `docs/phase-4-auto-improvement-v0.md`
+- `docs/phase-4-governance-v1-plan.md`
+- `docs/phase-4-governance-v1.md`
+- `docs/real-integration-foundation-v0-plan.md`
+- `docs/repository-inventory.md`
+- `docs/persistent-storage-schema-v0.md`
+- `docs/persistent-db-v1-plan.md`
+- `docs/persistent-db-v1.md`
+- `docs/real-git-adapter-v0-plan.md`
+- `docs/real-git-adapter-v0.md`
+- `docs/llm-gateway-v0-plan.md`
+- `docs/llm-gateway-v0.md`
+- `docs/auth-rbac-readiness.md`
+- `docs/real-git-adapter-v0-readiness.md`
+- `docs/dashboard-read-model-plan.md`
+- `docs/real-integration-roadmap.md`
 - implementation under `apps/`, `packages/`, `tests/`, `scripts/`, and `docs/`
 
 ## 1. Phase Mapping
@@ -29,8 +47,16 @@ Guidance and evidence reviewed:
 | Phase 1: LLM and cost management foundation, task orchestration, mock or real Git workflow, usage ledger, API, worker, dashboard | `complete_for_current_milestone` | The mock MVP vertical slice is implemented, validated, tested, and still mock-only. Task orchestration exists in `apps/worker/src/workflows/run-agent-task-workflow.ts`; API task creation/run endpoints exist in `apps/api/src/main.ts`; mock LLM/model routing, mock Git PR/branch behavior, usage ledger, worker, and web dashboard are implemented. This is not production-ready. |
 | Phase 2: Branch conflict manager, active branch or lease graph, conflict risk scoring, merge queue, conflict visibility | `complete_for_current_milestone` | v0 concepts exist (`BranchLease`, `ConflictRisk`, `MergeQueueEntry`) and v1 adds `MergeSimulationResult`, `MergeSimulator`, `MockMergeSimulator`, `LocalGitDryRunMergeSimulator`, simulation-aware risk and queue fields, API visibility, dashboard visibility, and tests. This is not full Phase 2 completion because semantic/symbol/test impact signals, rebase-needed detection, resolver handoff, human escalation workflow, and provider-backed merge automation remain future work. |
 | Phase 3: Skill Registry, Harness Registry, Instruction Registry, version pinning, separation of Skill / Harness / InstructionArtifact | `v3_implemented` | Separate domain concepts, seed registries, exact and simple semver range refs, repository interfaces, in-memory and file-backed repositories, stable DTOs, registry APIs, registry-backed workflow selection, TaskRun-selected refs, audit logs, approval/eval gates, local checksum verification, append-only history, rollback, approval queue read models, local eval result attachment, mock mutation RBAC, local package manifests, local import/export, package diffs, dashboard visibility, and tests exist. Signed artifacts, full approval workflow, eval execution, full package management, real auth/RBAC, and real artifact registry integration remain future work. |
-| Phase 4: Auto-improvement loop, trace clustering, LLM-based Skill or Harness patch proposals, eval, canary rollout | `planned_only` | Roadmap and metadata references exist, such as `evalStatus` and docs mentioning canary rollout, but no auto-improvement loop, trace clustering, proposal generation, eval execution, or canary rollout code exists. |
+| Phase 4: Auto-improvement loop, trace clustering, LLM-based Skill or Harness patch proposals, eval, canary rollout | `v1_implemented` | Mock-only Auto-improvement v0 exists and Governance v1 now adds `ProposalReviewQueueItem`, `ProposalGovernanceDecision`, `ProposalEvalRun`, `CanaryReadiness`, `ProposalApplyGate`, improvement governance audit events, readiness checks that consider governance/eval/canary/draft status, API/dashboard visibility, and tests. This is not production auto-improvement: no LLM calls, no embeddings, no active registry mutation, no proposal auto-approval, no eval execution, no canary execution, and no apply behavior exists. |
 | Phase 5: Enterprise features such as SCIM, audit export, policy-as-code, private deployment, data residency, advanced security | `planned_only` | Security and roadmap docs mention enterprise concerns, but there is no SCIM, audit export, policy-as-code engine, private deployment workflow, data residency control, or advanced enterprise security implementation. |
+
+Real integration foundation: `v0_scaffolded`. A storage provider and repository factory abstraction exists in `packages/db/src/storage.ts`; the default runtime remains in-memory. Repository inventory, Postgres-oriented schema design, migration skeleton, auth/RBAC readiness, Real Git Adapter readiness, dashboard read model plan, and real integration roadmap are documented.
+
+Persistent DB: `v1_implemented`. `packages/db/src/postgres.ts` adds an opt-in Postgres storage provider, repository factory, small database client boundary, and Postgres-backed repositories for Task, TaskRun, usage ledger, branch leases, merge simulations, merge queue, registry entities, registry audit/history, registry packages, and registry eval results. `scripts/db/migrate.mjs` runs the SQL migration only when explicitly invoked. Optional Postgres repository contract tests run only when `AICHESTRA_TEST_DATABASE_URL` is configured. Phase 4 governance repositories remain in-memory for v1.
+
+Real Git Adapter: `v0_implemented`. `GitProvider` now exposes provider-neutral branch, PR, changed-file, validation, and merge simulation recording operations. `MockGitProvider` remains the default; `LocalGitProvider` supports fixture-safe local Git inspection without fetch, push, or working-tree mutation; `GitHubGitProvider` is a gated skeleton that blocks remote operations by default and performs no network calls. `GitIntegrationService`, `/git/*` API routes, health metadata, dashboard visibility, and deterministic tests are implemented. This is not production Git integration because remote branch/PR creation and automatic merge/rebase remain out of scope.
+
+LLM Gateway: `v0_implemented`. `LLMProvider` and `LLMGatewayService` now provide provider-neutral model routing, deterministic mock completions, model catalog, virtual model key policy objects, per-task budget checks, usage ledger integration, LLM audit events, API endpoints, health metadata, dashboard visibility, and tests. `OpenAICompatibleLLMProvider` is a gated skeleton that blocks remote completion by default and performs no network calls. This is not production LLM integration because real provider calls, streaming, BYOK, OAuth/delegated auth, and production secret management remain out of scope.
 
 ## 2. MVP Vertical Slice Validation
 
@@ -153,7 +179,7 @@ Conclusion: the repository complies with the mock-only MVP rule.
 | `pnpm install` | pass | Workspace already up to date; no packages downloaded. |
 | `pnpm lint` | pass | `node scripts/lint.mjs`; output: `lint passed`. |
 | `pnpm typecheck` | pass | `tsc --noEmit -p tsconfig.typecheck.json`; no errors. |
-| `pnpm test` | pass | `node scripts/run-tests.mjs`; 68 tests passed, 0 failed. |
+| `pnpm test` | pass | `node scripts/run-tests.mjs`; 95 tests passed, 1 optional Postgres contract test skipped, 0 failed. |
 | `pnpm build` | pass | `node scripts/build.mjs`; output: `build passed`. |
 
 ## 7. Test Coverage Audit
@@ -196,16 +222,16 @@ None found.
 
 ## 9. Recommendation
 
-Recommendation: safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, and Phase 3 Packaging & Versioning v3.
+Recommendation: safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v0, and LLM Gateway v0.
 
 The repository has moved beyond the v0 baseline. Conflict Manager v1 is implemented with mock/local-only merge simulation, and it should not be interpreted as full Phase 2 completion.
+
+Persistent DB v1, Real Git Adapter v0, and LLM Gateway v0 are implemented behind explicit storage/provider boundaries. The next implementation task should be Local Agent Runner v0, or Real Git Adapter v1 if controlled remote GitHub branch/PR creation is the preferred next integration milestone.
 
 Exact next task:
 
 ```text
-Work Order 3: Phase 4 Preparation.
-
-The next task should prepare trace and eval foundations for future auto-improvement while keeping provider network calls, real artifact registry integration, and automatic registry mutation out of scope.
+Local Agent Runner v0, or Real Git Adapter v1 for explicitly gated GitHub branch/PR creation.
 ```
 
 ## Final Summary
@@ -215,21 +241,25 @@ Current phase status:
 - Phase 1: `complete_for_current_milestone`
 - Phase 2: `complete_for_current_milestone`
 - Phase 3: `v3_implemented`
-- Phase 4: `planned_only`
+- Phase 4: `v1_implemented`
 - Phase 5: `planned_only`
+- Real integration foundation: `v0_scaffolded`
+- Persistent DB: `v1_implemented`
+- Real Git Adapter: `v0_implemented`
+- LLM Gateway: `v0_implemented`
 
 Validation:
 
 - install: pass
 - lint: pass
 - typecheck: pass
-- test: pass
+- test: pass, 95 passed and 1 optional Postgres contract test skipped
 - build: pass
 
 Merge recommendation:
 
-Safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, and Phase 3 Packaging & Versioning v3. No critical blockers were found.
+Safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v0, and LLM Gateway v0. No critical blockers were found.
 
 Next recommended Codex task:
 
-Work Order 3: Phase 4 Preparation. Prepare trace/eval foundations and auto-improvement guardrails, with no real provider calls and no automatic registry mutation.
+Local Agent Runner v0, or Real Git Adapter v1 for explicitly gated GitHub branch/PR creation.

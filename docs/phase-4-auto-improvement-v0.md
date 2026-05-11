@@ -1,0 +1,148 @@
+# Phase 4 Auto-Improvement v0
+
+## What v0 Implements
+
+Phase 4 Auto-improvement v0 adds a deterministic mock-only engine that can turn failure clusters into draft improvement artifacts:
+
+- `AutoImprovementAnalysis`
+- `ImprovementCandidate`
+- draft `ImprovementProposal`
+- `DraftRegistryChange`
+- `ProposalReadiness`
+
+The implementation remains draft-only. It does not apply changes, activate registry entries, approve proposals, execute evals, or execute canary rollouts.
+
+## Why It Is Mock-Only
+
+The project is still in a mock-first milestone. Auto-improvement needs safety evidence before any real provider integration. v0 therefore uses deterministic mappings and local in-memory repositories only. There are no LLM calls, embeddings, hosted Git calls, MCP calls, artifact registry calls, or external network calls.
+
+## AutoImprovementEngine Interface
+
+The provider-agnostic engine interface supports:
+
+```text
+analyzeFailureCluster(clusterId)
+generateImprovementCandidate(clusterId)
+generateImprovementProposal(candidateId)
+prepareDraftRegistryChange(proposalId)
+evaluateProposalReadiness(proposalId)
+```
+
+The interface does not reference any external model or provider.
+
+## MockAutoImprovementEngine Behavior
+
+`MockAutoImprovementEngine` is deterministic:
+
+- It reads `FailureCluster` and related `FailureSignal` records.
+- It creates stable IDs from cluster, candidate, and proposal IDs.
+- It creates candidates and proposals only as metadata.
+- It stores draft registry changes separately from registry artifacts.
+- It evaluates readiness against safety policy and eval requirements.
+
+## Deterministic Mapping Rules
+
+| Failure category | Target | Candidate type | Proposal change type |
+|---|---|---|---|
+| `instruction_checksum_mismatch` | instruction | `update_instruction` | `instruction_update` |
+| `repeated_eval_failed` on skill | skill | `update_skill` | `new_version` |
+| `harness_runtime_failure` | harness | `update_harness` | `patch` |
+| `registry_resolution_warning` | instruction or skill | `update_instruction` or `adjust_resolver` | deterministic draft proposal |
+| `conflict_risk_repeated` | skill | `update_skill` targeting `conflict-risk-reviewer` | `patch` |
+| `cost_spike` | skill/resolver metadata | `adjust_resolver` | `metadata_update` |
+
+Cost spike handling does not call or integrate real model routing.
+
+## Models
+
+### AutoImprovementAnalysis
+
+Captures deterministic cluster analysis with target kind, target ref, evidence, recommended candidate type, confidence, and timestamp.
+
+### DraftRegistryChange
+
+Stores a draft-only payload linked to an improvement proposal. Its status is:
+
+```text
+draft | awaiting_review | rejected | superseded
+```
+
+No `applied` status exists for draft registry changes in v0.
+
+### ProposalReadiness
+
+Records whether a proposal can be reviewed and why it cannot auto-apply. Default blocking reasons are:
+
+```text
+human_approval_required
+eval_pass_required
+canary_required
+auto_apply_disabled
+```
+
+## API Endpoints
+
+Implemented endpoints:
+
+```text
+POST /improvement/clusters/:id/analyze
+POST /improvement/clusters/:id/generate-candidate
+POST /improvement/candidates/:id/generate-proposal
+POST /improvement/proposals/:id/prepare-draft-change
+GET  /improvement/proposals/:id/readiness
+GET  /improvement/analyses
+GET  /improvement/analyses/:id
+GET  /improvement/draft-registry-changes
+GET  /improvement/draft-registry-changes/:id
+PATCH /improvement/draft-registry-changes/:id/status
+```
+
+There is no apply endpoint.
+
+## Dashboard Changes
+
+The dashboard now shows:
+
+- auto-improvement analyses
+- generated candidates and proposals
+- draft registry changes
+- proposal readiness blockers
+- safety policy state
+
+The dashboard text makes clear that draft registry changes are not active and auto-apply is disabled.
+
+## Tests
+
+Tests cover:
+
+- analysis generation
+- candidate generation
+- proposal generation
+- draft registry change creation and status transitions
+- readiness blockers
+- deterministic category mappings
+- API endpoints
+- no active Skill, Harness, or InstructionArtifact mutation
+- no apply behavior
+- existing Phase 1, Phase 2, Phase 3, and Phase 4 Preparation regressions
+
+## Known Limitations
+
+- Storage is in-memory.
+- Proposals are deterministic mock proposals.
+- Draft registry changes cannot be applied.
+- Eval requirements are metadata only.
+- Canary plans are metadata only.
+- No real provider, artifact registry, auth, RBAC, eval runner, or rollout engine exists.
+
+## Next Recommended Task
+
+Phase 4 Governance v1:
+
+- proposal review workflow design
+- draft change approval gates
+- readiness DTO hardening
+- eval/canary execution planning
+- policy-as-code skeleton for auto-improvement permissions
+
+Alternatively, the team can switch to real integration planning if mock-first architecture is sufficient for now.

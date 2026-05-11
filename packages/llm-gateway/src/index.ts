@@ -1,3 +1,9 @@
 export type { LlmCallInput, LlmCallResult, LlmGateway } from "@aichestra/adapters";
 export { MockLlmGateway } from "@aichestra/adapters";
 export * from "./model-router.ts";
+export * from "./types.ts";
+export * from "./providers.ts";
+export * from "./catalog.ts";
+export * from "./virtual-keys.ts";
+export * from "./gateway.ts";
+export * from "./dto.ts";

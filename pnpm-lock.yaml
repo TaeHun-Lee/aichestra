@@ -23,6 +23,9 @@ importers:
       '@aichestra/git-adapter':
         specifier: workspace:*
         version: link:packages/git-adapter
+      '@aichestra/improvement':
+        specifier: workspace:*
+        version: link:packages/improvement
       '@aichestra/llm-gateway':
         specifier: workspace:*
         version: link:packages/llm-gateway
@@ -56,6 +59,15 @@ importers:
       '@aichestra/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aichestra/git-adapter':
+        specifier: workspace:*
+        version: link:../../packages/git-adapter
+      '@aichestra/improvement':
+        specifier: workspace:*
+        version: link:../../packages/improvement
+      '@aichestra/llm-gateway':
+        specifier: workspace:*
+        version: link:../../packages/llm-gateway
       '@aichestra/registry':
         specifier: workspace:*
         version: link:../../packages/registry
@@ -83,6 +95,18 @@ importers:
       '@aichestra/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aichestra/git-adapter':
+        specifier: workspace:*
+        version: link:../../packages/git-adapter
+      '@aichestra/improvement':
+        specifier: workspace:*
+        version: link:../../packages/improvement
+      '@aichestra/llm-gateway':
+        specifier: workspace:*
+        version: link:../../packages/llm-gateway
+      '@aichestra/registry':
+        specifier: workspace:*
+        version: link:../../packages/registry
       '@aichestra/worker':
         specifier: workspace:*
         version: link:../worker
@@ -127,12 +151,27 @@ importers:
       '@aichestra/core':
         specifier: workspace:*
         version: link:../core
+      '@aichestra/improvement':
+        specifier: workspace:*
+        version: link:../improvement
+      '@aichestra/registry':
+        specifier: workspace:*
+        version: link:../registry
 
   packages/git-adapter:
     dependencies:
       '@aichestra/adapters':
         specifier: workspace:*
         version: link:../adapters
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aichestra/db':
+        specifier: workspace:*
+        version: link:../db
+
+  packages/improvement:
+    dependencies:
       '@aichestra/core':
         specifier: workspace:*
         version: link:../core

@@ -119,7 +119,10 @@ test("API health returns the expected service payload", async () => {
   try {
     const address = server.address() as AddressInfo;
     const body = await getJson(address.port, "/health");
-    assert.deepEqual(body, { status: "ok", service: "aichestra-api" });
+    assert.equal(body.status, "ok");
+    assert.equal(body.service, "aichestra-api");
+    assert.equal((body.storage as { kind: string; healthy: boolean }).kind, "in_memory");
+    assert.equal((body.storage as { kind: string; healthy: boolean }).healthy, true);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
