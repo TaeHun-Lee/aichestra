@@ -1,6 +1,9 @@
 import { createSeededStore } from "@aichestra/db";
+import { GitHubGitProvider, GitIntegrationService, MockGitProvider } from "@aichestra/git-adapter";
+import { OpenAICompatibleLLMProvider, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
 import { createRegistryService } from "@aichestra/registry";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
+import { createImprovementDemoData } from "../lib/improvement-demo.ts";
 
 function escapeHtml(value: string): string {
   return value
@@ -80,6 +83,72 @@ export async function renderDashboardHtml(): Promise<string> {
   const registryPackages = registryService.listPackageManifests();
   const registryPackageDiff = registryService.diffPackageManifests(skillManifest, bundleManifest);
   const registryVersionResolution = registryService.resolveVersion("skill", "auth-debugging", "^1.0.0");
+  const gitService = new GitIntegrationService({
+    store,
+    provider: new MockGitProvider(),
+    config: {
+      providerKind: "mock",
+      remoteGitEnabled: false,
+      remoteBranchCreateEnabled: false,
+      remotePullRequestCreateEnabled: false,
+      remoteMergeEnabled: false,
+      githubConfigured: false,
+      localBranchCreateEnabled: false
+    }
+  });
+  const gitRepo = gitService.createRepo({
+    provider: "mock",
+    owner: "aichestra",
+    name: "demo-backend",
+    defaultBranch: "main"
+  });
+  const gitBranch = await gitService.createBranch(gitRepo.id, {
+    branchName: "codex/fix-login-timeout",
+    baseBranch: "main",
+    taskId: task.id,
+    files: ["src/auth/session.ts", "tests/auth/session.test.ts"]
+  });
+  await gitService.createPullRequest(gitRepo.id, {
+    taskId: task.id,
+    branchName: gitBranch.branch?.branchName ?? "codex/fix-login-timeout",
+    baseBranch: "main",
+    title: "Fix login timeout bug"
+  });
+  const gitChangedFiles = await gitService.getChangedFiles(gitRepo.id, {
+    branchName: gitBranch.branch?.branchName ?? "codex/fix-login-timeout",
+    baseBranch: "main"
+  });
+  const remoteBlockedOperation = await new GitHubGitProvider({
+    remoteGitEnabled: false,
+    remoteBranchCreateEnabled: false,
+    remotePullRequestCreateEnabled: false
+  }).createPullRequest({
+    repoRef: { repoId: "github_demo_backend", provider: "github", owner: "aichestra", name: "demo-backend" },
+    taskId: task.id,
+    repoId: "github_demo_backend",
+    provider: "github",
+    branchName: "codex/fix-login-timeout",
+    baseBranch: "main",
+    title: "Blocked remote PR example"
+  });
+  const llmService = createDefaultLlmGatewayService({ usageRepository: store });
+  const llmCompletion = latestRun
+    ? await llmService.routeCompletion({
+      taskId: task.id,
+      taskRunId: latestRun.id,
+      actorId: task.requesterUserId,
+      modelRef: "mock-registry-reviewer@1.0",
+      prompt: "Review registry status for dashboard visibility.",
+      repoId: task.repoId,
+      budgetLimitUsd: 1
+    })
+    : undefined;
+  const remoteLlmBlockedOperation = await new OpenAICompatibleLLMProvider().createCompletion({
+    taskId: task.id,
+    taskRunId: latestRun?.id ?? "run_dashboard_llm",
+    prompt: "This remote provider call must stay blocked."
+  }, seedLlmModels().find((model) => model.id === "openai-compatible/default") ?? seedLlmModels()[0]);
+  const improvement = createImprovementDemoData();
   const activeSkills = store.listSkills().filter((skill) => skill.status === "active").length;
   const activeHarnesses = store.listHarnesses().filter((harness) => harness.status === "active").length;
   const activeInstructions = store.listInstructions().filter((instruction) => instruction.status === "active").length;
@@ -343,6 +412,48 @@ export async function renderDashboardHtml(): Promise<string> {
           ${registryPackages.map((manifest) => `<div class="item"><strong>${escapeHtml(manifest.name)}@${escapeHtml(manifest.version)}</strong><span>${escapeHtml(manifest.packageKind)} / ${manifest.entries.length} entries / ${escapeHtml(manifest.checksum)}</span></div>`).join("")}
           <div class="item"><strong>Version resolution</strong><span>${escapeHtml(registryVersionResolution.name)} ${escapeHtml(registryVersionResolution.requestedRange)} -> ${escapeHtml(registryVersionResolution.selected?.version ?? "unresolved")}</span></div>
           <div class="item"><strong>Package diff</strong><span>${escapeHtml(registryPackageDiff.summary)} / risk ${escapeHtml(registryPackageDiff.riskLevel)}</span></div>
+        </div>
+        <h2>Git Adapter</h2>
+        <div class="list">
+          <div class="item"><strong>Provider</strong><span>${escapeHtml(gitService.getConfig().providerKind)} / remote Git ${gitService.getConfig().remoteGitEnabled ? "enabled" : "disabled"} / branch create ${gitService.getConfig().remoteBranchCreateEnabled ? "enabled" : "disabled"} / PR create ${gitService.getConfig().remotePullRequestCreateEnabled ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Branches</strong><span>${escapeHtml((await gitService.listBranches(gitRepo.id)).map((branch) => branch.branchName).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Pull requests</strong><span>${escapeHtml(gitService.listPullRequests(gitRepo.id).map((pr) => `${pr.externalId ?? pr.id} -> ${pr.url ?? "no-url"}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Changed files</strong><span>${escapeHtml(gitChangedFiles.changedFiles.map((file) => `${file.path}:${file.status}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Merge queue linkage</strong><span>${escapeHtml(mergeQueue.map((entry) => `${entry.pullRequestId}:${entry.recommendation}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Git audit</strong><span>${escapeHtml(gitService.listGitAuditEvents().map((event) => event.action).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Remote blocked example</strong><span>${escapeHtml(remoteBlockedOperation.reason ?? "remote operation blocked")}</span></div>
+        </div>
+        <h2>LLM Gateway</h2>
+        <div class="list">
+          <div class="item"><strong>Provider</strong><span>${escapeHtml(llmService.getConfig().providerKind)} / remote LLM ${llmService.getConfig().remoteLlmEnabled ? "enabled" : "disabled"} / remote completion ${llmService.getConfig().remoteCompletionEnabled ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Model catalog</strong><span>${escapeHtml(llmService.listModels().map((model) => `${model.id}:${model.status}`).join(", "))}</span></div>
+          <div class="item"><strong>Virtual model keys</strong><span>${escapeHtml(llmService.listVirtualKeys().map((key) => `${key.id}:${key.status}:storesProviderSecret=false`).join(", "))}</span></div>
+          <div class="item"><strong>Budget policy</strong><span>${escapeHtml(llmCompletion?.budgetDecision?.reason ?? "not evaluated")} / cost $${(llmCompletion?.budgetDecision?.estimatedCostUsd ?? 0).toFixed(6)}</span></div>
+          <div class="item"><strong>Recent LLM usage</strong><span>${escapeHtml(llmService.listUsageEvents().map((event) => `${event.model}:${event.costUsd}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>LLM audit</strong><span>${escapeHtml(llmService.listAuditEvents().map((event) => event.eventType).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Remote LLM blocked example</strong><span>${escapeHtml(remoteLlmBlockedOperation.reason ?? "remote LLM blocked")}</span></div>
+        </div>
+        <h2>Phase 4 Preparation</h2>
+        <div class="list">
+          <div class="item"><strong>Failure signals</strong><span>${improvement.failureSignals.length} captured / ${escapeHtml(improvement.failureSignals.at(0)?.category ?? "none")}</span></div>
+          <div class="item"><strong>Failure clusters</strong><span>${improvement.failureClusters.length} deterministic clusters / ${escapeHtml(improvement.failureClusters.at(0)?.severity ?? "none")}</span></div>
+          <div class="item"><strong>Improvement candidates</strong><span>${improvement.improvementCandidates.length} candidate(s) / ${escapeHtml(improvement.improvementCandidates.at(0)?.status ?? "none")}</span></div>
+          <div class="item"><strong>Improvement proposals</strong><span>${improvement.improvementProposals.length} draft proposal(s); no auto-apply path exists.</span></div>
+          <div class="item"><strong>Auto-improvement analyses</strong><span>${improvement.autoImprovementAnalyses.length} mock analysis / ${escapeHtml(improvement.autoImprovementAnalyses.at(0)?.recommendedCandidateType ?? "none")}</span></div>
+          <div class="item"><strong>Draft registry changes</strong><span>${improvement.draftRegistryChanges.length} draft change(s); not active registry entries.</span></div>
+          <div class="item"><strong>Proposal readiness</strong><span>${escapeHtml(improvement.proposalReadiness.at(0)?.blockingReasons.join(", ") ?? "not evaluated")}</span></div>
+          <div class="item"><strong>Eval requirements</strong><span>${improvement.evalRequirements.length} requirement(s); evals are not executed.</span></div>
+          <div class="item"><strong>Canary plans</strong><span>${improvement.canaryRolloutPlans.length} draft plan(s); rollout is not executed.</span></div>
+          <div class="item"><strong>Safety policy</strong><span>auto-apply ${improvement.safetyPolicies.at(0)?.allowAutoApply === true ? "enabled" : "disabled"} / human approval ${improvement.safetyPolicies.at(0)?.requireHumanApproval === true ? "required" : "not required"}</span></div>
+        </div>
+        <h2>Phase 4 Governance</h2>
+        <div class="list">
+          <div class="item"><strong>Review queue</strong><span>${improvement.proposalReviewQueue.length} item(s) / ${escapeHtml(improvement.proposalReviewQueue.at(0)?.recommendedAction ?? "none")}</span></div>
+          <div class="item"><strong>Governance decisions</strong><span>${improvement.governanceDecisions.length} decision(s) / ${escapeHtml(improvement.governanceDecisions.at(0)?.decision ?? "none")}</span></div>
+          <div class="item"><strong>Proposal eval runs</strong><span>${improvement.proposalEvalRuns.length} attached; eval execution is manual/mock-only.</span></div>
+          <div class="item"><strong>Canary readiness</strong><span>${escapeHtml(improvement.canaryReadiness.at(0)?.blockingReasons.join(", ") ?? "not checked")} / rollout is not executed.</span></div>
+          <div class="item"><strong>Apply gate</strong><span>${escapeHtml(improvement.proposalApplyGates.at(0)?.blockingReasons.join(", ") ?? "not checked")} / apply is not implemented.</span></div>
+          <div class="item"><strong>Governance audit</strong><span>${improvement.governanceAuditEvents.length} event(s); draft changes are not active.</span></div>
         </div>
       </aside>
     </section>

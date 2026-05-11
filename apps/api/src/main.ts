@@ -4,8 +4,60 @@ import { pathToFileURL } from "node:url";
 import { AichestraError, NotFoundError, isTaskStatus } from "@aichestra/core";
 import type { BranchLeaseStatus, MergeSimulationMode, MergeSimulationStatus, Task } from "@aichestra/core";
 import type { TaskStatus } from "@aichestra/core";
-import { InMemoryAichestraStore, createSeededStore } from "@aichestra/db";
-import { LocalGitDryRunMergeSimulator, MockMergeSimulator } from "@aichestra/git-adapter";
+import {
+  InMemoryAichestraStore,
+  createInMemoryStorageProvider,
+  createPostgresStorageProviderFromEnv,
+  createSeededStore
+} from "@aichestra/db";
+import type { StorageProvider } from "@aichestra/db";
+import {
+  GitIntegrationService,
+  LocalGitDryRunMergeSimulator,
+  MockMergeSimulator,
+  createGitProviderFromEnv
+} from "@aichestra/git-adapter";
+import type { GitProviderRuntimeConfig } from "@aichestra/git-adapter";
+import {
+  budgetDecisionToDto,
+  createDefaultLlmGatewayService,
+  isLlmModelStatus,
+  isLlmProviderKind,
+  isVirtualModelKeyStatus,
+  llmAuditEventToDto,
+  llmCompletionResultToDto,
+  llmConfigToDto,
+  llmModelToDto,
+  virtualModelKeyToDto
+} from "@aichestra/llm-gateway";
+import type { LLMGatewayService } from "@aichestra/llm-gateway";
+import {
+  autoImprovementAnalysisToDto,
+  canaryReadinessToDto,
+  canaryRolloutPlanToDto,
+  createImprovementServices,
+  draftRegistryChangeToDto,
+  evalRequirementToDto,
+  failureClusterToDto,
+  failureSignalToDto,
+  improvementGovernanceAuditEventToDto,
+  improvementCandidateToDto,
+  improvementProposalToDto,
+  isDraftRegistryChangeStatus,
+  isFailureSeverity,
+  isFailureSignalTargetKind,
+  isImprovementCandidateStatus,
+  isImprovementProposalStatus,
+  isProposalEvalRunStatus,
+  isProposalGovernanceDecision,
+  proposalApplyGateToDto,
+  proposalEvalRunToDto,
+  proposalGovernanceDecisionToDto,
+  proposalReadinessToDto,
+  proposalReviewQueueItemToDto,
+  safetyPolicyToDto
+} from "@aichestra/improvement";
+import type { ImprovementServices } from "@aichestra/improvement";
 import {
   createRegistryService,
   harnessToDto,
@@ -31,7 +83,12 @@ import { runAgentTaskWorkflow } from "@aichestra/worker";
 
 type RouteContext = {
   store: InMemoryAichestraStore;
+  storageProvider: StorageProvider;
+  gitIntegrationService: GitIntegrationService;
+  gitProviderConfig: GitProviderRuntimeConfig;
+  llmGatewayService: LLMGatewayService;
   registryService: RegistryService;
+  improvementServices: ImprovementServices;
 };
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -93,10 +150,409 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const method = request.method ?? "GET";
     const store = context.store;
     const registryService = context.registryService;
+    const improvementServices = context.improvementServices;
 
     if (method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { status: "ok", service: "aichestra-api" });
+      const storage = await context.storageProvider.healthCheck();
+      sendJson(response, storage.healthy ? 200 : 503, {
+        status: storage.healthy ? "ok" : "degraded",
+        service: "aichestra-api",
+        storage: {
+          kind: storage.kind,
+          healthy: storage.healthy,
+          message: storage.message,
+          checkedAt: storage.checkedAt.toISOString()
+        },
+        git: {
+          providerKind: context.gitProviderConfig.providerKind,
+          remoteGitEnabled: context.gitProviderConfig.remoteGitEnabled,
+          remoteBranchCreateEnabled: context.gitProviderConfig.remoteBranchCreateEnabled,
+          remotePullRequestCreateEnabled: context.gitProviderConfig.remotePullRequestCreateEnabled,
+          remoteMergeEnabled: false
+        },
+        llm: {
+          providerKind: context.llmGatewayService.getConfig().providerKind,
+          remoteLlmEnabled: context.llmGatewayService.getConfig().remoteLlmEnabled,
+          remoteCompletionEnabled: context.llmGatewayService.getConfig().remoteCompletionEnabled,
+          modelCatalogStatus: "available",
+          gatewayHealth: "available"
+        }
+      });
       return;
+    }
+
+    if (segments[0] === "improvement") {
+      if (segments[1] === "failure-signals") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { failureSignals: improvementServices.signals.listSignals().map(failureSignalToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            if (!isFailureSeverity(body.severity) || !isFailureSignalTargetKind(body.targetKind)) {
+              sendJson(response, 400, { error: "invalid_failure_signal", message: "severity and targetKind must be valid Phase 4 preparation values." });
+              return;
+            }
+            const signal = improvementServices.signals.createSignal(body as Parameters<ImprovementServices["signals"]["createSignal"]>[0]);
+            sendJson(response, 201, { failureSignal: failureSignalToDto(signal) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_failure_signal", message: error instanceof Error ? error.message : "Invalid failure signal" });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "failure-clusters") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { failureClusters: improvementServices.clustering.listClusters().map(failureClusterToDto) });
+          return;
+        }
+        if (method === "POST" && segments[2] === "recompute") {
+          sendJson(response, 200, { failureClusters: improvementServices.clustering.recomputeClusters().map(failureClusterToDto) });
+          return;
+        }
+      }
+
+      if (segments[1] === "clusters") {
+        const clusterId = segments[2];
+        if (method === "POST" && segments[3] === "analyze") {
+          if (!clusterId) {
+            sendJson(response, 400, { error: "missing_cluster_id", message: "cluster id is required." });
+            return;
+          }
+          try {
+            const analysis = improvementServices.autoImprovement.analyzeFailureCluster(clusterId);
+            sendJson(response, 201, { analysis: autoImprovementAnalysisToDto(analysis) });
+          } catch (error) {
+            sendJson(response, 404, { error: "cluster_analysis_failed", message: error instanceof Error ? error.message : "Cluster analysis failed" });
+          }
+          return;
+        }
+        if (method === "POST" && segments[3] === "generate-candidate") {
+          if (!clusterId) {
+            sendJson(response, 400, { error: "missing_cluster_id", message: "cluster id is required." });
+            return;
+          }
+          try {
+            const candidate = improvementServices.autoImprovement.generateImprovementCandidate(clusterId);
+            sendJson(response, 201, { candidate: improvementCandidateToDto(candidate) });
+          } catch (error) {
+            sendJson(response, 404, { error: "candidate_generation_failed", message: error instanceof Error ? error.message : "Candidate generation failed" });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "analyses") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { analyses: improvementServices.autoImprovement.listAnalyses().map(autoImprovementAnalysisToDto) });
+          return;
+        }
+        if (method === "GET" && segments.length === 3) {
+          const analysis = improvementServices.autoImprovement.getAnalysis(segments[2]);
+          if (!analysis) {
+            sendJson(response, 404, { error: "analysis_not_found", message: `Auto-improvement analysis not found: ${segments[2]}` });
+            return;
+          }
+          sendJson(response, 200, { analysis: autoImprovementAnalysisToDto(analysis) });
+          return;
+        }
+      }
+
+      if (segments[1] === "candidates") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { candidates: improvementServices.candidates.listCandidates().map(improvementCandidateToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "generate-proposal") {
+          if (!segments[2]) {
+            sendJson(response, 400, { error: "missing_candidate_id", message: "candidate id is required." });
+            return;
+          }
+          try {
+            const proposal = improvementServices.autoImprovement.generateImprovementProposal(segments[2]);
+            sendJson(response, 201, { proposal: improvementProposalToDto(proposal) });
+          } catch (error) {
+            sendJson(response, 404, { error: "proposal_generation_failed", message: error instanceof Error ? error.message : "Proposal generation failed" });
+          }
+          return;
+        }
+        if (method === "POST" && segments[2] === "triage") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            if (typeof body.id === "string" || typeof body.candidateId === "string") {
+              const status = body.status;
+              if (!isImprovementCandidateStatus(status)) {
+                sendJson(response, 400, { error: "invalid_candidate_status", message: "status must be new, triaged, proposal_requested, proposal_created, or dismissed." });
+                return;
+              }
+              const candidate = improvementServices.candidates.triageCandidate({ id: String(body.id ?? body.candidateId), status });
+              sendJson(response, 200, { candidate: improvementCandidateToDto(candidate) });
+              return;
+            }
+            const candidate = improvementServices.candidates.createCandidateFromCluster(body as Parameters<ImprovementServices["candidates"]["createCandidateFromCluster"]>[0]);
+            const triaged = improvementServices.candidates.triageCandidate({ id: candidate.id, status: "triaged" });
+            sendJson(response, 201, { candidate: improvementCandidateToDto(triaged) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_candidate_triage", message: error instanceof Error ? error.message : "Invalid candidate triage" });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "proposal-review-queue") {
+        if (method === "GET" && segments.length === 2) {
+          const status = url.searchParams.get("status") ?? undefined;
+          const targetKind = url.searchParams.get("targetKind") ?? undefined;
+          const recommendedAction = url.searchParams.get("recommendedAction") ?? undefined;
+          const includeArchived = url.searchParams.get("includeArchived") === "true";
+          if (status !== undefined && !isImprovementProposalStatus(status)) {
+            sendJson(response, 400, { error: "invalid_proposal_status", message: "status is invalid." });
+            return;
+          }
+          if (targetKind !== undefined && !["skill", "harness", "instruction"].includes(targetKind)) {
+            sendJson(response, 400, { error: "invalid_target_kind", message: "targetKind must be skill, harness, or instruction." });
+            return;
+          }
+          const queue = improvementServices.governance.listReviewQueue({
+            status,
+            targetKind: targetKind as "skill" | "harness" | "instruction" | undefined,
+            recommendedAction: recommendedAction as "review_proposal" | "attach_eval_result" | "prepare_canary_plan" | "ready_for_canary_review" | "no_action" | undefined,
+            includeArchived
+          });
+          sendJson(response, 200, { proposalReviewQueue: queue.map(proposalReviewQueueItemToDto) });
+          return;
+        }
+      }
+
+      if (segments[1] === "proposals") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { proposals: improvementServices.proposals.listProposals().map(improvementProposalToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const proposal = improvementServices.proposals.createDraftProposal(await readJson(request) as Parameters<ImprovementServices["proposals"]["createDraftProposal"]>[0]);
+            sendJson(response, 201, { proposal: improvementProposalToDto(proposal) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_improvement_proposal", message: error instanceof Error ? error.message : "Invalid improvement proposal" });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "prepare-draft-change") {
+          if (!segments[2]) {
+            sendJson(response, 400, { error: "missing_proposal_id", message: "proposal id is required." });
+            return;
+          }
+          try {
+            const draftChange = improvementServices.autoImprovement.prepareDraftRegistryChange(segments[2]);
+            sendJson(response, 201, { draftRegistryChange: draftRegistryChangeToDto(draftChange) });
+          } catch (error) {
+            sendJson(response, 404, { error: "draft_change_preparation_failed", message: error instanceof Error ? error.message : "Draft registry change preparation failed" });
+          }
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "decisions") {
+          try {
+            const decisions = improvementServices.governance.listDecisions(segments[2]);
+            sendJson(response, 200, { decisions: decisions.map(proposalGovernanceDecisionToDto) });
+          } catch (error) {
+            sendJson(response, 404, { error: "proposal_decisions_failed", message: error instanceof Error ? error.message : "Proposal decisions failed" });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "decisions") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            if (!isProposalGovernanceDecision(body.decision)) {
+              sendJson(response, 400, { error: "invalid_governance_decision", message: "decision is invalid." });
+              return;
+            }
+            const decision = improvementServices.governance.recordDecision({
+              proposalId: segments[2],
+              actorId: typeof body.actorId === "string" ? body.actorId : "mock-admin",
+              decision: body.decision,
+              reason: typeof body.reason === "string" ? body.reason : ""
+            });
+            sendJson(response, 201, { decision: proposalGovernanceDecisionToDto(decision) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_governance_decision", message: error instanceof Error ? error.message : "Invalid governance decision" });
+          }
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "eval-runs") {
+          try {
+            const runs = improvementServices.proposalEvalRuns.listEvalRuns(segments[2]);
+            sendJson(response, 200, { evalRuns: runs.map(proposalEvalRunToDto) });
+          } catch (error) {
+            sendJson(response, 404, { error: "proposal_eval_runs_failed", message: error instanceof Error ? error.message : "Proposal eval runs failed" });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "eval-runs") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            if (!isProposalEvalRunStatus(body.status)) {
+              sendJson(response, 400, { error: "invalid_eval_run_status", message: "status must be pending, passed, failed, or skipped." });
+              return;
+            }
+            const run = improvementServices.proposalEvalRuns.attachEvalRun({
+              ...body,
+              proposalId: segments[2],
+              status: body.status
+            } as Parameters<ImprovementServices["proposalEvalRuns"]["attachEvalRun"]>[0]);
+            sendJson(response, 201, { evalRun: proposalEvalRunToDto(run) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_eval_run", message: error instanceof Error ? error.message : "Invalid proposal eval run" });
+          }
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "canary-readiness") {
+          try {
+            const readiness = improvementServices.canaryReadiness.evaluate(segments[2]);
+            sendJson(response, 200, { canaryReadiness: canaryReadinessToDto(readiness) });
+          } catch (error) {
+            sendJson(response, 404, { error: "canary_readiness_failed", message: error instanceof Error ? error.message : "Canary readiness failed" });
+          }
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "apply-gate") {
+          try {
+            const gate = improvementServices.applyGate.evaluate(segments[2]);
+            sendJson(response, 200, { applyGate: proposalApplyGateToDto(gate) });
+          } catch (error) {
+            sendJson(response, 404, { error: "apply_gate_failed", message: error instanceof Error ? error.message : "Apply gate failed" });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "apply") {
+          try {
+            const gate = improvementServices.applyGate.blockApplyAttempt(segments[2]);
+            sendJson(response, 403, {
+              error: "apply_not_implemented",
+              message: "Applying draft registry changes is not implemented in Phase 4 Governance v1.",
+              applyGate: proposalApplyGateToDto(gate)
+            });
+          } catch (error) {
+            sendJson(response, 404, { error: "apply_gate_failed", message: error instanceof Error ? error.message : "Apply gate failed" });
+          }
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "readiness") {
+          if (!segments[2]) {
+            sendJson(response, 400, { error: "missing_proposal_id", message: "proposal id is required." });
+            return;
+          }
+          try {
+            const readiness = improvementServices.autoImprovement.evaluateProposalReadiness(segments[2]);
+            sendJson(response, 200, { readiness: proposalReadinessToDto(readiness) });
+          } catch (error) {
+            sendJson(response, 404, { error: "proposal_readiness_failed", message: error instanceof Error ? error.message : "Proposal readiness failed" });
+          }
+          return;
+        }
+        if (method === "PATCH" && segments.length === 4 && segments[3] === "status") {
+          const body = await readJson(request) as Record<string, unknown>;
+          if (!isImprovementProposalStatus(body.status)) {
+            sendJson(response, 400, { error: "invalid_proposal_status", message: "status is invalid." });
+            return;
+          }
+          try {
+            const proposal = improvementServices.proposals.transitionProposalStatus({ id: segments[2], status: body.status });
+            sendJson(response, 200, { proposal: improvementProposalToDto(proposal) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_proposal_transition", message: error instanceof Error ? error.message : "Invalid proposal status transition" });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "governance-audit") {
+        if (method === "GET" && segments.length === 2) {
+          const proposalId = url.searchParams.get("proposalId") ?? undefined;
+          sendJson(response, 200, { events: improvementServices.governance.listAuditEvents(proposalId).map(improvementGovernanceAuditEventToDto) });
+          return;
+        }
+      }
+
+      if (segments[1] === "draft-registry-changes") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { draftRegistryChanges: improvementServices.draftRegistryChanges.listDraftChanges().map(draftRegistryChangeToDto) });
+          return;
+        }
+        if (method === "GET" && segments.length === 3) {
+          const draftChange = improvementServices.draftRegistryChanges.getDraftChange(segments[2]);
+          if (!draftChange) {
+            sendJson(response, 404, { error: "draft_registry_change_not_found", message: `Draft registry change not found: ${segments[2]}` });
+            return;
+          }
+          sendJson(response, 200, { draftRegistryChange: draftRegistryChangeToDto(draftChange) });
+          return;
+        }
+        if (method === "PATCH" && segments.length === 4 && segments[3] === "status") {
+          const body = await readJson(request) as Record<string, unknown>;
+          if (!isDraftRegistryChangeStatus(body.status)) {
+            sendJson(response, 400, { error: "invalid_draft_registry_change_status", message: "status must be draft, awaiting_review, rejected, or superseded." });
+            return;
+          }
+          try {
+            const draftChange = improvementServices.draftRegistryChanges.transitionDraftChange({ id: segments[2], status: body.status });
+            sendJson(response, 200, { draftRegistryChange: draftRegistryChangeToDto(draftChange) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_draft_registry_change_transition", message: error instanceof Error ? error.message : "Invalid draft registry change transition" });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "eval-requirements") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { evalRequirements: improvementServices.evalRequirements.listRequirements().map(evalRequirementToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const requirement = improvementServices.evalRequirements.createRequirement(await readJson(request) as Parameters<ImprovementServices["evalRequirements"]["createRequirement"]>[0]);
+            sendJson(response, 201, { evalRequirement: evalRequirementToDto(requirement) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_eval_requirement", message: error instanceof Error ? error.message : "Invalid eval requirement" });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "canary-plans") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { canaryPlans: improvementServices.canaryPlans.listPlans().map(canaryRolloutPlanToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const plan = improvementServices.canaryPlans.createPlan(await readJson(request) as Parameters<ImprovementServices["canaryPlans"]["createPlan"]>[0]);
+            sendJson(response, 201, { canaryPlan: canaryRolloutPlanToDto(plan) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_canary_plan", message: error instanceof Error ? error.message : "Invalid canary plan" });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "safety-policies") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { safetyPolicies: improvementServices.safetyPolicies.listPolicies().map(safetyPolicyToDto) });
+          return;
+        }
+        if (method === "PATCH" && segments.length === 3) {
+          try {
+            const policy = improvementServices.safetyPolicies.updatePolicy(segments[2], await readJson(request) as Parameters<ImprovementServices["safetyPolicies"]["updatePolicy"]>[1]);
+            sendJson(response, 200, { safetyPolicy: safetyPolicyToDto(policy) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_safety_policy_update", message: error instanceof Error ? error.message : "Invalid safety policy update" });
+          }
+          return;
+        }
+      }
     }
 
     if (segments[0] === "registry") {
@@ -657,6 +1113,320 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     }
 
+    if (segments[0] === "git") {
+      const gitService = context.gitIntegrationService;
+
+      if (method === "GET" && segments[1] === "providers") {
+        sendJson(response, 200, { providers: gitService.listProviders() });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "config") {
+        sendJson(response, 200, { config: gitService.getConfig() });
+        return;
+      }
+
+      if (segments[1] === "repos") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { repos: gitService.listRepos() });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            sendJson(response, 201, { repo: gitService.createRepo(await readJson(request)) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_repo", message: error instanceof Error ? error.message : "Invalid repository" });
+          }
+          return;
+        }
+
+        const repoId = segments[2];
+        if (!repoId) {
+          sendJson(response, 400, { error: "missing_repo_id", message: "repo id is required." });
+          return;
+        }
+
+        if (method === "GET" && segments.length === 3) {
+          sendJson(response, 200, { repo: gitService.getRepo(repoId) ?? notFound("repo", repoId) });
+          return;
+        }
+
+        if (segments[3] === "branches") {
+          if (method === "GET") {
+            sendJson(response, 200, { branches: await gitService.listBranches(repoId, url.searchParams.get("localPath") ?? undefined) });
+            return;
+          }
+          if (method === "POST") {
+            const body = await readJson(request) as Record<string, unknown>;
+            const branchName = stringValue(body.branchName);
+            if (!branchName) {
+              sendJson(response, 400, { error: "invalid_branch_request", message: "branchName is required." });
+              return;
+            }
+            const result = await gitService.createBranch(repoId, {
+              branchName,
+              baseBranch: stringValue(body.baseBranch),
+              taskId: stringValue(body.taskId),
+              taskRunId: stringValue(body.taskRunId),
+              localPath: stringValue(body.localPath),
+              files: Array.isArray(body.files) ? body.files.filter((file): file is string => typeof file === "string") : undefined,
+              symbols: Array.isArray(body.symbols) ? body.symbols.filter((symbol): symbol is string => typeof symbol === "string") : undefined,
+              tests: Array.isArray(body.tests) ? body.tests.filter((testPath): testPath is string => typeof testPath === "string") : undefined
+            });
+            sendJson(response, result.ok ? 201 : 409, result as unknown as JsonValue);
+            return;
+          }
+        }
+
+        if (segments[3] === "pull-requests") {
+          if (method === "GET") {
+            sendJson(response, 200, { pullRequests: gitService.listPullRequests(repoId) });
+            return;
+          }
+          if (method === "POST") {
+            const body = await readJson(request) as Record<string, unknown>;
+            const taskId = stringValue(body.taskId);
+            const branchName = stringValue(body.branchName);
+            const title = stringValue(body.title);
+            if (!taskId || !branchName || !title) {
+              sendJson(response, 400, { error: "invalid_pull_request", message: "taskId, branchName, and title are required." });
+              return;
+            }
+            const result = await gitService.createPullRequest(repoId, {
+              taskId,
+              taskRunId: stringValue(body.taskRunId),
+              branchLeaseId: stringValue(body.branchLeaseId),
+              branchName,
+              baseBranch: stringValue(body.baseBranch),
+              title,
+              body: stringValue(body.body),
+              localPath: stringValue(body.localPath)
+            });
+            sendJson(response, result.ok ? 201 : 409, result as unknown as JsonValue);
+            return;
+          }
+        }
+      }
+
+      if (segments[1] === "pull-requests") {
+        const pullRequestId = segments[2];
+        if (!pullRequestId) {
+          sendJson(response, 400, { error: "missing_pull_request_id", message: "pull request id is required." });
+          return;
+        }
+        const pullRequest = gitService.getPullRequest(pullRequestId);
+        if (!pullRequest) notFound("pull request", pullRequestId);
+        if (method === "GET" && segments.length === 3) {
+          sendJson(response, 200, { pullRequest });
+          return;
+        }
+        if (method === "GET" && segments[3] === "changed-files") {
+          const branchName = url.searchParams.get("branchName") ?? pullRequest.externalId?.replace(/^mock-pr_/, "");
+          if (!branchName) {
+            sendJson(response, 400, { error: "missing_branch_name", message: "branchName query parameter is required for changed-file inspection." });
+            return;
+          }
+          sendJson(response, 200, await gitService.getChangedFiles(pullRequest.repoId, {
+            branchName,
+            baseBranch: url.searchParams.get("baseBranch") ?? undefined,
+            localPath: url.searchParams.get("localPath") ?? undefined
+          }) as unknown as JsonValue);
+          return;
+        }
+      }
+
+      if (method === "GET" && segments[1] === "audit") {
+        sendJson(response, 200, { auditEvents: gitService.listGitAuditEvents() });
+        return;
+      }
+    }
+
+    if (segments[0] === "llm") {
+      const llmService = context.llmGatewayService;
+
+      if (method === "GET" && segments[1] === "providers") {
+        sendJson(response, 200, { providers: llmService.listProviders() });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "config") {
+        sendJson(response, 200, { config: llmConfigToDto(llmService.getConfig()) });
+        return;
+      }
+
+      if (segments[1] === "models") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { models: llmService.listModels().map(llmModelToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            if (!isLlmProviderKind(body.providerKind) || !isLlmModelStatus(body.status) || typeof body.id !== "string" || typeof body.displayName !== "string") {
+              sendJson(response, 400, { error: "invalid_llm_model", message: "id, displayName, providerKind, and status are required." });
+              return;
+            }
+            const model = llmService.registerModel({
+              id: body.id,
+              providerKind: body.providerKind,
+              displayName: body.displayName,
+              contextWindow: typeof body.contextWindow === "number" ? body.contextWindow : 16000,
+              supportsTools: body.supportsTools === true,
+              supportsStreaming: body.supportsStreaming === true,
+              inputTokenCostUsd: typeof body.inputTokenCostUsd === "number" ? body.inputTokenCostUsd : undefined,
+              outputTokenCostUsd: typeof body.outputTokenCostUsd === "number" ? body.outputTokenCostUsd : undefined,
+              status: body.status,
+              metadata: typeof body.metadata === "object" && body.metadata !== null ? body.metadata as Record<string, unknown> : {}
+            });
+            sendJson(response, 201, { model: llmModelToDto(model) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_llm_model", message: error instanceof Error ? error.message : "Invalid LLM model." });
+          }
+          return;
+        }
+        const modelId = decodeURIComponent(segments[2] ?? "");
+        if (method === "GET" && segments.length === 3) {
+          const model = llmService.getModel(modelId);
+          if (!model) notFound("llm model", modelId);
+          sendJson(response, 200, { model: llmModelToDto(model) });
+          return;
+        }
+        if (method === "PATCH" && segments.length === 4 && segments[3] === "status") {
+          const body = await readJson(request) as Record<string, unknown>;
+          if (!isLlmModelStatus(body.status)) {
+            sendJson(response, 400, { error: "invalid_llm_model_status", message: "status must be active, disabled, or deprecated." });
+            return;
+          }
+          try {
+            sendJson(response, 200, { model: llmModelToDto(llmService.updateModelStatus(modelId, body.status)) });
+          } catch (error) {
+            sendJson(response, 404, { error: "llm_model_not_found", message: error instanceof Error ? error.message : "LLM model not found." });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "virtual-keys") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { virtualKeys: llmService.listVirtualKeys().map(virtualModelKeyToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            if (!isVirtualModelKeyStatus(body.status) || typeof body.ownerKind !== "string" || typeof body.ownerId !== "string" || typeof body.displayName !== "string") {
+              sendJson(response, 400, { error: "invalid_virtual_model_key", message: "ownerKind, ownerId, displayName, and status are required." });
+              return;
+            }
+            const allowedProviderKinds = Array.isArray(body.allowedProviderKinds)
+              ? body.allowedProviderKinds.filter(isLlmProviderKind)
+              : [];
+            const allowedModelIds = Array.isArray(body.allowedModelIds)
+              ? body.allowedModelIds.filter((value): value is string => typeof value === "string")
+              : [];
+            const key = llmService.createVirtualKey({
+              ownerKind: body.ownerKind as "user" | "team" | "project" | "system",
+              ownerId: body.ownerId,
+              displayName: body.displayName,
+              allowedProviderKinds,
+              allowedModelIds,
+              monthlyBudgetUsd: typeof body.monthlyBudgetUsd === "number" ? body.monthlyBudgetUsd : undefined,
+              perTaskBudgetUsd: typeof body.perTaskBudgetUsd === "number" ? body.perTaskBudgetUsd : undefined,
+              rpmLimit: typeof body.rpmLimit === "number" ? body.rpmLimit : undefined,
+              tpmLimit: typeof body.tpmLimit === "number" ? body.tpmLimit : undefined,
+              status: body.status
+            });
+            sendJson(response, 201, { virtualKey: virtualModelKeyToDto(key) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_virtual_model_key", message: error instanceof Error ? error.message : "Invalid virtual model key." });
+          }
+          return;
+        }
+        if (method === "PATCH" && segments.length === 4 && segments[3] === "status") {
+          const body = await readJson(request) as Record<string, unknown>;
+          if (!isVirtualModelKeyStatus(body.status)) {
+            sendJson(response, 400, { error: "invalid_virtual_model_key_status", message: "status must be active or disabled." });
+            return;
+          }
+          try {
+            sendJson(response, 200, { virtualKey: virtualModelKeyToDto(llmService.updateVirtualKeyStatus(segments[2], body.status)) });
+          } catch (error) {
+            sendJson(response, 404, { error: "virtual_model_key_not_found", message: error instanceof Error ? error.message : "Virtual model key not found." });
+          }
+          return;
+        }
+      }
+
+      if (method === "POST" && segments[1] === "route") {
+        const body = await readJson(request) as Record<string, unknown>;
+        const taskId = stringValue(body.taskId);
+        const taskRunId = stringValue(body.taskRunId);
+        const prompt = stringValue(body.prompt);
+        if (!taskId || !taskRunId || !prompt) {
+          sendJson(response, 400, { error: "invalid_llm_route", message: "taskId, taskRunId, and prompt are required." });
+          return;
+        }
+        const route = llmService.routeRequest({
+          taskId,
+          taskRunId,
+          actorId: stringValue(body.actorId),
+          modelRef: stringValue(body.modelRef),
+          virtualKeyId: stringValue(body.virtualKeyId),
+          prompt,
+          budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined
+        });
+        sendJson(response, route.ok ? 200 : 409, {
+          ok: route.ok,
+          model: route.model ? llmModelToDto(route.model) : undefined,
+          budgetDecision: route.budgetDecision ? budgetDecisionToDto(route.budgetDecision) : undefined,
+          reason: route.reason
+        });
+        return;
+      }
+
+      if (method === "POST" && segments[1] === "completions") {
+        const body = await readJson(request) as Record<string, unknown>;
+        const taskId = stringValue(body.taskId);
+        const taskRunId = stringValue(body.taskRunId);
+        const prompt = stringValue(body.prompt);
+        if (!taskId || !taskRunId || !prompt) {
+          sendJson(response, 400, { error: "invalid_llm_completion", message: "taskId, taskRunId, and prompt are required." });
+          return;
+        }
+        const result = await llmService.routeCompletion({
+          taskId,
+          taskRunId,
+          actorId: stringValue(body.actorId),
+          modelRef: stringValue(body.modelRef),
+          virtualKeyId: stringValue(body.virtualKeyId),
+          prompt,
+          systemInstructions: stringValue(body.systemInstructions),
+          maxTokens: typeof body.maxTokens === "number" ? body.maxTokens : undefined,
+          temperature: typeof body.temperature === "number" ? body.temperature : undefined,
+          budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined,
+          repoId: stringValue(body.repoId)
+        });
+        sendJson(response, result.ok ? 201 : 409, {
+          ok: result.ok,
+          result: result.result ? llmCompletionResultToDto(result.result) : undefined,
+          usageEvent: result.usageEvent,
+          budgetDecision: result.budgetDecision ? budgetDecisionToDto(result.budgetDecision) : undefined,
+          reason: result.reason
+        });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "usage") {
+        sendJson(response, 200, { usageEvents: llmService.listUsageEvents() });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "audit") {
+        sendJson(response, 200, { auditEvents: llmService.listAuditEvents().map(llmAuditEventToDto) });
+        return;
+      }
+    }
+
     if (segments[0] === "repos") {
       if (method === "POST" && segments.length === 1) {
         sendJson(response, 201, store.createRepo(await readJson(request)) as unknown as JsonValue);
@@ -729,33 +1499,63 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 }
 
 export function createApiServer(store: InMemoryAichestraStore = createSeededStore()) {
-  const registryService = createRegistryService({
-    skillRepository: store,
-    harnessRepository: store,
-    instructionRepository: store,
-    auditRepository: {
-      appendAuditLog: (input) => store.appendAuditLog(input),
-      listAuditLogs: () => store.listRegistryAuditLogs(),
-      listAuditLogsForTarget: (targetKind, targetId) => store.listAuditLogsForTarget(targetKind, targetId)
-    },
-    historyRepository: store,
-    evalResultRepository: store,
-    packageRepository: store,
-    repoRoot: process.cwd()
+  const storage = createInMemoryStorageProvider({ store, repoRoot: process.cwd() });
+  return createApiServerWithStorage(storage);
+}
+
+export function createApiServerWithStorage(storage: StorageProvider) {
+  const store = storage.repositoryFactory.createDataStore();
+  const registryService = createRegistryService(storage.repositoryFactory.createRegistryRepositories());
+  const improvementServices = createImprovementServices(storage.repositoryFactory.createImprovementRepositories());
+  const git = createGitProviderFromEnv();
+  const gitIntegrationService = new GitIntegrationService({
+    store,
+    provider: git.provider,
+    config: git.config
+  });
+  const llmGatewayService = createDefaultLlmGatewayService({
+    usageRepository: store
   });
   return createServer((request, response) => {
-    void handleRequest(request, response, { store, registryService });
+    void handleRequest(request, response, {
+      store,
+      storageProvider: storage,
+      gitIntegrationService,
+      gitProviderConfig: git.config,
+      llmGatewayService,
+      registryService,
+      improvementServices
+    });
   });
+}
+
+export function createApiStorageProviderFromEnv(env: Record<string, string | undefined> = process.env): StorageProvider {
+  if (env.AICHESTRA_STORAGE_PROVIDER === "postgres") {
+    return createPostgresStorageProviderFromEnv(env);
+  }
+  return createInMemoryStorageProvider({ repoRoot: process.cwd() });
 }
 
 function isMain(): boolean {
   return import.meta.url === pathToFileURL(process.argv[1] ?? "").href;
 }
 
-if (isMain()) {
+async function start(): Promise<void> {
   const host = process.env.AICHESTRA_API_HOST ?? "127.0.0.1";
   const port = Number(process.env.AICHESTRA_API_PORT ?? "3000");
-  createApiServer().listen(port, host, () => {
+  const storage = createApiStorageProviderFromEnv();
+  const health = await storage.healthCheck();
+  if (!health.healthy) {
+    throw new Error(`Storage provider ${health.kind} is not healthy: ${health.message}`);
+  }
+  createApiServerWithStorage(storage).listen(port, host, () => {
     console.log(`aichestra-api listening on http://${host}:${port}`);
+  });
+}
+
+if (isMain()) {
+  void start().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
   });
 }

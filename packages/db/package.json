@@ -7,6 +7,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@aichestra/core": "workspace:*"
+    "@aichestra/core": "workspace:*",
+    "@aichestra/improvement": "workspace:*",
+    "@aichestra/registry": "workspace:*"
   }
 }

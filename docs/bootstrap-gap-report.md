@@ -50,7 +50,7 @@ README.md
 
 - Persistence remains in-memory for the MVP.
 - Migrations are placeholder-only.
-- `AICHESTRA_BOOTSTRAP.md` is present at the repository root as the canonical bootstrap source.
+- `design_docs/AICHESTRA_BOOTSTRAP.md` is the canonical bootstrap source.
 - Pull request creation still lives under the mock Git provider; a dedicated pull request provider can be split later if that behavior grows.
 - API and web are dependency-light Node skeletons rather than production frameworks.
 

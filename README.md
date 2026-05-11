@@ -4,16 +4,19 @@ Aichestra is an AgentOps control plane for coordinating LLM usage, AI coding age
 
 This repository is an MVP scaffold. It is intentionally mock-first: no runtime code calls real LLM providers, Git hosting APIs, MCP gateways, secret stores, or production databases.
 
+Design and work-order source documents live under `design_docs/`; the canonical bootstrap document is `design_docs/AICHESTRA_BOOTSTRAP.md`.
+
 ## Architecture
 
 - `packages/core`: domain models, status transitions, validation schemas, seed data, instruction resolution, Conflict Manager scoring, and merge simulation interfaces.
 - `packages/git-adapter`: Git provider behavior, mock branch/PR creation, conflict risk, and local-only dry-run merge simulation.
-- `packages/llm-gateway`: model routing, mock model provider behavior, and usage metadata.
+- `packages/improvement`: Phase 4 Preparation, Auto-improvement v0, and Governance v1 models, repository interfaces, in-memory repositories, DTOs, deterministic clustering, candidates, draft proposals, draft registry changes, readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, and auto-improvement safety policies.
+- `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, OpenAI-compatible skeleton, model catalog, virtual model key policy objects, budget checks, usage ledger integration, and LLM audit events.
 - `packages/policy`: policy decisions for budget and high-risk work.
 - `packages/registry`: Skill, Harness, and Instruction registry interfaces, repository boundaries, DTO mappers, audit logs, history, rollback, approval queue read models, local eval result attachment, checksum verification, mock RBAC, local package manifests, import/export, semver range resolution v0, package diffs, validation helpers, and deterministic resolver.
 - `packages/runner`: agent runner and mock test runner contracts.
 - `packages/adapters`: compatibility aggregate for shared adapter contracts and mocks.
-- `packages/db`: Prisma schema draft plus an in-memory repository used by the MVP apps.
+- `packages/db`: Postgres-oriented schema, storage provider abstraction, repository factory, in-memory repositories for mock-first runtime/tests, and opt-in Postgres repositories for the core durable slice.
 - `apps/api`: REST API skeleton using Node's local HTTP server.
 - `apps/worker`: task workflow skeleton with mock branch, runner, usage, audit, and PR behavior.
 - `apps/web`: dashboard skeleton with Next-style folders and a dependency-free local dev server.
@@ -38,6 +41,47 @@ API health:
 
 ```bash
 curl http://localhost:3000/health
+```
+
+Default storage is in-memory. Persistent DB v1 is opt-in:
+
+```bash
+AICHESTRA_STORAGE_PROVIDER=postgres AICHESTRA_DATABASE_URL=postgres://... pnpm --filter @aichestra/api dev
+```
+
+Run the schema migration only when explicitly configuring a local/test Postgres database:
+
+```bash
+AICHESTRA_DATABASE_URL=postgres://... pnpm db:migrate
+```
+
+Git integration remains mock-first by default. Real Git Adapter v0 supports mock provider behavior, local-only fixture inspection, and a gated GitHub provider skeleton with remote calls disabled by default:
+
+```bash
+AICHESTRA_GIT_PROVIDER=mock pnpm --filter @aichestra/api dev
+```
+
+Remote Git flags exist for future gated integration work, but v0 does not implement remote branch/PR creation and does not support merge/rebase:
+
+```bash
+AICHESTRA_GIT_PROVIDER=github
+AICHESTRA_ENABLE_REMOTE_GIT=false
+AICHESTRA_ALLOW_REMOTE_BRANCH_CREATE=false
+AICHESTRA_ALLOW_REMOTE_PR_CREATE=false
+```
+
+LLM Gateway v0 remains mock-first. Remote LLM calls are blocked by default:
+
+```bash
+AICHESTRA_LLM_PROVIDER=mock pnpm --filter @aichestra/api dev
+```
+
+OpenAI-compatible settings are placeholders for future gated work and do not enable real provider calls in v0:
+
+```bash
+AICHESTRA_LLM_PROVIDER=openai_compatible
+AICHESTRA_ENABLE_REMOTE_LLM=false
+AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION=false
 ```
 
 Create a task:
@@ -145,6 +189,43 @@ curl -X POST http://localhost:3000/registry/packages/diff \
 `local-package-import.json` should wrap an exported manifest as `{ "manifest": <exported manifest JSON> }`.
 `local-package-diff.json` should provide `{ "fromManifest": <manifest JSON>, "toManifest": <manifest JSON> }`.
 
+Inspect Real Git Adapter v0 state:
+
+```bash
+curl http://localhost:3000/git/providers
+curl http://localhost:3000/git/config
+curl http://localhost:3000/git/repos
+curl -X POST http://localhost:3000/git/repos \
+  -H "Content-Type: application/json" \
+  -d '{ "provider": "mock", "owner": "aichestra", "name": "demo-backend", "defaultBranch": "main" }'
+curl -X POST http://localhost:3000/git/repos/<repo_id>/branches \
+  -H "Content-Type: application/json" \
+  -d '{ "branchName": "codex/fix-login-timeout", "baseBranch": "main" }'
+curl -X POST http://localhost:3000/git/repos/<repo_id>/pull-requests \
+  -H "Content-Type: application/json" \
+  -d '{ "taskId": "<task_id>", "branchName": "codex/fix-login-timeout", "title": "Fix login timeout bug" }'
+curl http://localhost:3000/git/repos/<repo_id>/pull-requests
+curl "http://localhost:3000/git/pull-requests/<pr_id>/changed-files?branchName=codex/fix-login-timeout"
+curl http://localhost:3000/git/audit
+```
+
+Inspect LLM Gateway v0 state:
+
+```bash
+curl http://localhost:3000/llm/providers
+curl http://localhost:3000/llm/config
+curl http://localhost:3000/llm/models
+curl http://localhost:3000/llm/virtual-keys
+curl -X POST http://localhost:3000/llm/route \
+  -H "Content-Type: application/json" \
+  -d '{ "taskId": "<task_id>", "taskRunId": "<task_run_id>", "modelRef": "mock-coder@1.0", "prompt": "Fix login bug", "budgetLimitUsd": 1 }'
+curl -X POST http://localhost:3000/llm/completions \
+  -H "Content-Type: application/json" \
+  -d '{ "taskId": "<task_id>", "taskRunId": "<task_run_id>", "modelRef": "mock-coder@1.0", "prompt": "Fix login bug", "budgetLimitUsd": 1 }'
+curl http://localhost:3000/llm/usage
+curl http://localhost:3000/llm/audit
+```
+
 ## Test
 
 ```bash
@@ -154,7 +235,9 @@ pnpm test
 pnpm build
 ```
 
-Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
+Optional Postgres repository contract tests are skipped unless `AICHESTRA_TEST_DATABASE_URL` is set.
+
+Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v0 provider/catalog/virtual-key/budget/usage/API behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0 provider/service/API behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
 
 ## First Vertical Slice
 
@@ -185,18 +268,26 @@ Included:
 - Conflict Manager v1 active leases, file-overlap risk scoring, local/mock dry-run merge simulation, and mock merge queue.
 - Mock LLM usage tracking.
 - Skill, Harness, and Instruction Registry Packaging & Versioning v3 with exact refs, semver range resolution v0, package manifests, local import/export, package diffs, repository boundaries, in-memory and file-backed local storage, stable DTOs, audit logs, append-only history, rollback, approval/eval gates, approval queue read models, local eval result attachment, mock mutation RBAC, local checksum verification, APIs, resolver-backed task selection, TaskRun registry refs, and dashboard visibility.
+- Phase 4 Preparation foundations, Auto-improvement v0, and Governance v1 for failure signals, deterministic clusters, improvement candidates, draft proposal metadata, draft registry changes, readiness blockers, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, safety policy guardrails, APIs, tests, and dashboard visibility.
 - Usage ledger and audit log.
 - Minimal web dashboard.
-- Prisma schema draft for Postgres persistence.
+- Persistent DB v1 opt-in Postgres storage for Task, TaskRun, UsageLedger, BranchLease, MergeSimulationResult, MergeQueueEntry, Skill, Harness, Instruction, registry audit/history, registry packages, and registry eval results.
+- Real Integration Foundation v0 storage provider abstraction, repository inventory, Postgres schema design, migration skeleton, auth/RBAC readiness, Real Git Adapter readiness, dashboard read model plan, and repository contract tests.
+- Real Git Adapter v0 provider boundary, deterministic MockGitProvider default, LocalGitProvider fixture-safe changed-file inspection, gated GitHubGitProvider skeleton, GitIntegrationService, `/git/*` API visibility, health metadata, Git audit events, and dashboard visibility.
+- LLM Gateway v0 provider boundary, deterministic MockLLMProvider default, OpenAI-compatible skeleton with blocked remote calls, model catalog, virtual model keys, budget checks, usage ledger integration, `/llm/*` API visibility, health metadata, LLM audit events, and dashboard visibility.
 
 Deferred:
 
+- Phase 4 governance repositories remain in-memory for v1.
+- Production database operations, backups, migrations governance, pooling, and async repository refactors.
 - Real LLM provider calls.
+- BYOK, provider API key storage, real streaming, real billing, and remote LLM completions.
 - Real GitHub/GitLab/Bitbucket writes.
 - Remote git fetch, push, provider merge, provider rebase, or hosted PR automation.
 - Real Kubernetes, Temporal, MCP gateway, SSO, SCIM, and billing.
 - Production-grade RBAC and secret storage.
 - Signed artifacts, full package signing, artifact provenance/SBOM, and real artifact registry integration.
+- Production auto-improvement, real proposal generation, draft registry change apply workflow, real eval execution, real canary execution, and automatic registry mutation.
 
 ## Security Notes
 
@@ -208,8 +299,8 @@ Deferred:
 
 ## Next Steps
 
-1. Execute Work Order 3: Phase 4 Preparation for trace/eval foundations and auto-improvement guardrails.
-2. Harden Conflict Manager v1 with rebase-needed detection, stable risk DTOs, queue status history, and richer conflict evidence.
-3. Replace the in-memory repository with Prisma-backed persistence.
-4. Add OpenAPI documentation for the API routes.
-5. Implement provider adapters behind explicit environment gates.
+1. Plan or implement Local Agent Runner v0.
+2. Implement Real Git Adapter v1 only if controlled GitHub branch/PR creation is needed in an integration-test environment.
+3. Harden LLM Gateway v0 with persistent model catalog/audit repositories before real provider calls.
+4. Harden Conflict Manager v1 with rebase-needed detection, stable risk DTOs, queue status history, and richer conflict evidence.
+5. Add production DB operational controls such as pooling, backups, restore drills, and migration governance.

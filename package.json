@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "db:migrate": "node scripts/db/migrate.mjs",
     "dev": "pnpm --filter @aichestra/api dev",
     "lint": "node scripts/lint.mjs",
     "test": "node scripts/run-tests.mjs",
@@ -18,6 +19,7 @@
     "@aichestra/core": "workspace:*",
     "@aichestra/db": "workspace:*",
     "@aichestra/git-adapter": "workspace:*",
+    "@aichestra/improvement": "workspace:*",
     "@aichestra/llm-gateway": "workspace:*",
     "@aichestra/policy": "workspace:*",
     "@aichestra/registry": "workspace:*",

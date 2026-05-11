@@ -39,7 +39,7 @@ No real GitHub, GitLab, OpenAI, Anthropic, MCP, Vault, Temporal, Kubernetes, or 
 
 ### Bootstrap filename
 
-The bootstrap file is standardized as `AICHESTRA_BOOTSTRAP.md` at the repository root.
+The bootstrap file is standardized as `design_docs/AICHESTRA_BOOTSTRAP.md`.
 
 ## Decision
 

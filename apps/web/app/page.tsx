@@ -90,6 +90,49 @@ export default async function DashboardPage() {
           </article>
         ))}
       </section>
+      <section>
+        <h2>Git Adapter</h2>
+        <p>Provider: {data.gitProviderConfig.providerKind}</p>
+        <p>Remote Git: {data.gitProviderConfig.remoteGitEnabled ? "enabled" : "disabled"}</p>
+        <p>Branches: {data.gitBranches.length}</p>
+        <p>Pull requests: {data.gitPullRequests.length}</p>
+        <p>Changed files: {data.gitChangedFiles.map((file) => file.path).join(", ")}</p>
+        <p>Git audit events: {data.gitAuditEvents.length}</p>
+        <p>Remote blocked reason: {data.remoteBlockedOperation.reason ?? "none"}</p>
+      </section>
+      <section>
+        <h2>LLM Gateway</h2>
+        <p>Provider: {data.llmProviderConfig.providerKind}</p>
+        <p>Remote LLM: {data.llmProviderConfig.remoteLlmEnabled ? "enabled" : "disabled"}</p>
+        <p>Models: {data.llmModels.length}</p>
+        <p>Virtual model keys: {data.virtualModelKeys.length}</p>
+        <p>Budget result: {data.llmCompletion?.budgetDecision?.reason ?? "not evaluated"}</p>
+        <p>LLM usage events: {data.llmUsageEvents.length}</p>
+        <p>LLM audit events: {data.llmAuditEvents.length}</p>
+        <p>Remote LLM blocked reason: {data.remoteLlmBlockedOperation.reason ?? "none"}</p>
+      </section>
+      <section>
+        <h2>Phase 4 Preparation</h2>
+        <p>Failure signals: {data.improvementFailureSignals.length}</p>
+        <p>Failure clusters: {data.improvementFailureClusters.length}</p>
+        <p>Improvement candidates: {data.improvementCandidates.length}</p>
+        <p>Improvement proposals: {data.improvementProposals.length}</p>
+        <p>Auto-improvement analyses: {data.autoImprovementAnalyses.length}</p>
+        <p>Draft registry changes: {data.draftRegistryChanges.length}</p>
+        <p>Readiness blockers: {data.proposalReadiness[0]?.blockingReasons.join(", ") ?? "not evaluated"}</p>
+        <p>Eval requirements: {data.evalRequirements.length}</p>
+        <p>Canary plans: {data.canaryRolloutPlans.length}</p>
+        <p>Auto-apply: {data.autoImprovementSafetyPolicies[0]?.allowAutoApply ? "enabled" : "disabled"}</p>
+      </section>
+      <section>
+        <h2>Phase 4 Governance</h2>
+        <p>Proposal review queue: {data.proposalReviewQueue.length}</p>
+        <p>Governance decisions: {data.governanceDecisions.length}</p>
+        <p>Proposal eval runs: {data.proposalEvalRuns.length}</p>
+        <p>Canary readiness: {data.canaryReadiness[0]?.blockingReasons.join(", ") ?? "not checked"}</p>
+        <p>Apply gate: {data.proposalApplyGates[0]?.blockingReasons.join(", ") ?? "not checked"}</p>
+        <p>Governance audit events: {data.governanceAuditEvents.length}</p>
+      </section>
     </main>
   );
 }

@@ -1,7 +1,6 @@
 import type { GitProvider } from "@aichestra/adapters";
 import { MockGitProvider, MockMergeSimulator } from "@aichestra/git-adapter";
-import { MockLlmGateway } from "@aichestra/llm-gateway";
-import { MockModelRouter } from "@aichestra/llm-gateway";
+import { CatalogModelRouter, createDefaultLlmGatewayService } from "@aichestra/llm-gateway";
 import { MockPolicyEngine } from "@aichestra/policy";
 import { ConflictError, assembleInstructionSet, createId, slugify } from "@aichestra/core";
 import type { AgentKind, InstructionArtifact, MergeSimulationMode, MergeSimulator, SkillPackage, Task, TaskStatus } from "@aichestra/core";
@@ -54,8 +53,8 @@ function findActiveTaskRun(store: InMemoryAichestraStore, taskId: string) {
 export async function runAgentTaskWorkflow(taskId: string, deps: RunAgentTaskWorkflowDeps): Promise<RunAgentTaskWorkflowResult> {
   const store = deps.store;
   const gitProvider = deps.gitProvider ?? new MockGitProvider();
-  const llmGateway = deps.llmGateway ?? new MockLlmGateway();
-  const modelRouter = deps.modelRouter ?? new MockModelRouter();
+  const llmGateway = deps.llmGateway ?? createDefaultLlmGatewayService({ usageRepository: store });
+  const modelRouter = deps.modelRouter ?? new CatalogModelRouter();
   const policyEngine = deps.policyEngine ?? new MockPolicyEngine();
   const agentRunner = deps.agentRunner ?? new MockAgentRunner(llmGateway);
   const testRunner = deps.testRunner ?? new MockTestRunner();
