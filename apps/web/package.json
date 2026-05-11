@@ -1,0 +1,17 @@
+{
+  "name": "@aichestra/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "scripts": {
+    "dev": "node src/main.ts"
+  },
+  "dependencies": {
+    "@aichestra/core": "workspace:*",
+    "@aichestra/db": "workspace:*",
+    "@aichestra/worker": "workspace:*"
+  }
+}

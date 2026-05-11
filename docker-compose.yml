@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: aichestra
+      POSTGRES_USER: aichestra
+      POSTGRES_PASSWORD: aichestra
+    volumes:
+      - aichestra_postgres:/var/lib/postgresql/data
+
+volumes:
+  aichestra_postgres:

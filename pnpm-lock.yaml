@@ -1,0 +1,199 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@aichestra/adapters':
+        specifier: workspace:*
+        version: link:packages/adapters
+      '@aichestra/api':
+        specifier: workspace:*
+        version: link:apps/api
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@aichestra/db':
+        specifier: workspace:*
+        version: link:packages/db
+      '@aichestra/git-adapter':
+        specifier: workspace:*
+        version: link:packages/git-adapter
+      '@aichestra/llm-gateway':
+        specifier: workspace:*
+        version: link:packages/llm-gateway
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:packages/policy
+      '@aichestra/registry':
+        specifier: workspace:*
+        version: link:packages/registry
+      '@aichestra/runner':
+        specifier: workspace:*
+        version: link:packages/runner
+      '@aichestra/shared':
+        specifier: workspace:*
+        version: link:packages/shared
+      '@aichestra/worker':
+        specifier: workspace:*
+        version: link:apps/worker
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.12.3
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+
+  apps/api:
+    dependencies:
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aichestra/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@aichestra/registry':
+        specifier: workspace:*
+        version: link:../../packages/registry
+      '@aichestra/worker':
+        specifier: workspace:*
+        version: link:../worker
+
+  apps/runner:
+    dependencies:
+      '@aichestra/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aichestra/runner':
+        specifier: workspace:*
+        version: link:../../packages/runner
+
+  apps/web:
+    dependencies:
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aichestra/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@aichestra/worker':
+        specifier: workspace:*
+        version: link:../worker
+
+  apps/worker:
+    dependencies:
+      '@aichestra/adapters':
+        specifier: workspace:*
+        version: link:../../packages/adapters
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aichestra/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@aichestra/git-adapter':
+        specifier: workspace:*
+        version: link:../../packages/git-adapter
+      '@aichestra/llm-gateway':
+        specifier: workspace:*
+        version: link:../../packages/llm-gateway
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
+      '@aichestra/registry':
+        specifier: workspace:*
+        version: link:../../packages/registry
+      '@aichestra/runner':
+        specifier: workspace:*
+        version: link:../../packages/runner
+
+  packages/adapters:
+    dependencies:
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/core: {}
+
+  packages/db:
+    dependencies:
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/git-adapter:
+    dependencies:
+      '@aichestra/adapters':
+        specifier: workspace:*
+        version: link:../adapters
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/llm-gateway:
+    dependencies:
+      '@aichestra/adapters':
+        specifier: workspace:*
+        version: link:../adapters
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/policy:
+    dependencies:
+      '@aichestra/adapters':
+        specifier: workspace:*
+        version: link:../adapters
+
+  packages/registry:
+    dependencies:
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/runner:
+    dependencies:
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aichestra/llm-gateway':
+        specifier: workspace:*
+        version: link:../llm-gateway
+
+  packages/shared: {}
+
+  packages/testing:
+    dependencies:
+      '@aichestra/db':
+        specifier: workspace:*
+        version: link:../db
+
+packages:
+
+  '@types/node@24.12.3':
+    resolution: {integrity: sha512-8oljBDGun9cIsZRJR6fkihn0TSXJI0UDOOhncYaERq6M0JMDoPLxyscwruJcb4GKS6dvK/d8xebYBg27h/duaQ==}
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  undici-types@7.16.0:
+    resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
+
+snapshots:
+
+  '@types/node@24.12.3':
+    dependencies:
+      undici-types: 7.16.0
+
+  typescript@5.9.3: {}
+
+  undici-types@7.16.0: {}

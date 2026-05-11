@@ -1,0 +1,30 @@
+{
+  "name": "aichestra",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "pnpm --filter @aichestra/api dev",
+    "lint": "node scripts/lint.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"
+  },
+  "devDependencies": {
+    "@aichestra/adapters": "workspace:*",
+    "@aichestra/api": "workspace:*",
+    "@aichestra/core": "workspace:*",
+    "@aichestra/db": "workspace:*",
+    "@aichestra/git-adapter": "workspace:*",
+    "@aichestra/llm-gateway": "workspace:*",
+    "@aichestra/policy": "workspace:*",
+    "@aichestra/registry": "workspace:*",
+    "@aichestra/runner": "workspace:*",
+    "@aichestra/shared": "workspace:*",
+    "@aichestra/worker": "workspace:*",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}

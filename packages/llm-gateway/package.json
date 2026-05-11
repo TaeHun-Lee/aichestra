@@ -1,0 +1,13 @@
+{
+  "name": "@aichestra/llm-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aichestra/adapters": "workspace:*",
+    "@aichestra/core": "workspace:*"
+  }
+}
