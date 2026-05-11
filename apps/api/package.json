@@ -1,0 +1,19 @@
+{
+  "name": "@aichestra/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts"
+  },
+  "scripts": {
+    "dev": "node src/main.ts",
+    "test": "node --test ../../tests/api-health.test.ts"
+  },
+  "dependencies": {
+    "@aichestra/core": "workspace:*",
+    "@aichestra/db": "workspace:*",
+    "@aichestra/registry": "workspace:*",
+    "@aichestra/worker": "workspace:*"
+  }
+}

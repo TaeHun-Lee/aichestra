@@ -1,0 +1,17 @@
+{
+  "name": "@aichestra/runner-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "node src/main.ts"
+  },
+  "dependencies": {
+    "@aichestra/adapters": "workspace:*",
+    "@aichestra/core": "workspace:*",
+    "@aichestra/runner": "workspace:*"
+  }
+}

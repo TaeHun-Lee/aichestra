@@ -1,0 +1,22 @@
+{
+  "name": "@aichestra/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "node src/main.ts"
+  },
+  "dependencies": {
+    "@aichestra/adapters": "workspace:*",
+    "@aichestra/core": "workspace:*",
+    "@aichestra/db": "workspace:*",
+    "@aichestra/git-adapter": "workspace:*",
+    "@aichestra/llm-gateway": "workspace:*",
+    "@aichestra/policy": "workspace:*",
+    "@aichestra/registry": "workspace:*",
+    "@aichestra/runner": "workspace:*"
+  }
+}
