@@ -29,5 +29,8 @@
     "@aichestra/worker": "workspace:*",
     "@types/node": "^24.0.0",
     "typescript": "^5.8.0"
+  },
+  "volta": {
+    "node": "24.15.0"
   }
 }
