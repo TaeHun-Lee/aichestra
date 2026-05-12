@@ -38,6 +38,7 @@ export type CreateBranchInput = {
   baseBranch: string;
   taskId?: string;
   taskRunId?: string;
+  branchLeaseId?: string;
   actorId?: string;
   repoRef?: RepoRef;
 };
@@ -98,9 +99,16 @@ export type BranchRef = {
   exists?: boolean;
 };
 
+export type GitChangedFilesInput = BranchRef & {
+  repoRef?: RepoRef;
+  compareRef?: string;
+  pullRequestNumber?: number;
+};
+
 export type PullRequestRef = {
   repoId: string;
   pullRequestId?: string;
+  pullRequestNumber?: number;
   externalId?: string;
   url?: string;
 };
@@ -157,6 +165,11 @@ export type GitProviderConfigView = {
   remotePullRequestCreateEnabled: boolean;
   remoteMergeEnabled: false;
   githubConfigured: boolean;
+  githubOwnerConfigured?: boolean;
+  githubRepoConfigured?: boolean;
+  githubAllowedRepoCount?: number;
+  githubAllowedBranchPrefix?: string;
+  githubIntegrationTestsEnabled?: boolean;
 };
 
 export type GitProvider = {
@@ -171,7 +184,7 @@ export type GitProvider = {
   getPullRequest(input: PullRequestRef): Promise<GitProviderResult<PullRequest | undefined>>;
   listPullRequests(input: RepoRef): Promise<GitProviderResult<PullRequest[]>>;
   getPullRequestDiff(input: PullRequestRef): Promise<GitProviderResult<string>>;
-  getChangedFiles(input: BranchRef & { repoRef?: RepoRef; compareRef?: string }): Promise<GitProviderResult<GitChangedFile[]>>;
+  getChangedFiles(input: GitChangedFilesInput): Promise<GitProviderResult<GitChangedFile[]>>;
   recordMergeSimulationResult(input: DomainMergeSimulationResult): Promise<GitProviderResult<DomainMergeSimulationResult>>;
   simulateMerge(input: CreateBranchInput): Promise<MergeSimulationResult>;
   computeConflictRisk(input: ConflictRiskInput): ConflictRiskResult;

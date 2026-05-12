@@ -222,7 +222,7 @@ test("Git, LLM, Runner, and Registry services consult policy gates", async () =>
   });
   const remoteBranch = await remoteGitService.createBranch("repo_demo_backend", { branchName: "codex/policy-remote", baseBranch: "main" });
   assert.equal(remoteBranch.ok, false);
-  assert.equal(remoteBranch.reason, "Remote Git operations are disabled in the mock-first milestone.");
+  assert.equal(remoteBranch.reason, "repo_not_allowlisted");
 
   const task = store.createTask({ title: "Policy LLM task", repoId: "repo_demo_backend", baseBranch: "main" });
   const taskRun = store.createTaskRun({ taskId: task.id, attempt: 1, status: "running", agent: "codex", model: "mock-coder@1.0" });

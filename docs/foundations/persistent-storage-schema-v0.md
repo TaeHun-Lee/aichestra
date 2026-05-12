@@ -22,6 +22,7 @@ Purpose: durable repository metadata used by tasks, branch leases, and future Gi
 - Important columns: `provider`, `owner`, `name`, `default_branch`, `remote_url`, `status`, `created_at`, `updated_at`
 - Indexes: `provider,status`
 - Retention: project lifetime
+- Real Git Adapter v1 notes: GitHub remote operations use `provider=github`, `owner`, `name`, and `default_branch` with environment allowlists. Tokens are not stored in this table.
 
 ### `tasks`
 
@@ -328,13 +329,13 @@ Purpose: bounded command result records for controlled fixture-local runner exec
 
 ### `audit_events`
 
-Purpose: common task and system audit events.
+Purpose: common task and system audit events, including Git integration audit.
 
 - Primary key: `id`
 - Important columns: `actor_user_id`, `action`, `target_type`, `target_id`, `task_id`, `repo_id`, `metadata jsonb`, `created_at`
 - Indexes: `actor_user_id`, `target_type,target_id`, `task_id`, `repo_id`, `created_at`
 - Retention: compliance retention
-- Migration notes: keep append-only
+- Migration notes: keep append-only. Real Git Adapter v1 records remote Git config validation, GitHub branch/PR creation, changed-file reads, and blocked merge/rebase attempts here with sanitized metadata. GitHub tokens and credential-like strings must never be stored.
 
 ### `policy_decision_audit_entries`
 
@@ -348,12 +349,13 @@ Purpose: append-only audit entries for Policy-as-code v0 evaluations.
 
 ### `pull_requests`
 
-Purpose: durable mock/current PR metadata before real Git provider integration.
+Purpose: durable PR metadata for mock, local fixture, and controlled GitHub flows.
 
 - Primary key: `id`
 - Important columns: `task_id`, `repo_id`, `provider`, `external_id`, `url`, `status`, `created_at`, `updated_at`
-- Indexes: `task_id`, `repo_id,status`
+- Indexes: `task_id`, `repo_id,status`, `provider,external_id`
 - Retention: task/PR lifetime
+- Migration notes: Real Git Adapter v1 stores GitHub PR numbers in `external_id` and sanitized URLs/status only. Reviewer data, tokens, and raw provider response payloads are not stored.
 
 ### `instruction_sets`
 

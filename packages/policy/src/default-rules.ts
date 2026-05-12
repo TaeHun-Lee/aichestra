@@ -3,14 +3,52 @@ import type { PolicyRule } from "./types.ts";
 export function createDefaultPolicyRules(): PolicyRule[] {
   return [
     {
-      id: "policy_git_remote_operation_deny",
-      name: "Deny remote Git operations",
-      description: "Remote Git operations are disabled in the mock-first milestone.",
+      id: "policy_git_remote_operation_disabled_deny",
+      name: "Deny disabled remote Git operations",
+      description: "Remote Git operations require explicit v1 runtime gates.",
       effect: "deny",
       action: "git.remote_operation",
       resourceKind: "git_operation",
-      conditions: {},
+      conditions: {
+        environmentEquals: {
+          remoteGitEnabled: false
+        }
+      },
       priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_git_remote_operation_gate_deny",
+      name: "Deny remote Git operation without operation gate",
+      description: "Remote Git operations require an operation-specific branch, PR, or read gate.",
+      effect: "deny",
+      action: "git.remote_operation",
+      resourceKind: "git_operation",
+      conditions: {
+        environmentEquals: {
+          remoteOperationAllowed: false
+        }
+      },
+      priority: 950,
+      enabled: true
+    },
+    {
+      id: "policy_git_remote_operation_allow_github_v1",
+      name: "Allow gated GitHub remote operation",
+      description: "GitHub remote operations may proceed only after v1 config gates and allowlists pass.",
+      effect: "allow",
+      action: "git.remote_operation",
+      resourceKind: "git_operation",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          remoteGitEnabled: true,
+          remoteOperationAllowed: true,
+          repoAllowlisted: true,
+          credentialsConfigured: true
+        }
+      },
+      priority: 300,
       enabled: true
     },
     {
@@ -83,6 +121,46 @@ export function createDefaultPolicyRules(): PolicyRule[] {
         }
       },
       priority: 150,
+      enabled: true
+    },
+    {
+      id: "policy_git_github_branch_create_allow_v1",
+      name: "Allow gated GitHub branch creation",
+      description: "GitHub branch creation is allowed only when remote Git, branch creation, repo allowlist, branch prefix, and credential gates pass.",
+      effect: "allow",
+      action: "git.branch.create",
+      resourceKind: "branch",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          remoteGitEnabled: true,
+          remoteBranchCreateEnabled: true,
+          repoAllowlisted: true,
+          branchPrefixAllowed: true,
+          credentialsConfigured: true
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_git_github_pr_create_allow_v1",
+      name: "Allow gated GitHub pull request creation",
+      description: "GitHub PR creation is allowed only when remote Git, PR creation, repo allowlist, branch prefix, and credential gates pass.",
+      effect: "allow",
+      action: "git.pull_request.create",
+      resourceKind: "pull_request",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          remoteGitEnabled: true,
+          remotePullRequestCreateEnabled: true,
+          repoAllowlisted: true,
+          branchPrefixAllowed: true,
+          credentialsConfigured: true
+        }
+      },
+      priority: 250,
       enabled: true
     },
     {

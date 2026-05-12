@@ -13,15 +13,18 @@ export type {
   GitProviderKind,
   GitProviderOperation,
   GitProviderResult,
+  GitChangedFilesInput,
   MergeSimulationResult
 } from "@aichestra/adapters";
 export * from "./service.ts";
 export {
+  FetchGitHubClient,
   GitHubGitProvider,
   LocalGitProvider,
   LocalGitDryRunMergeSimulator,
   MockGitProvider,
   MockMergeSimulator,
+  NoopGitHubClient,
   createGitProviderConfigFromEnv,
   createGitProviderFromConfig,
   createGitProviderFromEnv,
@@ -29,6 +32,10 @@ export {
 } from "@aichestra/adapters";
 export type {
   BranchRef,
+  GitHubBranch,
+  GitHubClient,
+  GitHubPullRequest,
+  GitHubRepository,
   GitProviderRuntimeConfig,
   PullRequestRef,
   RepoRef
