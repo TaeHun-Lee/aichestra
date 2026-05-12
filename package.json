@@ -24,6 +24,7 @@
     "@aichestra/policy": "workspace:*",
     "@aichestra/registry": "workspace:*",
     "@aichestra/runner": "workspace:*",
+    "@aichestra/security": "workspace:*",
     "@aichestra/shared": "workspace:*",
     "@aichestra/worker": "workspace:*",
     "@types/node": "^24.0.0",

@@ -1,0 +1,124 @@
+# Policy-as-code Skeleton v0
+
+## What v0 Implements
+
+Policy-as-code Skeleton v0 adds a central, provider-neutral policy decision layer for protected operations across Git, LLM, Runner, Registry, and Auto-improvement boundaries.
+
+It is intentionally static and mock-first. It does not integrate OPA/Rego, Cedar, external policy services, real auth, real secrets, or production enforcement.
+
+## Policy Models
+
+The policy package defines:
+
+- `PolicySubject`: actor id, actor kind, roles, and optional teams.
+- `PolicyResource`: resource kind, resource id, and sanitized metadata.
+- `PolicyAction`: provider-neutral action names such as `git.remote_operation`, `llm.completion`, `runner.command.execute`, `registry.update`, and `improvement.apply`.
+- `PolicyContext`: task/run/repo/model/runner/command context, environment gates, and metadata.
+- `PolicyRule`: static allow, deny, or require-approval rule.
+- `PolicyDecision`: deterministic decision with matched rule ids.
+- `PolicyDecisionAuditEntry`: append-only audit read model for evaluations.
+
+## PolicyEngine Interface
+
+`PolicyEngine` supports:
+
+- `evaluate`
+- `evaluateMany`
+- `listRules`
+- `getRule`
+- `validatePolicySet`
+
+`StaticPolicyEngine` is the only v0 implementation. It uses a deterministic in-process rule set and never executes dynamic policy code.
+
+## Default Policy Set
+
+Default rules are restrictive:
+
+- deny remote Git operations, merge, rebase, and branch deletion;
+- allow mock Git branch and PR operations;
+- deny remote LLM completion;
+- allow mock LLM completion only after budget checks pass;
+- deny disabled/deprecated model usage;
+- deny runner command execution by default;
+- allow fixture-local runner commands only when local execution, harness, and workspace gates pass;
+- deny network commands, remote Git commands, secret reads, and MCP tool calls;
+- deny `improvement.apply`;
+- deny enterprise provider cloud API invocation, credential cache reads/uploads, PTY invocation, and local CLI shell/file/network access by default;
+- allow mock provider invocation and allow local CLI provider requests only to reach the fail-closed Local Agent boundary;
+- require registry editor/admin/reviewer roles for mutations, approvals, and rollback;
+- demonstrate `require_approval` for high-risk task execution.
+
+## Integrations
+
+Policy checks are integrated where practical:
+
+- `GitIntegrationService`: branch creation, PR creation, and remote operation attempts.
+- `LLMGatewayService`: model use, remote completion, and completion routing.
+- `AgentRunnerService`: runner execution and command execution.
+- Registry: `PolicyBackedRegistryMutationAuthorizer` wraps existing mock RBAC.
+- API and dashboard: `/policy/*` endpoints, health metadata, rules, audit entries, and blocked examples.
+
+Existing domain gates remain authoritative. Policy v0 does not weaken resolver approval/eval/checksum gates, runner harness policy, budget gates, or governance apply gates.
+
+## API Endpoints
+
+- `GET /policy/config`
+- `GET /policy/rules`
+- `GET /policy/rules/:id`
+- `POST /policy/evaluate`
+- `POST /policy/evaluate-many`
+- `GET /policy/audit`
+
+The API does not accept dynamic policy code or upload policy bundles.
+
+## Dashboard Changes
+
+The dashboard now shows:
+
+- policy engine kind;
+- loaded rule count;
+- audit enabled state;
+- recent policy decisions;
+- blocked operation examples;
+- policy decision audit entries.
+
+## Schema and Persistence
+
+Policy v0 uses an in-memory audit repository by default. The Postgres schema skeleton includes `policy_decision_audit_entries` for future durable audit persistence.
+
+## Safety Constraints
+
+- No OPA/Rego or Cedar runtime.
+- No `eval()` or user-provided policy execution.
+- No external policy service.
+- No provider calls.
+- No real secrets.
+- No remote Git operations.
+- No real LLM calls.
+- No auto-apply of improvement proposals.
+
+## Tests
+
+Tests cover:
+
+- policy model and action validation;
+- static engine allow/deny/require-approval behavior;
+- policy audit sanitization;
+- Git, LLM, Runner, and Registry policy integration;
+- policy API endpoints;
+- health and dashboard visibility;
+- regression behavior for existing mock-first gates.
+
+## Known Limitations
+
+- Policy rules are static and code-defined.
+- Policy audit is in-memory at runtime.
+- No production auth/RBAC identity source exists.
+- No OPA/Rego, Cedar, policy bundle loading, or external policy decision service exists.
+- Policy decisions are centralizing safety checks, not replacing production security controls.
+
+## Next Recommended Task
+
+Secrets and Sandbox Design v0 has extended the policy action/resource set for secret leases, sandbox sessions, network egress, runner secret injection, provider credential resolution, Local Agent secret forwarding, and secret audit access. These rules remain static and deny-by-default for real secrets and network behavior.
+
+Next recommended task: Aichestra Local Agent Protocol v0, or Real Git Adapter v1 if controlled GitHub branch/PR creation should be enabled in a gated integration-test environment.

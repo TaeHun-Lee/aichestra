@@ -38,6 +38,9 @@ importers:
       '@aichestra/runner':
         specifier: workspace:*
         version: link:packages/runner
+      '@aichestra/security':
+        specifier: workspace:*
+        version: link:packages/security
       '@aichestra/shared':
         specifier: workspace:*
         version: link:packages/shared
@@ -68,9 +71,15 @@ importers:
       '@aichestra/llm-gateway':
         specifier: workspace:*
         version: link:../../packages/llm-gateway
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@aichestra/registry':
         specifier: workspace:*
         version: link:../../packages/registry
+      '@aichestra/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       '@aichestra/worker':
         specifier: workspace:*
         version: link:../worker
@@ -104,9 +113,15 @@ importers:
       '@aichestra/llm-gateway':
         specifier: workspace:*
         version: link:../../packages/llm-gateway
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@aichestra/registry':
         specifier: workspace:*
         version: link:../../packages/registry
+      '@aichestra/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       '@aichestra/worker':
         specifier: workspace:*
         version: link:../worker
@@ -169,12 +184,18 @@ importers:
       '@aichestra/db':
         specifier: workspace:*
         version: link:../db
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../policy
 
   packages/improvement:
     dependencies:
       '@aichestra/core':
         specifier: workspace:*
         version: link:../core
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../policy
 
   packages/llm-gateway:
     dependencies:
@@ -184,6 +205,9 @@ importers:
       '@aichestra/core':
         specifier: workspace:*
         version: link:../core
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../policy
 
   packages/policy:
     dependencies:
@@ -196,6 +220,9 @@ importers:
       '@aichestra/core':
         specifier: workspace:*
         version: link:../core
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../policy
 
   packages/runner:
     dependencies:
@@ -205,6 +232,21 @@ importers:
       '@aichestra/llm-gateway':
         specifier: workspace:*
         version: link:../llm-gateway
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@aichestra/security':
+        specifier: workspace:*
+        version: link:../security
+
+  packages/security:
+    dependencies:
+      '@aichestra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aichestra/policy':
+        specifier: workspace:*
+        version: link:../policy
 
   packages/shared: {}
 

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aichestra Provider Catalog Schema - draft",
+  "type": "object",
+  "required": [
+    "providers"
+  ],
+  "properties": {
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "auth"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "cloud_api",
+              "oauth_api",
+              "workload_identity_api",
+              "cloud_iam",
+              "local_cli",
+              "pty_interactive_fallback"
+            ]
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "auth": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "api_key",
+                  "oauth_user",
+                  "device_code",
+                  "workload_identity",
+                  "cloud_iam",
+                  "external_cli_session"
+                ]
+              },
+              "credentialAccess": {
+                "enum": [
+                  "never_read_tokens"
+                ]
+              }
+            },
+            "additionalProperties": true
+          },
+          "invocation": {
+            "type": "object"
+          },
+          "safety": {
+            "type": "object"
+          },
+          "policy": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

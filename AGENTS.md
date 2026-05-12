@@ -28,10 +28,11 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - `apps/worker` owns workflow execution.
 - `packages/git-adapter` abstracts Git provider behavior.
 - `packages/improvement` owns Phase 4 Preparation, Auto-improvement v0, and Governance v1 failure signals, deterministic clusters, improvement candidates, draft proposal metadata, draft registry changes, proposal readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness checks, apply gates, governance audit events, eval requirement metadata, canary rollout plan metadata, safety policies, repository interfaces, DTO mappers, mock engine behavior, and in-memory services.
-- `packages/llm-gateway` abstracts model providers, owns LLM Gateway v0 provider-neutral interfaces, mock provider behavior, OpenAI-compatible skeleton behavior, model catalog, virtual model key policy objects, budget checks, usage ledger integration, and LLM audit events.
+- `packages/llm-gateway` abstracts model providers, owns LLM Gateway v0 provider-neutral interfaces, mock provider behavior, OpenAI-compatible skeleton behavior, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, and Enterprise LLM Provider Abstraction v0 provider catalog/auth/credential/token/adapter/local-agent boundary skeletons.
 - `packages/registry` owns Skill, Harness, and Instruction registries, exact and simple semver version refs, repository boundaries, DTO mappers, registry audit logs, append-only history, rollback, approval queues, local eval result attachment, checksum verification, mock mutation authorization, local package manifests, import/export, package diffs, and deterministic registry resolution.
-- `packages/policy` owns policy decisions.
-- `packages/runner` owns agent runner contracts and mock runner behavior.
+- `packages/policy` owns Policy-as-code Skeleton v0 provider-neutral policy models, static/default policy rules, policy decision audit, DTOs, and policy service boundaries for Git, LLM, Runner, Registry, and Auto-improvement operations.
+- `packages/runner` owns agent runner contracts, deterministic `MockAgentRunner`, disabled-by-default `LocalAgentRunner`, controlled fixture command execution boundaries, workspace validation, harness execution policy, instruction assembly, in-memory runner repositories, command result capture, and runner DTOs/services.
+- `packages/security` owns Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, secret access decisions, mock secret manager, sandbox profiles/sessions/decisions, network egress policy, redaction policy, security audit events, DTOs, and in-memory repositories.
 - `packages/db` owns schema, repository contracts, storage provider abstractions, repository factories, seed data, and persistence adapters.
 - `apps/web` owns the dashboard skeleton.
 
@@ -47,6 +48,10 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - Conflict Manager v1 must remain mock/local-only: deterministic file-overlap scoring, active lease tracking, mock merge queue status, and local dry-run simulation behind `MergeSimulator`.
 - Local dry-run simulation may use `git merge-tree` only against explicitly supplied local repositories or test fixtures. It must not fetch, push, call hosted Git providers, or mutate the user's working branch.
 - Do not perform real provider merge/rebase operations.
+- Do not implement real Codex CLI, Claude Code, or Aider runner integration in the MVP scaffold.
+- Local Agent Runner v1 must stay mock-first: `MockAgentRunner` is the default, `LocalAgentRunner` is disabled by default, command execution is disabled by default, no secrets are injected, and no remote Git or real LLM calls are allowed.
+- Local Agent Runner v1 command execution must go through `CommandExecutor`, use command+args arrays, avoid shell string execution, reject network/remote Git/destructive commands, size-limit stdout/stderr previews, and run only inside explicit fixture/temp workspaces.
+- Harness execution policy is authoritative; task prompts, skill instructions, and instruction artifacts must not override denied commands, network-disabled, remote-Git-disabled, file-write, timeout, output-size, or secret-scope boundaries.
 - Skill, Harness, and InstructionArtifact must remain separate concepts with separate domain types, APIs, and tests.
 - Registry v3 supports exact version pinning and simple semver ranges only. Do not add a full package manager.
 - Registry API responses must go through stable DTO mappers instead of returning internal domain entities directly.
@@ -73,6 +78,19 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - Remote LLM operations must require explicit configuration such as `AICHESTRA_LLM_PROVIDER=openai_compatible`, `AICHESTRA_ENABLE_REMOTE_LLM=true`, and `AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION=true`. Even then, v0 must remain skeleton-only unless a future task explicitly implements real calls.
 - Virtual model keys are internal policy objects only. Do not store OpenAI, Anthropic, Gemini, Bedrock, LiteLLM, or other provider API keys in source, model catalog records, virtual keys, audit events, or usage metadata.
 - LLM Gateway calls must record successful usage with `taskId` and `taskRunId`; blocked calls must create audit events and must not call external providers.
+- Enterprise LLM Provider Abstraction v0 must remain skeleton-only: do not call Claude, Codex, Gemini, Vertex, Bedrock, Foundry, or any provider API/CLI.
+- Provider auth config must not contain raw provider tokens. `local_cli` providers must use `external_cli_session` with `credentialAccess = never_read_tokens`.
+- Do not read or upload provider-owned credential caches such as `~/.codex/auth.json`, `~/.claude`, Google credential caches, OS keychains, or vendor CLI session files.
+- Aichestra Local Agent is a future user-machine daemon boundary and is not the same as Local Agent Runner. Do not implement real Local Agent daemon/protocol or vendor CLI execution until an explicit future task.
+- PTY interactive fallback, danger/full-access local CLI modes, local CLI shell execution, local CLI file write, and local CLI network access are denied by default.
+- Policy-as-code v0 must remain static/mock-first: do not add real OPA/Rego, Cedar, external policy services, dynamic policy code upload, `eval()`, or user-provided policy execution.
+- Policy decisions must not weaken existing safety gates. Budget checks, harness policy, registry approval/eval/checksum gates, mock RBAC, governance apply gates, and provider-disabled defaults remain authoritative.
+- Policy decision audit must not store secrets, tokens, provider API keys, or raw prompts. Default policy rules must deny remote Git operations, remote LLM completion, runner command execution by default, MCP tool calls, secret reads, runner secret injection, network egress, provider credential resolution, Local Agent secret forwarding, and improvement apply.
+- Secrets and Sandbox Design v0 must remain metadata-only and model-only. `SecretRef`, `SecretLease`, API responses, audit events, and test fixtures must not contain raw secret values, OAuth tokens, provider API keys, vendor credential cache content, or real credential file paths except redaction test strings.
+- `SecretManager` implementations for Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and env-backed secrets must remain future placeholders until an explicit future task. Do not connect to real secret backends.
+- `SandboxProfile` container, Firecracker, and Kubernetes kinds are future placeholders. Do not add Docker, Kubernetes, Firecracker, VM, or production sandbox runtime integration in the MVP scaffold.
+- Network egress is denied by default and modeled through `NetworkEgressPolicy`; do not add real external network calls or make runner/provider paths more permissive.
+- Runner and provider output must be redacted and preview-limited before security audit storage where Secrets and Sandbox v0 controls the path.
 
 ## MVP focus
 

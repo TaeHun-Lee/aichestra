@@ -1,7 +1,11 @@
+import path from "node:path";
 import { createSeededStore } from "@aichestra/db";
 import { GitHubGitProvider, GitIntegrationService, MockGitProvider } from "@aichestra/git-adapter";
-import { OpenAICompatibleLLMProvider, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
-import { createRegistryService } from "@aichestra/registry";
+import { OpenAICompatibleLLMProvider, ProviderAbstractionService, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
+import { PolicyService, createPolicyContext, createPolicyResource, createPolicySubject } from "@aichestra/policy";
+import { PolicyBackedRegistryMutationAuthorizer, createRegistryService } from "@aichestra/registry";
+import { AgentRunnerService, MockAgentRunner, createAgentRunnerConfigFromEnv } from "@aichestra/runner";
+import { SecurityControlService } from "@aichestra/security";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
 import { createImprovementDemoData } from "../lib/improvement-demo.ts";
 
@@ -39,6 +43,8 @@ export async function renderDashboardHtml(): Promise<string> {
   });
   await runAgentTaskWorkflow(task.id, { store });
   await runAgentTaskWorkflow(overlappingTask.id, { store });
+  const policyService = new PolicyService();
+  const securityService = new SecurityControlService({ policyService });
   const registryService = createRegistryService({
     skillRepository: store,
     harnessRepository: store,
@@ -50,7 +56,8 @@ export async function renderDashboardHtml(): Promise<string> {
     },
     historyRepository: store,
     evalResultRepository: store,
-    packageRepository: store
+    packageRepository: store,
+    authorizer: new PolicyBackedRegistryMutationAuthorizer({ policyService })
   });
   registryService.updateSkillApproval("skill_auth_debugging", { approvalStatus: "pending", reason: "dashboard review queue fixture" });
   registryService.attachEvalResult("harness", "harness_backend_node20", {
@@ -94,7 +101,8 @@ export async function renderDashboardHtml(): Promise<string> {
       remoteMergeEnabled: false,
       githubConfigured: false,
       localBranchCreateEnabled: false
-    }
+    },
+    policyService
   });
   const gitRepo = gitService.createRepo({
     provider: "mock",
@@ -131,7 +139,43 @@ export async function renderDashboardHtml(): Promise<string> {
     baseBranch: "main",
     title: "Blocked remote PR example"
   });
-  const llmService = createDefaultLlmGatewayService({ usageRepository: store });
+  const llmService = createDefaultLlmGatewayService({ usageRepository: store, policyService });
+  const agentRunnerConfig = createAgentRunnerConfigFromEnv({});
+  const agentRunnerService = new AgentRunnerService({
+    runner: new MockAgentRunner(llmService),
+    config: agentRunnerConfig,
+    policyService,
+    securityService
+  });
+  const agentRun = latestRun
+    ? await agentRunnerService.runAgent({
+      taskId: task.id,
+      taskRunId: latestRun.id,
+      actorId: task.requesterUserId,
+      repoRef: { repoId: task.repoId, provider: "mock" },
+      branchRef: { repoId: task.repoId, branchName: task.branchName ?? "mock-agent/dashboard", baseBranch: task.baseBranch },
+      selectedModelRef: "mock-coder@1.0",
+      selectedSkillRefs: latestRun.selectedSkillRefs ?? [],
+      selectedHarnessRef: latestRun.selectedHarnessRef ?? { kind: "harness", name: "backend-node20", version: "1.0.0" },
+      selectedInstructionRefs: latestRun.selectedInstructionRefs ?? [],
+      prompt: "Run local agent runner dashboard fixture for login.",
+      allowedCommands: [],
+      testCommands: ["pnpm test"],
+      maxRuntimeMs: agentRunnerConfig.maxRuntimeMs,
+      metadata: { source: "dashboard" }
+    })
+    : undefined;
+  const blockedCommandExample = agentRun
+    ? await agentRunnerService.executeCommandForRun(agentRun.id, {
+      command: "git",
+      args: ["push", "origin", "main"],
+      allowedCommands: ["git push origin main"]
+    })
+    : undefined;
+  const localRunnerBlockedExample = await agentRunnerService.validateEnvironment({
+    taskId: task.id,
+    taskRunId: latestRun?.id ?? "run_dashboard_agent"
+  });
   const llmCompletion = latestRun
     ? await llmService.routeCompletion({
       taskId: task.id,
@@ -148,6 +192,94 @@ export async function renderDashboardHtml(): Promise<string> {
     taskRunId: latestRun?.id ?? "run_dashboard_llm",
     prompt: "This remote provider call must stay blocked."
   }, seedLlmModels().find((model) => model.id === "openai-compatible/default") ?? seedLlmModels()[0]);
+  const policyDecisions = [
+    policyService.evaluate({
+      subject: createPolicySubject({ actorId: "mock-dashboard", actorKind: "system", roles: ["system"] }),
+      action: "llm.completion",
+      resource: createPolicyResource({ resourceKind: "llm_provider", resourceId: "mock", metadata: { providerKind: "mock" } }),
+      context: createPolicyContext({ taskId: task.id, taskRunId: latestRun?.id, providerKind: "mock", environment: { budgetAllowed: true }, metadata: { source: "dashboard" } })
+    }),
+    policyService.evaluate({
+      subject: createPolicySubject({ actorId: "mock-dashboard", actorKind: "system", roles: ["system"] }),
+      action: "git.remote_operation",
+      resource: createPolicyResource({ resourceKind: "git_operation", resourceId: gitRepo.id, metadata: { providerKind: "github" } }),
+      context: createPolicyContext({ taskId: task.id, repoId: gitRepo.id, providerKind: "github", metadata: { source: "dashboard" } })
+    }),
+    policyService.evaluate({
+      subject: createPolicySubject({ actorId: "mock-dashboard", actorKind: "system", roles: ["system"] }),
+      action: "runner.command.execute",
+      resource: createPolicyResource({ resourceKind: "command", resourceId: "git push", metadata: { command: "git push origin main" } }),
+      context: createPolicyContext({ taskId: task.id, taskRunId: latestRun?.id, runnerKind: "mock", command: "git push origin main", environment: { localCommandExecutionEnabled: false, harnessAllowed: true, workspaceSafe: false }, metadata: { source: "dashboard" } })
+    }),
+    policyService.evaluate({
+      subject: createPolicySubject({ actorId: "mock-viewer", actorKind: "user", roles: ["registry_viewer"] }),
+      action: "registry.update",
+      resource: createPolicyResource({ resourceKind: "registry_item", resourceId: "skill_auth_debugging", metadata: { targetKind: "skill" } }),
+      context: createPolicyContext({ metadata: { source: "dashboard" } })
+    }),
+    policyService.evaluate({
+      subject: createPolicySubject({ actorId: "mock-dashboard", actorKind: "system", roles: ["system"] }),
+      action: "improvement.apply",
+      resource: createPolicyResource({ resourceKind: "draft_registry_change", resourceId: "draft_dashboard", metadata: { activeRegistryMutation: false } }),
+      context: createPolicyContext({ metadata: { source: "dashboard" } })
+    }),
+    policyService.evaluate({
+      subject: createPolicySubject({ actorId: "mock-dashboard", actorKind: "system", roles: ["system"] }),
+      action: "secret.read",
+      resource: createPolicyResource({ resourceKind: "secret_scope", resourceId: "scope_future_real_credentials" }),
+      context: createPolicyContext({ metadata: { source: "dashboard" } })
+    }),
+    policyService.evaluate({
+      subject: createPolicySubject({ actorId: "mock-dashboard", actorKind: "system", roles: ["system"] }),
+      action: "network.egress",
+      resource: createPolicyResource({ resourceKind: "network_egress_policy", resourceId: "network_default_deny" }),
+      context: createPolicyContext({ metadata: { source: "dashboard" } })
+    })
+  ];
+  const secretLeaseRequest = securityService.requestLease({
+    secretRefId: "secretref_mock_provider_metadata",
+    scopeId: "scope_mock_provider_metadata",
+    taskId: task.id,
+    taskRunId: latestRun?.id,
+    actorId: task.requesterUserId,
+    reason: "dashboard_denied_example"
+  });
+  const sandboxSession = securityService.createSandboxSession({
+    profileId: "sandbox_local_temp_fixture",
+    taskId: task.id,
+    taskRunId: latestRun?.id,
+    actorId: task.requesterUserId,
+    runnerKind: "local",
+    workspaceId: "workspace_dashboard_fixture",
+    metadata: { source: "dashboard" }
+  });
+  securityService.evaluateNetworkEgress({
+    host: "api.example.invalid",
+    port: 443,
+    taskId: task.id,
+    taskRunId: latestRun?.id,
+    actorId: task.requesterUserId
+  });
+  const redactionTest = securityService.redactText({
+    text: "Bearer dashboard-token OPENAI_API_KEY=sk-dashboard-secret ~/.codex/auth.json",
+    taskId: task.id,
+    taskRunId: latestRun?.id,
+    actorId: task.requesterUserId,
+    metadata: { source: "dashboard" }
+  });
+  const providerAbstractionService = new ProviderAbstractionService({ policyService });
+  const providerValidation = providerAbstractionService.validateProvider("claude-code-local");
+  const providerInvocation = await providerAbstractionService.invoke({
+    providerId: "claude-code-local",
+    taskId: task.id,
+    taskRunId: latestRun?.id,
+    actorId: task.requesterUserId,
+    modelId: "claude-code/local",
+    prompt: "Provider dashboard fixture stays blocked.",
+    metadata: { source: "dashboard" }
+  });
+  providerAbstractionService.getCredentialReference("claude-code-local");
+  providerAbstractionService.getCredentialReference("anthropic-api-key");
   const improvement = createImprovementDemoData();
   const activeSkills = store.listSkills().filter((skill) => skill.status === "active").length;
   const activeHarnesses = store.listHarnesses().filter((harness) => harness.status === "active").length;
@@ -432,6 +564,52 @@ export async function renderDashboardHtml(): Promise<string> {
           <div class="item"><strong>Recent LLM usage</strong><span>${escapeHtml(llmService.listUsageEvents().map((event) => `${event.model}:${event.costUsd}`).join(", ") || "none")}</span></div>
           <div class="item"><strong>LLM audit</strong><span>${escapeHtml(llmService.listAuditEvents().map((event) => event.eventType).join(", ") || "none")}</span></div>
           <div class="item"><strong>Remote LLM blocked example</strong><span>${escapeHtml(remoteLlmBlockedOperation.reason ?? "remote LLM blocked")}</span></div>
+        </div>
+        <h2>Agent Runner</h2>
+        <div class="list">
+          <div class="item"><strong>Runner</strong><span>${escapeHtml(agentRunnerConfig.runnerKind)} / local runner ${agentRunnerConfig.localRunnerEnabled ? "enabled" : "disabled"} / command execution ${agentRunnerConfig.localCommandExecutionEnabled ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Command executor</strong><span>${escapeHtml(agentRunnerConfig.commandExecutorKind)} / max runtime ${agentRunnerConfig.maxRuntimeMs}ms</span></div>
+          <div class="item"><strong>Latest agent run</strong><span>${escapeHtml(agentRun?.status ?? "not run")} / ${escapeHtml(agentRun?.diffSummary ?? "no diff")}</span></div>
+          <div class="item"><strong>Changed files</strong><span>${escapeHtml(agentRun?.changedFiles.join(", ") ?? "none")}</span></div>
+          <div class="item"><strong>Test results</strong><span>${escapeHtml(agentRun?.testResults.map((result) => `${result.command}:${result.status}`).join(", ") ?? "none")}</span></div>
+          <div class="item"><strong>Instruction assembly</strong><span>${escapeHtml(agentRunnerService.listInstructionAssemblies().at(0)?.instructionSetHash ?? "none")} / refs ${agentRunnerService.listInstructionAssemblies().at(0)?.selectedInstructionRefs.length ?? 0}</span></div>
+          <div class="item"><strong>LLM linkage</strong><span>${escapeHtml(agentRun?.llmGatewayRequestIds.join(", ") || "none")} / usage ${escapeHtml(agentRun?.usageLedgerEntryIds.join(", ") || "none")}</span></div>
+          <div class="item"><strong>Git linkage</strong><span>provider ${escapeHtml(gitService.getConfig().providerKind)} / remote Git disabled</span></div>
+          <div class="item"><strong>Command results</strong><span>${escapeHtml(agentRunnerService.listCommandResults().map((result) => `${path.basename(result.command)}:${result.status}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Workspace status</strong><span>${escapeHtml(agentRunnerService.listWorkspaces().map((workspace) => `${workspace.mode}:${workspace.status}`).join(", ") || "no local workspace")}</span></div>
+          <div class="item"><strong>Blocked command example</strong><span>${escapeHtml(blockedCommandExample?.blockedReason ?? blockedCommandExample?.status ?? "none")}</span></div>
+          <div class="item"><strong>Local runner blocked example</strong><span>${escapeHtml(localRunnerBlockedExample.reason ?? "mock runner available")}</span></div>
+        </div>
+        <h2>Policy-as-code</h2>
+        <div class="list">
+          <div class="item"><strong>Policy engine</strong><span>${escapeHtml(policyService.getConfig().engineKind)} / ${policyService.getConfig().ruleCount} rules / audit ${policyService.getConfig().auditEnabled ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Default policy summary</strong><span>remote Git denied, remote LLM denied, runner commands denied by default, improvement apply denied.</span></div>
+          <div class="item"><strong>Recent policy decisions</strong><span>${escapeHtml(policyDecisions.map((decision) => `${decision.action}:${decision.decision}`).join(", "))}</span></div>
+          <div class="item"><strong>Blocked operation examples</strong><span>${escapeHtml(policyDecisions.filter((decision) => !decision.allowed).map((decision) => `${decision.action}:${decision.matchedRuleIds.join("+")}`).join(", "))}</span></div>
+          <div class="item"><strong>Policy audit</strong><span>${escapeHtml(policyService.listAuditEntries().map((entry) => `${entry.action}:${entry.decision}`).join(", ") || "none")}</span></div>
+        </div>
+        <h2>Secrets and Sandbox</h2>
+        <div class="list">
+          <div class="item"><strong>Secret manager</strong><span>${escapeHtml(securityService.getConfig().secretManagerKind)} / production injection disabled / raw secrets unavailable</span></div>
+          <div class="item"><strong>Secret refs</strong><span>${escapeHtml(securityService.listSecretRefs().map((ref) => `${ref.id}:${ref.status}:material=false`).join(", "))}</span></div>
+          <div class="item"><strong>Secret scopes</strong><span>${escapeHtml(securityService.listSecretScopes().map((scope) => `${scope.id}:approval=${scope.requiresApproval}`).join(", "))}</span></div>
+          <div class="item"><strong>Lease request example</strong><span>${escapeHtml(secretLeaseRequest.status)} / ${escapeHtml(secretLeaseRequest.reason ?? "no secret material issued")}</span></div>
+          <div class="item"><strong>Sandbox profiles</strong><span>${escapeHtml(securityService.listSandboxProfiles().map((profile) => `${profile.id}:${profile.kind}:${profile.status}`).join(", "))}</span></div>
+          <div class="item"><strong>Sandbox session</strong><span>${escapeHtml(sandboxSession.session?.status ?? sandboxSession.decision.reason)} / network denied / secrets denied / remote Git denied</span></div>
+          <div class="item"><strong>Network egress policy</strong><span>${escapeHtml(securityService.listNetworkEgressPolicies().map((policy) => `${policy.id}:${policy.defaultAction}`).join(", "))}</span></div>
+          <div class="item"><strong>Redaction policy</strong><span>${escapeHtml(securityService.listRedactionPolicies().map((policy) => `${policy.id}:maxPreview=${policy.maxPreviewBytes}`).join(", "))} / preview ${escapeHtml(redactionTest.preview)}</span></div>
+          <div class="item"><strong>Security audit</strong><span>${escapeHtml(securityService.listAuditEvents().map((event) => `${event.eventType}:${event.result}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Blocked examples</strong><span>secret reads denied, network egress blocked, credential cache paths redacted.</span></div>
+        </div>
+        <h2>Enterprise LLM Providers</h2>
+        <div class="list">
+          <div class="item"><strong>Provider abstraction</strong><span>${escapeHtml(providerAbstractionService.getConfig().status)} / ${providerAbstractionService.getConfig().providerCatalogCount} catalog entries</span></div>
+          <div class="item"><strong>Provider kinds</strong><span>${escapeHtml(providerAbstractionService.listProviders().map((provider) => provider.kind).join(", "))}</span></div>
+          <div class="item"><strong>Auth types</strong><span>${escapeHtml(providerAbstractionService.listAuthTypes().join(", "))}</span></div>
+          <div class="item"><strong>Local CLI readiness</strong><span>${escapeHtml(providerInvocation.error?.code ?? "none")} / Local Agent required</span></div>
+          <div class="item"><strong>Credential cache access</strong><span>denied; credential references only</span></div>
+          <div class="item"><strong>PTY fallback</strong><span>disabled by policy</span></div>
+          <div class="item"><strong>Provider audit</strong><span>${providerAbstractionService.listAuditEvents().length} event(s); validation ${providerValidation.ok ? "passed" : escapeHtml(providerValidation.reason ?? "failed")}</span></div>
         </div>
         <h2>Phase 4 Preparation</h2>
         <div class="list">

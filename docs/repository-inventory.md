@@ -28,7 +28,27 @@ Real Integration Foundation v0 keeps the default runtime in-memory, and Persiste
 | VirtualModelKeyRepository | `InMemoryVirtualModelKeyRepository` | persistent_required before real multi-user usage | `virtual_model_keys` | `id`, `owner_kind`, `owner_id`, `status` | Key policy lifecycle | Must not store provider API secrets. Status changes should be audited. |
 | LLMAuditRepository | `InMemoryLLMAuditRepository` | persistent_required before real provider calls | `llm_audit_events` | `id`, `task_id`, `task_run_id`, `provider_kind`, `model_id`, `created_at` | Long-lived or compliance retention | Append-only; never log API keys or secrets. |
 | LLMGatewayRequestRepository | not implemented; request ids live in result metadata | persistent_recommended before real provider calls | `llm_gateway_requests` | `id`, `task_id`, `task_run_id`, `provider_kind`, `model_id`, `created_at` | Debug/audit retention | Store sanitized request/result metadata only. |
-| Policy decision records | Currently implicit in workflow/task status and generic audit | persistent_recommended | `policy_decision_events` or common `audit_events` | `task_id`, `task_run_id`, `decision`, `created_at` | Long-lived for compliance | Policy blocks and approvals should be auditable. |
+| ProviderCatalogRepository | `InMemoryProviderCatalogRepository` | persistent_recommended before real enterprise provider management | `provider_catalog_entries` | `id`, `vendor`, `kind`, `status` | Provider lifecycle | Auth config must contain references only, never raw tokens or credential cache paths. |
+| ProviderAuditRepository | `InMemoryProviderAuditRepository` | persistent_required before real provider calls or Local Agent invocation | `provider_audit_events` | `id`, `provider_id`, `event_type`, `task_id`, `task_run_id`, `created_at` | Compliance/audit retention | Append-only; sanitized metadata only; no raw prompts, tokens, or credential cache contents. |
+| LocalAgentDescriptor store | In-memory list inside `ProviderAbstractionService` | persistent_recommended before real Local Agent pairing | `local_agent_descriptors` | `id`, `user_id`, `host_id`, `status`, `last_seen_at` | Agent connection lifecycle | Must not store vendor credentials or local credential cache content. |
+| PolicyDecisionAuditRepository | `InMemoryPolicyDecisionAuditRepository` in `packages/policy`; schema skeleton only for Postgres | persistent_required before real provider integrations | `policy_decision_audit_entries` | `policy_decision_id`, `action`, `resource_kind`, `actor_id`, `task_id`, `task_run_id`, `created_at` | Long-lived for compliance | Append-only; must not store secrets or raw prompts. |
+
+## Policy-as-code
+
+| Repository or Store | Current Implementation | Priority | Recommended Table | Key Indexes | Retention | Audit Requirements |
+|---|---|---|---|---|---|---|
+| PolicyRule store | Static code-defined rules in `createDefaultPolicyRules` | persistent_recommended before production policy management | `policy_rules` future table or versioned policy bundle store | `id`, `action`, `resource_kind`, `enabled`, `priority` | Policy bundle lifecycle | Rule changes must be reviewed and audited. Not implemented in v0. |
+| PolicyDecisionAuditRepository | `InMemoryPolicyDecisionAuditRepository` | persistent_required before real integrations | `policy_decision_audit_entries` | `policy_decision_id`, `action`, `resource_kind`, `actor_id`, `task_id`, `task_run_id`, `created_at` | Compliance/audit retention | Store decision summaries only; no secrets, tokens, API keys, or raw prompts. |
+
+## Local Agent Runner
+
+| Repository or Store | Current Implementation | Priority | Recommended Table | Key Indexes | Retention | Audit Requirements |
+|---|---|---|---|---|---|---|
+| AgentRunRepository | `InMemoryAgentRunRepository` in `packages/runner` | persistent_required before controlled local execution | `agent_runs` | `id`, `task_id`, `task_run_id`, `runner_kind`, `status`, `created_at` | Retain with TaskRun history | Runner start, completion, failure, and block status should be auditable. |
+| AgentRunAuditRepository | `InMemoryAgentRunAuditRepository` in `packages/runner` | persistent_required before controlled local execution | `agent_run_audit_events` | `id`, `task_id`, `task_run_id`, `runner_kind`, `event_type`, `created_at` | Long-lived operational/audit retention | Append-only; never store secrets or unsafe command output. |
+| InstructionAssemblyRepository | `InMemoryInstructionAssemblyRepository` in `packages/runner` | persistent_recommended before real runner execution | `instruction_assemblies` | `id`, `task_id`, `task_run_id`, `instruction_set_hash` | Retain with TaskRun history | Must preserve selected refs and hash used for runner input. |
+| AgentWorkspaceRepository | `InMemoryAgentWorkspaceRepository` in `packages/runner` | persistent_recommended before wider local runner use | `agent_workspaces` | `id`, `task_id`, `task_run_id`, `status`, `created_at` | Retain with AgentRun history | Workspace status and cleanup must be auditable; never store secrets or workspace contents. |
+| CommandExecutionResultRepository | `InMemoryCommandExecutionResultRepository` in `packages/runner` | persistent_recommended before wider local runner use | `command_execution_results` | `id`, `agent_run_id`, `task_id`, `task_run_id`, `status`, `created_at` | Retain bounded previews with AgentRun history | Store size-limited sanitized previews only; blocked/timeout reasons should be auditable. |
 
 ## Phase 2
 
@@ -67,6 +87,21 @@ Real Integration Foundation v0 keeps the default runtime in-memory, and Persiste
 | CanaryReadinessRepository | `InMemoryImprovementRepository` | persistent_recommended | `canary_readiness` | `proposal_id`, `evaluated_at` | Latest plus optional history | Readiness checks should be auditable. |
 | ProposalApplyGateRepository | `InMemoryImprovementRepository` | persistent_required before apply | `proposal_apply_gates` | `proposal_id`, `can_apply`, `evaluated_at` | Long-lived for apply governance | Apply-gate and blocked apply attempts must be audited. |
 | ImprovementGovernanceAuditRepository | `InMemoryImprovementRepository` | persistent_required | `improvement_governance_audit_events` | `id`, `proposal_id`, `action`, `actor_id`, `created_at` | Long-lived or compliance retention | Append-only. |
+
+## Secrets and Sandbox
+
+| Repository or Store | Current Implementation | Priority | Recommended Table | Key Indexes | Retention | Audit Requirements |
+|---|---|---|---|---|---|---|
+| SecretRefRepository | `InMemorySecretRefRepository` in `packages/security` | persistent_required before real secret backend integration | `secret_refs` | `id`, `provider`, `scope`, `status` | Secret reference lifecycle | Must never store raw secret values or credential cache paths. |
+| SecretScopeRepository | `InMemorySecretScopeRepository` | persistent_required before production secret leasing | `secret_scopes` | `id`, `requires_approval` | Scope/policy lifecycle | Scope changes must be audited before production. |
+| SecretLeaseRepository | `InMemorySecretLeaseRepository` | persistent_required before any real secret issuance | `secret_leases` | `id`, `secret_ref_id`, `scope_id`, `task_id`, `task_run_id`, `status`, `expires_at` | Lease lifecycle plus compliance retention | Lease requests, denials, issuance, expiration, and revocation must be audited without secret values. |
+| SecretAccessDecisionRepository | `InMemorySecretAccessDecisionRepository` | persistent_required before real secret issuance | `secret_access_decisions` | `id`, `secret_ref_id`, `scope_id`, `actor_id`, `task_id`, `task_run_id`, `created_at` | Compliance/audit retention | Decision records must link to policy decisions and never contain raw secrets. |
+| SandboxProfileRepository | `InMemorySandboxProfileRepository` | persistent_required before production sandbox configuration | `sandbox_profiles` | `id`, `kind`, `status` | Sandbox profile lifecycle | Profile changes require review/audit. Future container/Firecracker/Kubernetes profiles remain disabled placeholders. |
+| SandboxSessionRepository | `InMemorySandboxSessionRepository` | persistent_recommended before broader local runner use | `sandbox_sessions` | `id`, `profile_id`, `task_id`, `task_run_id`, `runner_kind`, `status`, `created_at` | Retain with AgentRun history | Session create/complete/cleanup must be audited. |
+| SandboxDecisionRepository | `InMemorySandboxDecisionRepository` | persistent_required before production sandbox use | `sandbox_decisions` | `id`, `profile_id`, `task_id`, `task_run_id`, `actor_id`, `created_at` | Compliance/audit retention | Decisions should link to policy decisions. |
+| NetworkEgressPolicyRepository | `InMemoryNetworkEgressPolicyRepository` | persistent_required before real network egress controls | `network_egress_policies` | `id`, `status`, `default_action` | Network policy lifecycle | Policy changes and blocked egress decisions require audit. |
+| RedactionPolicyRepository | `InMemoryRedactionPolicyRepository` | persistent_required before real provider output retention | `redaction_policies` | `id`, `status`, `retention_class` | Redaction policy lifecycle | Policy changes require audit/review before production. |
+| SecurityAuditRepository | `InMemorySecurityAuditRepository` | persistent_required before real secrets/sandbox/provider integrations | `security_audit_events` | `id`, `event_type`, `target_kind`, `task_id`, `task_run_id`, `actor_id`, `created_at` | Long-lived compliance retention | Append-only; metadata must be sanitized and must not contain secrets, tokens, credential cache contents, or raw prompts. |
 
 ## Test Infrastructure
 

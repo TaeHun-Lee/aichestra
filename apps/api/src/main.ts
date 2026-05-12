@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 import { AichestraError, NotFoundError, isTaskStatus } from "@aichestra/core";
-import type { BranchLeaseStatus, MergeSimulationMode, MergeSimulationStatus, Task } from "@aichestra/core";
+import type { BranchLeaseStatus, MergeSimulationMode, MergeSimulationStatus, RegistryVersionRef, Task } from "@aichestra/core";
 import type { TaskStatus } from "@aichestra/core";
 import {
   InMemoryAichestraStore,
@@ -20,7 +20,10 @@ import {
 import type { GitProviderRuntimeConfig } from "@aichestra/git-adapter";
 import {
   budgetDecisionToDto,
+  credentialReferenceResultToDto,
   createDefaultLlmGatewayService,
+  localAgentDescriptorToDto,
+  localCliProviderConfigToDto,
   isLlmModelStatus,
   isLlmProviderKind,
   isVirtualModelKeyStatus,
@@ -28,9 +31,29 @@ import {
   llmCompletionResultToDto,
   llmConfigToDto,
   llmModelToDto,
+  providerAuditEventToDto,
+  providerCatalogEntryToDto,
+  providerInvocationResultToDto,
+  providerValidationResultToDto,
+  ProviderAbstractionService,
   virtualModelKeyToDto
 } from "@aichestra/llm-gateway";
 import type { LLMGatewayService } from "@aichestra/llm-gateway";
+import {
+  AgentRunnerService,
+  MockAgentRunner,
+  agentRunAuditEventToDto,
+  agentRunToDto,
+  agentRunnerConfigToDto,
+  agentWorkspaceToDto,
+  commandExecutionResultToDto,
+  createInMemoryAgentRunnerRepositories,
+  createAgentRunnerConfigFromEnv,
+  createAgentRunnerFromConfig,
+  instructionAssemblyToDto,
+  LocalAgentWorkspaceManager
+} from "@aichestra/runner";
+import type { AgentRunnerRuntimeConfig } from "@aichestra/runner";
 import {
   autoImprovementAnalysisToDto,
   canaryReadinessToDto,
@@ -59,6 +82,18 @@ import {
 } from "@aichestra/improvement";
 import type { ImprovementServices } from "@aichestra/improvement";
 import {
+  PolicyService,
+  createPolicyContext,
+  createPolicyResource,
+  createPolicySubject,
+  isPolicyAction,
+  isPolicyResourceKind,
+  policyDecisionAuditEntryToDto,
+  policyDecisionToDto,
+  policyRuleToDto
+} from "@aichestra/policy";
+import {
+  PolicyBackedRegistryMutationAuthorizer,
   createRegistryService,
   harnessToDto,
   instructionToDto,
@@ -79,6 +114,19 @@ import {
   skillToDto
 } from "@aichestra/registry";
 import type { RegistryService } from "@aichestra/registry";
+import {
+  SecurityControlService,
+  networkEgressPolicyToDto,
+  redactionPolicyToDto,
+  redactionResultToDto,
+  sandboxDecisionToDto,
+  sandboxProfileToDto,
+  sandboxSessionToDto,
+  secretLeaseToDto,
+  secretRefToDto,
+  secretScopeToDto,
+  securityAuditEventToDto
+} from "@aichestra/security";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
 
 type RouteContext = {
@@ -87,8 +135,13 @@ type RouteContext = {
   gitIntegrationService: GitIntegrationService;
   gitProviderConfig: GitProviderRuntimeConfig;
   llmGatewayService: LLMGatewayService;
+  agentRunnerService: AgentRunnerService;
+  agentRunnerConfig: AgentRunnerRuntimeConfig;
   registryService: RegistryService;
   improvementServices: ImprovementServices;
+  policyService: PolicyService;
+  providerAbstractionService: ProviderAbstractionService;
+  securityService: SecurityControlService;
 };
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -143,6 +196,92 @@ function isValidEvalResultPayload(body: Record<string, unknown>): boolean {
     isRegistryEvalResultSource(body.source);
 }
 
+function registryRefValue(value: unknown, fallbackKind: RegistryVersionRef["kind"], fallbackName: string): RegistryVersionRef {
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    if (isRegistryTargetKind(record.kind) && typeof record.name === "string" && typeof record.version === "string") {
+      return {
+        kind: record.kind,
+        name: record.name,
+        version: record.version,
+        versionRange: typeof record.versionRange === "string" ? record.versionRange : undefined,
+        id: typeof record.id === "string" ? record.id : undefined,
+        checksum: typeof record.checksum === "string" ? record.checksum : undefined
+      };
+    }
+  }
+  return {
+    kind: fallbackKind,
+    name: fallbackName,
+    version: "1.0.0"
+  };
+}
+
+function registryRefsValue(value: unknown, fallbackKind: RegistryVersionRef["kind"], fallbackName: string): RegistryVersionRef[] {
+  if (!Array.isArray(value)) return [registryRefValue(undefined, fallbackKind, fallbackName)];
+  const refs = value.map((item) => registryRefValue(item, fallbackKind, fallbackName));
+  return refs.length > 0 ? refs : [registryRefValue(undefined, fallbackKind, fallbackName)];
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringArrayValue(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function policyEvaluationRequestFromBody(body: Record<string, unknown>) {
+  const action = body.action;
+  const subjectRecord = recordValue(body.subject);
+  const resourceRecord = recordValue(body.resource);
+  const contextRecord = recordValue(body.context);
+  const resourceKind = resourceRecord.resourceKind ?? body.resourceKind;
+  if (!isPolicyAction(action)) {
+    return { ok: false as const, error: "invalid_policy_action", message: "action must be a valid policy action." };
+  }
+  if (!isPolicyResourceKind(resourceKind)) {
+    return { ok: false as const, error: "invalid_policy_resource_kind", message: "resource.resourceKind must be a valid policy resource kind." };
+  }
+  const actorKind = subjectRecord.actorKind;
+  if (actorKind !== undefined && actorKind !== "user" && actorKind !== "team" && actorKind !== "system" && actorKind !== "service") {
+    return { ok: false as const, error: "invalid_policy_actor_kind", message: "subject.actorKind must be user, team, system, or service." };
+  }
+  return {
+    ok: true as const,
+    request: {
+      subject: createPolicySubject({
+        actorId: stringValue(subjectRecord.actorId),
+        actorKind: actorKind as "user" | "team" | "system" | "service" | undefined,
+        roles: stringArrayValue(subjectRecord.roles),
+        teams: stringArrayValue(subjectRecord.teams)
+      }),
+      action,
+      resource: createPolicyResource({
+        resourceKind,
+        resourceId: stringValue(resourceRecord.resourceId),
+        metadata: recordValue(resourceRecord.metadata)
+      }),
+      context: createPolicyContext({
+        taskId: stringValue(contextRecord.taskId),
+        taskRunId: stringValue(contextRecord.taskRunId),
+        repoId: stringValue(contextRecord.repoId),
+        branchName: stringValue(contextRecord.branchName),
+        modelId: stringValue(contextRecord.modelId),
+        providerKind: stringValue(contextRecord.providerKind),
+        runnerKind: stringValue(contextRecord.runnerKind),
+        command: stringValue(contextRecord.command),
+        skillRefs: Array.isArray(contextRecord.skillRefs) ? contextRecord.skillRefs : undefined,
+        harnessRef: contextRecord.harnessRef,
+        instructionRefs: Array.isArray(contextRecord.instructionRefs) ? contextRecord.instructionRefs : undefined,
+        riskScore: typeof contextRecord.riskScore === "number" ? contextRecord.riskScore : undefined,
+        environment: recordValue(contextRecord.environment),
+        metadata: recordValue(contextRecord.metadata)
+      })
+    }
+  };
+}
+
 async function handleRequest(request: IncomingMessage, response: ServerResponse, context: RouteContext): Promise<void> {
   try {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -176,9 +315,475 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           remoteCompletionEnabled: context.llmGatewayService.getConfig().remoteCompletionEnabled,
           modelCatalogStatus: "available",
           gatewayHealth: "available"
+        },
+        agentRunner: {
+          runnerKind: context.agentRunnerService.getConfig().runnerKind,
+          localRunnerEnabled: context.agentRunnerService.getConfig().localRunnerEnabled,
+          localCommandExecutionEnabled: context.agentRunnerService.getConfig().localCommandExecutionEnabled,
+          workspaceRootConfigured: context.agentRunnerService.getConfig().workspaceRootConfigured,
+          commandExecutorKind: context.agentRunnerService.getConfig().commandExecutorKind,
+          maxRuntimeMs: context.agentRunnerService.getConfig().maxRuntimeMs,
+          llmProviderKind: context.llmGatewayService.getConfig().providerKind,
+          gitProviderKind: context.gitProviderConfig.providerKind
+        },
+        policy: {
+          engineKind: context.policyService.getConfig().engineKind,
+          rulesLoaded: context.policyService.getConfig().ruleCount,
+          auditEnabled: context.policyService.getConfig().auditEnabled
+        },
+        providerAbstraction: {
+          status: context.providerAbstractionService.getConfig().status,
+          providerCatalogCount: context.providerAbstractionService.getConfig().providerCatalogCount,
+          localAgentSupportEnabled: context.providerAbstractionService.getConfig().localAgentSupportEnabled,
+          connectedLocalAgents: context.providerAbstractionService.getConfig().connectedLocalAgents,
+          credentialManagerKind: context.providerAbstractionService.getConfig().credentialManagerKind,
+          tokenResolverKind: context.providerAbstractionService.getConfig().tokenResolverKind
+        },
+        security: {
+          secretManagerKind: context.securityService.getConfig().secretManagerKind,
+          sandboxSupportStatus: context.securityService.getConfig().sandboxSupportStatus,
+          defaultSandboxProfile: context.securityService.getConfig().defaultSandboxProfile,
+          networkDefaultAction: context.securityService.getConfig().networkDefaultAction,
+          redactionEnabled: context.securityService.getConfig().redactionEnabled,
+          productionSecretInjection: false,
+          productionSandboxRuntime: false
         }
       });
       return;
+    }
+
+    if (segments[0] === "policy") {
+      const policyService = context.policyService;
+
+      if (method === "GET" && segments[1] === "config") {
+        sendJson(response, 200, { config: policyService.getConfig() });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "rules" && segments.length === 2) {
+        sendJson(response, 200, { rules: policyService.listRules().map(policyRuleToDto) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "rules" && segments.length === 3) {
+        const rule = policyService.getRule(segments[2]);
+        if (!rule) notFound("policy rule", segments[2]);
+        sendJson(response, 200, { rule: policyRuleToDto(rule) });
+        return;
+      }
+
+      if (method === "POST" && segments[1] === "evaluate") {
+        const body = await readJson(request) as Record<string, unknown>;
+        const parsed = policyEvaluationRequestFromBody(body);
+        if (!parsed.ok) {
+          sendJson(response, 400, { error: parsed.error, message: parsed.message });
+          return;
+        }
+        sendJson(response, 200, { decision: policyDecisionToDto(policyService.evaluate(parsed.request)) });
+        return;
+      }
+
+      if (method === "POST" && segments[1] === "evaluate-many") {
+        const body = await readJson(request) as Record<string, unknown>;
+        const requests = Array.isArray(body.requests) ? body.requests : undefined;
+        if (!requests) {
+          sendJson(response, 400, { error: "invalid_policy_requests", message: "requests must be an array." });
+          return;
+        }
+        const parsed = requests.map((item) => policyEvaluationRequestFromBody(recordValue(item)));
+        const invalid = parsed.find((item) => !item.ok);
+        if (invalid && !invalid.ok) {
+          sendJson(response, 400, { error: invalid.error, message: invalid.message });
+          return;
+        }
+        const decisions = policyService.evaluateMany(parsed.filter((item): item is Extract<typeof item, { ok: true }> => item.ok).map((item) => item.request));
+        sendJson(response, 200, { decisions: decisions.map(policyDecisionToDto) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "audit") {
+        const action = url.searchParams.get("action") ?? undefined;
+        if (action !== undefined && !isPolicyAction(action)) {
+          sendJson(response, 400, { error: "invalid_policy_action", message: "action must be a valid policy action." });
+          return;
+        }
+        sendJson(response, 200, {
+          auditEntries: policyService.listAuditEntries({
+            action,
+            actorId: url.searchParams.get("actorId") ?? undefined,
+            taskId: url.searchParams.get("taskId") ?? undefined,
+            taskRunId: url.searchParams.get("taskRunId") ?? undefined
+          }).map(policyDecisionAuditEntryToDto)
+        });
+        return;
+      }
+    }
+
+    if (segments[0] === "security") {
+      const securityService = context.securityService;
+
+      if (segments[1] === "secrets") {
+        if (method === "GET" && segments[2] === "refs") {
+          sendJson(response, 200, { secretRefs: securityService.listSecretRefs().map(secretRefToDto) });
+          return;
+        }
+        if (method === "GET" && segments[2] === "scopes") {
+          sendJson(response, 200, { secretScopes: securityService.listSecretScopes().map(secretScopeToDto) });
+          return;
+        }
+        if (method === "POST" && segments[2] === "leases" && segments[3] === "request") {
+          const body = await readJson(request) as Record<string, unknown>;
+          const secretRefId = stringValue(body.secretRefId);
+          const scopeId = stringValue(body.scopeId);
+          if (!secretRefId || !scopeId) {
+            sendJson(response, 400, { error: "invalid_secret_lease_request", message: "secretRefId and scopeId are required." });
+            return;
+          }
+          const lease = securityService.requestLease({
+            secretRefId,
+            scopeId,
+            taskId: stringValue(body.taskId),
+            taskRunId: stringValue(body.taskRunId),
+            actorId: stringValue(body.actorId),
+            ttlSeconds: typeof body.ttlSeconds === "number" ? body.ttlSeconds : undefined,
+            reason: stringValue(body.reason),
+            metadata: recordValue(body.metadata)
+          });
+          sendJson(response, lease.status === "issued" ? 201 : 409, { lease: secretLeaseToDto(lease), safeEnvironment: securityService.getSafeEnvironment(lease.id) });
+          return;
+        }
+        if (method === "GET" && segments[2] === "leases") {
+          sendJson(response, 200, {
+            leases: securityService.listSecretLeases({
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined
+            }).map(secretLeaseToDto)
+          });
+          return;
+        }
+        if (method === "POST" && segments[2] === "leases" && segments[4] === "revoke") {
+          try {
+            sendJson(response, 200, { lease: secretLeaseToDto(securityService.revokeLease(segments[3])) });
+          } catch (error) {
+            sendJson(response, 404, { error: "secret_lease_not_found", message: error instanceof Error ? error.message : "Secret lease not found." });
+          }
+          return;
+        }
+        if (method === "GET" && segments[2] === "audit") {
+          sendJson(response, 200, {
+            auditEvents: securityService.listAuditEvents({
+              targetKind: "secret",
+              eventType: url.searchParams.get("eventType") ?? undefined,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+              actorId: url.searchParams.get("actorId") ?? undefined
+            }).map(securityAuditEventToDto)
+          });
+          return;
+        }
+      }
+
+      if (segments[1] === "sandbox") {
+        if (method === "GET" && segments[2] === "profiles") {
+          sendJson(response, 200, { sandboxProfiles: securityService.listSandboxProfiles().map(sandboxProfileToDto) });
+          return;
+        }
+        if (method === "GET" && segments[2] === "sessions") {
+          sendJson(response, 200, {
+            sandboxSessions: securityService.listSandboxSessions({
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined
+            }).map(sandboxSessionToDto)
+          });
+          return;
+        }
+        if (method === "POST" && segments[2] === "sessions") {
+          const body = await readJson(request) as Record<string, unknown>;
+          const profileId = stringValue(body.profileId);
+          if (!profileId) {
+            sendJson(response, 400, { error: "invalid_sandbox_session", message: "profileId is required." });
+            return;
+          }
+          const result = securityService.createSandboxSession({
+            profileId,
+            taskId: stringValue(body.taskId),
+            taskRunId: stringValue(body.taskRunId),
+            actorId: stringValue(body.actorId),
+            runnerKind: stringValue(body.runnerKind),
+            workspaceId: stringValue(body.workspaceId),
+            metadata: recordValue(body.metadata)
+          });
+          sendJson(response, result.session ? 201 : 409, {
+            session: result.session ? sandboxSessionToDto(result.session) : undefined,
+            decision: sandboxDecisionToDto(result.decision)
+          });
+          return;
+        }
+        if (method === "GET" && segments[2] === "audit") {
+          sendJson(response, 200, {
+            auditEvents: securityService.listAuditEvents({
+              targetKind: "sandbox",
+              eventType: url.searchParams.get("eventType") ?? undefined,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+              actorId: url.searchParams.get("actorId") ?? undefined
+            }).map(securityAuditEventToDto)
+          });
+          return;
+        }
+      }
+
+      if (segments[1] === "network" && method === "GET" && segments[2] === "policies") {
+        sendJson(response, 200, { networkPolicies: securityService.listNetworkEgressPolicies().map(networkEgressPolicyToDto) });
+        return;
+      }
+
+      if (segments[1] === "redaction") {
+        if (method === "GET" && segments[2] === "policies") {
+          sendJson(response, 200, { redactionPolicies: securityService.listRedactionPolicies().map(redactionPolicyToDto) });
+          return;
+        }
+        if (method === "POST" && segments[2] === "test") {
+          const body = await readJson(request) as Record<string, unknown>;
+          const text = typeof body.text === "string" ? body.text : "";
+          const result = securityService.redactText({
+            text,
+            policyId: stringValue(body.policyId),
+            actorId: stringValue(body.actorId),
+            taskId: stringValue(body.taskId),
+            taskRunId: stringValue(body.taskRunId),
+            metadata: { source: "api_redaction_test" }
+          });
+          sendJson(response, 200, { result: redactionResultToDto(result) });
+          return;
+        }
+      }
+    }
+
+    if (segments[0] === "providers") {
+      const providerService = context.providerAbstractionService;
+
+      if (method === "GET" && segments.length === 1) {
+        sendJson(response, 200, { providers: providerService.listProviders().map(providerCatalogEntryToDto) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "catalog") {
+        sendJson(response, 200, { providers: providerService.listProviders().map(providerCatalogEntryToDto) });
+        return;
+      }
+
+      if (method === "POST" && segments[1] === "validate") {
+        const body = await readJson(request) as Record<string, unknown>;
+        const providerId = stringValue(body.providerId);
+        if (!providerId) {
+          sendJson(response, 400, { error: "invalid_provider_validation", message: "providerId is required." });
+          return;
+        }
+        const validation = providerService.validateProvider(providerId);
+        sendJson(response, validation.ok ? 200 : 409, { validation: providerValidationResultToDto(validation) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "auth-types") {
+        sendJson(response, 200, { authTypes: providerService.listAuthTypes() });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "local-cli" && segments[2] === "templates") {
+        sendJson(response, 200, { templates: providerService.listLocalCliTemplates().map(localCliProviderConfigToDto) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "local-agents") {
+        sendJson(response, 200, { localAgents: providerService.listLocalAgents().map(localAgentDescriptorToDto) });
+        return;
+      }
+
+      if (method === "POST" && segments[1] === "invoke") {
+        const body = await readJson(request) as Record<string, unknown>;
+        const providerId = stringValue(body.providerId);
+        const prompt = stringValue(body.prompt);
+        if (!providerId || !prompt) {
+          sendJson(response, 400, { error: "invalid_provider_invocation", message: "providerId and prompt are required." });
+          return;
+        }
+        const result = await providerService.invoke({
+          providerId,
+          prompt,
+          taskId: stringValue(body.taskId),
+          taskRunId: stringValue(body.taskRunId),
+          actorId: stringValue(body.actorId),
+          modelId: stringValue(body.modelId),
+          context: recordValue(body.context),
+          instructionSetHash: stringValue(body.instructionSetHash),
+          workspaceRef: stringValue(body.workspaceRef),
+          metadata: recordValue(body.metadata)
+        });
+        sendJson(response, result.status === "completed" ? 201 : 409, { result: providerInvocationResultToDto(result) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "audit") {
+        sendJson(response, 200, {
+          auditEvents: providerService.listAuditEvents({
+            providerId: url.searchParams.get("providerId") ?? undefined,
+            eventType: url.searchParams.get("eventType") ?? undefined,
+            actorId: url.searchParams.get("actorId") ?? undefined
+          }).map(providerAuditEventToDto)
+        });
+        return;
+      }
+
+      if (method === "GET" && segments.length === 2) {
+        const provider = providerService.getProvider(segments[1]);
+        if (!provider) notFound("provider catalog entry", segments[1]);
+        sendJson(response, 200, {
+          provider: providerCatalogEntryToDto(provider),
+          credentialReference: credentialReferenceResultToDto(providerService.getCredentialReference(provider.id))
+        });
+        return;
+      }
+    }
+
+    if (segments[0] === "agents") {
+      const agentService = context.agentRunnerService;
+
+      if (method === "GET" && segments[1] === "runners") {
+        sendJson(response, 200, { runners: agentService.listRunners() });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "config") {
+        sendJson(response, 200, { config: agentRunnerConfigToDto(agentService.getConfig()) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "executors") {
+        sendJson(response, 200, { executors: agentService.listExecutors() });
+        return;
+      }
+
+      if (segments[1] === "workspaces") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { workspaces: agentService.listWorkspaces().map(agentWorkspaceToDto) });
+          return;
+        }
+        const workspaceId = segments[2];
+        if (!workspaceId) {
+          sendJson(response, 400, { error: "missing_workspace_id", message: "workspace id is required." });
+          return;
+        }
+        const workspace = agentService.getWorkspace(workspaceId);
+        if (!workspace) notFound("agent workspace", workspaceId);
+        if (method === "GET") {
+          sendJson(response, 200, { workspace: agentWorkspaceToDto(workspace) });
+          return;
+        }
+      }
+
+      if (segments[1] === "runs") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            agentRuns: agentService.listRuns({
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined
+            }).map(agentRunToDto)
+          });
+          return;
+        }
+
+        if (method === "POST" && segments.length === 2) {
+          const body = await readJson(request) as Record<string, unknown>;
+          const taskId = stringValue(body.taskId);
+          const taskRunId = stringValue(body.taskRunId);
+          const prompt = stringValue(body.prompt);
+          const selectedModelRef = stringValue(body.selectedModelRef) ?? "mock-coder@1.0";
+          if (!taskId || !taskRunId || !prompt) {
+            sendJson(response, 400, { error: "invalid_agent_run", message: "taskId, taskRunId, and prompt are required." });
+            return;
+          }
+          const run = await agentService.runAgent({
+            taskId,
+            taskRunId,
+            actorId: stringValue(body.actorId) ?? "mock-agent-actor",
+            repoRef: {
+              repoId: stringValue(body.repoId) ?? "repo_demo_backend",
+              localPath: stringValue(body.localPath)
+            },
+            branchRef: {
+              repoId: stringValue(body.repoId) ?? "repo_demo_backend",
+              branchName: stringValue(body.branchName) ?? "mock-agent-run"
+            },
+            selectedModelRef,
+            selectedSkillRefs: registryRefsValue(body.selectedSkillRefs, "skill", "mock-runner-skill"),
+            selectedHarnessRef: registryRefValue(body.selectedHarnessRef, "harness", "backend-node20"),
+            selectedInstructionRefs: registryRefsValue(body.selectedInstructionRefs, "instruction", "org-secure-coding-baseline"),
+            prompt,
+            allowedCommands: Array.isArray(body.allowedCommands) ? body.allowedCommands.filter((command): command is string => typeof command === "string") : [],
+            testCommands: Array.isArray(body.testCommands) ? body.testCommands.filter((command): command is string => typeof command === "string") : ["pnpm test"],
+            maxRuntimeMs: typeof body.maxRuntimeMs === "number" ? body.maxRuntimeMs : context.agentRunnerConfig.maxRuntimeMs,
+            metadata: {
+              budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined,
+              source: "api"
+            }
+          });
+          sendJson(response, run.status === "blocked" ? 409 : 201, { agentRun: agentRunToDto(run) });
+          return;
+        }
+
+        const runId = segments[2];
+        if (!runId) {
+          sendJson(response, 400, { error: "missing_agent_run_id", message: "agent run id is required." });
+          return;
+        }
+        const run = agentService.getRun(runId);
+        if (!run) notFound("agent run", runId);
+
+        if (method === "GET" && segments.length === 3) {
+          sendJson(response, 200, { agentRun: agentRunToDto(run) });
+          return;
+        }
+        if (method === "GET" && segments[3] === "audit") {
+          sendJson(response, 200, { auditEvents: agentService.listAuditEvents({ runId }).map(agentRunAuditEventToDto) });
+          return;
+        }
+        if (method === "GET" && segments[3] === "instructions") {
+          const assembly = agentService.getInstructionAssemblyForTaskRun(run.taskRunId);
+          sendJson(response, 200, { instructionAssembly: assembly ? instructionAssemblyToDto(assembly) : undefined });
+          return;
+        }
+        if (method === "GET" && segments[3] === "commands") {
+          sendJson(response, 200, {
+            commandResults: agentService.listCommandResults({ agentRunId: runId }).map(commandExecutionResultToDto)
+          });
+          return;
+        }
+        if (method === "GET" && segments[3] === "workspace") {
+          const workspace = agentService.getWorkspaceForRun(runId);
+          sendJson(response, 200, { workspace: workspace ? agentWorkspaceToDto(workspace) : undefined });
+          return;
+        }
+        if (method === "POST" && segments[3] === "execute-command") {
+          const body = await readJson(request) as Record<string, unknown>;
+          const command = stringValue(body.command);
+          const args = Array.isArray(body.args) ? body.args.filter((arg): arg is string => typeof arg === "string") : [];
+          if (!command) {
+            sendJson(response, 400, { error: "invalid_command", message: "command is required." });
+            return;
+          }
+          const commandResult = await agentService.executeCommandForRun(runId, {
+            workspacePath: stringValue(body.workspacePath),
+            command,
+            args,
+            allowedCommands: Array.isArray(body.allowedCommands) ? body.allowedCommands.filter((item): item is string => typeof item === "string") : [],
+            deniedCommands: Array.isArray(body.deniedCommands) ? body.deniedCommands.filter((item): item is string => typeof item === "string") : undefined,
+            timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined
+          });
+          sendJson(response, commandResult.status === "blocked" ? 409 : 200, { commandResult: commandExecutionResultToDto(commandResult) });
+          return;
+        }
+      }
     }
 
     if (segments[0] === "improvement") {
@@ -989,8 +1594,85 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         });
         return;
       }
+      if (method === "POST" && segments[2] === "run-agent") {
+        const activeRun = store.listTaskRuns(task.id).find((run) => run.status === "queued" || run.status === "running");
+        if (activeRun) {
+          sendJson(response, 409, { error: "conflict", message: `Task ${task.id} already has active run ${activeRun.id}` });
+          return;
+        }
+        const agent = task.selectedAgent ?? "codex";
+        const registryResolution = registryService.resolveRegistryContextForTask({
+          task,
+          agent,
+          repo: store.getRepo(task.repoId)
+        });
+        const selectedHarness = registryResolution.selectedHarness.id ? store.getHarness(registryResolution.selectedHarness.id) : undefined;
+        const taskRun = store.createTaskRun({
+          taskId: task.id,
+          attempt: store.listTaskRuns(task.id).length + 1,
+          status: "running",
+          agent,
+          model: task.selectedModel ?? "mock-coder@1.0",
+          modelProvider: "mock",
+          selectedHarnessId: selectedHarness?.id,
+          harnessVersion: `${registryResolution.selectedHarness.name}@${registryResolution.selectedHarness.version}`,
+          selectedSkillRefs: registryResolution.selectedSkills,
+          selectedHarnessRef: registryResolution.selectedHarness,
+          selectedInstructionRefs: registryResolution.selectedInstructions,
+          registryResolutionWarnings: registryResolution.warnings,
+          registryResolutionErrors: registryResolution.errors,
+          startedAt: new Date()
+        });
+        const agentRun = await context.agentRunnerService.runAgent({
+          taskId: task.id,
+          taskRunId: taskRun.id,
+          actorId: task.requesterUserId,
+          repoRef: {
+            repoId: task.repoId,
+            provider: store.getRepo(task.repoId)?.provider,
+            localPath: undefined
+          },
+          branchRef: {
+            repoId: task.repoId,
+            branchName: task.branchName ?? `mock-agent/${task.id}`,
+            baseBranch: task.baseBranch
+          },
+          selectedModelRef: task.selectedModel ?? "mock-coder@1.0",
+          selectedSkillRefs: registryResolution.selectedSkills,
+          selectedHarnessRef: registryResolution.selectedHarness,
+          selectedInstructionRefs: registryResolution.selectedInstructions,
+          prompt: task.description ?? task.title,
+          allowedCommands: selectedHarness?.allowedTools ?? [],
+          testCommands: selectedHarness?.testCommands ?? ["pnpm test"],
+          maxRuntimeMs: context.agentRunnerConfig.maxRuntimeMs,
+          metadata: {
+            budgetLimitUsd: task.budgetLimitUsd,
+            gitProviderKind: context.gitProviderConfig.providerKind,
+            source: "task_run_agent_endpoint"
+          }
+        });
+        store.updateTaskRun(taskRun.id, {
+          status: agentRun.status === "completed" ? "succeeded" : "failed",
+          finishedAt: new Date(),
+          resultSummary: agentRun.status === "completed" ? "Agent runner completed." : `Agent runner ${agentRun.status}.`,
+          changedFiles: agentRun.changedFiles,
+          diffSummary: agentRun.diffSummary,
+          errorMessage: agentRun.status === "completed" ? undefined : String(agentRun.metadata.reason ?? agentRun.status)
+        });
+        sendJson(response, agentRun.status === "blocked" ? 409 : 201, {
+          task: taskView(store.getTask(task.id) ?? task),
+          taskRun: store.listTaskRuns(task.id).find((run) => run.id === taskRun.id),
+          agentRun: agentRunToDto(agentRun),
+          usageEvents: store.listUsageEvents().filter((event) => event.taskRunId === taskRun.id)
+        });
+        return;
+      }
       if (method === "GET" && segments[2] === "runs") {
         sendJson(response, 200, { taskRuns: store.listTaskRuns(task.id) });
+        return;
+      }
+      if (method === "GET" && segments[2] === "agent-runs") {
+        sendJson(response, 200, { agentRuns: context.agentRunnerService.listRuns({ taskId: task.id }).map(agentRunToDto) });
         return;
       }
       if (method === "POST" && segments[2] === "plan") {
@@ -1505,16 +2187,47 @@ export function createApiServer(store: InMemoryAichestraStore = createSeededStor
 
 export function createApiServerWithStorage(storage: StorageProvider) {
   const store = storage.repositoryFactory.createDataStore();
-  const registryService = createRegistryService(storage.repositoryFactory.createRegistryRepositories());
-  const improvementServices = createImprovementServices(storage.repositoryFactory.createImprovementRepositories());
+  const policyService = new PolicyService();
+  const securityService = new SecurityControlService({ policyService });
+  const providerAbstractionService = new ProviderAbstractionService({ policyService });
+  const registryService = createRegistryService({
+    ...storage.repositoryFactory.createRegistryRepositories(),
+    authorizer: new PolicyBackedRegistryMutationAuthorizer({ policyService })
+  });
+  const improvementServices = createImprovementServices(storage.repositoryFactory.createImprovementRepositories(), { policyService });
   const git = createGitProviderFromEnv();
   const gitIntegrationService = new GitIntegrationService({
     store,
     provider: git.provider,
-    config: git.config
+    config: git.config,
+    policyService
   });
   const llmGatewayService = createDefaultLlmGatewayService({
-    usageRepository: store
+    usageRepository: store,
+    policyService
+  });
+  const agentRunnerConfig = createAgentRunnerConfigFromEnv();
+  const agentRunnerRepositories = createInMemoryAgentRunnerRepositories();
+  const agentRunner = agentRunnerConfig.runnerKind === "mock"
+    ? new MockAgentRunner(llmGatewayService)
+    : createAgentRunnerFromConfig(agentRunnerConfig, {
+      llmGateway: llmGatewayService,
+      commandResultRepository: agentRunnerRepositories.commandExecutionResultRepository,
+      workspaceManager: new LocalAgentWorkspaceManager({
+        workspaceRoot: agentRunnerConfig.workspaceRoot,
+        workspaceRepository: agentRunnerRepositories.workspaceRepository
+      })
+    });
+  const agentRunnerService = new AgentRunnerService({
+    runner: agentRunner,
+    config: agentRunnerConfig,
+    runRepository: agentRunnerRepositories.runRepository,
+    auditRepository: agentRunnerRepositories.auditRepository,
+    instructionAssemblyRepository: agentRunnerRepositories.instructionAssemblyRepository,
+    commandExecutionResultRepository: agentRunnerRepositories.commandExecutionResultRepository,
+    workspaceRepository: agentRunnerRepositories.workspaceRepository,
+    policyService,
+    securityService
   });
   return createServer((request, response) => {
     void handleRequest(request, response, {
@@ -1523,8 +2236,13 @@ export function createApiServerWithStorage(storage: StorageProvider) {
       gitIntegrationService,
       gitProviderConfig: git.config,
       llmGatewayService,
+      agentRunnerService,
+      agentRunnerConfig,
       registryService,
-      improvementServices
+      improvementServices,
+      policyService,
+      providerAbstractionService,
+      securityService
     });
   });
 }

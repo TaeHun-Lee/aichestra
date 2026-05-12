@@ -2,6 +2,13 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createId, seedHarnesses, seedInstructions, seedRepos, seedSkills } from "@aichestra/core";
+import {
+  PolicyService,
+  createPolicyContext,
+  createPolicyResource,
+  createPolicySubject
+} from "@aichestra/policy";
+import type { PolicyAction } from "@aichestra/policy";
 import type {
   AgentKind,
   ApprovalStatus,
@@ -1980,6 +1987,62 @@ export class MockRegistryMutationAuthorizer implements RegistryMutationAuthorize
     return {
       allowed,
       reason: allowed ? "allowed by mock registry role" : `missing permission ${permission}`,
+      requiredPermission: permission,
+      actorId: actor.id,
+      targetKind: target.targetKind,
+      targetId: target.targetId
+    };
+  }
+}
+
+function registryPermissionToPolicyAction(permission: RegistryPermission): PolicyAction | undefined {
+  if (permission === "registry.create") return "registry.create";
+  if (permission === "registry.update" || permission === "registry.status.change" || permission === "registry.eval.change" || permission === "registry.checksum.verify") return "registry.update";
+  if (permission === "registry.approval.change") return "registry.approve";
+  if (permission === "registry.rollback") return "registry.rollback";
+  return undefined;
+}
+
+export class PolicyBackedRegistryMutationAuthorizer implements RegistryMutationAuthorizer {
+  private readonly fallback: RegistryMutationAuthorizer;
+  private readonly policyService: PolicyService;
+
+  constructor(input: { policyService: PolicyService; fallback?: RegistryMutationAuthorizer }) {
+    this.policyService = input.policyService;
+    this.fallback = input.fallback ?? new MockRegistryMutationAuthorizer();
+  }
+
+  authorize(actor: RegistryActor, permission: RegistryPermission, target: RegistryMutationTarget = {}) {
+    const fallbackDecision = this.fallback.authorize(actor, permission, target);
+    if (!fallbackDecision.allowed) return fallbackDecision;
+    const action = registryPermissionToPolicyAction(permission);
+    if (!action) return fallbackDecision;
+    const policyDecision = this.policyService.evaluate({
+      subject: createPolicySubject({
+        actorId: actor.id,
+        actorKind: actor.roles.includes("system") ? "system" : "user",
+        roles: actor.roles,
+        teams: actor.teams
+      }),
+      action,
+      resource: createPolicyResource({
+        resourceKind: "registry_item",
+        resourceId: target.targetId,
+        metadata: {
+          targetKind: target.targetKind
+        }
+      }),
+      context: createPolicyContext({
+        metadata: {
+          permission,
+          targetKind: target.targetKind,
+          targetId: target.targetId
+        }
+      })
+    });
+    return {
+      allowed: policyDecision.allowed,
+      reason: policyDecision.allowed ? fallbackDecision.reason : policyDecision.reason,
       requiredPermission: permission,
       actorId: actor.id,
       targetKind: target.targetKind,

@@ -1,6 +1,14 @@
 import { createId } from "@aichestra/core";
 import type { LlmCallInput, LlmCallResult, LlmGateway as LegacyLlmGateway } from "@aichestra/adapters";
+import {
+  PolicyService,
+  createPolicyContext,
+  createPolicyResource,
+  createPolicySubject
+} from "@aichestra/policy";
+import type { PolicyDecision } from "@aichestra/policy";
 import { ModelCatalogService, type ModelCatalogRepository } from "./catalog.ts";
+import { ProviderCatalogService } from "./enterprise-providers.ts";
 import { MockLLMProvider, createLlmProviderFromEnv } from "./providers.ts";
 import {
   allowsProvider,
@@ -52,6 +60,8 @@ export type LLMGatewayServiceInput = {
   auditRepository?: LLMAuditRepository;
   actorId?: string;
   recordLegacyUsage?: boolean;
+  policyService?: PolicyService;
+  enterpriseProviderCatalog?: ProviderCatalogService;
 };
 
 export class LLMGatewayService implements LegacyLlmGateway {
@@ -63,6 +73,8 @@ export class LLMGatewayService implements LegacyLlmGateway {
   private readonly usageRepository?: LLMUsageRepository;
   private readonly actorId: string;
   private readonly recordLegacyUsage: boolean;
+  private readonly policyService: PolicyService;
+  private readonly enterpriseProviderCatalog: ProviderCatalogService;
 
   constructor(input: LLMGatewayServiceInput = {}) {
     const providerConfig = input.config ?? createLlmProviderFromEnv({}).config;
@@ -74,6 +86,8 @@ export class LLMGatewayService implements LegacyLlmGateway {
     this.usageRepository = input.usageRepository;
     this.actorId = input.actorId ?? "mock-llm-actor";
     this.recordLegacyUsage = input.recordLegacyUsage ?? false;
+    this.policyService = input.policyService ?? new PolicyService();
+    this.enterpriseProviderCatalog = input.enterpriseProviderCatalog ?? new ProviderCatalogService();
   }
 
   getConfig(): LLMProviderRuntimeConfig {
@@ -88,6 +102,14 @@ export class LLMGatewayService implements LegacyLlmGateway {
       { providerKind: "mock", default: this.provider.getProviderKind() === "mock", remote: false, enabled: true },
       { providerKind: "openai_compatible", default: this.provider.getProviderKind() === "openai_compatible", remote: true, enabled: this.config.remoteLlmEnabled }
     ];
+  }
+
+  listEnterpriseProviders() {
+    return this.enterpriseProviderCatalog.listProviders();
+  }
+
+  getEnterpriseProvider(id: string) {
+    return this.enterpriseProviderCatalog.getProvider(id);
   }
 
   async validateConnection() {
@@ -191,6 +213,27 @@ export class LLMGatewayService implements LegacyLlmGateway {
       };
     }
 
+    const policyDecision = this.evaluateCompletionPolicy(request, route.model, route.budgetDecision);
+    if (!policyDecision.allowed) {
+      this.recordAuditEvent({
+        eventType: "llm_completion_blocked",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId: request.actorId ?? this.actorId,
+        providerKind: route.model.providerKind,
+        modelId: route.model.id,
+        result: "blocked",
+        reason: policyDecision.reason,
+        metadata: {
+          source: "llm_gateway",
+          provider_id: request.providerId,
+          policy_decision_id: policyDecision.id,
+          matched_rule_ids: policyDecision.matchedRuleIds
+        }
+      });
+      return { ok: false, reason: policyDecision.reason, budgetDecision: route.budgetDecision };
+    }
+
     const providerResult = await this.provider.createCompletion(request, route.model);
     if (!providerResult.ok || !providerResult.result) {
       this.recordAuditEvent({
@@ -219,6 +262,8 @@ export class LLMGatewayService implements LegacyLlmGateway {
       metadata: {
         source: "llm_gateway",
         gateway_request_id: providerResult.result.id,
+        provider_id: providerResult.result.providerId ?? request.providerId,
+        billing_mode: this.providerMetadataForRequest(request).billingMode,
         usage_event_id: usageEvent?.id,
         estimated_cost_usd: providerResult.result.estimatedCostUsd
       }
@@ -371,6 +416,27 @@ export class LLMGatewayService implements LegacyLlmGateway {
       });
       return { ok: false, reason: route.reason ?? route.budgetDecision?.reason, budgetDecision: route.budgetDecision };
     }
+    const policyDecision = this.evaluateCompletionPolicy(request, route.model, route.budgetDecision);
+    if (!policyDecision.allowed) {
+      this.recordAuditEvent({
+        eventType: "llm_completion_blocked",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId: request.actorId ?? this.actorId,
+        providerKind: route.model.providerKind,
+        modelId: route.model.id,
+        result: "blocked",
+        reason: policyDecision.reason,
+        metadata: {
+          source: "llm_gateway",
+          policy_decision_id: policyDecision.id,
+          matched_rule_ids: policyDecision.matchedRuleIds,
+          provider_id: request.providerId,
+          legacy_runner_call: request.metadata?.legacy_runner_call === true
+        }
+      });
+      return { ok: false, reason: policyDecision.reason, budgetDecision: route.budgetDecision };
+    }
     const providerResult = await this.provider.createCompletion(request, route.model);
     if (!providerResult.ok || !providerResult.result) {
       this.recordAuditEvent({
@@ -397,6 +463,8 @@ export class LLMGatewayService implements LegacyLlmGateway {
       metadata: {
         source: "llm_gateway",
         gateway_request_id: providerResult.result.id,
+        provider_id: providerResult.result.providerId ?? request.providerId,
+        billing_mode: this.providerMetadataForRequest(request).billingMode,
         persisted_usage: false
       }
     });
@@ -421,6 +489,8 @@ export class LLMGatewayService implements LegacyLlmGateway {
         source: "llm_gateway",
         gateway_request_id: result.id,
         virtual_key_id: request.virtualKeyId,
+        provider_id: result.providerId ?? request.providerId,
+        billing_mode: this.providerMetadataForRequest(request).billingMode,
         provider_kind: result.providerKind,
         model_id: result.modelId
       }
@@ -444,6 +514,102 @@ export class LLMGatewayService implements LegacyLlmGateway {
       providerKind: model.providerKind,
       estimatedCostUsd,
       budgetRemainingUsd
+    };
+  }
+
+  private evaluateCompletionPolicy(request: LLMCompletionRequest, model: LLMModel, budgetDecision: BudgetDecision): PolicyDecision {
+    const subject = createPolicySubject({
+      actorId: request.actorId ?? this.actorId,
+      actorKind: request.actorId ? "user" : "service",
+      roles: ["system"]
+    });
+    const modelUse = this.policyService.evaluate({
+      subject,
+      action: "llm.model.use",
+      resource: createPolicyResource({
+        resourceKind: "llm_model",
+        resourceId: model.id,
+        metadata: {
+          providerKind: model.providerKind,
+          status: model.status
+        }
+      }),
+      context: createPolicyContext({
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        repoId: request.repoId,
+        modelId: model.id,
+        providerKind: model.providerKind,
+        environment: {
+          budgetAllowed: budgetDecision.allowed
+        },
+        metadata: {
+          source: "llm_gateway"
+        }
+      })
+    });
+    if (!modelUse.allowed) return modelUse;
+    if (model.providerKind !== "mock") {
+      const remote = this.policyService.evaluate({
+        subject,
+        action: "llm.remote_completion",
+        resource: createPolicyResource({
+          resourceKind: "llm_provider",
+          resourceId: model.providerKind,
+          metadata: {
+            providerKind: model.providerKind
+          }
+        }),
+        context: createPolicyContext({
+          taskId: request.taskId,
+          taskRunId: request.taskRunId,
+          repoId: request.repoId,
+          modelId: model.id,
+          providerKind: model.providerKind,
+          environment: {
+            remoteCompletionEnabled: this.config.remoteCompletionEnabled,
+            budgetAllowed: budgetDecision.allowed
+          },
+          metadata: {
+            source: "llm_gateway"
+          }
+        })
+      });
+      if (!remote.allowed) return remote;
+    }
+    return this.policyService.evaluate({
+      subject,
+      action: "llm.completion",
+      resource: createPolicyResource({
+        resourceKind: "llm_provider",
+        resourceId: model.providerKind,
+        metadata: {
+          providerKind: model.providerKind
+        }
+      }),
+      context: createPolicyContext({
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        repoId: request.repoId,
+        modelId: model.id,
+        providerKind: model.providerKind,
+        environment: {
+          budgetAllowed: budgetDecision.allowed
+        },
+        metadata: {
+          source: "llm_gateway"
+        }
+      })
+    });
+  }
+
+  private providerMetadataForRequest(request: LLMCompletionRequest): { providerId?: string; billingMode?: string } {
+    const metadata = request.metadata ?? {};
+    const providerId = request.providerId ?? (typeof metadata.providerId === "string" ? metadata.providerId : undefined);
+    const provider = providerId ? this.enterpriseProviderCatalog.getProvider(providerId) : undefined;
+    return {
+      providerId,
+      billingMode: provider?.billingMode ?? (typeof metadata.billingMode === "string" ? metadata.billingMode : undefined)
     };
   }
 }
