@@ -50,6 +50,33 @@ function findActiveTaskRun(store: InMemoryAichestraStore, taskId: string) {
   return store.listTaskRuns(taskId).find((run) => run.status === "queued" || run.status === "running");
 }
 
+function transitionToPolicyBlocked(store: InMemoryAichestraStore, task: Task): Task {
+  if (task.status === "policy_blocked") return task;
+  if (task.status === "completed" || task.status === "failed") {
+    return transitionIfNeeded(store, transitionIfNeeded(store, task, "queued"), "policy_blocked");
+  }
+  if (task.status === "queued") {
+    return transitionIfNeeded(store, task, "policy_blocked");
+  }
+  return transitionIfNeeded(store, transitionIfNeeded(store, task, "planned"), "policy_blocked");
+}
+
+function sanitizeTaskPromptForAgent(input: string): string {
+  return input
+    .replace(/<\|im_start\|/gi, "[escaped-im-start]")
+    .replace(/<\|im_end\|/gi, "[escaped-im-end]")
+    .replace(/<\/?system>/gi, "[escaped-system-tag]")
+    .replace(/<\/?developer>/gi, "[escaped-developer-tag]");
+}
+
+function composeAgentUserPrompt(input: string): string {
+  return [
+    "AICHESTRA_USER_TASK_INPUT_START",
+    sanitizeTaskPromptForAgent(input),
+    "AICHESTRA_USER_TASK_INPUT_END"
+  ].join("\n");
+}
+
 export async function runAgentTaskWorkflow(taskId: string, deps: RunAgentTaskWorkflowDeps): Promise<RunAgentTaskWorkflowResult> {
   const store = deps.store;
   const gitProvider = deps.gitProvider ?? new MockGitProvider();
@@ -114,8 +141,7 @@ export async function runAgentTaskWorkflow(taskId: string, deps: RunAgentTaskWor
   });
 
   if (!policyDecision.allowed) {
-    task = transitionIfNeeded(store, task, "planned");
-    task = transitionIfNeeded(store, task, "policy_blocked");
+    task = transitionToPolicyBlocked(store, task);
     store.recordAudit({
       action: "policy.blocked",
       targetType: "task",
@@ -184,7 +210,7 @@ export async function runAgentTaskWorkflow(taskId: string, deps: RunAgentTaskWor
   store.saveInstructionSet(instructionSet);
   store.updateTask(task.id, { instructionSetId: instructionSet.id });
 
-  const prompt = task.description ?? task.title;
+  const prompt = composeAgentUserPrompt(task.description ?? task.title);
   const agentRun = await agentRunner.run({
     taskId: task.id,
     taskRunId: taskRun.id,
@@ -209,6 +235,8 @@ export async function runAgentTaskWorkflow(taskId: string, deps: RunAgentTaskWor
       selected_skill_refs: registryResolution.selectedSkills.map(registryRefLabel),
       selected_harness_ref: registryRefLabel(registryResolution.selectedHarness),
       selected_instruction_refs: registryResolution.selectedInstructions.map(registryRefLabel),
+      instruction_set_id: instructionSet.id,
+      instruction_set_hash: instructionSet.assembledHash,
       registry_resolution_warnings: registryResolution.warnings,
       registry_resolution_errors: registryResolution.errors
     }

@@ -310,6 +310,7 @@ export function createDefaultSecuritySeed(): {
       {
         id: "secretref_mock_provider_metadata",
         provider: "mock",
+        secretKind: "mock_metadata",
         name: "mock-provider-metadata",
         scope: "scope_mock_provider_metadata",
         description: "Mock metadata reference; contains no secret value.",
@@ -324,6 +325,7 @@ export function createDefaultSecuritySeed(): {
       {
         id: "secretref_vault_future_placeholder",
         provider: "vault_future",
+        secretKind: "provider_api_key",
         name: "future-vault-secret",
         scope: "scope_future_real_credentials",
         description: "Future Vault reference placeholder; not connected.",
@@ -360,6 +362,20 @@ export function createDefaultSecuritySeed(): {
         requiresApproval: true,
         metadata: {
           notImplemented: true
+        }
+      },
+      {
+        id: "scope_env_provider_credentials",
+        name: "Env-backed provider credentials",
+        allowedResourceKinds: ["provider_credential", "llm_provider", "repo"],
+        allowedActions: ["provider.credential.resolve", "secret.lease.request", "secret.lease.issue"],
+        allowedProviderIds: ["github", "openai_compatible", "openai-api-key"],
+        maxTtlSeconds: 300,
+        requiresApproval: false,
+        metadata: {
+          secretMaterialAvailable: true,
+          envProviderOnly: true,
+          credentialCacheAccessAllowed: false
         }
       }
     ],

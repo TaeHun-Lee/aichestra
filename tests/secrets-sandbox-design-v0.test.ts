@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { createApiServer } from "@aichestra/api";
 import { createSeededStore } from "@aichestra/db";
+import { DemoDashboardDataProvider } from "../apps/web/lib/dashboard-data-provider.ts";
 import { ProviderAbstractionService, StaticCredentialManager, MockTokenResolver, ProviderCatalogService } from "@aichestra/llm-gateway";
 import { PolicyService, createPolicyContext, createPolicyResource, createPolicySubject } from "@aichestra/policy";
 import {
@@ -334,7 +335,7 @@ test("security API exposes metadata-only secrets, sandbox, network, redaction, a
 });
 
 test("dashboard renders security panels without exposing secrets", async () => {
-  const html = await renderDashboardHtml();
+  const html = await renderDashboardHtml(new DemoDashboardDataProvider());
 
   assert.equal(html.includes("Secrets and Sandbox"), true);
   assert.equal(html.includes("Secret manager"), true);

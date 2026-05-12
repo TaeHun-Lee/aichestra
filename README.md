@@ -2,7 +2,7 @@
 
 Aichestra is an AgentOps control plane for coordinating LLM usage, AI coding agents, Git branches, PRs, skills, harnesses, instruction artifacts, usage ledgers, and audit logs.
 
-This repository is an MVP scaffold. It is intentionally mock-first: no runtime code calls real LLM providers, Git hosting APIs, MCP gateways, secret stores, or production databases.
+This repository is an MVP scaffold. It is intentionally mock-first: default runtime code does not call real LLM providers, Git hosting APIs, MCP gateways, secret stores, or production databases. Real Git Adapter v1 and LLM Gateway v1 are controlled exceptions that remain disabled unless every explicit integration gate is configured.
 
 Design and work-order source documents live under `docs/briefs/`; the canonical bootstrap document is `docs/briefs/AICHESTRA_BOOTSTRAP.md`. See `docs/README.md` for the full documentation layout.
 
@@ -11,11 +11,11 @@ Design and work-order source documents live under `docs/briefs/`; the canonical 
 - `packages/core`: domain models, status transitions, validation schemas, seed data, instruction resolution, Conflict Manager scoring, and merge simulation interfaces.
 - `packages/git-adapter`: Git provider behavior, mock branch/PR creation, conflict risk, and local-only dry-run merge simulation.
 - `packages/improvement`: Phase 4 Preparation, Auto-improvement v0, and Governance v1 models, repository interfaces, in-memory repositories, DTOs, deterministic clustering, candidates, draft proposals, draft registry changes, readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, and auto-improvement safety policies.
-- `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, OpenAI-compatible skeleton, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 catalog/auth/credential/token/adapter/local-agent boundary skeletons, and Local Agent Protocol v1 mock channels/fixture daemon/compatibility/streaming models.
+- `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, gated OpenAI-compatible HTTP provider path, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 catalog/auth/credential/token/adapter/local-agent boundary skeletons, and Local Agent Protocol v1 mock channels/fixture daemon/compatibility/streaming models.
 - `packages/policy`: provider-neutral Policy-as-code Skeleton v0 models, static/mock policy engine, default restrictive rules, policy decision audit, DTOs, and policy service boundaries.
 - `packages/registry`: Skill, Harness, and Instruction registry interfaces, repository boundaries, DTO mappers, audit logs, history, rollback, approval queue read models, local eval result attachment, checksum verification, mock RBAC, local package manifests, import/export, semver range resolution v0, package diffs, validation helpers, and deterministic resolver.
 - `packages/runner`: provider-neutral agent runner contracts, deterministic MockAgentRunner, disabled-by-default LocalAgentRunner, harness execution policy, instruction assembly, in-memory runner repositories, runner DTOs/services, and mock test runner contracts.
-- `packages/security`: Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, DTOs, and in-memory repositories.
+- `packages/security`: Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, SecretRef-backed Provider Credentials v1 env provider, credential manager/handles/resolution audit, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, DTOs, and in-memory repositories.
 - `packages/adapters`: compatibility aggregate for shared adapter contracts and mocks.
 - `packages/db`: Postgres-oriented schema, storage provider abstraction, repository factory, in-memory repositories for mock-first runtime/tests, and opt-in Postgres repositories for the core durable slice.
 - `apps/api`: REST API skeleton using Node's local HTTP server.
@@ -62,7 +62,7 @@ Git integration remains mock-first by default. Real Git Adapter v1 supports mock
 AICHESTRA_GIT_PROVIDER=mock pnpm --filter @aichestra/api dev
 ```
 
-Remote Git remains disabled by default. GitHub branch/PR creation requires explicit env gates, a token, repo allowlist, and the allowed branch prefix. Merge/rebase remain unsupported:
+Remote Git remains disabled by default. GitHub branch/PR creation requires explicit env gates, a SecretRef-backed token or legacy env token, repo allowlist, and the allowed branch prefix. Merge/rebase remain unsupported:
 
 ```bash
 AICHESTRA_GIT_PROVIDER=github
@@ -70,6 +70,7 @@ AICHESTRA_ENABLE_REMOTE_GIT=false
 AICHESTRA_ALLOW_REMOTE_BRANCH_CREATE=false
 AICHESTRA_ALLOW_REMOTE_PR_CREATE=false
 AICHESTRA_ALLOW_REMOTE_MERGE=false
+AICHESTRA_GITHUB_TOKEN_SECRET_REF=
 AICHESTRA_GITHUB_TOKEN=
 AICHESTRA_GITHUB_OWNER=
 AICHESTRA_GITHUB_REPO=
@@ -78,19 +79,31 @@ AICHESTRA_GITHUB_ALLOWED_BRANCH_PREFIX=ai/
 AICHESTRA_GITHUB_INTEGRATION_TESTS=false
 ```
 
-LLM Gateway v0 remains mock-first. Remote LLM calls are blocked by default:
+The preferred GitHub credential path is `AICHESTRA_GITHUB_TOKEN_SECRET_REF` with `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=true` and `AICHESTRA_ALLOWED_SECRET_ENV_KEYS` containing the referenced env key. `AICHESTRA_GITHUB_TOKEN` remains a legacy fallback when no SecretRef is configured.
+
+LLM Gateway v1 remains mock-first by default. Remote LLM calls are blocked unless every explicit gate is enabled:
 
 ```bash
 AICHESTRA_LLM_PROVIDER=mock pnpm --filter @aichestra/api dev
 ```
 
-OpenAI-compatible settings are placeholders for future gated work and do not enable real provider calls in v0:
+OpenAI-compatible settings enable the only controlled real provider path in v1 when all gates, model allowlists, virtual-key budget policy, and policy checks pass:
 
 ```bash
 AICHESTRA_LLM_PROVIDER=openai_compatible
 AICHESTRA_ENABLE_REMOTE_LLM=false
 AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION=false
+AICHESTRA_LLM_BASE_URL=
+AICHESTRA_LLM_API_KEY_SECRET_REF=
+AICHESTRA_LLM_API_KEY=
+AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=false
+AICHESTRA_ALLOWED_SECRET_ENV_KEYS=
+AICHESTRA_LLM_ALLOWED_MODELS=
+AICHESTRA_LLM_DEFAULT_MODEL=
+AICHESTRA_LLM_INTEGRATION_TESTS=false
 ```
+
+The preferred OpenAI-compatible credential path is `AICHESTRA_LLM_API_KEY_SECRET_REF` with the explicit env SecretRef provider enabled and allowlisted. `AICHESTRA_LLM_API_KEY` remains a legacy fallback when no SecretRef is configured. The API key is read only inside the gated provider boundary and is never returned by `/health`, `/llm/config`, `/llm/audit`, usage metadata, or dashboard read models. BYOK, OAuth/device-code/WIF/IAM, broad multi-provider routing, streaming, and Local CLI provider execution remain out of scope.
 
 Enterprise LLM Provider Abstraction v0 adds provider catalog and credential boundary visibility only. It does not execute provider APIs or local vendor CLIs:
 
@@ -155,6 +168,23 @@ AICHESTRA_DASHBOARD_DISABLE_DEMO_FALLBACK=false
 ```
 
 Dashboard read endpoints are read-only and do not call GitHub, LLM providers, vendor CLIs, runner commands, secret stores, Local Agent transports, or workflow execution paths. Responses are sanitized and do not expose provider tokens, API keys, raw secrets, credential cache contents, or unredacted logs.
+
+SecretRef-backed Provider Credentials v1 adds metadata-only provider credential resolution for controlled GitHub and OpenAI-compatible paths. The env provider is disabled by default and reads only the requested allowlisted env key referenced by an active `SecretRef`:
+
+```bash
+AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=false
+AICHESTRA_ALLOWED_SECRET_ENV_KEYS=
+curl http://localhost:3000/security/credentials/refs
+curl -X POST http://localhost:3000/security/credentials/refs \
+  -H "Content-Type: application/json" \
+  -d '{ "id": "secretref_llm_api_key", "name": "LLM API key", "provider": "env", "secretKind": "llm_api_key", "envKey": "AICHESTRA_LLM_API_KEY", "scope": "scope_env_provider_credentials" }'
+curl -X POST http://localhost:3000/security/credentials/resolve/check \
+  -H "Content-Type: application/json" \
+  -d '{ "secretRefId": "secretref_llm_api_key", "purpose": "llm_api_call", "providerId": "openai_compatible" }'
+curl http://localhost:3000/security/credentials/audit
+```
+
+Credential APIs return status, handles, and audit ids only. They reject raw secret fields and credential cache paths, and never return env var values.
 
 Secrets and Sandbox Design v0 adds metadata-only security boundaries. It does not retrieve real secrets, inject secrets, run production sandboxes, or enforce network egress at the OS/container layer:
 
@@ -326,7 +356,7 @@ curl http://localhost:3000/git/audit
 curl http://localhost:3000/git/remote/audit
 ```
 
-Inspect LLM Gateway v0 state:
+Inspect LLM Gateway v1 state:
 
 ```bash
 curl http://localhost:3000/llm/providers
@@ -392,7 +422,7 @@ pnpm build
 
 Optional Postgres repository contract tests are skipped unless `AICHESTRA_TEST_DATABASE_URL` is set.
 
-Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v0 provider/catalog/virtual-key/budget/usage/API behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, Dashboard API-backed Read Model v0 endpoints/provider/fallback/no-secret behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0/v1 provider/service/API behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
+Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v1 provider/catalog/virtual-key/budget/usage/API/OpenAI-compatible mocked HTTP behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, Dashboard API-backed Read Model v0 endpoints/provider/fallback/no-secret behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0/v1 provider/service/API behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
 
 ## First Vertical Slice
 
@@ -430,7 +460,8 @@ Included:
 - Persistent DB v1 opt-in Postgres storage for Task, TaskRun, UsageLedger, BranchLease, MergeSimulationResult, MergeQueueEntry, Skill, Harness, Instruction, registry audit/history, registry packages, and registry eval results.
 - Real Integration Foundation v0 storage provider abstraction, repository inventory, Postgres schema design, migration skeleton, auth/RBAC readiness, Real Git Adapter readiness, dashboard read model plan, and repository contract tests.
 - Real Git Adapter v1 provider boundary, deterministic MockGitProvider default, LocalGitProvider fixture-safe changed-file inspection, gated GitHubGitProvider, GitHubClient boundary, controlled GitHub branch/PR/changed-file operations, GitIntegrationService, `/git/*` API visibility, health metadata, Git audit events, and dashboard visibility.
-- LLM Gateway v0 provider boundary, deterministic MockLLMProvider default, OpenAI-compatible skeleton with blocked remote calls, model catalog, virtual model keys, budget checks, usage ledger integration, `/llm/*` API visibility, health metadata, LLM audit events, and dashboard visibility.
+- LLM Gateway v1 provider boundary, deterministic MockLLMProvider default, gated OpenAI-compatible HTTP provider path, model catalog, virtual model keys, budget checks, usage ledger integration, `/llm/*` API visibility, health metadata, LLM audit events, and dashboard visibility.
+- SecretRef-backed Provider Credentials v1 metadata-only SecretRef credential model, explicit env secret provider, credential manager/handle/resolution results, GitHub and LLM credential integration, `/security/credentials/*` API visibility, health/dashboard status, credential audit, and redaction tests.
 - Local Agent Runner v1 provider boundary, deterministic MockAgentRunner default, disabled-by-default LocalAgentRunner, controlled fixture command execution boundary, workspace validation, harness policy gates, instruction assembly, `/agents/*` API visibility, health metadata, command result/workspace read models, runner audit events, and dashboard visibility.
 - Policy-as-code Skeleton v0 static policy engine, provider-neutral policy models, restrictive default rules, policy audit read model, `/policy/*` API visibility, health metadata, dashboard visibility, and Git/LLM/Runner/Registry service-boundary checks.
 - Enterprise LLM Provider Abstraction v0 provider kind/auth models, provider catalog skeletons, CredentialManager/TokenResolver interfaces, blocked ProviderAdapter skeletons, Local CLI provider contract, Aichestra Local Agent boundary models, parser/redaction utilities, `/providers/*` API visibility, health metadata, provider audit events, dashboard visibility, and policy hooks.
@@ -441,14 +472,14 @@ Deferred:
 
 - Phase 4 governance repositories remain in-memory for v1.
 - Production database operations, backups, migrations governance, pooling, and async repository refactors.
-- Real LLM provider calls.
+- Real LLM provider calls by default. LLM Gateway v1 supports one controlled OpenAI-compatible path only when explicit integration gates are configured.
 - Real Codex CLI, Claude Code, Aider, or production runner integration.
 - Local command execution outside controlled fixture/temp workspace mode.
-- BYOK, provider API key storage, real streaming, real billing, and remote LLM completions.
+- BYOK, production provider API key storage, real streaming, real billing, and default remote LLM completions.
 - Real GitHub writes outside explicit v1 gates, and all GitLab/Bitbucket writes.
 - Remote git fetch, push, provider merge, provider rebase, force push, branch deletion, production webhooks, GitHub App installation flow, or reviewer automation.
 - Real Kubernetes, Temporal, MCP gateway, SSO, SCIM, and billing.
-- Production-grade RBAC and secret storage.
+- Production-grade RBAC and cloud secret storage.
 - Production OPA/Rego or Cedar integration, policy bundle management, production auth-backed policy subjects, and persistent policy audit repositories.
 - Real enterprise LLM provider API calls, OAuth/device-code/WIF/IAM token exchange, vendor credential cache access, Aichestra Local Agent daemon or real transport, vendor CLI execution, and PTY terminal automation.
 - Real Vault/cloud secret manager integration, production secret injection, container/VM sandboxing, OS-level network egress enforcement, and Local Agent secret forwarding.
@@ -465,8 +496,8 @@ Deferred:
 
 ## Next Steps
 
-1. Implement LLM Gateway v1 if controlled real provider calls should be enabled next, or plan Real Git Adapter v2/webhooks if Git integration should continue first.
+1. Plan Real Git Adapter v2/webhooks, or implement LLM Gateway v2 multi-provider routing if LLM integration should continue first.
 2. Harden Local Agent Protocol persistence and consent UX before any real daemon or local CLI work.
-3. Harden LLM Gateway v0 with persistent model catalog/audit repositories before real provider calls.
+3. Harden LLM Gateway v1 with persistent model catalog/audit repositories and production secret backend planning before broader provider calls.
 4. Harden Local Agent Runner v1 with production sandbox runtime planning before any real agent CLI integration.
 5. Add production DB operational controls such as pooling, backups, restore drills, and migration governance.

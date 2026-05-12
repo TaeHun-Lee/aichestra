@@ -91,7 +91,7 @@ export class GitIntegrationService {
     this.policyService = input.policyService ?? new PolicyService();
   }
 
-  getConfig(): GitProviderConfigView & { localBranchCreateEnabled: boolean } {
+  getConfig(): GitProviderRuntimeConfig {
     return {
       providerKind: this.provider.getProviderKind(),
       remoteGitEnabled: this.config.remoteGitEnabled,
@@ -104,7 +104,12 @@ export class GitIntegrationService {
       githubAllowedRepoCount: this.githubAllowedRepos().length,
       githubAllowedBranchPrefix: this.githubAllowedBranchPrefix(),
       githubIntegrationTestsEnabled: this.config.githubIntegrationTestsEnabled ?? false,
-      localBranchCreateEnabled: this.config.localBranchCreateEnabled
+      localBranchCreateEnabled: this.config.localBranchCreateEnabled,
+      githubCredentialSource: this.config.githubCredentialSource ?? "none",
+      githubCredentialStatus: this.config.githubCredentialStatus ?? (this.config.githubConfigured ? "resolved" : "missing"),
+      githubCredentialReason: this.config.githubCredentialReason,
+      envSecretProviderEnabled: this.config.envSecretProviderEnabled ?? false,
+      allowedSecretEnvKeyCount: this.config.allowedSecretEnvKeyCount ?? 0
     };
   }
 
@@ -124,6 +129,8 @@ export class GitIntegrationService {
         operation: "validate_connection",
         result: this.config.remoteGitEnabled ? "allowed" : "blocked",
         githubConfigured: this.config.githubConfigured,
+        githubCredentialSource: this.config.githubCredentialSource ?? "none",
+        githubCredentialStatus: this.config.githubCredentialStatus ?? (this.config.githubConfigured ? "resolved" : "missing"),
         githubOwnerConfigured: Boolean(this.config.githubOwner),
         githubRepoConfigured: Boolean(this.config.githubRepo),
         allowedRepoCount: this.githubAllowedRepos().length,
@@ -798,7 +805,7 @@ export class GitIntegrationService {
     if (!this.config.remoteGitEnabled) return { ok: false, reason: "remote_git_disabled" };
     if (operation === "branch_create" && !this.config.remoteBranchCreateEnabled) return { ok: false, reason: "remote_branch_create_disabled" };
     if (operation === "pull_request_create" && !this.config.remotePullRequestCreateEnabled) return { ok: false, reason: "remote_pr_create_disabled" };
-    if (!this.config.githubConfigured) return { ok: false, reason: "github_credentials_missing" };
+    if (!this.config.githubConfigured) return { ok: false, reason: this.config.githubCredentialReason ?? credentialBlockedReason(this.config.githubCredentialStatus, "github_credentials_missing") };
     if (!this.repoAllowlisted(repo)) return { ok: false, reason: "repo_not_allowlisted" };
     if (branchName && !this.branchPrefixAllowed(branchName)) return { ok: false, reason: "branch_prefix_not_allowed" };
     return { ok: true };
@@ -826,6 +833,8 @@ export class GitIntegrationService {
       remotePullRequestCreateEnabled: this.config.remotePullRequestCreateEnabled,
       remoteMergeEnabled: false,
       githubConfigured: this.config.githubConfigured,
+      githubCredentialSource: this.config.githubCredentialSource ?? "none",
+      githubCredentialStatus: this.config.githubCredentialStatus ?? (this.config.githubConfigured ? "resolved" : "missing"),
       allowedRepoCount: this.githubAllowedRepos().length,
       allowedBranchPrefix: this.githubAllowedBranchPrefix()
     });
@@ -904,6 +913,14 @@ function sanitizeValue(value: unknown, key = ""): unknown {
       .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]");
   }
   return value;
+}
+
+function credentialBlockedReason(status: unknown, fallback: string): string {
+  if (status === "blocked") return "github_credential_blocked";
+  if (status === "denied") return "github_credential_denied";
+  if (status === "unavailable") return "github_credential_unavailable";
+  if (status === "missing") return "github_credentials_missing";
+  return fallback;
 }
 
 function repoSlug(repo: Repo): string {

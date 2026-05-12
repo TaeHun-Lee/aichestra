@@ -391,6 +391,19 @@ test("API exposes active leases, conflict risks, and merge queue actions", async
     assert.ok(firstQueueEntry);
     assert.ok(secondLease);
 
+    const originalAllowedRepoPaths = process.env.AICHESTRA_ALLOWED_REPO_PATHS;
+    process.env.AICHESTRA_ALLOWED_REPO_PATHS = "/tmp/aichestra-allowed-only";
+    const rejectedLocalSimulation = await postJson(address.port, "/merge-simulations", {
+      branchLeaseId: secondLease.id,
+      mode: "local_git_merge_tree",
+      repoPath: "/etc"
+    }) as { error: string };
+    if (originalAllowedRepoPaths === undefined) {
+      delete process.env.AICHESTRA_ALLOWED_REPO_PATHS;
+    } else {
+      process.env.AICHESTRA_ALLOWED_REPO_PATHS = originalAllowedRepoPaths;
+    }
+
     const simulation = await postJson(address.port, "/merge-simulations", {
       branchLeaseId: secondLease.id,
       status: "text_conflict"
@@ -407,6 +420,7 @@ test("API exposes active leases, conflict risks, and merge queue actions", async
     assert.equal(repoRisks.conflictRisks[0]?.riskLevel, "critical");
     assert.equal(runRisks.conflictRisks.length, 1);
     assert.equal(queue.mergeQueue.some((entry) => entry.status === "blocked" && entry.riskScore === 0.9), true);
+    assert.equal(rejectedLocalSimulation.error, "repo_path_not_allowlisted");
     assert.equal(simulation.mergeSimulation.status, "text_conflict");
     assert.equal(simulation.mergeSimulation.conflictingFiles.includes("src/auth/session.ts"), true);
     assert.equal(simulation.mergeQueue[0]?.recommendation, "conflict_detected");

@@ -272,7 +272,7 @@ test("Git, LLM, Runner, and Registry services consult policy gates", async () =>
     allowedCommands: ["git push origin main"]
   });
   assert.equal(command.status, "blocked");
-  assert.equal(command.blockedReason, "Command execution requires explicit local execution, harness, and workspace gates.");
+  assert.equal(command.blockedReason, "Runner may not run git fetch, push, merge, or rebase.");
 
   const authorizer = new PolicyBackedRegistryMutationAuthorizer({ policyService });
   const viewer: Parameters<PolicyBackedRegistryMutationAuthorizer["authorize"]>[0] = { id: "viewer", displayName: "Viewer", roles: ["registry_viewer"] };

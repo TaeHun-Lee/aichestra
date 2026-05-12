@@ -22,12 +22,15 @@ export function applySecurityRedaction(input: string, policy: Pick<RedactionPoli
   if (policy.maskApiKeys || policy.maskProviderTokens) {
     output = output
       .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, "[redacted-api-key]")
+      .replace(/\b(ghp_[A-Za-z0-9_]{8,})\b/g, "[redacted-api-key]")
+      .replace(/\b(github_pat_[A-Za-z0-9_]{8,})\b/g, "[redacted-api-key]")
       .replace(/\b(AIza[0-9A-Za-z_-]{8,})\b/g, "[redacted-api-key]");
   }
   if (policy.maskEnvDumps) {
     output = output
-      .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|LLM|GITHUB|GOOGLE_APPLICATION)_API_KEY)\s*=\s*[^\s]+/gi, "$1=[redacted]")
-      .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|LLM|GITHUB|GOOGLE_APPLICATION)_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+      .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|AICHESTRA_GITHUB|LLM|GITHUB|GOOGLE_APPLICATION)_API_KEY)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+      .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|AICHESTRA_GITHUB|LLM|GITHUB|GOOGLE_APPLICATION)_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+      .replace(/\b(AICHESTRA_GITHUB_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
       .replace(/GOOGLE_APPLICATION_CREDENTIALS\s*=\s*[^\s]+/gi, "GOOGLE_APPLICATION_CREDENTIALS=[redacted]");
   }
   if (policy.maskCredentialPaths) {
@@ -38,6 +41,36 @@ export function applySecurityRedaction(input: string, policy: Pick<RedactionPoli
       .replace(/gcloud[\\/]application_default_credentials/gi, "[redacted-credential-cache]");
   }
   return output;
+}
+
+const defaultRedactionPolicy = {
+  maskBearerTokens: true,
+  maskApiKeys: true,
+  maskCredentialPaths: true,
+  maskEnvDumps: true,
+  maskProviderTokens: true
+} satisfies Pick<RedactionPolicy, "maskBearerTokens" | "maskApiKeys" | "maskCredentialPaths" | "maskEnvDumps" | "maskProviderTokens">;
+
+const sensitiveMetadataKeyPattern = /token|secret|key|credential|authorization|password|prompt/i;
+
+export function sanitizeSecurityMetadata<T = unknown>(input: T): T {
+  return sanitizeSecurityValue(input) as T;
+}
+
+function sanitizeSecurityValue(value: unknown, key = ""): unknown {
+  if (sensitiveMetadataKeyPattern.test(key)) return "[redacted]";
+  if (value === undefined || value === null || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "string") return applySecurityRedaction(value, defaultRedactionPolicy);
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map((item) => sanitizeSecurityValue(item));
+  if (typeof value === "object") {
+    const sanitized: Record<string, unknown> = {};
+    for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+      sanitized[childKey] = sanitizeSecurityValue(childValue, childKey);
+    }
+    return sanitized;
+  }
+  return String(value);
 }
 
 export function limitBytes(input: string, maxBytes: number): string {

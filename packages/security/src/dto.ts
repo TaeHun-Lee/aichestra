@@ -1,4 +1,6 @@
 import type {
+  CredentialHandle,
+  CredentialResolutionResult,
   NetworkEgressDecision,
   NetworkEgressPolicy,
   RedactionPolicy,
@@ -17,13 +19,39 @@ export function secretRefToDto(secretRef: SecretRef) {
   return {
     id: secretRef.id,
     provider: secretRef.provider,
+    secretKind: secretRef.secretKind,
     name: secretRef.name,
+    envKey: secretRef.envKey,
+    envKeyConfigured: Boolean(secretRef.envKey),
     scope: secretRef.scope,
     description: secretRef.description,
     status: secretRef.status,
     metadata: sanitizeDtoMetadata(secretRef.metadata),
     createdAt: secretRef.createdAt.toISOString(),
     updatedAt: secretRef.updatedAt.toISOString(),
+    containsSecretMaterial: false
+  };
+}
+
+export function credentialHandleToDto(handle: CredentialHandle) {
+  return {
+    ...handle,
+    expiresAt: handle.expiresAt?.toISOString(),
+    metadata: sanitizeDtoMetadata(handle.metadata),
+    containsSecretMaterial: false
+  };
+}
+
+export function credentialResolutionResultToDto(result: CredentialResolutionResult) {
+  return {
+    id: result.id,
+    allowed: result.allowed,
+    status: result.status,
+    credentialHandle: result.credentialHandle ? credentialHandleToDto(result.credentialHandle) : undefined,
+    blockedReason: result.blockedReason,
+    policyDecisionId: result.policyDecisionId,
+    auditEventId: result.auditEventId,
+    createdAt: result.createdAt.toISOString(),
     containsSecretMaterial: false
   };
 }

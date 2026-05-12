@@ -2,6 +2,7 @@ import type { PolicyDecision } from "@aichestra/policy";
 
 export type SecretProviderKind =
   | "mock"
+  | "env"
   | "vault_future"
   | "aws_secrets_manager_future"
   | "gcp_secret_manager_future"
@@ -10,10 +11,21 @@ export type SecretProviderKind =
 
 export type SecretRefStatus = "active" | "disabled" | "revoked";
 
+export type SecretKind =
+  | "mock_metadata"
+  | "github_token"
+  | "llm_api_key"
+  | "provider_api_key"
+  | "webhook_secret"
+  | "future_oauth_token"
+  | "future_cloud_identity";
+
 export type SecretRef = {
   id: string;
   provider: SecretProviderKind;
+  secretKind: SecretKind;
   name: string;
+  envKey?: string;
   scope: string;
   description?: string;
   status: SecretRefStatus;
@@ -92,11 +104,74 @@ export type SecretRefValidationResult = {
 
 export type SecretAuditEventType =
   | "secret_ref_validated"
+  | "credential_secret_ref_created"
+  | "credential_secret_ref_disabled"
+  | "credential_secret_ref_revoked"
   | "secret_lease_requested"
   | "secret_lease_denied"
   | "secret_lease_issued_mock"
   | "secret_lease_revoked"
-  | "secret_access_blocked";
+  | "secret_access_blocked"
+  | "credential_resolution_requested"
+  | "credential_resolution_allowed"
+  | "credential_resolution_denied"
+  | "credential_resolution_missing"
+  | "credential_resolution_revoked"
+  | "credential_env_provider_disabled"
+  | "credential_env_key_not_allowlisted"
+  | "credential_cache_access_denied"
+  | "credential_value_redacted";
+
+export type CredentialPurpose =
+  | "github_api_call"
+  | "llm_api_call"
+  | "provider_api_call"
+  | "webhook_verification_future";
+
+export type CredentialHandleStatus = "resolved" | "blocked" | "missing" | "expired" | "revoked" | "unavailable";
+
+export type CredentialHandle = {
+  id: string;
+  secretRefId: string;
+  secretKind: SecretKind;
+  provider: SecretProviderKind;
+  status: CredentialHandleStatus;
+  expiresAt?: Date;
+  metadata: Record<string, unknown>;
+};
+
+export type CredentialResolutionStatus = "resolved" | "blocked" | "missing" | "denied" | "unavailable";
+
+export type CredentialResolutionRequest = {
+  secretRefId: string;
+  purpose: CredentialPurpose;
+  actorId?: string;
+  taskId?: string;
+  taskRunId?: string;
+  providerId?: string;
+  policyContext?: Record<string, unknown>;
+};
+
+export type CredentialResolutionResult = {
+  id: string;
+  allowed: boolean;
+  status: CredentialResolutionStatus;
+  credentialHandle?: CredentialHandle;
+  blockedReason?: string;
+  policyDecisionId?: string;
+  auditEventId?: string;
+  createdAt: Date;
+};
+
+export type InternalCredentialResolutionResult = CredentialResolutionResult & {
+  value?: string;
+};
+
+export type EnvSecretProviderConfig = {
+  enabled: boolean;
+  allowedEnvKeys: string[];
+  allowedEnvKeyCount: number;
+};
 
 export type SandboxKind = "none" | "local_temp_workspace" | "container_future" | "firecracker_future" | "kubernetes_future";
 
@@ -243,11 +318,15 @@ export type SecurityAuditEvent = {
   createdAt: Date;
 };
 
-export type SecretManagerKind = "mock";
+export type SecretManagerKind = "mock" | "mock_with_env_secret_provider";
 
 export type SecretManager = {
   getManagerKind(): SecretManagerKind;
   validateSecretRef(secretRef: SecretRef): SecretRefValidationResult;
+  createSecretRef(input: Omit<SecretRef, "createdAt" | "updatedAt"> & { createdAt?: Date; updatedAt?: Date }): SecretRef;
+  updateSecretRefStatus(secretRefId: string, status: SecretRefStatus, actorId?: string): SecretRef;
+  resolveCredential(request: CredentialResolutionRequest): CredentialResolutionResult;
+  resolveCredentialForInternalUse(request: CredentialResolutionRequest): InternalCredentialResolutionResult;
   requestLease(request: SecretLeaseRequest): SecretLease;
   revokeLease(leaseId: string): SecretLease;
   getSafeEnvironment(leaseId: string): SafeEnvironmentResult;

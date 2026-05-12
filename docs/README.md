@@ -33,6 +33,7 @@
 - [instruction-layer.md](foundations/instruction-layer.md)
 - [security-model.md](foundations/security-model.md)
 - [auth-rbac-readiness.md](foundations/auth-rbac-readiness.md)
+- [secretref-provider-credentials/v1.md](foundations/secretref-provider-credentials/v1.md) (+ plan)
 - [persistent-storage-schema-v0.md](foundations/persistent-storage-schema-v0.md)
 - [repository-inventory.md](foundations/repository-inventory.md)
 
@@ -45,7 +46,7 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 | Conflict Manager | [features/conflict-manager/](features/conflict-manager/) | v0, v1 |
 | Persistent DB | [features/persistent-db/](features/persistent-db/) | v1 (+ plan) |
 | Real Git Adapter | [features/real-git-adapter/](features/real-git-adapter/) | v0, v1 (+ plans, audits/v0-readiness) |
-| LLM Gateway | [features/llm-gateway/](features/llm-gateway/) | v0 (+ plan) |
+| LLM Gateway | [features/llm-gateway/](features/llm-gateway/) | v0, v1 (+ plans) |
 | Local Agent Runner | [features/local-agent-runner/](features/local-agent-runner/) | v0, v1 (+ plans) |
 | Local Agent Protocol | [features/local-agent-protocol/](features/local-agent-protocol/) | v0, v1 (+ plans) |
 | Enterprise LLM Provider | [features/enterprise-llm-provider/](features/enterprise-llm-provider/) | v0 (+ plan) |
@@ -65,7 +66,10 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 
 시점이 중요한 감사 보고서. 파일명 앞 `YYYY-MM-DD-` 접두사로 시계열화. 가장 최신부터 보면 됨.
 
+- 2026-05-12 — [secretref-provider-credentials-v1-audit.claude.md](audits/2026-05-12-secretref-provider-credentials-v1-audit.claude.md) — SecretRef Credentials v1 보안 감사 (이슈 #SR1~#SR8)
+- 2026-05-12 — [ai-behavior-audit.claude.md](audits/2026-05-12-ai-behavior-audit.claude.md) — AI 동작/지침 일관성 관점 감사 (신규 이슈 #N1~#N7)
 - 2026-05-12 — [audit_claude_01.html](audits/2026-05-12-audit_claude_01.html) — 5개 영역 통합 감사 (이슈 24건)
+- 2026-05-12 — [audit-remediation.codex.md](audits/2026-05-12-audit-remediation.codex.md) — 위 감사 항목 현재성 판단 및 적용 내역.
 - 2026-05-12 — [design-conformance-audit.claude.md](audits/2026-05-12-design-conformance-audit.claude.md)
 - 2026-05-12 — [final-audit-synthesis.md](audits/2026-05-12-final-audit-synthesis.md)
 - 2026-05-12 — [final-completion-audit.codex.md](audits/2026-05-12-final-completion-audit.codex.md)

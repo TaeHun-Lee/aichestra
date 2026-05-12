@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createId, seedHarnesses, seedInstructions, seedRepos, seedSkills } from "@aichestra/core";
 import {
@@ -1847,6 +1847,14 @@ function serializeSnapshot(snapshot: Required<RegistrySnapshot>): string {
   return JSON.stringify(snapshot, null, 2);
 }
 
+function atomicWriteJson(filePath: string, content: string): void {
+  const directory = path.dirname(filePath);
+  mkdirSync(directory, { recursive: true });
+  const tempPath = path.join(directory, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  writeFileSync(tempPath, content, "utf8");
+  renameSync(tempPath, filePath);
+}
+
 function reviveSnapshot(raw: string): Required<RegistrySnapshot> {
   const parsed = JSON.parse(raw) as RegistrySnapshot;
   return copySnapshot({
@@ -1873,14 +1881,14 @@ export class FileBackedRegistryRepository extends InMemoryRegistryRepository {
       const directory = path.dirname(filePath);
       mkdirSync(directory, { recursive: true });
       const initial = copySnapshot(seed);
-      writeFileSync(filePath, serializeSnapshot(initial), "utf8");
+      atomicWriteJson(filePath, serializeSnapshot(initial));
       return initial;
     }
     return reviveSnapshot(readFileSync(filePath, "utf8"));
   }
 
   private persist(): void {
-    writeFileSync(this.filePath, serializeSnapshot(this.snapshot), "utf8");
+    atomicWriteJson(this.filePath, serializeSnapshot(this.snapshot));
   }
 
   override createSkill(input: SkillPackage): SkillPackage {
@@ -2710,7 +2718,8 @@ export class RegistryService {
     if (filter.targetKind && filter.targetId) {
       return this.auditRepository.listAuditLogsForTarget(filter.targetKind, filter.targetId);
     }
-    return this.auditRepository.listAuditLogs();
+    const logs = this.auditRepository.listAuditLogs();
+    return filter.targetKind ? logs.filter((log) => log.targetKind === filter.targetKind) : logs;
   }
 
   private requireSkill(id: string): SkillPackage {

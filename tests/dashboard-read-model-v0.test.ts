@@ -6,6 +6,7 @@ import { createApiServer } from "@aichestra/api";
 import { createSeededStore } from "@aichestra/db";
 import {
   ApiDashboardDataProvider,
+  createDashboardDataProviderFromEnv,
   DemoDashboardDataProvider
 } from "../apps/web/lib/dashboard-data-provider.ts";
 import { renderDashboardHtml, renderDashboardReadModels } from "../apps/web/src/render.ts";
@@ -184,10 +185,12 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
   });
   const fallback = await fallbackProvider.getReadModels();
   assert.equal(fallback.overview.source, "demo");
+
+  assert.equal(await createDashboardDataProviderFromEnv({ AICHESTRA_DASHBOARD_DATA_SOURCE: "demo" }).getReadModels().then((models) => models.overview.source), "demo");
 });
 
 test("dashboard renderer consumes read models and preserves static demo fallback", async () => {
-  const html = await renderDashboardHtml();
+  const html = await renderDashboardHtml(new DemoDashboardDataProvider());
   assert.equal(html.includes("Data source"), true);
   assert.equal(html.includes("demo"), true);
   assert.equal(html.includes("Git Adapter"), true);

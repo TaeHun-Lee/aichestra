@@ -67,7 +67,7 @@ Purpose: durable model catalog for future real provider integrations.
 - Important columns: `provider_kind`, `display_name`, `context_window`, `supports_tools`, `supports_streaming`, `input_token_cost_usd`, `output_token_cost_usd`, `status`, `metadata jsonb`, `created_at`, `updated_at`
 - Indexes: `provider_kind,status`
 - Retention: model catalog lifecycle
-- Migration notes: v0 runtime uses an in-memory catalog; persistent wiring is future work.
+- Migration notes: v1 runtime still uses an in-memory catalog by default. `openai-compatible/default` is an Aichestra model id and can map to a provider-side model through gated config; provider API keys are not stored here.
 
 ### `virtual_model_keys`
 
@@ -87,7 +87,7 @@ Purpose: append-only audit events for LLM routing, blocked calls, allowed calls,
 - Important columns: `event_type`, `task_id`, `task_run_id`, `actor_id`, `provider_kind`, `model_id`, `result`, `reason`, `metadata jsonb`, `created_at`
 - Indexes: `task_id`, `task_run_id`, `provider_kind,model_id`, `created_at`
 - Retention: operational/compliance retention
-- Migration notes: metadata must be sanitized and must not include provider API keys.
+- Migration notes: metadata must be sanitized and must not include provider API keys, bearer tokens, raw credentials, raw prompts, unredacted output, or credential cache contents. LLM Gateway v1 remote events use this table shape in future persistence.
 
 ### `llm_gateway_requests`
 
@@ -97,7 +97,7 @@ Purpose: sanitized request/result trace records for future real LLM calls.
 - Important columns: `task_id`, `task_run_id`, `provider_kind`, `model_id`, `status`, `input_tokens`, `output_tokens`, `estimated_cost_usd`, `finish_reason`, `metadata jsonb`, `created_at`
 - Indexes: `task_id`, `task_run_id`, `provider_kind,model_id`, `created_at`
 - Retention: debug/audit retention
-- Migration notes: v0 usage ledger remains the source of cost attribution.
+- Migration notes: v1 usage ledger remains the source of cost attribution. Request traces must contain sanitized metadata only; raw prompts and provider secrets are not stored.
 
 ### `provider_catalog_entries`
 
@@ -524,10 +524,10 @@ These tables are schema skeletons only in Secrets and Sandbox Design v0. Runtime
 ### `secret_refs`
 
 - Primary key: `id`
-- Columns: `provider`, `name`, `scope`, `description`, `status`, `metadata jsonb`, `created_at`, `updated_at`
-- Indexes: `provider,status`, `scope`
+- Columns: `provider`, `secret_kind`, `name`, `env_key`, `scope`, `description`, `status`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `provider,status`, `secret_kind,status`, `scope`, `env_key`
 - Retention: secret reference lifecycle
-- Migration notes: never store raw secret values, OAuth tokens, API keys, keychain paths, or vendor credential cache paths.
+- Migration notes: never store raw secret values, OAuth tokens, API keys, keychain paths, env var values, or vendor credential cache paths. `env_key` is a reference only for SecretRef-backed Provider Credentials v1.
 
 ### `secret_scopes`
 
@@ -550,6 +550,14 @@ These tables are schema skeletons only in Secrets and Sandbox Design v0. Runtime
 - Columns: `allowed`, `decision`, `reason`, `secret_ref_id`, `scope_id`, `task_id`, `task_run_id`, `actor_id`, `policy_decision_id`, `created_at`
 - Indexes: `secret_ref_id,created_at`, `scope_id,created_at`, `actor_id,created_at`, `task_id,task_run_id`
 - Retention: compliance/audit retention
+
+### `credential_handles` (future optional)
+
+- Primary key: `id`
+- Columns: `secret_ref_id`, `secret_kind`, `provider`, `status`, `expires_at`, `metadata jsonb`, `created_at`
+- Indexes: `secret_ref_id,status`, `secret_kind,status`, `expires_at`
+- Retention: short-lived credential resolution evidence
+- Migration notes: handles are metadata-only and must not store raw credential values. v1 keeps handles in request/result metadata only.
 
 ### `sandbox_profiles`
 

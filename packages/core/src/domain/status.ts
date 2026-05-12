@@ -36,7 +36,7 @@ const taskTransitions: Record<TaskStatus, TaskStatus[]> = {
   draft: ["planned", "failed", "cancelled"],
   planned: ["policy_blocked", "queued", "failed", "cancelled"],
   policy_blocked: ["cancelled"],
-  queued: ["branch_created", "running", "failed", "cancelled"],
+  queued: ["policy_blocked", "branch_created", "running", "failed", "cancelled"],
   branch_created: ["running", "failed", "cancelled"],
   running: ["testing", "failed", "cancelled"],
   testing: ["pr_draft_ready", "conflict_detected", "review_required", "failed", "ci_failed", "cancelled"],

@@ -1,4 +1,5 @@
 import { createId } from "@aichestra/core";
+import type { CredentialResolutionRequest, InternalCredentialResolutionResult } from "@aichestra/security";
 import type {
   LLMCompletionRequest,
   LLMModel,
@@ -90,19 +91,83 @@ export type OpenAICompatibleProviderInput = {
   remoteCompletionEnabled?: boolean;
   baseUrl?: string;
   apiKey?: string;
+  allowedModels?: string[];
+  defaultModel?: string;
+  timeoutMs?: number;
+  httpClient?: OpenAICompatibleHttpClient;
 };
+
+export type LlmCredentialResolver = (request: CredentialResolutionRequest) => InternalCredentialResolutionResult;
+
+export type LlmProviderFactoryOptions = {
+  credentialResolver?: LlmCredentialResolver;
+  resolvedCredentialValue?: string;
+  httpClient?: OpenAICompatibleHttpClient;
+};
+
+export type OpenAICompatibleHttpRequest = {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+  timeoutMs: number;
+};
+
+export type OpenAICompatibleHttpResponse = {
+  ok: boolean;
+  status: number;
+  body: unknown;
+};
+
+export type OpenAICompatibleHttpClient = {
+  postJson(request: OpenAICompatibleHttpRequest): Promise<OpenAICompatibleHttpResponse>;
+};
+
+export class FetchOpenAICompatibleHttpClient implements OpenAICompatibleHttpClient {
+  async postJson(request: OpenAICompatibleHttpRequest): Promise<OpenAICompatibleHttpResponse> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+    try {
+      const response = await fetch(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body: JSON.stringify(request.body),
+        signal: controller.signal
+      });
+      const text = await response.text();
+      let body: unknown = {};
+      if (text) {
+        try {
+          body = JSON.parse(text);
+        } catch {
+          body = { error: { message: text.slice(0, 500) } };
+        }
+      }
+      return { ok: response.ok, status: response.status, body };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
 
 export class OpenAICompatibleLLMProvider implements LLMProvider {
   private readonly remoteLlmEnabled: boolean;
   private readonly remoteCompletionEnabled: boolean;
   private readonly baseUrl?: string;
   private readonly apiKey?: string;
+  private readonly allowedModels: string[];
+  private readonly defaultModel?: string;
+  private readonly timeoutMs: number;
+  private readonly httpClient: OpenAICompatibleHttpClient;
 
   constructor(input: OpenAICompatibleProviderInput = {}) {
     this.remoteLlmEnabled = input.remoteLlmEnabled ?? false;
     this.remoteCompletionEnabled = input.remoteCompletionEnabled ?? false;
     this.baseUrl = input.baseUrl;
     this.apiKey = input.apiKey;
+    this.allowedModels = input.allowedModels ?? [];
+    this.defaultModel = input.defaultModel;
+    this.timeoutMs = input.timeoutMs ?? 30000;
+    this.httpClient = input.httpClient ?? new FetchOpenAICompatibleHttpClient();
   }
 
   getProviderKind(): LLMProviderKind {
@@ -116,7 +181,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     if (!this.baseUrl || !this.apiKey) {
       return { ok: false, providerKind: "openai_compatible", reason: "openai_compatible_config_missing" };
     }
-    return { ok: false, providerKind: "openai_compatible", reason: "openai_compatible_not_implemented" };
+    return { ok: true, providerKind: "openai_compatible" };
   }
 
   async listModels(): Promise<LLMModel[]> {
@@ -133,7 +198,7 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     };
   }
 
-  async createCompletion(_request?: LLMCompletionRequest, _model?: LLMModel): Promise<LLMProviderCompletionResult> {
+  async createCompletion(request: LLMCompletionRequest, model: LLMModel): Promise<LLMProviderCompletionResult> {
     if (!this.remoteLlmEnabled) {
       return { ok: false, reason: "blocked_remote_llm_disabled" };
     }
@@ -143,38 +208,153 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
     if (!this.baseUrl || !this.apiKey) {
       return { ok: false, reason: "openai_compatible_config_missing" };
     }
-    return { ok: false, reason: "openai_compatible_not_implemented" };
+    const remoteModel = this.remoteModelFor(model, request);
+    if (!this.isModelAllowed(model.id, remoteModel)) {
+      return { ok: false, reason: "model_not_allowlisted" };
+    }
+
+    const usageEstimate = await this.estimateUsage(request, model);
+    const startedAt = Date.now();
+    try {
+      const response = await this.httpClient.postJson({
+        url: chatCompletionsUrl(this.baseUrl),
+        timeoutMs: this.timeoutMs,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.apiKey}`
+        },
+        body: {
+          model: remoteModel,
+          messages: [
+            ...(request.systemInstructions ? [{ role: "system", content: request.systemInstructions }] : []),
+            { role: "user", content: request.prompt }
+          ],
+          max_tokens: request.maxTokens ?? 96,
+          temperature: request.temperature ?? 0.2
+        }
+      });
+
+      if (!response.ok) {
+        return { ok: false, reason: normalizeOpenAICompatibleError(response.body, response.status) };
+      }
+
+      const normalized = normalizeOpenAICompatibleCompletion(response.body, usageEstimate);
+      if (!normalized.content) {
+        return { ok: false, reason: "openai_compatible_empty_response" };
+      }
+      const redactedContent = redactLlmText(normalized.content);
+      const inputTokens = normalized.inputTokens ?? usageEstimate.inputTokens;
+      const outputTokens = normalized.outputTokens ?? usageEstimate.outputTokens;
+      return {
+        ok: true,
+        result: {
+          id: createId("llmreq"),
+          providerKind: "openai_compatible",
+          providerId: request.providerId,
+          modelId: model.id,
+          content: redactedContent,
+          inputTokens,
+          outputTokens,
+          estimatedCostUsd: estimateCompletionCost(model, inputTokens, outputTokens),
+          finishReason: normalized.finishReason,
+          latencyMs: Date.now() - startedAt,
+          createdAt: new Date(),
+          metadata: {
+            source: "llm_gateway",
+            remote_provider: "openai_compatible",
+            remote_model: remoteModel,
+            provider_id: request.providerId,
+            response_id: normalized.responseId,
+            redaction_applied: redactedContent !== normalized.content,
+            direct_provider_api_key_exposed: false
+          }
+        }
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: normalizeThrownProviderError(error)
+      };
+    }
+  }
+
+  private remoteModelFor(model: LLMModel, request: LLMCompletionRequest): string {
+    const metadataModel = typeof model.metadata.remoteModelId === "string" ? model.metadata.remoteModelId : undefined;
+    const requestModel = typeof request.metadata?.remoteModelId === "string" ? request.metadata.remoteModelId : undefined;
+    return requestModel ?? metadataModel ?? this.defaultModel ?? model.id;
+  }
+
+  private isModelAllowed(modelId: string, remoteModel: string): boolean {
+    if (this.allowedModels.length === 0) return true;
+    return this.allowedModels.includes(modelId) || this.allowedModels.includes(remoteModel);
   }
 }
 
 export function createLlmProviderConfigFromEnv(env: Record<string, string | undefined> = process.env): LLMProviderRuntimeConfig {
   const providerKind = env.AICHESTRA_LLM_PROVIDER === "openai_compatible" ? "openai_compatible" : "mock";
+  const allowedModels = parseCsv(env.AICHESTRA_LLM_ALLOWED_MODELS);
+  const apiKeySecretRef = env.AICHESTRA_LLM_API_KEY_SECRET_REF;
+  const apiKeyConfigured = Boolean(env.AICHESTRA_LLM_API_KEY || apiKeySecretRef);
   return {
     providerKind,
     remoteLlmEnabled: env.AICHESTRA_ENABLE_REMOTE_LLM === "true",
     remoteCompletionEnabled: env.AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION === "true",
-    openAICompatibleConfigured: Boolean(env.AICHESTRA_LLM_API_KEY),
-    baseUrlConfigured: Boolean(env.AICHESTRA_LLM_BASE_URL)
+    openAICompatibleConfigured: apiKeyConfigured,
+    baseUrlConfigured: Boolean(env.AICHESTRA_LLM_BASE_URL),
+    apiKeyConfigured,
+    apiKeySecretRef,
+    credentialSource: apiKeySecretRef ? "secret_ref" : env.AICHESTRA_LLM_API_KEY ? "legacy_env" : "none",
+    credentialStatus: apiKeyConfigured ? "resolved" : "missing",
+    credentialReason: apiKeySecretRef ? undefined : env.AICHESTRA_LLM_API_KEY ? "legacy_env_api_key_configured" : "llm_api_key_missing",
+    envSecretProviderEnabled: env.AICHESTRA_ENABLE_ENV_SECRET_PROVIDER === "true",
+    allowedSecretEnvKeyCount: parseCsv(env.AICHESTRA_ALLOWED_SECRET_ENV_KEYS).length,
+    allowedModels,
+    allowedModelCount: allowedModels.length,
+    defaultModel: env.AICHESTRA_LLM_DEFAULT_MODEL,
+    defaultModelConfigured: Boolean(env.AICHESTRA_LLM_DEFAULT_MODEL),
+    integrationTestsEnabled: env.AICHESTRA_LLM_INTEGRATION_TESTS === "true"
   };
 }
 
-export function createLlmProviderFromConfig(config: LLMProviderRuntimeConfig, env: Record<string, string | undefined> = process.env): LLMProvider {
+export function createLlmProviderFromConfig(
+  config: LLMProviderRuntimeConfig,
+  env: Record<string, string | undefined> = process.env,
+  options: LlmProviderFactoryOptions = {}
+): LLMProvider {
   if (config.providerKind === "openai_compatible") {
+    const credential = options.resolvedCredentialValue
+      ? { allowed: true, status: "resolved" as const, value: options.resolvedCredentialValue }
+      : resolveLlmCredential(config, env, options);
     return new OpenAICompatibleLLMProvider({
       remoteLlmEnabled: config.remoteLlmEnabled,
       remoteCompletionEnabled: config.remoteCompletionEnabled,
       baseUrl: env.AICHESTRA_LLM_BASE_URL,
-      apiKey: env.AICHESTRA_LLM_API_KEY
+      apiKey: credential.value,
+      allowedModels: config.allowedModels,
+      defaultModel: env.AICHESTRA_LLM_DEFAULT_MODEL,
+      httpClient: options.httpClient
     });
   }
   return new MockLLMProvider();
 }
 
-export function createLlmProviderFromEnv(env: Record<string, string | undefined> = process.env) {
+export function createLlmProviderFromEnv(env: Record<string, string | undefined> = process.env, options: LlmProviderFactoryOptions = {}) {
   const config = createLlmProviderConfigFromEnv(env);
+  const credential = resolveLlmCredential(config, env, options);
+  const resolvedConfig: LLMProviderRuntimeConfig = {
+    ...config,
+    apiKeyConfigured: credential.allowed,
+    openAICompatibleConfigured: credential.allowed,
+    credentialStatus: credential.status,
+    credentialReason: credential.blockedReason,
+    credentialSource: config.apiKeySecretRef ? "secret_ref" : credential.allowed ? "legacy_env" : "none"
+  };
   return {
-    config,
-    provider: createLlmProviderFromConfig(config, env)
+    config: resolvedConfig,
+    provider: createLlmProviderFromConfig(resolvedConfig, env, {
+      resolvedCredentialValue: credential.value,
+      httpClient: options.httpClient
+    })
   };
 }
 
@@ -260,10 +440,134 @@ export function seedLlmModels(): LLMModel[] {
       supportsStreaming: false,
       inputTokenCostUsd: 0.000003,
       outputTokenCostUsd: 0.000006,
-      status: "disabled",
-      metadata: { skeleton: true },
+      status: "active",
+      metadata: { remoteProvider: "openai_compatible", remoteModelFromConfig: true },
       createdAt: now,
       updatedAt: now
     }
   ];
+}
+
+function parseCsv(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function resolveLlmCredential(
+  config: LLMProviderRuntimeConfig,
+  env: Record<string, string | undefined>,
+  options: LlmProviderFactoryOptions
+): InternalCredentialResolutionResult {
+  if (config.apiKeySecretRef) {
+    if (!options.credentialResolver) {
+      return {
+        id: createId("credres"),
+        allowed: false,
+        status: "blocked",
+        blockedReason: "credential_resolver_unavailable",
+        createdAt: new Date()
+      };
+    }
+    return options.credentialResolver({
+      secretRefId: config.apiKeySecretRef,
+      purpose: "llm_api_call",
+      providerId: "openai_compatible",
+      policyContext: {
+        providerKind: "openai_compatible",
+        remoteLlmEnabled: config.remoteLlmEnabled,
+        remoteCompletionEnabled: config.remoteCompletionEnabled,
+        baseUrlConfigured: config.baseUrlConfigured,
+        modelAllowlisted: config.allowedModels.length > 0 || Boolean(config.defaultModel),
+        credentialsConfigured: true,
+        envSecretProviderEnabled: config.envSecretProviderEnabled
+      }
+    });
+  }
+  const value = env.AICHESTRA_LLM_API_KEY;
+  if (value) {
+    return {
+      id: createId("credres"),
+      allowed: true,
+      status: "resolved",
+      value,
+      createdAt: new Date()
+    };
+  }
+  return {
+    id: createId("credres"),
+    allowed: false,
+    status: "missing",
+    blockedReason: "llm_api_key_missing",
+    createdAt: new Date()
+  };
+}
+
+function chatCompletionsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, "");
+  return trimmed.endsWith("/chat/completions") ? trimmed : `${trimmed}/chat/completions`;
+}
+
+function normalizeOpenAICompatibleCompletion(
+  body: unknown,
+  fallbackUsage: { inputTokens: number; outputTokens: number; estimatedCostUsd: number }
+): {
+  responseId?: string;
+  content: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  finishReason: "stop" | "length" | "error";
+} {
+  const record = isRecord(body) ? body : {};
+  const choices = Array.isArray(record.choices) ? record.choices : [];
+  const firstChoice = isRecord(choices[0]) ? choices[0] : {};
+  const message = isRecord(firstChoice.message) ? firstChoice.message : {};
+  const content = typeof message.content === "string"
+    ? message.content
+    : typeof firstChoice.text === "string"
+      ? firstChoice.text
+      : "";
+  const usage = isRecord(record.usage) ? record.usage : {};
+  const finish = typeof firstChoice.finish_reason === "string" ? firstChoice.finish_reason : "stop";
+  return {
+    responseId: typeof record.id === "string" ? record.id : undefined,
+    content,
+    inputTokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : fallbackUsage.inputTokens,
+    outputTokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : fallbackUsage.outputTokens,
+    finishReason: finish === "length" ? "length" : finish === "stop" ? "stop" : "error"
+  };
+}
+
+function normalizeOpenAICompatibleError(body: unknown, status: number): string {
+  const record = isRecord(body) ? body : {};
+  const error = isRecord(record.error) ? record.error : {};
+  const message = typeof error.message === "string" ? redactLlmText(error.message) : undefined;
+  if (message) return `openai_compatible_http_${status}:${message.slice(0, 160)}`;
+  return `openai_compatible_http_${status}`;
+}
+
+function normalizeThrownProviderError(error: unknown): string {
+  if (error instanceof Error && error.name === "AbortError") return "openai_compatible_timeout";
+  const message = error instanceof Error ? redactLlmText(error.message) : "unknown_provider_error";
+  if (/abort|timeout/i.test(message)) return "openai_compatible_timeout";
+  return `openai_compatible_provider_error:${message.slice(0, 160)}`;
+}
+
+function redactLlmText(text: string): string {
+  return text
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, "[redacted-api-key]")
+    .replace(/\b(AIza[0-9A-Za-z_-]{8,})\b/g, "[redacted-api-key]")
+    .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|LLM|GITHUB|GOOGLE_APPLICATION)_API_KEY)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+    .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|LLM|GITHUB|GOOGLE_APPLICATION)_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+    .replace(/GOOGLE_APPLICATION_CREDENTIALS\s*=\s*[^\s]+/gi, "GOOGLE_APPLICATION_CREDENTIALS=[redacted]")
+    .replace(/~[\\/]\.codex[\\/]auth\.json/gi, "[redacted-credential-cache]")
+    .replace(/~[\\/]\.claude[^\s]*/gi, "[redacted-credential-cache]")
+    .replace(/application_default_credentials\.json/gi, "[redacted-credential-cache]")
+    .replace(/gcloud[\\/]application_default_credentials/gi, "[redacted-credential-cache]");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

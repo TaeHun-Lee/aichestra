@@ -35,6 +35,7 @@ type ApiDashboardDataProviderOptions = {
   baseUrl: string;
   fetchImpl?: DashboardFetch;
   fallbackProvider?: DashboardDataProvider;
+  warnOnFallback?: boolean;
 };
 
 function numeric(value: unknown): number {
@@ -86,7 +87,7 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       git: { status: "available", count: sections.git.repos.length, notes: ["Remote Git gates remain explicit and token-free."] },
       conflicts: { status: sections.conflicts.branchLeases.length > 0 ? "available" : "empty", count: sections.conflicts.mergeQueue.length, notes: [] },
       registry: { status: "available", count: sections.registry.skills.length + sections.registry.harnesses.length + sections.registry.instructions.length, notes: [] },
-      llm: { status: "available", count: sections.llm.models.length, notes: ["Remote LLM calls remain disabled in v0."] },
+      llm: { status: "available", count: sections.llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
       agents: { status: "available", count: sections.agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: sections.policy.rules.length, notes: [] },
       providers: { status: "available", count: sections.providers.catalog.length, notes: ["Provider adapters remain skeleton/mock-first."] },
@@ -223,6 +224,10 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     budget: sanitizeDashboardObject({
       budgetDecision: objectValue((data.llmCompletion as Record<string, unknown> | undefined)?.budgetDecision),
       usageLedgerLinked: true,
+      remoteProviderPath: "openai_compatible",
+      selectedModel: objectValue(data.llmProviderConfig).defaultModel ?? "openai-compatible/default",
+      allowedModels: objectValue(data.llmProviderConfig).allowedModels ?? [],
+      apiKeyConfigured: objectValue(data.llmProviderConfig).apiKeyConfigured === true,
       apiKeyExposed: false
     })
   };
@@ -271,6 +276,14 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     networkPolicies: arrayValue(data.networkPolicies),
     redactionPolicies: arrayValue(data.redactionPolicies),
     auditEvents: arrayValue(data.securityAuditEvents),
+    credentialAuditEvents: arrayValue(data.securityAuditEvents).filter((event) => typeof event.eventType === "string" && event.eventType.startsWith("credential_")),
+    credentialStatus: sanitizeDashboardObject({
+      credentialManagerKind: (data.securityConfig as Record<string, unknown> | undefined)?.credentialManagerKind ?? "secretref_env_v1",
+      envSecretProviderEnabled: (data.securityConfig as Record<string, unknown> | undefined)?.envSecretProviderEnabled ?? false,
+      github: (data.securityConfig as Record<string, unknown> | undefined)?.githubCredentialConfigured === true ? "configured" : "missing",
+      llm: (data.securityConfig as Record<string, unknown> | undefined)?.llmCredentialConfigured === true ? "configured" : "missing",
+      rawValuesExposed: false
+    }),
     blockedExamples: sanitizeDashboardArray([data.secretLeaseRequest, { operation: "credential_cache_path", reason: "credential cache paths redacted" }]),
     redaction: sanitizeDashboardObject(data.redactionTest)
   };
@@ -359,6 +372,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
   private readonly baseUrl: string;
   private readonly fetchImpl: DashboardFetch;
   private readonly fallbackProvider?: DashboardDataProvider;
+  private readonly warnOnFallback: boolean;
 
   constructor(options: ApiDashboardDataProviderOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
@@ -368,6 +382,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
     }
     this.fetchImpl = fetchImpl;
     this.fallbackProvider = options.fallbackProvider;
+    this.warnOnFallback = options.warnOnFallback ?? true;
   }
 
   async getReadModels(): Promise<DashboardReadModels> {
@@ -402,7 +417,12 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         audit: objectValue((auditResponse as Record<string, unknown>).audit) as unknown as AuditSummaryReadModel
       };
     } catch (error) {
-      if (this.fallbackProvider) return this.fallbackProvider.getReadModels();
+      if (this.fallbackProvider) {
+        if (this.warnOnFallback) {
+          console.warn(`Dashboard API unavailable; using explicit demo fallback: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        return this.fallbackProvider.getReadModels();
+      }
       throw error;
     }
   }
@@ -421,15 +441,20 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
 }
 
 export function createDashboardDataProviderFromEnv(env: Record<string, string | undefined> = process.env): DashboardDataProvider {
-  const source = env.AICHESTRA_DASHBOARD_DATA_SOURCE;
+  const source = env.AICHESTRA_DASHBOARD_DATA_SOURCE ?? "api";
   const apiBaseUrl = env.AICHESTRA_DASHBOARD_API_BASE_URL ?? env.AICHESTRA_API_BASE_URL;
+  if (source === "demo") {
+    return new DemoDashboardDataProvider();
+  }
   if (source === "api" || apiBaseUrl) {
+    const enableDemoFallback = env.AICHESTRA_DASHBOARD_ENABLE_DEMO_FALLBACK === "true" ||
+      env.AICHESTRA_DASHBOARD_DISABLE_DEMO_FALLBACK === "false";
     return new ApiDashboardDataProvider({
       baseUrl: apiBaseUrl ?? "http://127.0.0.1:3000",
-      fallbackProvider: env.AICHESTRA_DASHBOARD_DISABLE_DEMO_FALLBACK === "true" ? undefined : new DemoDashboardDataProvider()
+      fallbackProvider: enableDemoFallback ? new DemoDashboardDataProvider() : undefined
     });
   }
-  return new DemoDashboardDataProvider();
+  throw new Error(`Unsupported AICHESTRA_DASHBOARD_DATA_SOURCE: ${source}`);
 }
 
 export async function getDashboardReadModels(provider: DashboardDataProvider = createDashboardDataProviderFromEnv()): Promise<DashboardReadModels> {

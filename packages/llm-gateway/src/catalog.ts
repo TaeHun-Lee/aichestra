@@ -91,6 +91,10 @@ export class ModelCatalogService {
         errors.push(`Model ${input.requestedModelId} is not registered.`);
         return { warnings, errors };
       }
+      if (input.providerKind && requested.providerKind !== input.providerKind) {
+        errors.push(`Model ${requested.id} does not match provider ${input.providerKind}.`);
+        return { warnings, errors };
+      }
       if (!isSelectableModel(requested)) {
         warnings.push(`Model ${requested.id} excluded: status is ${requested.status}.`);
         errors.push(`No selectable model satisfies ${requested.id}.`);
@@ -106,6 +110,7 @@ export class ModelCatalogService {
       text.includes("conflict") ? "mock-conflict-resolver@1.0" : undefined,
       text.includes("registry") ? "mock-registry-reviewer@1.0" : undefined,
       text.includes("code") || text.includes("fix") || text.includes("bug") ? "mock-coder@1.0" : undefined,
+      input.providerKind === "openai_compatible" ? "openai-compatible/default" : undefined,
       "mock-model",
       "mock-small@1.0"
     ].filter((id): id is string => typeof id === "string");

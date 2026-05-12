@@ -166,6 +166,31 @@ test("virtual model keys are policy objects and budget gates route completion", 
   assert.equal(service.listAuditEvents().some((event) => event.eventType === "llm_completion_blocked"), true);
 });
 
+test("LLM audit metadata redacts nested secret-like values recursively", () => {
+  const service = createDefaultLlmGatewayService();
+  service.recordAuditEvent({
+    eventType: "llm_completion_blocked",
+    taskId: "task_redaction",
+    taskRunId: "run_redaction",
+    providerKind: "mock",
+    modelId: "mock-coder@1.0",
+    result: "blocked",
+    metadata: {
+      provider: {
+        credentials: {
+          apiKey: "sk-nested-secret-value"
+        }
+      },
+      message: "Bearer nested-token-value ~/.codex/auth.json"
+    }
+  });
+
+  const serialized = JSON.stringify(service.listAuditEvents());
+  assert.equal(serialized.includes("sk-nested-secret-value"), false);
+  assert.equal(serialized.includes("nested-token-value"), false);
+  assert.equal(serialized.includes("auth.json"), false);
+});
+
 test("LLM API exposes providers, models, virtual keys, route, completion, usage, and audit", async () => {
   const store = createSeededStore();
   const task = store.createTask({ title: "LLM API task", repoId: "repo_demo_backend", baseBranch: "main" });

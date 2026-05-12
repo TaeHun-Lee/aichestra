@@ -137,6 +137,8 @@ export type SecurityReadModel = {
   networkPolicies: DashboardJsonObject[];
   redactionPolicies: DashboardJsonObject[];
   auditEvents: DashboardJsonObject[];
+  credentialAuditEvents: DashboardJsonObject[];
+  credentialStatus: DashboardJsonObject;
   blockedExamples: DashboardJsonObject[];
   redaction: DashboardJsonObject;
 };
@@ -197,7 +199,7 @@ export const dashboardReadModelEndpoints = [
 ] as const;
 
 const sensitiveKeyPattern = /^(token|accessToken|refreshToken|apiKey|api_key|authorization|password|rawSecret|secretValue|credentialValue)$/i;
-const tokenLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN)=)[^\s"']+/g;
+const tokenLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN)=)[^\s"']+/g;
 const credentialCachePattern = /~\/\.codex\/auth\.json|~\/\.claude[^\s"']*|Google credential cache/gi;
 
 export function sanitizeDashboardValue(value: unknown): DashboardJsonValue {

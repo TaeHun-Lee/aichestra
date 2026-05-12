@@ -6,10 +6,11 @@ import {
   createPolicyResource,
   createPolicySubject
 } from "@aichestra/policy";
+import { sanitizeSecurityMetadata } from "@aichestra/security";
 import type { PolicyDecision } from "@aichestra/policy";
 import { ModelCatalogService, type ModelCatalogRepository } from "./catalog.ts";
 import { ProviderCatalogService } from "./enterprise-providers.ts";
-import { MockLLMProvider, createLlmProviderFromEnv } from "./providers.ts";
+import { MockLLMProvider, createLlmProviderFromEnv, type LlmCredentialResolver } from "./providers.ts";
 import {
   allowsProvider,
   VirtualModelKeyService,
@@ -62,6 +63,7 @@ export type LLMGatewayServiceInput = {
   recordLegacyUsage?: boolean;
   policyService?: PolicyService;
   enterpriseProviderCatalog?: ProviderCatalogService;
+  credentialResolver?: LlmCredentialResolver;
 };
 
 export class LLMGatewayService implements LegacyLlmGateway {
@@ -100,7 +102,19 @@ export class LLMGatewayService implements LegacyLlmGateway {
   listProviders() {
     return [
       { providerKind: "mock", default: this.provider.getProviderKind() === "mock", remote: false, enabled: true },
-      { providerKind: "openai_compatible", default: this.provider.getProviderKind() === "openai_compatible", remote: true, enabled: this.config.remoteLlmEnabled }
+      {
+        providerKind: "openai_compatible",
+        default: this.provider.getProviderKind() === "openai_compatible",
+        remote: true,
+        enabled: this.config.remoteLlmEnabled,
+        completionEnabled: this.config.remoteCompletionEnabled,
+        baseUrlConfigured: this.config.baseUrlConfigured,
+        apiKeyConfigured: this.config.apiKeyConfigured,
+        allowedModelCount: this.config.allowedModelCount,
+        credentialSource: this.config.credentialSource,
+        credentialStatus: this.config.credentialStatus,
+        envSecretProviderEnabled: this.config.envSecretProviderEnabled
+      }
     ];
   }
 
@@ -195,8 +209,9 @@ export class LLMGatewayService implements LegacyLlmGateway {
   async completeRoute(request: LLMCompletionRequest): Promise<LLMCompletionRouteResult> {
     const route = this.routeRequest(request);
     if (!route.ok || !route.model || !route.budgetDecision?.allowed) {
+      const eventType = route.budgetDecision && !route.budgetDecision.allowed ? "llm_budget_blocked" : "llm_completion_blocked";
       this.recordAuditEvent({
-        eventType: "llm_completion_blocked",
+        eventType,
         taskId: request.taskId,
         taskRunId: request.taskRunId,
         actorId: request.actorId ?? this.actorId,
@@ -206,6 +221,19 @@ export class LLMGatewayService implements LegacyLlmGateway {
         reason: route.reason ?? route.budgetDecision?.reason,
         metadata: { source: "llm_gateway" }
       });
+      if (eventType === "llm_budget_blocked") {
+        this.recordAuditEvent({
+          eventType: "llm_completion_blocked",
+          taskId: request.taskId,
+          taskRunId: request.taskRunId,
+          actorId: request.actorId ?? this.actorId,
+          providerKind: route.model?.providerKind ?? request.providerKind ?? this.provider.getProviderKind(),
+          modelId: route.model?.id ?? request.modelRef,
+          result: "blocked",
+          reason: route.reason ?? route.budgetDecision?.reason,
+          metadata: { source: "llm_gateway", budget_decision_id: route.budgetDecision?.reason }
+        });
+      }
       return {
         ok: false,
         reason: route.reason ?? route.budgetDecision?.reason ?? "llm_route_blocked",
@@ -213,14 +241,35 @@ export class LLMGatewayService implements LegacyLlmGateway {
       };
     }
 
-    const policyDecision = this.evaluateCompletionPolicy(request, route.model, route.budgetDecision);
-    if (!policyDecision.allowed) {
+    if (route.model.providerKind !== this.provider.getProviderKind()) {
+      const reason = "provider_model_mismatch";
       this.recordAuditEvent({
         eventType: "llm_completion_blocked",
         taskId: request.taskId,
         taskRunId: request.taskRunId,
         actorId: request.actorId ?? this.actorId,
         providerKind: route.model.providerKind,
+        providerId: request.providerId,
+        modelId: route.model.id,
+        result: "blocked",
+        reason,
+        metadata: {
+          source: "llm_gateway",
+          provider_runtime_kind: this.provider.getProviderKind()
+        }
+      });
+      return { ok: false, reason, budgetDecision: route.budgetDecision };
+    }
+
+    const policyDecision = this.evaluateCompletionPolicy(request, route.model, route.budgetDecision);
+    if (!policyDecision.allowed) {
+      this.recordAuditEvent({
+        eventType: route.model.providerKind === "mock" ? "llm_completion_blocked" : "llm_policy_blocked",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId: request.actorId ?? this.actorId,
+        providerKind: route.model.providerKind,
+        providerId: request.providerId,
         modelId: route.model.id,
         result: "blocked",
         reason: policyDecision.reason,
@@ -234,16 +283,37 @@ export class LLMGatewayService implements LegacyLlmGateway {
       return { ok: false, reason: policyDecision.reason, budgetDecision: route.budgetDecision };
     }
 
-    const providerResult = await this.provider.createCompletion(request, route.model);
-    if (!providerResult.ok || !providerResult.result) {
+    if (route.model.providerKind !== "mock") {
       this.recordAuditEvent({
-        eventType: "llm_completion_blocked",
+        eventType: "llm_remote_completion_requested",
         taskId: request.taskId,
         taskRunId: request.taskRunId,
         actorId: request.actorId ?? this.actorId,
         providerKind: route.model.providerKind,
+        providerId: request.providerId,
         modelId: route.model.id,
-        result: "blocked",
+        result: "allowed",
+        metadata: {
+          source: "llm_gateway",
+          base_url_configured: this.config.baseUrlConfigured,
+          api_key_configured: this.config.apiKeyConfigured,
+          allowed_model_count: this.config.allowedModelCount,
+          default_model_configured: this.config.defaultModelConfigured
+        }
+      });
+    }
+
+    const providerResult = await this.provider.createCompletion(request, route.model);
+    if (!providerResult.ok || !providerResult.result) {
+      this.recordAuditEvent({
+        eventType: route.model.providerKind === "mock" ? "llm_completion_blocked" : eventTypeForRemoteProviderFailure(providerResult.reason),
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId: request.actorId ?? this.actorId,
+        providerKind: route.model.providerKind,
+        providerId: request.providerId,
+        modelId: route.model.id,
+        result: route.model.providerKind === "mock" ? "blocked" : "failed",
         reason: providerResult.reason,
         metadata: { source: "llm_gateway" }
       });
@@ -252,11 +322,12 @@ export class LLMGatewayService implements LegacyLlmGateway {
 
     const usageEvent = this.recordUsage(providerResult.result, request);
     this.recordAuditEvent({
-      eventType: "llm_completion_succeeded",
+      eventType: providerResult.result.providerKind === "mock" ? "llm_completion_succeeded" : "llm_remote_completion_completed",
       taskId: request.taskId,
       taskRunId: request.taskRunId,
       actorId: request.actorId ?? this.actorId,
       providerKind: providerResult.result.providerKind,
+      providerId: providerResult.result.providerId ?? request.providerId,
       modelId: providerResult.result.modelId,
       result: "allowed",
       metadata: {
@@ -268,6 +339,22 @@ export class LLMGatewayService implements LegacyLlmGateway {
         estimated_cost_usd: providerResult.result.estimatedCostUsd
       }
     });
+    if (providerResult.result.metadata.redaction_applied === true) {
+      this.recordAuditEvent({
+        eventType: "llm_output_redacted",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId: request.actorId ?? this.actorId,
+        providerKind: providerResult.result.providerKind,
+        providerId: providerResult.result.providerId ?? request.providerId,
+        modelId: providerResult.result.modelId,
+        result: "allowed",
+        metadata: {
+          source: "llm_gateway",
+          gateway_request_id: providerResult.result.id
+        }
+      });
+    }
 
     return {
       ok: true,
@@ -278,10 +365,11 @@ export class LLMGatewayService implements LegacyLlmGateway {
   }
 
   routeRequest(request: LLMCompletionRequest): LLMRouteResult {
+    const providerKind = request.providerKind ?? this.provider.getProviderKind();
     const resolution = this.modelCatalog.resolveModelForTask({
       requestedModelId: request.modelRef,
       prompt: request.prompt,
-      providerKind: request.providerKind
+      providerKind
     });
     if (!resolution.model) {
       return { ok: false, reason: resolution.errors[0] ?? "model_not_found" };
@@ -403,8 +491,9 @@ export class LLMGatewayService implements LegacyLlmGateway {
   private async completeRouteWithoutPersistingUsage(request: LLMCompletionRequest): Promise<LLMCompletionRouteResult> {
     const route = this.routeRequest(request);
     if (!route.ok || !route.model || !route.budgetDecision?.allowed) {
+      const eventType = route.budgetDecision && !route.budgetDecision.allowed ? "llm_budget_blocked" : "llm_completion_blocked";
       this.recordAuditEvent({
-        eventType: "llm_completion_blocked",
+        eventType,
         taskId: request.taskId,
         taskRunId: request.taskRunId,
         actorId: request.actorId ?? this.actorId,
@@ -414,16 +503,46 @@ export class LLMGatewayService implements LegacyLlmGateway {
         reason: route.reason ?? route.budgetDecision?.reason,
         metadata: { source: "llm_gateway", legacy_runner_call: request.metadata?.legacy_runner_call === true }
       });
+      if (eventType === "llm_budget_blocked") {
+        this.recordAuditEvent({
+          eventType: "llm_completion_blocked",
+          taskId: request.taskId,
+          taskRunId: request.taskRunId,
+          actorId: request.actorId ?? this.actorId,
+          providerKind: route.model?.providerKind ?? request.providerKind ?? this.provider.getProviderKind(),
+          modelId: route.model?.id ?? request.modelRef,
+          result: "blocked",
+          reason: route.reason ?? route.budgetDecision?.reason,
+          metadata: { source: "llm_gateway", legacy_runner_call: request.metadata?.legacy_runner_call === true }
+        });
+      }
       return { ok: false, reason: route.reason ?? route.budgetDecision?.reason, budgetDecision: route.budgetDecision };
     }
-    const policyDecision = this.evaluateCompletionPolicy(request, route.model, route.budgetDecision);
-    if (!policyDecision.allowed) {
+    if (route.model.providerKind !== this.provider.getProviderKind()) {
+      const reason = "provider_model_mismatch";
       this.recordAuditEvent({
         eventType: "llm_completion_blocked",
         taskId: request.taskId,
         taskRunId: request.taskRunId,
         actorId: request.actorId ?? this.actorId,
         providerKind: route.model.providerKind,
+        providerId: request.providerId,
+        modelId: route.model.id,
+        result: "blocked",
+        reason,
+        metadata: { source: "llm_gateway", legacy_runner_call: request.metadata?.legacy_runner_call === true }
+      });
+      return { ok: false, reason, budgetDecision: route.budgetDecision };
+    }
+    const policyDecision = this.evaluateCompletionPolicy(request, route.model, route.budgetDecision);
+    if (!policyDecision.allowed) {
+      this.recordAuditEvent({
+        eventType: route.model.providerKind === "mock" ? "llm_completion_blocked" : "llm_policy_blocked",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId: request.actorId ?? this.actorId,
+        providerKind: route.model.providerKind,
+        providerId: request.providerId,
         modelId: route.model.id,
         result: "blocked",
         reason: policyDecision.reason,
@@ -440,24 +559,26 @@ export class LLMGatewayService implements LegacyLlmGateway {
     const providerResult = await this.provider.createCompletion(request, route.model);
     if (!providerResult.ok || !providerResult.result) {
       this.recordAuditEvent({
-        eventType: "llm_completion_blocked",
+        eventType: route.model.providerKind === "mock" ? "llm_completion_blocked" : eventTypeForRemoteProviderFailure(providerResult.reason),
         taskId: request.taskId,
         taskRunId: request.taskRunId,
         actorId: request.actorId ?? this.actorId,
         providerKind: route.model.providerKind,
+        providerId: request.providerId,
         modelId: route.model.id,
-        result: "blocked",
+        result: route.model.providerKind === "mock" ? "blocked" : "failed",
         reason: providerResult.reason,
         metadata: { source: "llm_gateway" }
       });
       return { ok: false, reason: providerResult.reason, budgetDecision: route.budgetDecision };
     }
     this.recordAuditEvent({
-      eventType: "llm_completion_succeeded",
+      eventType: providerResult.result.providerKind === "mock" ? "llm_completion_succeeded" : "llm_remote_completion_completed",
       taskId: request.taskId,
       taskRunId: request.taskRunId,
       actorId: request.actorId ?? this.actorId,
       providerKind: providerResult.result.providerKind,
+      providerId: providerResult.result.providerId ?? request.providerId,
       modelId: providerResult.result.modelId,
       result: "allowed",
       metadata: {
@@ -523,6 +644,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
       actorKind: request.actorId ? "user" : "service",
       roles: ["system"]
     });
+    const environment = this.policyEnvironmentFor(model, budgetDecision);
     const modelUse = this.policyService.evaluate({
       subject,
       action: "llm.model.use",
@@ -540,9 +662,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         repoId: request.repoId,
         modelId: model.id,
         providerKind: model.providerKind,
-        environment: {
-          budgetAllowed: budgetDecision.allowed
-        },
+        environment,
         metadata: {
           source: "llm_gateway"
         }
@@ -550,6 +670,53 @@ export class LLMGatewayService implements LegacyLlmGateway {
     });
     if (!modelUse.allowed) return modelUse;
     if (model.providerKind !== "mock") {
+      const credential = this.policyService.evaluate({
+        subject,
+        action: "provider.credential.resolve",
+        resource: createPolicyResource({
+          resourceKind: "provider_credential",
+          resourceId: request.providerId ?? model.providerKind,
+          metadata: {
+            providerKind: model.providerKind,
+            credentialSource: this.config.credentialSource
+          }
+        }),
+        context: createPolicyContext({
+          taskId: request.taskId,
+          taskRunId: request.taskRunId,
+          repoId: request.repoId,
+          modelId: model.id,
+          providerKind: model.providerKind,
+          environment,
+          metadata: {
+            source: "llm_gateway"
+          }
+        })
+      });
+      if (!credential.allowed) return credential;
+      const providerInvoke = this.policyService.evaluate({
+        subject,
+        action: "provider.invoke",
+        resource: createPolicyResource({
+          resourceKind: "llm_provider",
+          resourceId: request.providerId ?? model.providerKind,
+          metadata: {
+            providerKind: model.providerKind
+          }
+        }),
+        context: createPolicyContext({
+          taskId: request.taskId,
+          taskRunId: request.taskRunId,
+          repoId: request.repoId,
+          modelId: model.id,
+          providerKind: model.providerKind,
+          environment,
+          metadata: {
+            source: "llm_gateway"
+          }
+        })
+      });
+      if (!providerInvoke.allowed) return providerInvoke;
       const remote = this.policyService.evaluate({
         subject,
         action: "llm.remote_completion",
@@ -566,10 +733,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
           repoId: request.repoId,
           modelId: model.id,
           providerKind: model.providerKind,
-          environment: {
-            remoteCompletionEnabled: this.config.remoteCompletionEnabled,
-            budgetAllowed: budgetDecision.allowed
-          },
+          environment,
           metadata: {
             source: "llm_gateway"
           }
@@ -593,9 +757,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         repoId: request.repoId,
         modelId: model.id,
         providerKind: model.providerKind,
-        environment: {
-          budgetAllowed: budgetDecision.allowed
-        },
+        environment,
         metadata: {
           source: "llm_gateway"
         }
@@ -612,10 +774,34 @@ export class LLMGatewayService implements LegacyLlmGateway {
       billingMode: provider?.billingMode ?? (typeof metadata.billingMode === "string" ? metadata.billingMode : undefined)
     };
   }
+
+  private policyEnvironmentFor(model: LLMModel, budgetDecision: BudgetDecision): Record<string, unknown> {
+    return {
+      budgetAllowed: budgetDecision.allowed,
+      remoteLlmEnabled: this.config.remoteLlmEnabled,
+      remoteCompletionEnabled: this.config.remoteCompletionEnabled,
+      baseUrlConfigured: this.config.baseUrlConfigured,
+      credentialsConfigured: this.config.apiKeyConfigured || this.config.openAICompatibleConfigured,
+      credentialSource: this.config.credentialSource,
+      credentialStatus: this.config.credentialStatus,
+      envSecretProviderEnabled: this.config.envSecretProviderEnabled,
+      modelAllowlisted: model.providerKind === "mock" || this.isModelAllowlisted(model),
+      credentialCacheAccessAllowed: false,
+      credentialMaterialStored: false
+    };
+  }
+
+  private isModelAllowlisted(model: LLMModel): boolean {
+    if (this.config.allowedModels.length === 0) return true;
+    const remoteModelId = typeof model.metadata.remoteModelId === "string" ? model.metadata.remoteModelId : undefined;
+    return this.config.allowedModels.includes(model.id) ||
+      (remoteModelId !== undefined && this.config.allowedModels.includes(remoteModelId)) ||
+      (this.config.defaultModel !== undefined && this.config.allowedModels.includes(this.config.defaultModel));
+  }
 }
 
 export function createDefaultLlmGatewayService(input: Omit<LLMGatewayServiceInput, "provider" | "config"> = {}): LLMGatewayService {
-  const runtime = createLlmProviderFromEnv();
+  const runtime = createLlmProviderFromEnv(process.env, { credentialResolver: input.credentialResolver });
   return new LLMGatewayService({
     ...input,
     provider: runtime.provider,
@@ -624,11 +810,16 @@ export function createDefaultLlmGatewayService(input: Omit<LLMGatewayServiceInpu
 }
 
 function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
-  const clone = structuredClone(metadata);
-  for (const key of Object.keys(clone)) {
-    if (key.toLowerCase().includes("key") || key.toLowerCase().includes("token") || key.toLowerCase().includes("secret")) {
-      clone[key] = "[redacted]";
-    }
+  return sanitizeSecurityMetadata(metadata) as Record<string, unknown>;
+}
+
+function eventTypeForRemoteProviderFailure(reason: string | undefined): string {
+  if (!reason) return "llm_remote_completion_failed";
+  if (reason.includes("disabled") || reason.includes("missing") || reason.includes("allowlist")) {
+    return "llm_remote_completion_blocked";
   }
-  return clone;
+  if (reason.includes("http") || reason.includes("provider_error") || reason.includes("timeout")) {
+    return "llm_provider_error";
+  }
+  return "llm_remote_completion_failed";
 }

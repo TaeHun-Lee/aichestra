@@ -38,6 +38,10 @@ test("instruction resolver applies status, agent filtering, precedence, and scop
       artifact({ id: "task", scope: "task", precedence: 50 }),
       artifact({ id: "repo", scope: "repo", precedence: 30 }),
       artifact({ id: "draft", scope: "org", precedence: 5, status: "draft" }),
+      artifact({ id: "pending-approval", scope: "org", precedence: 5, approvalStatus: "pending" }),
+      artifact({ id: "rejected", scope: "org", precedence: 5, approvalStatus: "rejected" }),
+      artifact({ id: "failed-eval", scope: "org", precedence: 5, evalStatus: "failed" }),
+      artifact({ id: "checksum-mismatch", scope: "org", precedence: 5, checksumStatus: "mismatch" }),
       artifact({ id: "other-agent", scope: "team", precedence: 20, appliesToAgents: ["aider"] }),
       artifact({ id: "org", scope: "org", precedence: 10 }),
       artifact({ id: "team", scope: "team", precedence: 10 })

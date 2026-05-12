@@ -1,7 +1,7 @@
 import type { PolicyDecision, PolicyEngine } from "../interfaces.ts";
 
 const blockedBudgetLimitUsd = 1000;
-const humanReviewPaths = ["infra/", ".github/workflows/", "schema/", "migrations/", "auth/", "payments/"];
+const humanReviewPaths = ["infra/", "terraform/", "security/", ".github/workflows/", "schema/", "migrations/", "auth/", "payments/"];
 
 export class MockPolicyEngine implements PolicyEngine {
   evaluateTask(input: { taskId: string; files: string[]; budgetLimitUsd?: number }): PolicyDecision {

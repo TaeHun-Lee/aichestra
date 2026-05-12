@@ -166,12 +166,52 @@ export function createDefaultPolicyRules(): PolicyRule[] {
     {
       id: "policy_llm_remote_completion_deny",
       name: "Deny remote LLM completion",
-      description: "Remote model completions are disabled by default.",
+      description: "Remote model completions require explicit v1 runtime gates.",
       effect: "deny",
       action: "llm.remote_completion",
       resourceKind: "llm_provider",
-      conditions: {},
+      conditions: {
+        environmentEquals: {
+          remoteLlmEnabled: false
+        }
+      },
       priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_llm_remote_completion_gate_deny",
+      name: "Deny remote LLM completion without completion gate",
+      description: "Remote LLM completion requires the operation-specific completion gate.",
+      effect: "deny",
+      action: "llm.remote_completion",
+      resourceKind: "llm_provider",
+      conditions: {
+        environmentEquals: {
+          remoteCompletionEnabled: false
+        }
+      },
+      priority: 950,
+      enabled: true
+    },
+    {
+      id: "policy_llm_remote_completion_allow_openai_v1",
+      name: "Allow gated OpenAI-compatible remote completion",
+      description: "OpenAI-compatible remote completion may proceed only after v1 config, credential, model allowlist, and budget gates pass.",
+      effect: "allow",
+      action: "llm.remote_completion",
+      resourceKind: "llm_provider",
+      conditions: {
+        providerKinds: ["openai_compatible"],
+        environmentEquals: {
+          remoteLlmEnabled: true,
+          remoteCompletionEnabled: true,
+          baseUrlConfigured: true,
+          credentialsConfigured: true,
+          modelAllowlisted: true,
+          budgetAllowed: true
+        }
+      },
+      priority: 250,
       enabled: true
     },
     {
@@ -202,6 +242,27 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_llm_openai_compatible_completion_allow_v1",
+      name: "Allow gated OpenAI-compatible completion",
+      description: "OpenAI-compatible completions are allowed only after remote, budget, credential, and model allowlist gates pass.",
+      effect: "allow",
+      action: "llm.completion",
+      resourceKind: "llm_provider",
+      conditions: {
+        providerKinds: ["openai_compatible"],
+        environmentEquals: {
+          remoteLlmEnabled: true,
+          remoteCompletionEnabled: true,
+          baseUrlConfigured: true,
+          credentialsConfigured: true,
+          modelAllowlisted: true,
+          budgetAllowed: true
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
       id: "policy_llm_active_model_allow",
       name: "Allow active model use",
       description: "Active models may be used when other checks pass.",
@@ -219,12 +280,8 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "deny",
       action: "runner.command.execute",
       resourceKind: "command",
-      conditions: {
-        environmentEquals: {
-          localCommandExecutionEnabled: false
-        }
-      },
-      priority: 1000,
+      conditions: {},
+      priority: 100,
       enabled: true
     },
     {
@@ -379,12 +436,56 @@ export function createDefaultPolicyRules(): PolicyRule[] {
     {
       id: "policy_provider_credential_resolve_deny",
       name: "Deny provider credential resolution",
-      description: "Real credential resolution is not implemented in v0.",
+      description: "Provider credential resolution requires explicit safe runtime configuration.",
       effect: "deny",
       action: "provider.credential.resolve",
       resourceKind: "provider_credential",
-      conditions: {},
+      conditions: {
+        environmentEquals: {
+          credentialsConfigured: false
+        }
+      },
       priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_provider_credential_resolve_allow_env_secretref_v1",
+      name: "Allow env-backed SecretRef credential resolution",
+      description: "GitHub and OpenAI-compatible provider credentials may be resolved from active env-backed SecretRefs only when the env secret provider is explicitly enabled.",
+      effect: "allow",
+      action: "provider.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        providerKinds: ["github", "openai_compatible"],
+        environmentEquals: {
+          credentialsConfigured: true,
+          secretRefActive: true,
+          envSecretProviderEnabled: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_provider_credential_resolve_allow_openai_env_v1",
+      name: "Allow OpenAI-compatible env credential reference",
+      description: "OpenAI-compatible v1 may use an environment-sourced API key only when remote gates are enabled and no credential cache access or stored secret material is involved.",
+      effect: "allow",
+      action: "provider.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        providerKinds: ["openai_compatible"],
+        environmentEquals: {
+          remoteLlmEnabled: true,
+          remoteCompletionEnabled: true,
+          credentialsConfigured: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 250,
       enabled: true
     },
     {
@@ -762,6 +863,43 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_provider_openai_compatible_invoke_allow_v1",
+      name: "Allow gated OpenAI-compatible provider invocation",
+      description: "OpenAI-compatible provider invocation may proceed only when LLM v1 remote gates, credentials, model allowlist, and budget checks pass.",
+      effect: "allow",
+      action: "provider.invoke",
+      resourceKind: "llm_provider",
+      conditions: {
+        providerKinds: ["openai_compatible"],
+        environmentEquals: {
+          remoteLlmEnabled: true,
+          remoteCompletionEnabled: true,
+          baseUrlConfigured: true,
+          credentialsConfigured: true,
+          modelAllowlisted: true,
+          budgetAllowed: true
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_provider_openai_compatible_model_allowlist_deny_v1",
+      name: "Deny OpenAI-compatible provider invocation for non-allowlisted model",
+      description: "OpenAI-compatible provider invocation requires the selected model to satisfy the configured allowlist.",
+      effect: "deny",
+      action: "provider.invoke",
+      resourceKind: "llm_provider",
+      conditions: {
+        providerKinds: ["openai_compatible"],
+        environmentEquals: {
+          modelAllowlisted: false
+        }
+      },
+      priority: 900,
+      enabled: true
+    },
+    {
       id: "policy_secret_metadata_read_allow_mock",
       name: "Allow mock secret metadata reads",
       description: "Mock secret metadata can be listed because it contains no secret material.",
@@ -777,6 +915,24 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_secret_lease_request_allow_env_provider_credentials_v1",
+      name: "Allow metadata lease request for env provider credentials",
+      description: "Env-backed provider credential resolution may create a metadata SecretLease after credential policy approval; secret.read remains denied.",
+      effect: "allow",
+      action: "secret.lease.request",
+      resourceKind: "secret_lease",
+      conditions: {
+        environmentEquals: {
+          secretRefActive: true,
+          envSecretProviderEnabled: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 1100,
+      enabled: true
+    },
+    {
       id: "policy_secret_lease_request_requires_approval",
       name: "Require approval for secret lease requests",
       description: "Secret leases cannot be issued automatically in v0.",
@@ -785,6 +941,24 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       resourceKind: "secret_lease",
       conditions: {},
       priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_secret_lease_issue_allow_env_provider_credentials_v1",
+      name: "Allow metadata lease issue for env provider credentials",
+      description: "Env-backed provider credential resolution may issue a metadata-only SecretLease without exposing the secret value outside the adapter boundary.",
+      effect: "allow",
+      action: "secret.lease.issue",
+      resourceKind: "secret_lease",
+      conditions: {
+        environmentEquals: {
+          secretRefActive: true,
+          envSecretProviderEnabled: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 1100,
       enabled: true
     },
     {

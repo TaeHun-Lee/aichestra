@@ -137,6 +137,18 @@ export type LLMProviderRuntimeConfig = {
   remoteCompletionEnabled: boolean;
   openAICompatibleConfigured: boolean;
   baseUrlConfigured: boolean;
+  apiKeyConfigured: boolean;
+  apiKeySecretRef?: string;
+  credentialSource: "none" | "legacy_env" | "secret_ref";
+  credentialStatus: "resolved" | "blocked" | "missing" | "denied" | "unavailable";
+  credentialReason?: string;
+  envSecretProviderEnabled: boolean;
+  allowedSecretEnvKeyCount: number;
+  allowedModels: string[];
+  allowedModelCount: number;
+  defaultModel?: string;
+  defaultModelConfigured: boolean;
+  integrationTestsEnabled: boolean;
 };
 
 export type LLMRouteResult = {

@@ -13,8 +13,10 @@
 9. Aichestra Local Agent Protocol v1 - implemented
 10. Real Git Adapter v1 - implemented
 11. Dashboard API-backed Read Model v0 - implemented
-12. MCP Gateway planning
-13. Phase 5 enterprise planning
+12. LLM Gateway v1 - implemented
+13. SecretRef-backed Provider Credentials v1 - implemented
+14. MCP Gateway planning
+15. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -56,7 +58,7 @@ Goals:
 - Record usage ledger entries for successful gateway calls.
 - Keep virtual keys as internal policy objects, not provider API secrets.
 
-Follow-up: Local Agent Runner v0, Real Git Adapter v1, and Dashboard API-backed Read Model v0 have been completed. Continue with LLM Gateway v1 if controlled real provider calls should be enabled next.
+Follow-up: Local Agent Runner v0, Real Git Adapter v1, Dashboard API-backed Read Model v0, LLM Gateway v1, and SecretRef-backed Provider Credentials v1 have been completed. Continue with Real Git Adapter v2/webhook planning or LLM Gateway v2 multi-provider routing.
 
 ## 4. Local Agent Runner v0
 
@@ -69,7 +71,7 @@ Goals:
 - Keep local execution disabled by default and scoped to safe fixture or controlled workspaces.
 - Preserve LLM Gateway and GitProvider boundaries without real provider calls.
 
-Recommended next step: Local Agent Runner v1 with controlled fixture command execution, or Real Git Adapter v1 / LLM Gateway v1 depending on project priorities.
+Recommended next step: Local Agent Runner v1, Real Git Adapter v1, Dashboard API-backed Read Model v0, and LLM Gateway v1 have since been completed.
 
 ## 5. Local Agent Runner v1
 
@@ -84,7 +86,7 @@ Goals:
 - Capture bounded command results and workspace status.
 - Preserve LLM Gateway and GitProvider boundaries.
 
-Follow-up: Policy-as-code Skeleton v0, Secrets and Sandbox v0, Real Git Adapter v1, and Dashboard API-backed Read Model v0 have been completed. Continue with LLM Gateway v1.
+Follow-up: Policy-as-code Skeleton v0, Secrets and Sandbox v0, Real Git Adapter v1, Dashboard API-backed Read Model v0, and LLM Gateway v1 have been completed.
 
 ## 6. Policy-as-Code Skeleton
 
@@ -98,7 +100,7 @@ Goals:
 - Preserve existing budget, harness, resolver, mock RBAC, and governance gates.
 - Prepare for future OPA/Rego or Cedar adapters without adding those integrations yet.
 
-Follow-up: Secrets and Sandbox Design v0, Real Git Adapter v1, and Dashboard API-backed Read Model v0 have been completed. Continue with LLM Gateway v1.
+Follow-up: Secrets and Sandbox Design v0, Real Git Adapter v1, Dashboard API-backed Read Model v0, and LLM Gateway v1 have been completed.
 
 ## 7. Enterprise LLM Provider Abstraction v0
 
@@ -126,7 +128,7 @@ Goals:
 - Keep default policies deny-by-default for real secrets, network, credential resolution, and runner secret injection.
 - Add security audit events, API/dashboard visibility, and deterministic tests without real secret or sandbox runtime integration.
 
-Follow-up: Local Agent Protocol v1, Real Git Adapter v1, and Dashboard API-backed Read Model v0 were completed after this milestone. Continue with LLM Gateway v1.
+Follow-up: Local Agent Protocol v1, Real Git Adapter v1, Dashboard API-backed Read Model v0, and LLM Gateway v1 were completed after this milestone.
 
 ## 9. Aichestra Local Agent Protocol v1
 
@@ -147,7 +149,7 @@ Implemented constraints:
 - direct cloud-side `local_cli` execution, credential cache read/upload, danger-full-access, shell execution, network access, and secret forwarding remain denied by default;
 - no real Local Agent daemon, WebSocket/gRPC/HTTP tunnel, PTY automation, vendor CLI execution, OAuth/device-code/WIF/IAM exchange, or provider call is implemented.
 
-Recommended next step: LLM Gateway v1 if controlled real provider calls should be enabled next.
+Recommended next step: Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
 
 ## 10. Real Git Adapter v1
 
@@ -162,7 +164,7 @@ Goals:
 - Audit config validation, blocked attempts, successful branch/PR creation, changed-file reads, and blocked merge/rebase attempts.
 - Keep merge, rebase, force push, branch deletion, webhooks, GitHub App installation, GitLab, and Bitbucket out of scope.
 
-Recommended next step: LLM Gateway v1 if controlled real provider calls should be enabled next.
+Recommended next step: LLM Gateway v1 and SecretRef-backed Provider Credentials v1 have been completed. Continue with Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
 
 ## 11. Dashboard API-backed Read Model v0
 
@@ -176,9 +178,42 @@ Goals:
 - Avoid workflow execution, provider calls, GitHub calls, LLM calls, runner commands, secret leases, and credential-cache reads from dashboard read endpoints.
 - Sanitize read-model output and avoid exposing secrets or raw tokens.
 
-Recommended next step: LLM Gateway v1 if controlled real provider calls should be enabled next, or Real Git Adapter v2/webhook planning if Git integration should continue first.
+Recommended next step: LLM Gateway v1 and SecretRef-backed Provider Credentials v1 have been completed. Continue with Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
 
-## 12. MCP Gateway Planning
+## 12. LLM Gateway v1
+
+Implemented with `docs/features/llm-gateway/v1.md`, `docs/features/llm-gateway/v1-plan.md`, gated updates to `OpenAICompatibleLLMProvider`, policy rules, health/dashboard read models, API behavior, and tests.
+
+Goals:
+
+- Keep `MockLLMProvider` as the default.
+- Add one controlled OpenAI-compatible HTTP chat-completion path.
+- Require explicit remote LLM gates, API key presence, base URL presence, model allowlists when configured, budget checks, virtual model key allowance, and policy allow decisions.
+- Keep HTTP code isolated inside the provider boundary.
+- Record remote usage ledger entries only on success.
+- Record sanitized remote LLM audit events for request, block, completion, failure, provider error, budget block, policy block, and output redaction.
+- Keep BYOK, OAuth/device-code/WIF/IAM, Local CLI execution, broad multi-provider routing, streaming, and production secret manager integration out of scope.
+
+Recommended next step: Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
+
+## 13. SecretRef-backed Provider Credentials v1
+
+Implemented with `docs/foundations/secretref-provider-credentials/v1.md`, `docs/foundations/secretref-provider-credentials/v1-plan.md`, `packages/security/src/credentials.ts`, updates to `SecurityControlService`, Git and LLM provider factories, API routes, health/dashboard read models, policy rules, redaction, and tests.
+
+Goals:
+
+- Keep all provider credentials metadata-only outside adapter boundaries.
+- Add active `SecretRef` metadata for GitHub tokens, LLM API keys, provider API keys, and future credential kinds.
+- Add an explicit env-only `EnvSecretProvider` that reads only requested allowlisted env keys.
+- Evaluate `provider.credential.resolve`, metadata `secret.lease.request`, and metadata `secret.lease.issue` before any env read.
+- Route GitHub and OpenAI-compatible credentials through `SecurityControlService` when `*_SECRET_REF` config is present.
+- Keep legacy env fallback for compatibility when no SecretRef is configured.
+- Expose credential refs, resolve checks, audit, health, and dashboard status without returning values.
+- Keep Vault/cloud secret managers, BYOK, OAuth/device-code/WIF/IAM, credential cache reads, vendor CLIs, runner secret injection, and Local Agent secret forwarding out of scope.
+
+Recommended next step: Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
+
+## 14. MCP Gateway Planning
 
 Goals:
 
@@ -186,7 +221,7 @@ Goals:
 - Keep MCP calls disabled by default.
 - Define audit, auth, and permission model.
 
-## 13. Phase 5 Enterprise Planning
+## 15. Phase 5 Enterprise Planning
 
 Goals:
 

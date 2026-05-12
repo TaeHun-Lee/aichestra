@@ -174,6 +174,8 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       remotePullRequestCreateEnabled: context.gitProviderConfig.remotePullRequestCreateEnabled,
       remoteMergeEnabled: false,
       githubConfigured: context.gitProviderConfig.githubConfigured,
+      githubCredentialSource: context.gitProviderConfig.githubCredentialSource ?? "none",
+      githubCredentialStatus: context.gitProviderConfig.githubCredentialStatus ?? (context.gitProviderConfig.githubConfigured ? "resolved" : "missing"),
       githubAllowedRepoCount: context.gitProviderConfig.githubAllowedRepoCount ?? context.gitProviderConfig.githubAllowedRepos?.length ?? 0,
       githubAllowedBranchPrefix: context.gitProviderConfig.githubAllowedBranchPrefix ?? "ai/",
       tokenExposed: false
@@ -241,7 +243,11 @@ function buildLlm(context: DashboardReadModelContext): LLMGatewayReadModel {
     blockedExamples: sanitizeDashboardArray([
       {
         operation: "remote_llm_completion",
-        reason: config.remoteLlmEnabled ? "remote_llm_completion_disabled_or_not_implemented" : "blocked_remote_llm_disabled"
+        reason: config.remoteLlmEnabled
+          ? config.remoteCompletionEnabled
+            ? "requires_policy_budget_credentials_and_allowlisted_model"
+            : "remote_llm_completion_disabled"
+          : "blocked_remote_llm_disabled"
       },
       {
         operation: "provider_api_key_exposure",
@@ -251,7 +257,15 @@ function buildLlm(context: DashboardReadModelContext): LLMGatewayReadModel {
     budget: sanitizeDashboardObject({
       budgetChecksEnabled: true,
       usageLedgerLinked: true,
-      apiKeyExposed: false
+      remoteProviderPath: "openai_compatible",
+      selectedModel: config.defaultModel ?? "openai-compatible/default",
+      allowedModels: config.allowedModels,
+      apiKeyConfigured: config.apiKeyConfigured,
+      credentialSource: config.credentialSource,
+      credentialStatus: config.credentialStatus,
+      envSecretProviderEnabled: config.envSecretProviderEnabled,
+      apiKeyExposed: false,
+      integrationTestsEnabled: config.integrationTestsEnabled
     })
   };
 }
@@ -324,6 +338,8 @@ function buildProviders(context: DashboardReadModelContext): EnterpriseProviderR
 }
 
 function buildSecurity(context: DashboardReadModelContext): SecurityReadModel {
+  const credentialAuditEvents = context.securityService.listAuditEvents({ targetKind: "secret" })
+    .filter((event) => event.eventType.startsWith("credential_"));
   return {
     config: sanitizeDashboardObject(context.securityService.getConfig()),
     secretRefs: sanitizeDashboardArray(context.securityService.listSecretRefs()),
@@ -334,11 +350,20 @@ function buildSecurity(context: DashboardReadModelContext): SecurityReadModel {
     networkPolicies: sanitizeDashboardArray(context.securityService.listNetworkEgressPolicies()),
     redactionPolicies: sanitizeDashboardArray(context.securityService.listRedactionPolicies()),
     auditEvents: sanitizeDashboardArray(context.securityService.listAuditEvents()),
+    credentialAuditEvents: sanitizeDashboardArray(credentialAuditEvents),
+    credentialStatus: sanitizeDashboardObject({
+      credentialManagerKind: context.securityService.getConfig().credentialManagerKind,
+      envSecretProviderEnabled: context.securityService.getConfig().envSecretProviderEnabled,
+      github: context.securityService.getConfig().githubCredentialConfigured ? "configured" : "missing",
+      llm: context.securityService.getConfig().llmCredentialConfigured ? "configured" : "missing",
+      rawValuesExposed: false
+    }),
     blockedExamples: sanitizeDashboardArray([
       { operation: "secret.lease.issue", reason: "no_secret_lease_issued_by_default" },
       { operation: "network.egress", reason: "network_default_deny" },
       { operation: "local_agent.secret.forward", reason: "secret_forwarding_denied" },
-      { operation: "credential_cache_path", reason: "credential cache paths redacted" }
+      { operation: "credential_cache_path", reason: "credential cache paths redacted" },
+      { operation: "env_secret_provider", reason: context.securityService.getConfig().envSecretProviderEnabled ? "requires_secret_ref_policy_and_allowlist" : "env_secret_provider_disabled" }
     ]),
     redaction: sanitizeDashboardObject({
       enabled: context.securityService.getConfig().redactionEnabled,
@@ -470,7 +495,7 @@ function buildOverview(
       git: { status: "available", count: git.repos.length, notes: ["Remote Git gates remain explicit and token-free."] },
       conflicts: { status: statusForCount(conflicts.mergeQueue.length + conflicts.branchLeases.length), count: conflicts.mergeQueue.length, notes: [] },
       registry: { status: "available", count: registry.skills.length + registry.harnesses.length + registry.instructions.length, notes: [] },
-      llm: { status: "available", count: llm.models.length, notes: ["Remote LLM calls remain disabled in v0."] },
+      llm: { status: "available", count: llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
       agents: { status: "available", count: agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: policy.rules.length, notes: [] },
       providers: { status: "available", count: providers.catalog.length, notes: ["Provider adapters remain skeleton/mock-first."] },

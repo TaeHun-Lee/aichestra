@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getDashboardData } from "../apps/web/lib/mock-data.ts";
+import { DemoDashboardDataProvider } from "../apps/web/lib/dashboard-data-provider.ts";
 import { renderDashboardHtml } from "../apps/web/src/render.ts";
 
 test("dashboard data exposes conflict manager v1 simulation and registry package assumptions", async () => {
@@ -75,7 +76,7 @@ test("dashboard data exposes conflict manager v1 simulation and registry package
   assert.equal(data.agentInstructionAssemblies[0]?.instructionSetHash.startsWith("sha256:"), true);
   assert.equal(data.agentExecutors.some((executor) => executor.executorKind === "blocked" && executor.enabled === true), true);
   assert.equal(data.blockedCommandExample?.status, "blocked");
-  assert.equal(data.agentCommandResults.some((result) => result.blockedReason === "Command execution requires explicit local execution, harness, and workspace gates."), true);
+  assert.equal(data.agentCommandResults.some((result) => result.blockedReason === "Runner may not run git fetch, push, merge, or rebase."), true);
   assert.equal(data.localRunnerBlockedExample.reason, undefined);
   assert.equal(data.policyConfig.engineKind, "static");
   assert.equal(data.policyConfig.auditEnabled, true);
@@ -142,7 +143,7 @@ test("dashboard data preserves pending approval exclusion during registry versio
 });
 
 test("rendered dashboard shows dry-run merge simulation status, queue recommendation, and registry data", async () => {
-  const html = await renderDashboardHtml();
+  const html = await renderDashboardHtml(new DemoDashboardDataProvider());
 
   assert.equal(html.includes("Dry-run Merge Simulations"), true);
   assert.equal(html.includes("safe_to_queue"), true);
@@ -194,7 +195,7 @@ test("rendered dashboard shows dry-run merge simulation status, queue recommenda
   assert.equal(html.includes("command execution disabled"), true);
   assert.equal(html.includes("Command executor"), true);
   assert.equal(html.includes("Blocked command example"), true);
-  assert.equal(html.includes("Command execution requires explicit local execution, harness, and workspace gates."), true);
+  assert.equal(html.includes("Runner may not run git fetch, push, merge, or rebase."), true);
   assert.equal(html.includes("Workspace status"), true);
   assert.equal(html.includes("Latest agent run"), true);
   assert.equal(html.includes("Instruction assembly"), true);

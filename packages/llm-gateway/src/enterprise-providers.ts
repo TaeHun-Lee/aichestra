@@ -5,6 +5,7 @@ import {
   createPolicyResource,
   createPolicySubject
 } from "@aichestra/policy";
+import { sanitizeSecurityMetadata } from "@aichestra/security";
 import type { PolicyAction } from "@aichestra/policy";
 import type { LocalAgentConsentLevel, LocalAgentInvocation, LocalAgentProtocolService } from "./local-agent-protocol.ts";
 
@@ -796,7 +797,7 @@ export class LocalCliProviderAdapter implements ProviderAdapter {
     return validateProviderCatalogEntry(this.provider);
   }
 
-  async invoke(request?: ProviderInvocationRequest): Promise<ProviderInvocationResult> {
+  async invoke(request: ProviderInvocationRequest): Promise<ProviderInvocationResult> {
     if (this.localAgentProtocolService) {
       return this.invokeThroughProtocol(request);
     }
@@ -821,7 +822,7 @@ export class LocalCliProviderAdapter implements ProviderAdapter {
     });
   }
 
-  private async invokeThroughProtocol(request?: ProviderInvocationRequest): Promise<ProviderInvocationResult> {
+  private async invokeThroughProtocol(request: ProviderInvocationRequest): Promise<ProviderInvocationResult> {
     const requestedAgentId = stringFromRecord(request?.context, "localAgentId") ?? stringFromRecord(request?.metadata, "localAgentId");
     const requestedAgent = requestedAgentId ? this.localAgentProtocolService?.getAgent(requestedAgentId) : undefined;
     const connected = requestedAgent?.status === "connected"
@@ -1147,8 +1148,11 @@ export function redactSecretText(text: string): string {
   return text
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, "[redacted-api-key]")
+    .replace(/\b(ghp_[A-Za-z0-9_]{8,})\b/g, "[redacted-api-key]")
+    .replace(/\b(github_pat_[A-Za-z0-9_]{8,})\b/g, "[redacted-api-key]")
     .replace(/\b(AIza[0-9A-Za-z_-]{8,})\b/g, "[redacted-api-key]")
-    .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|LLM|GITHUB|GOOGLE_APPLICATION)_API_KEY)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+    .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|AICHESTRA_GITHUB|LLM|GITHUB|GOOGLE_APPLICATION)_API_KEY)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+    .replace(/\b(AICHESTRA_GITHUB_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
     .replace(/GOOGLE_APPLICATION_CREDENTIALS\s*=\s*[^\s]+/gi, "GOOGLE_APPLICATION_CREDENTIALS=[redacted]")
     .replace(/~\/\.codex\/auth\.json/gi, "[redacted-credential-cache]")
     .replace(/~\/\.claude[^\s]*/gi, "[redacted-credential-cache]")
@@ -1479,18 +1483,7 @@ function containsRawTokenValue(text: string): boolean {
 }
 
 function sanitizeProviderMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
-  const clone = structuredClone(metadata);
-  for (const key of Object.keys(clone)) {
-    const value = clone[key];
-    if (/token|secret|key|prompt|credential/i.test(key)) {
-      clone[key] = "[redacted]";
-      continue;
-    }
-    if (typeof value === "string") {
-      clone[key] = redactSecretText(value);
-    }
-  }
-  return clone;
+  return sanitizeSecurityMetadata(metadata) as Record<string, unknown>;
 }
 
 function providerAuditEventTypeForLocalCliResult(result: ProviderInvocationResult): ProviderAuditEvent["eventType"] {

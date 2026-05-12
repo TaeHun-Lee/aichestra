@@ -21,6 +21,9 @@ export type ResolveInstructionSetInput = {
 export function resolveInstructionArtifacts(input: ResolveInstructionSetInput): InstructionArtifact[] {
   return input.artifacts
     .filter((artifact) => artifact.status === "active")
+    .filter((artifact) => artifact.approvalStatus === "not_required" || artifact.approvalStatus === "approved")
+    .filter((artifact) => artifact.evalStatus === "not_required" || artifact.evalStatus === "passed")
+    .filter((artifact) => artifact.checksumStatus !== "mismatch")
     .filter((artifact) => artifact.appliesToAgents.includes(input.agent))
     .sort((left, right) => {
       const precedence = left.precedence - right.precedence;

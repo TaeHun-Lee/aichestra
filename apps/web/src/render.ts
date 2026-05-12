@@ -320,9 +320,10 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
         <h2>LLM Gateway</h2>
         <div class="list">
           <div class="item"><strong>Provider</strong><span>${html(data.llm.config.providerKind)} / remote LLM ${data.llm.config.remoteLlmEnabled === true ? "enabled" : "disabled"} / remote completion ${data.llm.config.remoteCompletionEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Remote gates</strong><span>base URL ${data.llm.config.baseUrlConfigured === true ? "configured" : "missing"} / API key ${data.llm.config.apiKeyConfigured === true ? "configured" : "missing"} / allowed models ${html(data.llm.config.allowedModelCount, "0")} / integration tests ${data.llm.config.integrationTestsEnabled === true ? "enabled" : "skipped"}</span></div>
           <div class="item"><strong>Model catalog</strong><span>${html(data.llm.models.map((model) => `${text(model.id)}:${text(model.status)}`), "none")}</span></div>
           <div class="item"><strong>Virtual model keys</strong><span>${html(data.llm.virtualKeys.map((key) => `${text(key.id)}:${text(key.status)}:storesProviderSecret=false`), "none")}</span></div>
-          <div class="item"><strong>Budget policy</strong><span>${html(data.llm.budget.budgetDecision ?? "budget checks enabled")} / API key not exposed</span></div>
+          <div class="item"><strong>Budget policy</strong><span>${html(data.llm.budget.budgetDecision ?? "budget checks enabled")} / selected ${html(data.llm.budget.selectedModel, "openai-compatible/default")} / API key not exposed</span></div>
           <div class="item"><strong>Recent LLM usage</strong><span>${html(data.llm.usageEvents.map((event) => `${text(event.model)}:${text(event.costUsd)}`), "none")}</span></div>
           <div class="item"><strong>LLM audit</strong><span>${html(data.llm.auditEvents.map((event) => event.eventType), "none")}</span></div>
           <div class="item"><strong>Remote LLM blocked example</strong><span>${html(data.llm.blockedExamples.map((example) => example.reason), "remote LLM blocked")}</span></div>
@@ -349,6 +350,7 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
         <h2>Secrets and Sandbox</h2>
         <div class="list">
           <div class="item"><strong>Secret manager</strong><span>${html(data.security.config.secretManagerKind)} / production injection disabled / raw secrets unavailable</span></div>
+          <div class="item"><strong>Credential manager</strong><span>${html(data.security.credentialStatus.credentialManagerKind)} / env provider ${data.security.credentialStatus.envSecretProviderEnabled === true ? "enabled" : "disabled"} / GitHub ${html(data.security.credentialStatus.github)} / LLM ${html(data.security.credentialStatus.llm)} / raw values exposed false</span></div>
           <div class="item"><strong>Secret refs</strong><span>${html(data.security.secretRefs.map((ref) => `${text(ref.id)}:${text(ref.status)}:material=false`), "none")}</span></div>
           <div class="item"><strong>Secret scopes</strong><span>${html(data.security.secretScopes.map((scope) => `${text(scope.id)}:approval=${text(scope.requiresApproval)}`), "none")}</span></div>
           <div class="item"><strong>Lease request example</strong><span>${html(data.security.blockedExamples.map((example) => example.reason ?? example.status), "no secret material issued")}</span></div>
@@ -356,6 +358,7 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Sandbox session</strong><span>${html(data.security.sandboxSessions.map((session) => `${text(session.status)}:${text(session.runnerKind)}`), "no sandbox session")} / network denied / secrets denied / remote Git denied</span></div>
           <div class="item"><strong>Network egress policy</strong><span>${html(data.security.networkPolicies.map((policy) => `${text(policy.id)}:${text(policy.defaultAction)}`), "none")}</span></div>
           <div class="item"><strong>Redaction policy</strong><span>${html(data.security.redactionPolicies.map((policy) => `${text(policy.id)}:maxPreview=${text(policy.maxPreviewBytes)}`), "none")} / raw output stored false</span></div>
+          <div class="item"><strong>Credential audit</strong><span>${html(data.security.credentialAuditEvents.map((event) => `${text(event.eventType)}:${text(event.result)}`), "none")}</span></div>
           <div class="item"><strong>Security audit</strong><span>${html(data.security.auditEvents.map((event) => `${text(event.eventType)}:${text(event.result)}`), "none")}</span></div>
           <div class="item"><strong>Blocked examples</strong><span>secret reads denied, network egress blocked, credential cache paths redacted.</span></div>
         </div>

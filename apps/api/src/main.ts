@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { AichestraError, NotFoundError, isTaskStatus } from "@aichestra/core";
 import type { BranchLeaseStatus, MergeSimulationMode, MergeSimulationStatus, RegistryVersionRef, Task } from "@aichestra/core";
@@ -133,6 +134,7 @@ import {
 import type { RegistryService } from "@aichestra/registry";
 import {
   SecurityControlService,
+  credentialResolutionResultToDto,
   networkEgressPolicyToDto,
   redactionPolicyToDto,
   redactionResultToDto,
@@ -144,6 +146,7 @@ import {
   secretScopeToDto,
   securityAuditEventToDto
 } from "@aichestra/security";
+import type { SecretKind, SecretProviderKind, SecretRefStatus } from "@aichestra/security";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
 import { buildDashboardReadModels } from "./dashboard-read-model.ts";
 
@@ -203,6 +206,19 @@ function isMergeSimulationStatus(value: unknown): value is MergeSimulationStatus
   return value === "clean" || value === "text_conflict" || value === "failed" || value === "unavailable";
 }
 
+function allowedLocalRepoPrefixes(env: Record<string, string | undefined> = process.env): string[] {
+  return (env.AICHESTRA_ALLOWED_REPO_PATHS ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => path.resolve(entry));
+}
+
+function isRepoPathAllowlisted(repoPath: string, prefixes = allowedLocalRepoPrefixes()): boolean {
+  const resolved = path.resolve(repoPath);
+  return prefixes.some((prefix) => resolved === prefix || resolved.startsWith(`${prefix}${path.sep}`));
+}
+
 function isRegistryTargetKind(value: unknown): value is "skill" | "harness" | "instruction" {
   return value === "skill" || value === "harness" || value === "instruction";
 }
@@ -248,6 +264,52 @@ function recordValue(value: unknown): Record<string, unknown> {
 
 function stringArrayValue(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function secretProviderKindValue(value: unknown): SecretProviderKind | undefined {
+  return value === "mock" ||
+    value === "env" ||
+    value === "vault_future" ||
+    value === "aws_secrets_manager_future" ||
+    value === "gcp_secret_manager_future" ||
+    value === "azure_key_vault_future" ||
+    value === "env_future"
+    ? value
+    : undefined;
+}
+
+function secretKindValue(value: unknown): SecretKind | undefined {
+  return value === "mock_metadata" ||
+    value === "github_token" ||
+    value === "llm_api_key" ||
+    value === "provider_api_key" ||
+    value === "webhook_secret" ||
+    value === "future_oauth_token" ||
+    value === "future_cloud_identity"
+    ? value
+    : undefined;
+}
+
+function secretRefStatusValue(value: unknown): SecretRefStatus | undefined {
+  return value === "active" || value === "disabled" || value === "revoked" ? value : undefined;
+}
+
+function credentialPurposeValue(value: unknown): "github_api_call" | "llm_api_call" | "provider_api_call" | "webhook_verification_future" | undefined {
+  return value === "github_api_call" ||
+    value === "llm_api_call" ||
+    value === "provider_api_call" ||
+    value === "webhook_verification_future"
+    ? value
+    : undefined;
+}
+
+function containsRawSecretField(body: Record<string, unknown>): boolean {
+  return Object.entries(body).some(([key, value]) => {
+    if (/^(value|secretValue|rawSecret|token|apiKey|credentialValue|password)$/i.test(key)) {
+      return value !== undefined && value !== null && String(value).length > 0;
+    }
+    return typeof value === "string" && (/sk-[A-Za-z0-9_-]{8,}/.test(value) || /Bearer\s+[A-Za-z0-9._~+/=-]+/i.test(value) || /~\/\.codex\/auth\.json|~\/\.claude/i.test(value));
+  });
 }
 
 function isLocalAgentConsentLevel(value: unknown): value is "read_only" | "workspace_write" | "shell_execution" | "network_or_secret_access" | "danger_full_access" {
@@ -375,12 +437,23 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           githubRepoConfigured: context.gitProviderConfig.githubRepoConfigured ?? false,
           githubAllowedRepoCount: context.gitProviderConfig.githubAllowedRepoCount ?? context.gitProviderConfig.githubAllowedRepos?.length ?? 0,
           githubAllowedBranchPrefix: context.gitProviderConfig.githubAllowedBranchPrefix ?? "ai/",
-          githubIntegrationTestsEnabled: context.gitProviderConfig.githubIntegrationTestsEnabled ?? false
+          githubIntegrationTestsEnabled: context.gitProviderConfig.githubIntegrationTestsEnabled ?? false,
+          githubCredentialSource: context.gitProviderConfig.githubCredentialSource ?? "none",
+          githubCredentialStatus: context.gitProviderConfig.githubCredentialStatus ?? (context.gitProviderConfig.githubConfigured ? "resolved" : "missing"),
+          envSecretProviderEnabled: context.gitProviderConfig.envSecretProviderEnabled ?? false
         },
         llm: {
           providerKind: context.llmGatewayService.getConfig().providerKind,
           remoteLlmEnabled: context.llmGatewayService.getConfig().remoteLlmEnabled,
           remoteCompletionEnabled: context.llmGatewayService.getConfig().remoteCompletionEnabled,
+          baseUrlConfigured: context.llmGatewayService.getConfig().baseUrlConfigured,
+          apiKeyConfigured: context.llmGatewayService.getConfig().apiKeyConfigured,
+          allowedModelCount: context.llmGatewayService.getConfig().allowedModelCount,
+          defaultModelConfigured: context.llmGatewayService.getConfig().defaultModelConfigured,
+          integrationTestsEnabled: context.llmGatewayService.getConfig().integrationTestsEnabled,
+          credentialSource: context.llmGatewayService.getConfig().credentialSource,
+          credentialStatus: context.llmGatewayService.getConfig().credentialStatus,
+          envSecretProviderEnabled: context.llmGatewayService.getConfig().envSecretProviderEnabled,
           modelCatalogStatus: "available",
           gatewayHealth: "available"
         },
@@ -424,6 +497,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         },
         security: {
           secretManagerKind: context.securityService.getConfig().secretManagerKind,
+          credentialManagerKind: context.securityService.getConfig().credentialManagerKind,
+          envSecretProviderEnabled: context.securityService.getConfig().envSecretProviderEnabled,
+          allowedSecretEnvKeyCount: context.securityService.getConfig().allowedSecretEnvKeyCount,
+          activeSecretRefCount: context.securityService.getConfig().activeSecretRefCount,
+          githubCredentialConfigured: context.securityService.getConfig().githubCredentialConfigured,
+          llmCredentialConfigured: context.securityService.getConfig().llmCredentialConfigured,
           sandboxSupportStatus: context.securityService.getConfig().sandboxSupportStatus,
           defaultSandboxProfile: context.securityService.getConfig().defaultSandboxProfile,
           networkDefaultAction: context.securityService.getConfig().networkDefaultAction,
@@ -563,6 +642,92 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 
     if (segments[0] === "security") {
       const securityService = context.securityService;
+
+      if (segments[1] === "credentials") {
+        if (method === "GET" && segments[2] === "refs") {
+          sendJson(response, 200, { credentialRefs: securityService.listSecretRefs().map(secretRefToDto) });
+          return;
+        }
+        if (method === "POST" && segments[2] === "refs") {
+          const body = await readJson(request) as Record<string, unknown>;
+          if (containsRawSecretField(body)) {
+            sendJson(response, 400, { error: "raw_secret_value_rejected", message: "Credential refs may contain envKey references only, never raw secret values." });
+            return;
+          }
+          const id = stringValue(body.id);
+          const name = stringValue(body.name);
+          const provider = secretProviderKindValue(body.provider);
+          const secretKind = secretKindValue(body.secretKind);
+          const scope = stringValue(body.scope) ?? "scope_env_provider_credentials";
+          if (!id || !name || !provider || !secretKind) {
+            sendJson(response, 400, { error: "invalid_credential_ref", message: "id, name, provider, and secretKind are required." });
+            return;
+          }
+          try {
+            const secretRef = securityService.createSecretRef({
+              id,
+              name,
+              provider,
+              secretKind,
+              envKey: stringValue(body.envKey),
+              scope,
+              description: stringValue(body.description),
+              status: secretRefStatusValue(body.status) ?? "active",
+              metadata: recordValue(body.metadata)
+            });
+            sendJson(response, 201, { credentialRef: secretRefToDto(secretRef) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_credential_ref", message: error instanceof Error ? error.message : "Credential ref rejected." });
+          }
+          return;
+        }
+        if (method === "PATCH" && segments[2] === "refs" && segments[3] && segments[4] === "status") {
+          const body = await readJson(request) as Record<string, unknown>;
+          const status = secretRefStatusValue(body.status);
+          if (!status) {
+            sendJson(response, 400, { error: "invalid_credential_ref_status", message: "status must be active, disabled, or revoked." });
+            return;
+          }
+          try {
+            sendJson(response, 200, { credentialRef: secretRefToDto(securityService.updateSecretRefStatus(segments[3], status, stringValue(body.actorId))) });
+          } catch (error) {
+            sendJson(response, 404, { error: "credential_ref_not_found", message: error instanceof Error ? error.message : "Credential ref not found." });
+          }
+          return;
+        }
+        if (method === "POST" && segments[2] === "resolve" && segments[3] === "check") {
+          const body = await readJson(request) as Record<string, unknown>;
+          const secretRefId = stringValue(body.secretRefId);
+          const purpose = credentialPurposeValue(body.purpose);
+          if (!secretRefId || !purpose) {
+            sendJson(response, 400, { error: "invalid_credential_resolution_check", message: "secretRefId and purpose are required." });
+            return;
+          }
+          const result = securityService.resolveCredential({
+            secretRefId,
+            purpose,
+            actorId: stringValue(body.actorId),
+            taskId: stringValue(body.taskId),
+            taskRunId: stringValue(body.taskRunId),
+            providerId: stringValue(body.providerId),
+            policyContext: recordValue(body.policyContext)
+          });
+          sendJson(response, 200, { result: credentialResolutionResultToDto(result) });
+          return;
+        }
+        if (method === "GET" && segments[2] === "audit") {
+          sendJson(response, 200, {
+            auditEvents: securityService.listAuditEvents({
+              targetKind: "secret",
+              eventType: url.searchParams.get("eventType") ?? undefined,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+              actorId: url.searchParams.get("actorId") ?? undefined
+            }).map(securityAuditEventToDto)
+          });
+          return;
+        }
+      }
 
       if (segments[1] === "secrets") {
         if (method === "GET" && segments[2] === "refs") {
@@ -2331,9 +2496,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
 
         const simulator = mode === "local_git_merge_tree" ? new LocalGitDryRunMergeSimulator() : new MockMergeSimulator();
+        const repoPath = stringValue(body.repoPath);
+        if (mode === "local_git_merge_tree") {
+          if (!repoPath) {
+            sendJson(response, 400, { error: "repo_path_required", message: "local_git_merge_tree mode requires repoPath." });
+            return;
+          }
+          if (!isRepoPathAllowlisted(repoPath)) {
+            sendJson(response, 400, { error: "repo_path_not_allowlisted", message: "repoPath must be under AICHESTRA_ALLOWED_REPO_PATHS for local dry-run simulation." });
+            return;
+          }
+        }
         const mergeSimulation = await simulator.simulate({
           repoId,
-          repoPath: stringValue(body.repoPath),
+          repoPath,
           baseRef,
           sourceRef,
           targetRef: stringValue(body.targetRef) ?? baseRef,
@@ -2676,6 +2852,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           taskRunId,
           actorId: stringValue(body.actorId),
           modelRef: stringValue(body.modelRef),
+          providerKind: isLlmProviderKind(body.providerKind) ? body.providerKind : undefined,
           virtualKeyId: stringValue(body.virtualKeyId),
           prompt,
           budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined
@@ -2703,13 +2880,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           taskRunId,
           actorId: stringValue(body.actorId),
           modelRef: stringValue(body.modelRef),
+          providerId: stringValue(body.providerId),
+          providerKind: isLlmProviderKind(body.providerKind) ? body.providerKind : undefined,
           virtualKeyId: stringValue(body.virtualKeyId),
           prompt,
           systemInstructions: stringValue(body.systemInstructions),
           maxTokens: typeof body.maxTokens === "number" ? body.maxTokens : undefined,
           temperature: typeof body.temperature === "number" ? body.temperature : undefined,
           budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined,
-          repoId: stringValue(body.repoId)
+          repoId: stringValue(body.repoId),
+          metadata: typeof body.metadata === "object" && body.metadata !== null ? body.metadata as Record<string, unknown> : undefined
         });
         sendJson(response, result.ok ? 201 : 409, {
           ok: result.ok,
@@ -2808,7 +2988,11 @@ export function createApiServer(store: InMemoryAichestraStore = createSeededStor
   return createApiServerWithStorage(storage);
 }
 
-export function createApiServerWithStorage(storage: StorageProvider) {
+export type ApiServerOverrides = {
+  llmGatewayService?: LLMGatewayService;
+};
+
+export function createApiServerWithStorage(storage: StorageProvider, overrides: ApiServerOverrides = {}) {
   const store = storage.repositoryFactory.createDataStore();
   const policyService = new PolicyService();
   const securityService = new SecurityControlService({ policyService });
@@ -2819,16 +3003,28 @@ export function createApiServerWithStorage(storage: StorageProvider) {
     authorizer: new PolicyBackedRegistryMutationAuthorizer({ policyService })
   });
   const improvementServices = createImprovementServices(storage.repositoryFactory.createImprovementRepositories(), { policyService });
-  const git = createGitProviderFromEnv();
+  const git = createGitProviderFromEnv(process.env, {
+    credentialResolver: (resolutionRequest) => {
+      const resolved = securityService.resolveCredentialForInternalUse(resolutionRequest);
+      return {
+        ok: resolved.allowed,
+        status: resolved.status,
+        value: resolved.value,
+        reason: resolved.blockedReason,
+        credentialHandleId: resolved.credentialHandle?.id
+      };
+    }
+  });
   const gitIntegrationService = new GitIntegrationService({
     store,
     provider: git.provider,
     config: git.config,
     policyService
   });
-  const llmGatewayService = createDefaultLlmGatewayService({
+  const llmGatewayService = overrides.llmGatewayService ?? createDefaultLlmGatewayService({
     usageRepository: store,
-    policyService
+    policyService,
+    credentialResolver: (resolutionRequest) => securityService.resolveCredentialForInternalUse(resolutionRequest)
   });
   const agentRunnerConfig = createAgentRunnerConfigFromEnv();
   const agentRunnerRepositories = createInMemoryAgentRunnerRepositories();
