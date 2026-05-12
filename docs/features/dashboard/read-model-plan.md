@@ -1,5 +1,7 @@
 # Dashboard Read Model Plan
 
+Status update: Dashboard API-backed Read Model v0 is now implemented in `docs/features/dashboard/v0.md`. This earlier plan remains as the historical migration sketch.
+
 ## Current Dashboard Data Flow
 
 The dashboard currently uses deterministic demo data:

@@ -19,6 +19,7 @@
     "@aichestra/policy": "workspace:*",
     "@aichestra/registry": "workspace:*",
     "@aichestra/security": "workspace:*",
+    "@aichestra/shared": "workspace:*",
     "@aichestra/worker": "workspace:*"
   }
 }

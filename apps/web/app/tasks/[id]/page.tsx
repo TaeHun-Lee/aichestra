@@ -1,11 +1,12 @@
-import { getDashboardData } from "../../../lib/mock-data.ts";
+import { getDashboardReadModels } from "../../../lib/dashboard-data-provider.ts";
 import { StatusPill } from "../../../components/status-pill.tsx";
+import type { TaskStatus } from "@aichestra/core";
 
 export default async function TaskDetailPage({ params }: { params: { id: string } }) {
-  const data = await getDashboardData();
-  const task = data.tasks.find((item) => item.id === params.id);
-  const taskRun = data.taskRuns.filter((run) => run.taskId === task?.id).at(-1);
-  const mergeQueueEntry = data.mergeQueue.find((entry) => entry.taskRunId === taskRun?.id);
+  const data = await getDashboardReadModels();
+  const task = data.tasks.tasks.find((item) => item.id === params.id);
+  const taskRun = data.tasks.taskRuns.filter((run) => run.taskId === task?.id).at(-1);
+  const mergeQueueEntry = data.conflicts.mergeQueue.find((entry) => entry.taskRunId === taskRun?.id);
 
   if (!task) {
     return <main><h1>Task not found</h1></main>;
@@ -13,31 +14,31 @@ export default async function TaskDetailPage({ params }: { params: { id: string 
 
   return (
     <main>
-      <h1>{task.title}</h1>
-      <StatusPill status={task.status} />
+      <h1>{String(task.title ?? "Untitled task")}</h1>
+      <StatusPill status={String(task.status ?? "draft") as TaskStatus} />
       <dl>
         <dt>Agent</dt>
-        <dd>{task.selectedAgent}</dd>
+        <dd>{String(task.selectedAgent ?? "none")}</dd>
         <dt>Model</dt>
-        <dd>{task.selectedModel}</dd>
+        <dd>{String(task.selectedModel ?? "none")}</dd>
         <dt>Branch</dt>
-        <dd>{task.branchName ?? "Not created"}</dd>
+        <dd>{String(task.branchName ?? "Not created")}</dd>
         <dt>Conflict risk</dt>
-        <dd>{(task.conflictRiskScore ?? 0).toFixed(2)}</dd>
+        <dd>{Number(task.conflictRiskScore ?? 0).toFixed(2)}</dd>
         <dt>Merge queue</dt>
-        <dd>{mergeQueueEntry?.recommendation ?? mergeQueueEntry?.status ?? "pending"}</dd>
+        <dd>{String(mergeQueueEntry?.recommendation ?? mergeQueueEntry?.status ?? "pending")}</dd>
         <dt>Dry-run merge</dt>
-        <dd>{mergeQueueEntry?.simulationStatus ?? "not_run"}</dd>
+        <dd>{String(mergeQueueEntry?.simulationStatus ?? "not_run")}</dd>
         <dt>Selected skills</dt>
-        <dd>{taskRun?.selectedSkillRefs?.map((ref) => `${ref.name}@${ref.version}`).join(", ") ?? "pending"}</dd>
+        <dd>{JSON.stringify(taskRun?.selectedSkillRefs ?? "pending")}</dd>
         <dt>Selected harness</dt>
-        <dd>{taskRun?.selectedHarnessRef ? `${taskRun.selectedHarnessRef.name}@${taskRun.selectedHarnessRef.version}` : "pending"}</dd>
+        <dd>{JSON.stringify(taskRun?.selectedHarnessRef ?? "pending")}</dd>
         <dt>Selected instructions</dt>
-        <dd>{taskRun?.selectedInstructionRefs?.map((ref) => `${ref.name}@${ref.version}`).join(", ") ?? "pending"}</dd>
+        <dd>{JSON.stringify(taskRun?.selectedInstructionRefs ?? "pending")}</dd>
         <dt>Registry warnings</dt>
-        <dd>{taskRun?.registryResolutionWarnings?.join(", ") || "none"}</dd>
+        <dd>{Array.isArray(taskRun?.registryResolutionWarnings) ? taskRun.registryResolutionWarnings.join(", ") : "none"}</dd>
         <dt>Registry errors</dt>
-        <dd>{taskRun?.registryResolutionErrors?.join(", ") || "none"}</dd>
+        <dd>{Array.isArray(taskRun?.registryResolutionErrors) ? taskRun.registryResolutionErrors.join(", ") : "none"}</dd>
       </dl>
     </main>
   );

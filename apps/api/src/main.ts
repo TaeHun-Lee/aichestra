@@ -145,6 +145,7 @@ import {
   securityAuditEventToDto
 } from "@aichestra/security";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
+import { buildDashboardReadModels } from "./dashboard-read-model.ts";
 
 type RouteContext = {
   store: InMemoryAichestraStore;
@@ -368,7 +369,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           remoteGitEnabled: context.gitProviderConfig.remoteGitEnabled,
           remoteBranchCreateEnabled: context.gitProviderConfig.remoteBranchCreateEnabled,
           remotePullRequestCreateEnabled: context.gitProviderConfig.remotePullRequestCreateEnabled,
-          remoteMergeEnabled: false
+          remoteMergeEnabled: false,
+          githubConfigured: context.gitProviderConfig.githubConfigured,
+          githubOwnerConfigured: context.gitProviderConfig.githubOwnerConfigured ?? false,
+          githubRepoConfigured: context.gitProviderConfig.githubRepoConfigured ?? false,
+          githubAllowedRepoCount: context.gitProviderConfig.githubAllowedRepoCount ?? context.gitProviderConfig.githubAllowedRepos?.length ?? 0,
+          githubAllowedBranchPrefix: context.gitProviderConfig.githubAllowedBranchPrefix ?? "ai/",
+          githubIntegrationTestsEnabled: context.gitProviderConfig.githubIntegrationTestsEnabled ?? false
         },
         llm: {
           providerKind: context.llmGatewayService.getConfig().providerKind,
@@ -425,6 +432,65 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           productionSandboxRuntime: false
         }
       });
+      return;
+    }
+
+    if (segments[0] === "dashboard") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Dashboard read models are read-only." });
+        return;
+      }
+      const dashboard = buildDashboardReadModels(context, "api");
+      const section = segments[1] ?? "overview";
+      if (section === "overview" && segments.length <= 2) {
+        sendJson(response, 200, { overview: dashboard.overview });
+        return;
+      }
+      if (section === "tasks") {
+        sendJson(response, 200, { tasks: dashboard.tasks });
+        return;
+      }
+      if (section === "git") {
+        sendJson(response, 200, { git: dashboard.git });
+        return;
+      }
+      if (section === "conflicts") {
+        sendJson(response, 200, { conflicts: dashboard.conflicts });
+        return;
+      }
+      if (section === "registry") {
+        sendJson(response, 200, { registry: dashboard.registry });
+        return;
+      }
+      if (section === "llm") {
+        sendJson(response, 200, { llm: dashboard.llm });
+        return;
+      }
+      if (section === "agents") {
+        sendJson(response, 200, { agents: dashboard.agents });
+        return;
+      }
+      if (section === "policy") {
+        sendJson(response, 200, { policy: dashboard.policy });
+        return;
+      }
+      if (section === "providers") {
+        sendJson(response, 200, { providers: dashboard.providers });
+        return;
+      }
+      if (section === "security") {
+        sendJson(response, 200, { security: dashboard.security });
+        return;
+      }
+      if (section === "local-agents") {
+        sendJson(response, 200, { localAgents: dashboard.localAgents });
+        return;
+      }
+      if (section === "audit") {
+        sendJson(response, 200, { audit: dashboard.audit });
+        return;
+      }
+      sendJson(response, 404, { error: "dashboard_read_model_not_found", message: `Dashboard read model not found: ${section}` });
       return;
     }
 
@@ -2325,6 +2391,26 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
 
+      if (method === "POST" && segments[1] === "github" && segments[2] === "validate") {
+        const result = await gitService.validateGitHubConnection();
+        sendJson(response, result.ok ? 200 : 409, {
+          ok: result.ok,
+          reason: "reason" in result ? result.reason : undefined,
+          result: "data" in result ? result.data : undefined,
+          config: gitService.getConfig()
+        });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "remote" && segments[2] === "audit") {
+        sendJson(response, 200, {
+          auditEvents: gitService.listGitAuditEvents().filter((event) =>
+            event.action.includes("github_") || event.action.includes("remote_git")
+          )
+        });
+        return;
+      }
+
       if (segments[1] === "repos") {
         if (method === "GET" && segments.length === 2) {
           sendJson(response, 200, { repos: gitService.listRepos() });
@@ -2351,38 +2437,55 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
 
         if (segments[3] === "branches") {
-          if (method === "GET") {
+          if (method === "GET" && segments.length === 4) {
             sendJson(response, 200, { branches: await gitService.listBranches(repoId, url.searchParams.get("localPath") ?? undefined) });
             return;
           }
-          if (method === "POST") {
+          if (method === "POST" && (segments.length === 4 || segments[4] === "remote")) {
             const body = await readJson(request) as Record<string, unknown>;
             const branchName = stringValue(body.branchName);
             if (!branchName) {
               sendJson(response, 400, { error: "invalid_branch_request", message: "branchName is required." });
               return;
             }
-            const result = await gitService.createBranch(repoId, {
+            const input = {
               branchName,
               baseBranch: stringValue(body.baseBranch),
               taskId: stringValue(body.taskId),
               taskRunId: stringValue(body.taskRunId),
+              branchLeaseId: stringValue(body.branchLeaseId),
               localPath: stringValue(body.localPath),
               files: Array.isArray(body.files) ? body.files.filter((file): file is string => typeof file === "string") : undefined,
               symbols: Array.isArray(body.symbols) ? body.symbols.filter((symbol): symbol is string => typeof symbol === "string") : undefined,
               tests: Array.isArray(body.tests) ? body.tests.filter((testPath): testPath is string => typeof testPath === "string") : undefined
-            });
+            };
+            const result = segments[4] === "remote"
+              ? await gitService.createRemoteBranch(repoId, input)
+              : await gitService.createBranch(repoId, input);
             sendJson(response, result.ok ? 201 : 409, result as unknown as JsonValue);
             return;
           }
         }
 
         if (segments[3] === "pull-requests") {
-          if (method === "GET") {
+          if (method === "GET" && segments.length === 6 && segments[5] === "changed-files") {
+            const pullRequestNumber = Number(segments[4]);
+            if (!Number.isInteger(pullRequestNumber) || pullRequestNumber < 1) {
+              sendJson(response, 400, { error: "invalid_pull_request_number", message: "pull request number must be a positive integer." });
+              return;
+            }
+            sendJson(response, 200, await gitService.getPullRequestChangedFiles(repoId, {
+              pullRequestNumber,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined
+            }) as unknown as JsonValue);
+            return;
+          }
+          if (method === "GET" && segments.length === 4) {
             sendJson(response, 200, { pullRequests: gitService.listPullRequests(repoId) });
             return;
           }
-          if (method === "POST") {
+          if (method === "POST" && (segments.length === 4 || segments[4] === "remote")) {
             const body = await readJson(request) as Record<string, unknown>;
             const taskId = stringValue(body.taskId);
             const branchName = stringValue(body.branchName);
@@ -2391,7 +2494,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
               sendJson(response, 400, { error: "invalid_pull_request", message: "taskId, branchName, and title are required." });
               return;
             }
-            const result = await gitService.createPullRequest(repoId, {
+            const input = {
               taskId,
               taskRunId: stringValue(body.taskRunId),
               branchLeaseId: stringValue(body.branchLeaseId),
@@ -2400,7 +2503,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
               title,
               body: stringValue(body.body),
               localPath: stringValue(body.localPath)
-            });
+            };
+            const result = segments[4] === "remote"
+              ? await gitService.createRemotePullRequest(repoId, input)
+              : await gitService.createPullRequest(repoId, input);
             sendJson(response, result.ok ? 201 : 409, result as unknown as JsonValue);
             return;
           }

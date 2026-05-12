@@ -2,7 +2,7 @@
 
 ## Scope
 
-This audit reflects the current repository state after Local Agent Protocol v1.
+This audit reflects the current repository state after Dashboard API-backed Read Model v0.
 
 Guidance and evidence reviewed:
 
@@ -32,6 +32,8 @@ Guidance and evidence reviewed:
 - `docs/features/persistent-db/v1.md`
 - `docs/features/real-git-adapter/v0-plan.md`
 - `docs/features/real-git-adapter/v0.md`
+- `docs/features/real-git-adapter/v1-plan.md`
+- `docs/features/real-git-adapter/v1.md`
 - `docs/features/llm-gateway/v0-plan.md`
 - `docs/features/llm-gateway/v0.md`
 - `docs/features/local-agent-runner/v0-plan.md`
@@ -51,6 +53,9 @@ Guidance and evidence reviewed:
 - `docs/foundations/auth-rbac-readiness.md`
 - `docs/features/real-git-adapter/audits/v0-readiness.md`
 - `docs/features/dashboard/read-model-plan.md`
+- `docs/features/dashboard/v0-plan.md`
+- `docs/features/dashboard/v0.md`
+- `docs/reference/dashboard-read-model-inventory.md`
 - `docs/roadmaps/real-integration-roadmap.md`
 - implementation under `apps/`, `packages/`, `tests/`, `scripts/`, and `docs/`
 
@@ -68,7 +73,7 @@ Real integration foundation: `v0_scaffolded`. A storage provider and repository 
 
 Persistent DB: `v1_implemented`. `packages/db/src/postgres.ts` adds an opt-in Postgres storage provider, repository factory, small database client boundary, and Postgres-backed repositories for Task, TaskRun, usage ledger, branch leases, merge simulations, merge queue, registry entities, registry audit/history, registry packages, and registry eval results. `scripts/db/migrate.mjs` runs the SQL migration only when explicitly invoked. Optional Postgres repository contract tests run only when `AICHESTRA_TEST_DATABASE_URL` is configured. Phase 4 governance repositories remain in-memory for v1.
 
-Real Git Adapter: `v0_implemented`. `GitProvider` now exposes provider-neutral branch, PR, changed-file, validation, and merge simulation recording operations. `MockGitProvider` remains the default; `LocalGitProvider` supports fixture-safe local Git inspection without fetch, push, or working-tree mutation; `GitHubGitProvider` is a gated skeleton that blocks remote operations by default and performs no network calls. `GitIntegrationService`, `/git/*` API routes, health metadata, dashboard visibility, and deterministic tests are implemented. This is not production Git integration because remote branch/PR creation and automatic merge/rebase remain out of scope.
+Real Git Adapter: `v1_implemented`. `GitProvider` now exposes provider-neutral branch, PR, changed-file, validation, and merge simulation recording operations. `MockGitProvider` remains the default; `LocalGitProvider` supports fixture-safe local Git inspection without fetch, push, or working-tree mutation; `GitHubGitProvider` now supports controlled branch creation, PR creation, and PR changed-file reads through a `GitHubClient` boundary only when explicit remote Git gates, operation gates, repo allowlists, branch prefix, credentials, and policy checks pass. `GitIntegrationService`, `/git/*` API routes, health metadata, dashboard visibility, and deterministic tests are implemented. This is not production Git integration because automatic merge/rebase, force push, branch deletion, webhooks, GitHub App installation, GitLab, and Bitbucket remain out of scope.
 
 LLM Gateway: `v0_implemented`. `LLMProvider` and `LLMGatewayService` now provide provider-neutral model routing, deterministic mock completions, model catalog, virtual model key policy objects, per-task budget checks, usage ledger integration, LLM audit events, API endpoints, health metadata, dashboard visibility, and tests. `OpenAICompatibleLLMProvider` is a gated skeleton that blocks remote completion by default and performs no network calls. This is not production LLM integration because real provider calls, streaming, BYOK, OAuth/delegated auth, and production secret management remain out of scope.
 
@@ -81,6 +86,8 @@ Enterprise Provider Abstraction: `v0_implemented`. `packages/llm-gateway/src/ent
 Secrets and Sandbox: `v0_implemented`. `packages/security` defines metadata-only `SecretRef`, `SecretScope`, `SecretLease`, `SecretAccessDecision`, `SandboxProfile`, `SandboxSession`, `SandboxDecision`, `NetworkEgressPolicy`, `RedactionPolicy`, in-memory repositories, a mock `SecretManager`/`SecurityControlService`, security audit events, DTOs, API/dashboard visibility, and tests. Policy-as-code includes secret, sandbox, network, runner secret injection, provider credential, and Local Agent secret-forwarding actions. This is not production secret management or sandboxing: no real secret backend, production secret injection, container/VM sandbox, network enforcement, or credential cache access exists.
 
 Local Agent Protocol: `v1_implemented`. `packages/llm-gateway/src/local-agent-protocol.ts` defines Local Agent registration/status/capability/session models, mock signed channel and handshake metadata, fixture daemon simulation, capability advertisements, CLI compatibility matrix/results, invocation envelope metadata, consent request/decision records, deterministic lifecycle states, normalized stdout/stderr/system events, invocation streams, in-memory repositories, `MockLocalAgentTransport`, redaction/audit behavior, and policy/security/provider integration. `/local-agents/*` API routes, health metadata, dashboard visibility, docs, schema skeletons, and tests are implemented. This is not a production Local Agent: no real daemon, WebSocket/gRPC/HTTP tunnel, PTY automation, vendor CLI execution, credential cache read/upload, OAuth/device-code/WIF/IAM exchange, cloud provider call, or secret forwarding exists.
+
+Dashboard API-backed Read Model: `v0_implemented`. `packages/shared/src/dashboard-read-models.ts` defines stable dashboard read-model DTOs and sanitization helpers. `apps/api/src/dashboard-read-model.ts` aggregates current service/repository/config/audit state for `/dashboard/*` routes without running workflows, calling providers, executing runner commands, creating Local Agent fixture invocations, requesting secret leases, or reading credential caches. `apps/web/lib/dashboard-data-provider.ts` adds API and demo providers, and `apps/web/src/render.ts` consumes read models. This is not a production dashboard: auth/RBAC scoping, production analytics, and tenant isolation remain future work.
 
 ## 2. MVP Vertical Slice Validation
 
@@ -101,7 +108,7 @@ Local Agent Protocol: `v1_implemented`. `packages/llm-gateway/src/local-agent-pr
 | Mock PR creation | yes | `MockGitProvider.createDraftPullRequest`; workflow stores pull request | Uses `mock://` URL, safe. |
 | Usage ledger entry | yes | `MockUsageLedger.record`; `MockLlmGateway.complete` includes `taskId`, `taskRunId`, provider/model, token/cost metadata | Good attribution for MVP. |
 | Completed task state | yes | Workflow transitions through `pr_draft_ready` to `completed` when not blocked | High-risk conflict paths can end in `review_required`, which is expected. |
-| Dashboard visibility | yes | `apps/web/src/render.ts` shows task status, mock PR, cost, changed files, diff, active leases, risks, dry-run simulations, and merge queue recommendations | Warning: dashboard builds its own seeded data and runs workflows instead of consuming API data. |
+| Dashboard visibility | yes | `apps/web/src/render.ts` consumes `DashboardReadModels`; `/dashboard/*` routes expose Task, Git, Conflict, Registry, LLM, Runner, Policy, Provider, Security, Local Agent, and Audit sections | Demo fallback remains only for deterministic static/offline rendering. |
 
 ## 3. Architecture Boundary Audit
 
@@ -115,8 +122,8 @@ Local Agent Protocol: `v1_implemented`. `packages/llm-gateway/src/local-agent-pr
 | LLM provider behavior should be abstracted | pass | `LlmGateway` interface and `MockLlmGateway`; `ModelRouter` abstraction exists | Budget-aware routing can be added in the gateway/router layer. |
 | Usage ledger should be attributed to taskId and taskRunId | pass | `MockLlmGateway.complete` fills `taskId` and `taskRunId`; tests assert attribution in `tests/mock-workflow-vertical-slice.test.ts` | None for MVP. |
 | Skill, Harness, and InstructionArtifact should remain separate concepts | pass | Separate domain types, separate registry APIs, separate seed arrays, service methods, DTOs, and registry tests in `tests/registry-v0.test.ts` and `tests/registry-hardening-v1.test.ts` | Keep future artifact packaging separate for each concept. |
-| Dashboard should consume API data rather than duplicating domain logic | warning | `apps/web/lib/mock-data.ts` and `apps/web/src/render.ts` create a local store and run workflows directly | Introduce an API client/read model for dashboard data; keep deterministic fixtures only for tests or demos. |
-| Tests should verify behavior, not only snapshots | pass | Tests cover API behavior, workflow outcomes, conflict scoring, merge simulation, usage attribution, state transitions, dashboard assumptions, and merge queue release behavior | Add richer API DTO tests when read models are introduced. |
+| Dashboard should consume API data rather than duplicating domain logic | pass | `ApiDashboardDataProvider` fetches `/dashboard/*`; `DemoDashboardDataProvider` is explicit fallback for static/offline rendering | Add auth/tenant scoping before production use. |
+| Tests should verify behavior, not only snapshots | pass | Tests cover API behavior, workflow outcomes, conflict scoring, merge simulation, usage attribution, state transitions, dashboard read models, provider fallback, and merge queue release behavior | Add API contract docs later. |
 
 ## 4. State Machine Audit
 
@@ -191,13 +198,14 @@ Classification:
 - Safe mock references: dashboard/test seed strings, provider catalog templates, mock MCP naming, mock branch names, and blocked local CLI/provider examples.
 - Safe type/interface references: provider/agent enum strings, disabled future runner kinds, provider template metadata, and policy action names.
 - Safe config placeholders: `AICHESTRA_LLM_API_KEY`, `AICHESTRA_GITHUB_TOKEN`, and provider env key names are read only as gated configuration metadata and are not emitted into audit/output.
+- Gated GitHub client boundary: `FetchGitHubClient` is instantiated only from explicit GitHub remote config and is not used by default tests/runtime. Service/API layers do not call `fetch` directly.
 - Safe local-only git usage: `LocalGitProvider` and `LocalGitDryRunMergeSimulator` use local fixture-safe Git inspection and `git merge-tree` without fetch, push, provider merge/rebase, or working-branch mutation.
 - Gated runner boundary: `FixtureLocalCommandExecutor` uses `spawn` only behind explicit local runner/workspace/harness gates; default command executor is blocked.
 - Mock local agent protocol: `MockLocalAgentTransport` is in-memory and does not spawn processes or use network transport.
 - Mock fixture daemon: `FixtureLocalAgentDaemon` simulates connected/disconnected fixture agents, mock channels, compatibility, consent, and stream events without network, process spawn, vendor CLI execution, or credential reads.
 - Safe redaction test strings: credential cache and provider key strings appear in tests/dashboard data to prove redaction and denial.
 - Suspicious real integration code: none found.
-- Actual external calls: none found. `scripts/lint.mjs` contains a regex that detects direct external HTTP calls. `tests/api-health.test.ts` uses `http.request` only against local test servers.
+- Actual external calls in default runtime/tests: none found. `scripts/lint.mjs` contains a regex that detects direct external HTTP calls. `tests/api-health.test.ts` uses `http.request` only against local test servers. Optional GitHub integration tests are skipped unless all explicit remote Git env gates are set.
 
 Conclusion: the repository complies with the mock-only MVP rule.
 
@@ -208,7 +216,7 @@ Conclusion: the repository complies with the mock-only MVP rule.
 | `pnpm install` | pass | Workspace already up to date; no packages downloaded. |
 | `pnpm lint` | pass | `node scripts/lint.mjs`; output: `lint passed`. |
 | `pnpm typecheck` | pass | `tsc --noEmit -p tsconfig.typecheck.json`; no errors. |
-| `pnpm test` | pass | `node scripts/run-tests.mjs`; 144 total, 143 passed, 1 optional Postgres contract test skipped, 0 failed. |
+| `pnpm test` | pass | `node scripts/run-tests.mjs`; 156 total, 154 passed, 2 optional tests skipped (Postgres contract and real GitHub integration), 0 failed. |
 | `pnpm build` | pass | `node scripts/build.mjs`; output: `build passed`. |
 
 ## 7. Test Coverage Audit
@@ -222,7 +230,7 @@ Conclusion: the repository complies with the mock-only MVP rule.
 | Skill / Harness / Instruction separation | yes | `Skill, Harness, and Instruction records stay separate`; `tests/registry-v0.test.ts` | None for v0. |
 | Task state transitions | yes | `tests/task-state-machine.test.ts` | Add TaskRun transition tests after introducing TaskRun transition enforcement. |
 | Repeated task run behavior | yes | Workflow tests for completed/failed rerun and active-run rejection; API `409` test | None. |
-| Dashboard data assumptions | yes | `tests/dashboard-data.test.ts` asserts active leases, conflict risks, merge queue entries, merge simulations, and rendered dry-run text | Move dashboard demo data behind an API client/read model later. |
+| Dashboard data assumptions | yes | `tests/dashboard-data.test.ts` asserts deterministic demo fallback; `tests/dashboard-read-model-v0.test.ts` asserts `/dashboard/*`, provider mapping, fallback, no-secret exposure, and read-only behavior | Keep demo fallback out of production API mode. |
 
 ## 8. Current Blockers
 
@@ -232,7 +240,6 @@ None found.
 
 ### Important Follow-Ups
 
-- Dashboard currently creates its own seeded store and runs workflows directly instead of consuming API/read-model data.
 - TaskRun transitions are typed but not enforced by an explicit state transition function.
 - Persistence remains in-memory; Prisma schema is a draft and migrations are placeholders.
 - Phase 3 registries now have repository boundaries and local file-backed persistence, but production database persistence remains future work.
@@ -245,23 +252,23 @@ None found.
 ### Nice-To-Have Improvements
 
 - Add OpenAPI or route documentation for conflict endpoints.
-- Add dashboard render tests.
+- Add dashboard API contract/OpenAPI docs.
 - Add branch lease expiration behavior tests.
 - Add explicit audit events for merge queue mark-merged/cancel.
 - Add stable API response DTOs instead of returning in-memory domain objects directly.
 
 ## 9. Recommendation
 
-Recommendation: safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v0, LLM Gateway v0, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox v0, and Local Agent Protocol v1.
+Recommendation: safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v1, LLM Gateway v0, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0.
 
 The repository has moved beyond the v0 baseline. Conflict Manager v1 is implemented with mock/local-only merge simulation, and it should not be interpreted as full Phase 2 completion.
 
-Persistent DB v1, Real Git Adapter v0, LLM Gateway v0, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox Design v0, and Local Agent Protocol v1 are implemented behind explicit storage/provider/runner/policy/security boundaries. Real provider secret access, Local Agent production daemon/transport work, vendor CLI execution, and production sandboxing remain future work.
+Persistent DB v1, Real Git Adapter v1, LLM Gateway v0, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox Design v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0 are implemented behind explicit storage/provider/runner/policy/security/read-model boundaries. Real provider secret access, Local Agent production daemon/transport work, vendor CLI execution, and production sandboxing remain future work.
 
 Exact next task:
 
 ```text
-Real Git Adapter v1, if controlled remote Git branch/PR creation should be enabled next, or LLM Gateway v1 if controlled real provider calls should be enabled next.
+LLM Gateway v1 for controlled real provider calls, or Real Git Adapter v2/webhook planning if Git integration should continue first.
 ```
 
 ## Final Summary
@@ -275,26 +282,27 @@ Current phase status:
 - Phase 5: `planned_only`
 - Real integration foundation: `v0_scaffolded`
 - Persistent DB: `v1_implemented`
-- Real Git Adapter: `v0_implemented`
+- Real Git Adapter: `v1_implemented`
 - LLM Gateway: `v0_implemented`
 - Local Agent Runner: `v1_implemented`
 - Policy-as-code: `v0_implemented`
 - Enterprise Provider Abstraction: `v0_implemented`
 - Secrets and Sandbox: `v0_implemented`
 - Local Agent Protocol: `v1_implemented`
+- Dashboard API-backed Read Model: `v0_implemented`
 
 Validation:
 
 - install: pass
 - lint: pass
 - typecheck: pass
-- test: pass after Local Agent Protocol v1 validation; 144 total, 143 passed, one optional Postgres contract test skipped when no test database URL is configured
+- test: pass after Dashboard API-backed Read Model v0 validation; 156 total, 154 passed, optional Postgres contract and real GitHub integration tests skipped when env vars are not configured
 - build: pass
 
 Merge recommendation:
 
-Safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v0, LLM Gateway v0, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox v0, and Local Agent Protocol v1. No critical blockers were found.
+Safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v1, LLM Gateway v0, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0. No critical blockers were found.
 
 Next recommended Codex task:
 
-Real Git Adapter v1, if controlled remote Git branch/PR creation should be enabled next, or LLM Gateway v1 if controlled real provider calls should be enabled next.
+LLM Gateway v1 for controlled real provider calls, or Real Git Adapter v2/webhook planning if Git integration should continue first.

@@ -9,6 +9,15 @@ Real Integration Foundation v0 keeps the default runtime in-memory, and Persiste
 - `ephemeral_ok`: can be derived or request-scoped.
 - `test_only`: should remain test fixture infrastructure.
 
+## Dashboard Read Models
+
+Dashboard API-backed Read Model v0 does not add persistent storage. `/dashboard/*` routes derive read-only DTOs from existing repositories, service config, and audit repositories, then sanitize output through shared read-model helpers. `DemoDashboardDataProvider` remains a test/offline fixture path and is not production persistence.
+
+| Repository or Store | Current Implementation | Priority | Recommended Table | Key Indexes | Retention | Audit Requirements |
+|---|---|---:|---|---|---|---|
+| DashboardReadModels | Derived in `apps/api/src/dashboard-read-model.ts`; consumed by `ApiDashboardDataProvider` | ephemeral_ok | future materialized dashboard views only if needed | section, generated_at, tenant/project when auth exists | Recompute from source tables | Must not trigger workflows/provider calls or expose secrets/tokens/unredacted logs. |
+| Dashboard demo fallback | `DemoDashboardDataProvider` over deterministic `apps/web/lib/mock-data.ts` fixtures | test_only | none | none | Test/offline render lifetime | Must remain explicit and must not be used as production state. |
+
 ## Phase 1
 
 | Repository or Store | Current Implementation | Priority | Recommended Table | Key Indexes | Retention | Audit Requirements |
@@ -16,9 +25,9 @@ Real Integration Foundation v0 keeps the default runtime in-memory, and Persiste
 | TaskRepository | `InMemoryAichestraStore`; opt-in `PostgresAichestraStore` | persistent_required | `tasks` | `id`, `repo_id`, `status`, `requester_user_id`, `created_at` | Project lifetime | Status changes require audit events. |
 | TaskRunRepository | `InMemoryAichestraStore`; opt-in `PostgresAichestraStore` | persistent_required | `task_runs` | `id`, `task_id`, `(task_id, attempt)`, `status` | Project lifetime | Run creation, finish, failure, and retry should be audited. |
 | UsageLedgerRepository | `InMemoryAichestraStore.recordUsage`; opt-in `PostgresAichestraStore.recordUsage` | persistent_required | `usage_ledger_entries` | `id`, `task_id`, `task_run_id`, `user_id`, `provider`, `created_at` | Long-lived billing/audit retention | Must preserve taskId/taskRunId attribution. |
-| RepoRepository | `InMemoryAichestraStore`; opt-in `PostgresAichestraStore`; used by Real Git Adapter v0 | persistent_required before real Git writes | `repos` | `id`, `(provider, owner, name)` | Project lifetime | Repo creation/config changes should be audited. |
-| PullRequestRepository | `InMemoryAichestraStore`; opt-in `PostgresAichestraStore`; used by Real Git Adapter v0 | persistent_required before real Git writes | `pull_requests` | `id`, `task_id`, `repo_id`, `provider`, `external_id`, `status` | Until task/PR archival plus audit retention | PR creation and provider metadata updates require sanitized audit. |
-| GitAuditRepository | Generic `AuditLog` via `GitIntegrationService.listGitAuditEvents` | persistent_required before real Git writes | `audit_events` or future `git_audit_events` | `id`, `action`, `repo_id`, `task_id`, `created_at` | Long-lived operational/audit retention | Must not store tokens, secrets, or raw unsafe command output. |
+| RepoRepository | `InMemoryAichestraStore`; opt-in `PostgresAichestraStore`; used by Real Git Adapter v1 | persistent_required before real Git writes | `repos` | `id`, `(provider, owner, name)` | Project lifetime | Repo creation/config changes and remote config validation should be audited. |
+| PullRequestRepository | `InMemoryAichestraStore`; opt-in `PostgresAichestraStore`; used by Real Git Adapter v1 | persistent_required before real Git writes | `pull_requests` | `id`, `task_id`, `repo_id`, `provider`, `external_id`, `status` | Until task/PR archival plus audit retention | PR creation and provider metadata updates require sanitized audit. GitHub PR numbers are stored as provider external ids. |
+| GitAuditRepository | Generic `AuditLog` via `GitIntegrationService.listGitAuditEvents` | persistent_required before real Git writes | `audit_events` or future `git_audit_events` | `id`, `action`, `repo_id`, `task_id`, `created_at` | Long-lived operational/audit retention | Must not store tokens, secrets, raw credentials, or raw unsafe command output. v1 remote branch/PR/changed-file events use sanitized metadata. |
 
 ## LLM Gateway
 

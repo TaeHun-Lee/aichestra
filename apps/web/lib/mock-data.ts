@@ -112,6 +112,11 @@ export async function getDashboardData() {
     baseBranch: "main",
     title: "Blocked remote PR example"
   });
+  const remoteBranchBlockedOperation = await gitService.createRemoteBranch(gitRepo.id, {
+    branchName: "ai/blocked-remote-branch",
+    baseBranch: "main",
+    taskId: task.id
+  });
   const llmService = createDefaultLlmGatewayService({ usageRepository: store, policyService });
   const latestTaskRun = store.listTaskRuns(task.id).at(-1);
   const agentRunnerConfig = createAgentRunnerConfigFromEnv({});
@@ -359,7 +364,9 @@ export async function getDashboardData() {
       recommendation: entry.recommendation
     })),
     gitAuditEvents: gitService.listGitAuditEvents(),
+    gitRemoteAuditEvents: gitService.listGitAuditEvents().filter((event) => event.action.includes("github_") || event.action.includes("remote_git")),
     remoteBlockedOperation,
+    remoteBranchBlockedOperation,
     gitDemoPullRequest: gitPullRequest.pullRequest,
     llmProviderConfig: llmService.getConfig(),
     llmProviders: llmService.listProviders(),

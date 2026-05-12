@@ -44,7 +44,7 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 |---|---|---|
 | Conflict Manager | [features/conflict-manager/](features/conflict-manager/) | v0, v1 |
 | Persistent DB | [features/persistent-db/](features/persistent-db/) | v1 (+ plan) |
-| Real Git Adapter | [features/real-git-adapter/](features/real-git-adapter/) | v0 (+ plan, audits/v0-readiness) |
+| Real Git Adapter | [features/real-git-adapter/](features/real-git-adapter/) | v0, v1 (+ plans, audits/v0-readiness) |
 | LLM Gateway | [features/llm-gateway/](features/llm-gateway/) | v0 (+ plan) |
 | Local Agent Runner | [features/local-agent-runner/](features/local-agent-runner/) | v0, v1 (+ plans) |
 | Local Agent Protocol | [features/local-agent-protocol/](features/local-agent-protocol/) | v0, v1 (+ plans) |
@@ -54,7 +54,7 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 | Governance (Phase 4) | [features/governance/](features/governance/) | v1 (+ plan) |
 | Auto-Improvement (Phase 4) | [features/auto-improvement/](features/auto-improvement/) | v0 (+ plan, preparation\*, v0-blocked) |
 | Registry (Phase 3) | [features/registry/](features/registry/) | v0, v1-hardening, v2-operational-hardening, v3-packaging-versioning, + concept (skill/harness-design) |
-| Dashboard | [features/dashboard/](features/dashboard/) | read-model-plan |
+| Dashboard | [features/dashboard/](features/dashboard/) | read-model-plan, v0-plan, v0 |
 
 ## roadmaps/
 
@@ -80,6 +80,7 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 
 ## reference/
 
+- [dashboard-read-model-inventory.md](reference/dashboard-read-model-inventory.md)
 - [Aichestra_Closed_Enterprise_LLM_Provider_Design](reference/) — `.docx`, `.pdf`, `_LLM_Readable/` (json/md/txt 변환본).
 
 ## adr/

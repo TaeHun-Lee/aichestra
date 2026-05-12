@@ -8,7 +8,7 @@ Design and work-order source documents live under `docs/briefs/`. The canonical 
 
 ## Core principle
 
-Do not implement real external API calls in the MVP scaffold. Use explicit interfaces and mock adapters first.
+Do not implement real external API calls in the default MVP scaffold. Use explicit interfaces and mock adapters first. Real Git Adapter v1 is a controlled exception for GitHub branch/PR/changed-file operations only when every explicit integration gate and allowlist is configured.
 
 ## Setup
 
@@ -34,7 +34,7 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - `packages/runner` owns agent runner contracts, deterministic `MockAgentRunner`, disabled-by-default `LocalAgentRunner`, controlled fixture command execution boundaries, workspace validation, harness execution policy, instruction assembly, in-memory runner repositories, command result capture, and runner DTOs/services.
 - `packages/security` owns Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, secret access decisions, mock secret manager, sandbox profiles/sessions/decisions, network egress policy, redaction policy, security audit events, DTOs, and in-memory repositories.
 - `packages/db` owns schema, repository contracts, storage provider abstractions, repository factories, seed data, and persistence adapters.
-- `apps/web` owns the dashboard skeleton.
+- `apps/web` owns the dashboard skeleton, API-backed dashboard read-model provider, explicit demo fallback, and read-model rendering.
 
 ## Implementation rules
 
@@ -42,7 +42,7 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - Prefer deterministic tests.
 - Avoid hidden global state.
 - Do not store secrets in source code.
-- Do not call OpenAI, Anthropic, GitHub, or other external APIs in tests.
+- Do not call OpenAI, Anthropic, GitHub, or other external APIs in default tests. Optional real GitHub integration tests may run only when every explicit Real Git Adapter v1 gate is configured.
 - All generated code must pass lint, typecheck, test, and build.
 - `POST /tasks/:id/run` must reject active queued/running TaskRuns with `409 Conflict`; completed or failed tasks may create a new TaskRun attempt.
 - Conflict Manager v1 must remain mock/local-only: deterministic file-overlap scoring, active lease tracking, mock merge queue status, and local dry-run simulation behind `MergeSimulator`.
@@ -70,9 +70,9 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - Auto-improvement v0 must remain deterministic, mock-only, and draft-only. It may create analyses, candidates, draft proposals, draft registry changes, and readiness records, but it must not apply changes, activate registry entries, approve proposals, execute evals, execute canaries, or call external services.
 - Governance v1 may record proposal decisions, proposal eval run metadata, canary readiness, apply gates, and governance audit events. It must not apply draft registry changes, mutate active registry entries, execute evals, execute canaries, or add real auth/provider integrations.
 - Real Integration Foundation v0 may add repository abstractions, schema designs, migration skeletons, and contract tests. It must not wire live databases or real provider services until an explicit follow-up task.
-- Real Git Adapter v0 keeps `MockGitProvider` as the default, supports `LocalGitProvider` only for explicit local fixture paths, and keeps `GitHubGitProvider` as a gated skeleton with no default network calls.
-- Remote Git operations must require explicit configuration: `AICHESTRA_GIT_PROVIDER=github`, `AICHESTRA_ENABLE_REMOTE_GIT=true`, and operation-specific flags such as `AICHESTRA_ALLOW_REMOTE_BRANCH_CREATE=true` or `AICHESTRA_ALLOW_REMOTE_PR_CREATE=true`.
-- Real Git Adapter v0 must not implement automatic merge, provider rebase, force-push, branch deletion, or remote push. `AICHESTRA_ALLOW_REMOTE_MERGE` is unsupported in v0.
+- Real Git Adapter v1 keeps `MockGitProvider` as the default, supports `LocalGitProvider` only for explicit local fixture paths, and allows GitHub branch/PR/changed-file operations only through `GitHubClient` behind explicit gates.
+- Remote Git operations must require explicit configuration: `AICHESTRA_GIT_PROVIDER=github`, `AICHESTRA_ENABLE_REMOTE_GIT=true`, operation-specific flags such as `AICHESTRA_ALLOW_REMOTE_BRANCH_CREATE=true` or `AICHESTRA_ALLOW_REMOTE_PR_CREATE=true`, `AICHESTRA_GITHUB_TOKEN`, `AICHESTRA_GITHUB_ALLOWED_REPOS`, and the allowed branch prefix.
+- Real Git Adapter v1 must not implement automatic merge, provider rebase, force-push, branch deletion, remote push, production webhooks, GitHub App installation flow, GitLab, or Bitbucket. `AICHESTRA_ALLOW_REMOTE_MERGE` remains unsupported.
 - Git provider selection and Git operations must flow through provider/service boundaries, not direct API handler instantiation. Git audit events must not expose tokens or secrets.
 - LLM Gateway v0 keeps `MockLLMProvider` as the default and keeps `OpenAICompatibleLLMProvider` as a gated skeleton with no default network calls.
 - Remote LLM operations must require explicit configuration such as `AICHESTRA_LLM_PROVIDER=openai_compatible`, `AICHESTRA_ENABLE_REMOTE_LLM=true`, and `AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION=true`. Even then, v0 must remain skeleton-only unless a future task explicitly implements real calls.
@@ -88,12 +88,13 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - PTY interactive fallback, danger/full-access local CLI modes, local CLI shell execution, local CLI file write, and local CLI network access are denied by default.
 - Policy-as-code v0 must remain static/mock-first: do not add real OPA/Rego, Cedar, external policy services, dynamic policy code upload, `eval()`, or user-provided policy execution.
 - Policy decisions must not weaken existing safety gates. Budget checks, harness policy, registry approval/eval/checksum gates, mock RBAC, governance apply gates, and provider-disabled defaults remain authoritative.
-- Policy decision audit must not store secrets, tokens, provider API keys, or raw prompts. Default policy rules must deny remote Git operations, remote LLM completion, runner command execution by default, MCP tool calls, secret reads, runner secret injection, network egress, provider credential resolution, Local Agent secret forwarding, and improvement apply.
+- Policy decision audit must not store secrets, tokens, provider API keys, or raw prompts. Default policy rules must deny remote Git operations unless explicit Real Git Adapter v1 gates and allowlists pass, and must deny remote LLM completion, runner command execution by default, MCP tool calls, secret reads, runner secret injection, network egress, provider credential resolution, Local Agent secret forwarding, and improvement apply.
 - Secrets and Sandbox Design v0 must remain metadata-only and model-only. `SecretRef`, `SecretLease`, API responses, audit events, and test fixtures must not contain raw secret values, OAuth tokens, provider API keys, vendor credential cache content, or real credential file paths except redaction test strings.
 - `SecretManager` implementations for Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and env-backed secrets must remain future placeholders until an explicit future task. Do not connect to real secret backends.
 - `SandboxProfile` container, Firecracker, and Kubernetes kinds are future placeholders. Do not add Docker, Kubernetes, Firecracker, VM, or production sandbox runtime integration in the MVP scaffold.
 - Network egress is denied by default and modeled through `NetworkEgressPolicy`; do not add real external network calls or make runner/provider paths more permissive.
 - Runner and provider output must be redacted and preview-limited before security audit storage where Secrets and Sandbox v0 controls the path.
+- Dashboard API-backed Read Model v0 routes must remain read-only. They may aggregate current repository/service/config/audit state, but must not run workflows, call GitHub, call LLM providers, execute runner commands, create Local Agent fixture invocations, request secret leases, read credential caches, or expose raw secrets/tokens/unredacted logs.
 
 ## MVP focus
 
@@ -107,4 +108,4 @@ User creates a task
 -> mock PR is created
 -> mock merge queue records conflict risk and simulation status
 -> usage ledger records cost
--> web dashboard shows task status.
+-> web dashboard consumes read models and shows task status.

@@ -11,3 +11,5 @@ export const systemClock: Clock = {
 export function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }
+
+export * from "./dashboard-read-models.ts";

@@ -11,8 +11,10 @@
 7. Enterprise LLM Provider Abstraction v0 - implemented
 8. Secrets and sandbox design - implemented
 9. Aichestra Local Agent Protocol v1 - implemented
-10. MCP Gateway planning
-11. Phase 5 enterprise planning
+10. Real Git Adapter v1 - implemented
+11. Dashboard API-backed Read Model v0 - implemented
+12. MCP Gateway planning
+13. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -40,7 +42,7 @@ Goals:
 - Preserve mock/local-only default behavior.
 - No automatic merge or rebase.
 
-Recommended next step: LLM Gateway v0, or Real Git Adapter v1 if controlled GitHub branch/PR creation is the next priority.
+Follow-up: Real Git Adapter v1 now implements controlled GitHub branch/PR creation behind explicit gates. Merge/rebase remain out of scope.
 
 ## 3. LLM Gateway v0
 
@@ -54,7 +56,7 @@ Goals:
 - Record usage ledger entries for successful gateway calls.
 - Keep virtual keys as internal policy objects, not provider API secrets.
 
-Recommended next step: Local Agent Runner v0, or Real Git Adapter v1 if controlled GitHub branch/PR creation is the next priority.
+Follow-up: Local Agent Runner v0, Real Git Adapter v1, and Dashboard API-backed Read Model v0 have been completed. Continue with LLM Gateway v1 if controlled real provider calls should be enabled next.
 
 ## 4. Local Agent Runner v0
 
@@ -82,7 +84,7 @@ Goals:
 - Capture bounded command results and workspace status.
 - Preserve LLM Gateway and GitProvider boundaries.
 
-Recommended next step: Policy-as-code Skeleton v0 was completed after this milestone; continue with Secrets and Sandbox Design v0, or Real Git Adapter v1 if controlled GitHub branch/PR creation is the next priority.
+Follow-up: Policy-as-code Skeleton v0, Secrets and Sandbox v0, Real Git Adapter v1, and Dashboard API-backed Read Model v0 have been completed. Continue with LLM Gateway v1.
 
 ## 6. Policy-as-Code Skeleton
 
@@ -96,7 +98,7 @@ Goals:
 - Preserve existing budget, harness, resolver, mock RBAC, and governance gates.
 - Prepare for future OPA/Rego or Cedar adapters without adding those integrations yet.
 
-Recommended next step: Secrets and Sandbox Design v0, or Real Git Adapter v1 if controlled GitHub branch/PR creation is the next priority.
+Follow-up: Secrets and Sandbox Design v0, Real Git Adapter v1, and Dashboard API-backed Read Model v0 have been completed. Continue with LLM Gateway v1.
 
 ## 7. Enterprise LLM Provider Abstraction v0
 
@@ -124,7 +126,7 @@ Goals:
 - Keep default policies deny-by-default for real secrets, network, credential resolution, and runner secret injection.
 - Add security audit events, API/dashboard visibility, and deterministic tests without real secret or sandbox runtime integration.
 
-Recommended next step: Local Agent Protocol v1 was completed after this milestone; continue with Real Git Adapter v1 if controlled remote Git branch/PR creation should be enabled next, or LLM Gateway v1 if controlled real provider calls should be enabled next.
+Follow-up: Local Agent Protocol v1, Real Git Adapter v1, and Dashboard API-backed Read Model v0 were completed after this milestone. Continue with LLM Gateway v1.
 
 ## 9. Aichestra Local Agent Protocol v1
 
@@ -145,9 +147,38 @@ Implemented constraints:
 - direct cloud-side `local_cli` execution, credential cache read/upload, danger-full-access, shell execution, network access, and secret forwarding remain denied by default;
 - no real Local Agent daemon, WebSocket/gRPC/HTTP tunnel, PTY automation, vendor CLI execution, OAuth/device-code/WIF/IAM exchange, or provider call is implemented.
 
-Recommended next step: Real Git Adapter v1, if controlled remote Git branch/PR creation should be enabled next, or LLM Gateway v1 if controlled real provider calls should be enabled next.
+Recommended next step: LLM Gateway v1 if controlled real provider calls should be enabled next.
 
-## 10. MCP Gateway Planning
+## 10. Real Git Adapter v1
+
+Implemented with `docs/features/real-git-adapter/v1.md`, `docs/features/real-git-adapter/v1-plan.md`, `packages/adapters/src/git/github-client.ts`, gated updates to `GitHubGitProvider`, `GitIntegrationService`, API routes, policy rules, dashboard visibility, and tests.
+
+Goals:
+
+- Keep `MockGitProvider` as the default.
+- Add controlled GitHub branch creation, PR creation, and PR changed-file reads behind explicit env gates.
+- Require repo allowlists and an allowed branch prefix.
+- Keep GitHub calls inside a `GitHubClient` boundary.
+- Audit config validation, blocked attempts, successful branch/PR creation, changed-file reads, and blocked merge/rebase attempts.
+- Keep merge, rebase, force push, branch deletion, webhooks, GitHub App installation, GitLab, and Bitbucket out of scope.
+
+Recommended next step: LLM Gateway v1 if controlled real provider calls should be enabled next.
+
+## 11. Dashboard API-backed Read Model v0
+
+Implemented with `docs/features/dashboard/v0.md`, `docs/features/dashboard/v0-plan.md`, shared read-model DTOs in `packages/shared`, `apps/api/src/dashboard-read-model.ts`, `/dashboard/*` API routes, `ApiDashboardDataProvider`, `DemoDashboardDataProvider`, dashboard rendering updates, inventory docs, and tests.
+
+Goals:
+
+- Move dashboard runtime data consumption toward API-backed read models.
+- Keep deterministic demo fallback for static tests/offline rendering.
+- Expose Task, Git, Conflict Manager, Registry, LLM, Agent Runner, Policy, Enterprise Provider, Security, Local Agent, and Audit sections through read-only API DTOs.
+- Avoid workflow execution, provider calls, GitHub calls, LLM calls, runner commands, secret leases, and credential-cache reads from dashboard read endpoints.
+- Sanitize read-model output and avoid exposing secrets or raw tokens.
+
+Recommended next step: LLM Gateway v1 if controlled real provider calls should be enabled next, or Real Git Adapter v2/webhook planning if Git integration should continue first.
+
+## 12. MCP Gateway Planning
 
 Goals:
 
@@ -155,7 +186,7 @@ Goals:
 - Keep MCP calls disabled by default.
 - Define audit, auth, and permission model.
 
-## 11. Phase 5 Enterprise Planning
+## 13. Phase 5 Enterprise Planning
 
 Goals:
 
