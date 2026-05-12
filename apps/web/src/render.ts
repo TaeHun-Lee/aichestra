@@ -1,7 +1,7 @@
 import path from "node:path";
 import { createSeededStore } from "@aichestra/db";
 import { GitHubGitProvider, GitIntegrationService, MockGitProvider } from "@aichestra/git-adapter";
-import { OpenAICompatibleLLMProvider, ProviderAbstractionService, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
+import { LocalAgentProtocolService, OpenAICompatibleLLMProvider, ProviderAbstractionService, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
 import { PolicyService, createPolicyContext, createPolicyResource, createPolicySubject } from "@aichestra/policy";
 import { PolicyBackedRegistryMutationAuthorizer, createRegistryService } from "@aichestra/registry";
 import { AgentRunnerService, MockAgentRunner, createAgentRunnerConfigFromEnv } from "@aichestra/runner";
@@ -267,7 +267,72 @@ export async function renderDashboardHtml(): Promise<string> {
     actorId: task.requesterUserId,
     metadata: { source: "dashboard" }
   });
-  const providerAbstractionService = new ProviderAbstractionService({ policyService });
+  const localAgentProtocolService = new LocalAgentProtocolService({ policyService, securityService });
+  const fixtureStarted = localAgentProtocolService.startFixtureAgent({
+    userId: task.requesterUserId,
+    hostId: "host_dashboard_mock",
+    displayName: "Dashboard Mock Local Agent",
+    agentVersion: "0.1.0-fixture",
+    platform: "linux-x64",
+    metadata: { source: "dashboard" }
+  });
+  const protocolAgent = fixtureStarted.agent;
+  const protocolChannel = localAgentProtocolService.connectChannel(protocolAgent.id);
+  const protocolCompatibility = localAgentProtocolService.checkCompatibility({
+    providerId: "codex-cli-local",
+    agentId: protocolAgent.id,
+    command: "codex",
+    providerTemplateId: "codex-cli-jsonl",
+    parserMode: "jsonl",
+    reportedVersion: "0.1.0",
+    metadata: { source: "dashboard" }
+  });
+  const protocolInvocation = localAgentProtocolService.createInvocationEnvelope({
+    taskId: task.id,
+    taskRunId: latestRun?.id,
+    actorId: task.requesterUserId,
+    providerId: "codex-cli-local",
+    localAgentId: protocolAgent.id,
+    workspaceRef: "workspace_dashboard_protocol",
+    promptRef: "prompt_dashboard_protocol",
+    requiredConsentLevel: "read_only",
+    sandboxProfileId: "sandbox_default_deny",
+    networkPolicyId: "network_default_deny",
+    redactionPolicyId: "redaction_default",
+    secretScopeIds: [],
+    metadata: {
+      source: "dashboard",
+      requireChannel: true,
+      channelId: protocolChannel.channel.id,
+      compatibilityRequired: true,
+      compatibilityCompatible: protocolCompatibility.compatible,
+      compatibilityResultId: protocolCompatibility.id,
+      providerTemplateId: "codex-cli-jsonl",
+      fixtureDaemon: true
+    }
+  });
+  const protocolConsentRequest = localAgentProtocolService.requestConsent(protocolInvocation.invocation.id);
+  localAgentProtocolService.recordConsentDecision({
+    consentRequestId: protocolConsentRequest.id,
+    userId: task.requesterUserId,
+    decision: "approved_once",
+    reason: "dashboard mock consent"
+  });
+  const protocolDispatched = await localAgentProtocolService.dispatchInvocation(protocolInvocation.invocation.id);
+  localAgentProtocolService.receiveInvocationEvent({
+    invocationId: protocolDispatched.id,
+    source: "stdout",
+    type: "message",
+    payload: { text: "dashboard stdout OPENAI_API_KEY=sk-dashboard-secret" }
+  });
+  const protocolCompleted = localAgentProtocolService.completeInvocation({
+    invocationId: protocolDispatched.id,
+    exitCode: 0,
+    statusReason: "dashboard_mock_completed"
+  });
+  localAgentProtocolService.recordDirectLocalCliExecutionBlocked({ providerId: "codex-cli-local", metadata: { source: "dashboard" } });
+  localAgentProtocolService.recordCredentialCacheAccessDenied({ providerId: "codex-cli-local", metadata: { requestedPath: "~/.codex/auth.json" } });
+  const providerAbstractionService = new ProviderAbstractionService({ policyService, localAgentProtocolService });
   const providerValidation = providerAbstractionService.validateProvider("claude-code-local");
   const providerInvocation = await providerAbstractionService.invoke({
     providerId: "claude-code-local",
@@ -284,6 +349,17 @@ export async function renderDashboardHtml(): Promise<string> {
   const activeSkills = store.listSkills().filter((skill) => skill.status === "active").length;
   const activeHarnesses = store.listHarnesses().filter((harness) => harness.status === "active").length;
   const activeInstructions = store.listInstructions().filter((instruction) => instruction.status === "active").length;
+  const protocolConfig = localAgentProtocolService.getConfig();
+  const protocolChannels = localAgentProtocolService.listChannels({ agentId: protocolAgent.id });
+  const protocolHandshakes = localAgentProtocolService.listHandshakes({ agentId: protocolAgent.id });
+  const protocolCapabilityAdvertisements = localAgentProtocolService.listCapabilityAdvertisements({ agentId: protocolAgent.id });
+  const protocolCompatibilityEntries = localAgentProtocolService.listCompatibilityEntries();
+  const protocolCompatibilityResults = localAgentProtocolService.listCompatibilityResults({ agentId: protocolAgent.id });
+  const protocolConsentQueue = localAgentProtocolService.listConsentRequests({ pendingOnly: true });
+  const protocolApprovedConsentHistory = localAgentProtocolService.listConsentDecisions().filter((decision) => decision.decision === "approved" || decision.decision === "approved_once" || decision.decision === "approved_for_session");
+  const protocolDeniedConsentHistory = localAgentProtocolService.listConsentDecisions().filter((decision) => decision.decision === "denied" || decision.decision === "expired");
+  const protocolStream = localAgentProtocolService.getStreamForInvocation(protocolCompleted.id);
+  const protocolStreamEvents = localAgentProtocolService.listStreamEvents({ invocationId: protocolCompleted.id });
 
   return `<!doctype html>
 <html lang="en">
@@ -600,6 +676,26 @@ export async function renderDashboardHtml(): Promise<string> {
           <div class="item"><strong>Redaction policy</strong><span>${escapeHtml(securityService.listRedactionPolicies().map((policy) => `${policy.id}:maxPreview=${policy.maxPreviewBytes}`).join(", "))} / preview ${escapeHtml(redactionTest.preview)}</span></div>
           <div class="item"><strong>Security audit</strong><span>${escapeHtml(securityService.listAuditEvents().map((event) => `${event.eventType}:${event.result}`).join(", ") || "none")}</span></div>
           <div class="item"><strong>Blocked examples</strong><span>secret reads denied, network egress blocked, credential cache paths redacted.</span></div>
+        </div>
+        <h2>Local Agent Protocol</h2>
+        <div class="list">
+          <div class="item"><strong>Protocol status</strong><span>${escapeHtml(protocolConfig.status)} / mock transport ${protocolConfig.mockTransportEnabled ? "enabled" : "disabled"} / fixture daemon ${protocolConfig.fixtureDaemonSupportEnabled ? "enabled" : "disabled"} / mock channel ${protocolConfig.mockChannelSupportEnabled ? "enabled" : "disabled"} / real transport disabled / vendor CLI execution disabled</span></div>
+          <div class="item"><strong>Fixture agents</strong><span>${protocolConfig.connectedFixtureAgents} connected fixture agent(s) / ${protocolConfig.activeMockChannels} active mock channel(s)</span></div>
+          <div class="item"><strong>Registered agents</strong><span>${escapeHtml(localAgentProtocolService.listAgents().map((agent) => `${agent.displayName}:${agent.status}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Capabilities</strong><span>${escapeHtml(protocolAgent.capabilities.map((capability) => `${capability.kind}:${capability.enabled ? "on" : "off"}`).join(", "))}</span></div>
+          <div class="item"><strong>Channels</strong><span>${escapeHtml(protocolChannels.map((channel) => `${channel.channelKind}:${channel.status}:${channel.handshakeStatus}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Handshakes</strong><span>${escapeHtml(protocolHandshakes.map((handshake) => `${handshake.responseStatus}:productionCrypto=false`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Capability advertisement</strong><span>${escapeHtml(protocolCapabilityAdvertisements.map((advertisement) => `${advertisement.agentVersion}:streaming=${advertisement.supportsStreaming}:cancel=${advertisement.supportsCancellation}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Compatibility matrix</strong><span>${escapeHtml(protocolCompatibilityEntries.map((entry) => `${entry.providerTemplateId}:${entry.parserMode}:${entry.supported ? "supported" : "unsupported"}`).join(", "))}</span></div>
+          <div class="item"><strong>Compatibility result</strong><span>${escapeHtml(protocolCompatibilityResults.map((result) => `${result.providerId}:${result.compatible ? "compatible" : "blocked"}:${result.reason}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Consent queue</strong><span>${protocolConsentQueue.length} pending / latest ${escapeHtml(protocolConsentRequest.consentLevel)} / requested ${escapeHtml(protocolConsentRequest.requestedCapabilityKinds.join(", "))}</span></div>
+          <div class="item"><strong>Consent history</strong><span>${protocolApprovedConsentHistory.length} approved / ${protocolDeniedConsentHistory.length} denied / latest ${escapeHtml(protocolApprovedConsentHistory.at(-1)?.decision ?? "none")}</span></div>
+          <div class="item"><strong>Recent invocation</strong><span>${escapeHtml(protocolCompleted.state)} / stream ${escapeHtml(protocolStream?.state ?? "none")} / redaction ${protocolCompleted.redactionApplied ? "applied" : "not needed"} / ${escapeHtml(protocolCompleted.statusReason ?? "none")}</span></div>
+          <div class="item"><strong>Stream events</strong><span>${escapeHtml(protocolStreamEvents.map((event) => `${event.sequence}:${event.source}:${event.type}:${JSON.stringify(event.payloadPreview)}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Event previews</strong><span>${escapeHtml(localAgentProtocolService.listEvents({ invocationId: protocolCompleted.id }).map((event) => `${event.source}:${event.type}:${JSON.stringify(event.payload)}`).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Protocol audit</strong><span>${escapeHtml(localAgentProtocolService.listAuditEvents().map((event) => event.eventType).join(", ") || "none")}</span></div>
+          <div class="item"><strong>Timeout/cancel/disconnect examples</strong><span>timeout, cancellation, and disconnect outcomes are deterministic fixture states.</span></div>
+          <div class="item"><strong>Blocked examples</strong><span>local_cli_direct_execution_blocked, credential_cache_access_denied, real transport disabled, vendor CLI execution blocked, PTY denied, danger_full_access denied.</span></div>
         </div>
         <h2>Enterprise LLM Providers</h2>
         <div class="list">

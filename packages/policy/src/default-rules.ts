@@ -343,6 +343,28 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_local_cli_direct_invoke_deny",
+      name: "Deny direct local CLI execution",
+      description: "Aichestra Cloud must not execute local CLI providers directly.",
+      effect: "deny",
+      action: "local_cli.invoke",
+      resourceKind: "local_cli",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_local_cli_danger_full_access_deny",
+      name: "Deny local CLI danger full access",
+      description: "danger_full_access is denied by default.",
+      effect: "deny",
+      action: "local_cli.danger_full_access",
+      resourceKind: "local_cli",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
       id: "policy_local_cli_shell_execution_deny",
       name: "Deny local CLI shell execution",
       description: "Local CLI shell execution is denied until a future Local Agent policy explicitly enables it.",
@@ -373,6 +395,259 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       resourceKind: "local_cli",
       conditions: {},
       priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_register_allow_system",
+      name: "Allow mock Local Agent registration",
+      description: "Mock Local Agent registration is allowed for system and mock admin actors.",
+      effect: "allow",
+      action: "local_agent.register",
+      resourceKind: "local_agent",
+      conditions: { subjectRolesAny: ["system", "mock_admin", "local_agent_admin"] },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_channel_create_allow_mock",
+      name: "Allow mock Local Agent channel creation",
+      description: "Only mock in-memory Local Agent channels are allowed in v1.",
+      effect: "allow",
+      action: "local_agent.channel.create",
+      resourceKind: "local_agent",
+      conditions: {
+        environmentEquals: {
+          mockTransport: true,
+          realTransport: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_handshake_verify_allow_mock",
+      name: "Allow mock Local Agent handshake verification",
+      description: "Mock handshakes are deterministic metadata and are not production crypto.",
+      effect: "allow",
+      action: "local_agent.handshake.verify",
+      resourceKind: "local_agent",
+      conditions: {
+        environmentEquals: {
+          mockTransport: true,
+          realTransport: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_capability_advertise_allow_mock",
+      name: "Allow mock capability advertisement",
+      description: "Fixture Local Agents may advertise metadata-only capabilities.",
+      effect: "allow",
+      action: "local_agent.capability.advertise",
+      resourceKind: "local_agent",
+      conditions: {
+        environmentEquals: {
+          mockTransport: true
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_compatibility_check_allow_mock",
+      name: "Allow mock local CLI compatibility checks",
+      description: "Compatibility checks use fixture metadata only and do not run vendor CLIs.",
+      effect: "allow",
+      action: "local_agent.compatibility.check",
+      resourceKind: "local_agent",
+      conditions: {
+        environmentEquals: {
+          mockTransport: true
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_revoke_allow_system",
+      name: "Allow mock Local Agent revocation",
+      description: "Mock Local Agent revocation is allowed for system and local agent admin actors.",
+      effect: "allow",
+      action: "local_agent.revoke",
+      resourceKind: "local_agent",
+      conditions: { subjectRolesAny: ["system", "local_agent_admin"] },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_cancel_allow_system",
+      name: "Allow mock Local Agent invocation cancellation",
+      description: "Mock Local Agent invocation cancellation is allowed for system actors.",
+      effect: "allow",
+      action: "local_agent.cancel",
+      resourceKind: "local_agent",
+      conditions: { subjectRolesAny: ["system", "local_agent_admin"] },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_event_receive_allow_mock",
+      name: "Allow mock Local Agent event receipt",
+      description: "Mock Local Agent protocol events may be received after redaction controls.",
+      effect: "allow",
+      action: "local_agent.event.receive",
+      resourceKind: "local_agent",
+      conditions: {
+        environmentEquals: {
+          mockTransport: true
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_stream_receive_allow_mock",
+      name: "Allow mock Local Agent stream receipt",
+      description: "Mock stream events may be received after redaction controls.",
+      effect: "allow",
+      action: "local_agent.stream.receive",
+      resourceKind: "local_agent",
+      conditions: {
+        environmentEquals: {
+          mockTransport: true
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_session_expire_allow_system",
+      name: "Allow Local Agent session expiry",
+      description: "Session expiry is metadata-only and blocks future dispatch.",
+      effect: "allow",
+      action: "local_agent.session.expire",
+      resourceKind: "local_agent",
+      conditions: { subjectRolesAny: ["system", "local_agent_admin"] },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_session_approve_allow_mock",
+      name: "Allow mock Local Agent session consent approval",
+      description: "Session-scoped approval is metadata-only and still expires with Local Agent session state.",
+      effect: "allow",
+      action: "local_agent.session.approve",
+      resourceKind: "local_agent",
+      conditions: { subjectRolesAny: ["system", "local_agent_admin"] },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_consent_request_allow",
+      name: "Allow Local Agent consent request",
+      description: "Consent requests are allowed because they do not execute local CLI providers.",
+      effect: "allow",
+      action: "local_agent.consent.request",
+      resourceKind: "local_agent",
+      conditions: {},
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_consent_approve_allow_mock",
+      name: "Allow mock Local Agent consent approval",
+      description: "Mock consent decisions may be recorded, but dangerous consent levels remain denied by invocation policy.",
+      effect: "allow",
+      action: "local_agent.consent.approve",
+      resourceKind: "local_agent",
+      conditions: {},
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_invoke_revoked_deny",
+      name: "Deny revoked Local Agent invocation",
+      description: "Revoked Local Agents cannot receive invocations.",
+      effect: "deny",
+      action: "local_agent.invoke",
+      resourceKind: "local_agent",
+      conditions: { resourceStatuses: ["revoked"] },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_invoke_disconnected_deny",
+      name: "Deny disconnected Local Agent invocation",
+      description: "Disconnected Local Agents cannot receive invocations.",
+      effect: "deny",
+      action: "local_agent.invoke",
+      resourceKind: "local_agent",
+      conditions: { resourceStatuses: ["disconnected", "unknown", "pending"] },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_local_agent_invoke_read_only_with_consent_allow",
+      name: "Allow read-only Local Agent invocation with consent",
+      description: "Read-only Local Agent invocations may dispatch only after policy and consent are satisfied.",
+      effect: "allow",
+      action: "local_agent.invoke",
+      resourceKind: "local_agent",
+      conditions: {
+        environmentEquals: {
+          localAgentConnected: true,
+          mockTransport: true
+        },
+        metadataEquals: {
+          consentLevel: "read_only",
+          consentApproved: true
+        }
+      },
+      priority: 800,
+      enabled: true
+    },
+    {
+      id: "policy_local_cli_template_use_incompatible_deny",
+      name: "Deny incompatible local CLI template use",
+      description: "Local CLI templates require a successful compatibility check before invocation.",
+      effect: "deny",
+      action: "local_cli.template.use",
+      resourceKind: "local_cli",
+      conditions: {
+        metadataEquals: {
+          compatible: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_local_cli_template_use_allow_compatible_consent",
+      name: "Allow compatible local CLI template use with consent",
+      description: "Compatible local CLI templates may be used only after consent is approved.",
+      effect: "allow",
+      action: "local_cli.template.use",
+      resourceKind: "local_cli",
+      conditions: {
+        metadataEquals: {
+          compatible: true,
+          consentApproved: true
+        }
+      },
+      priority: 500,
+      enabled: true
+    },
+    {
+      id: "policy_local_cli_template_use_requires_consent",
+      name: "Require consent for local CLI template use",
+      description: "Template use is blocked until compatibility and consent are both satisfied.",
+      effect: "require_approval",
+      action: "local_cli.template.use",
+      resourceKind: "local_cli",
+      conditions: {},
+      priority: 400,
       enabled: true
     },
     {
@@ -498,6 +773,44 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       resourceKind: "secret_scope",
       conditions: {},
       priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_sandbox_default_deny_profile_allow",
+      name: "Allow default-deny sandbox profile",
+      description: "The default-deny sandbox profile may be referenced because it grants no network, secrets, or remote Git access.",
+      effect: "allow",
+      action: "sandbox.profile.use",
+      resourceKind: "sandbox_profile",
+      conditions: {
+        environmentEquals: {
+          sandboxKind: "none",
+          networkAllowed: false,
+          secretsAllowed: false,
+          remoteGitAllowed: false,
+          profileStatus: "active"
+        }
+      },
+      priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_sandbox_default_deny_session_allow",
+      name: "Allow default-deny sandbox session metadata",
+      description: "Default-deny sandbox session metadata may be recorded when no network, secrets, or remote Git access is enabled.",
+      effect: "allow",
+      action: "sandbox.session.create",
+      resourceKind: "sandbox_session",
+      conditions: {
+        environmentEquals: {
+          sandboxKind: "none",
+          networkAllowed: false,
+          secretsAllowed: false,
+          remoteGitAllowed: false,
+          profileStatus: "active"
+        }
+      },
+      priority: 200,
       enabled: true
     },
     {

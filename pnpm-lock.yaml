@@ -208,6 +208,9 @@ importers:
       '@aichestra/policy':
         specifier: workspace:*
         version: link:../policy
+      '@aichestra/security':
+        specifier: workspace:*
+        version: link:../security
 
   packages/policy:
     dependencies:

@@ -18,6 +18,23 @@ import type {
   ProviderValidationResult,
   TokenResolutionResult
 } from "./enterprise-providers.ts";
+import type {
+  LocalAgentConsentDecision,
+  LocalAgentConsentRequest,
+  LocalAgentCapabilityAdvertisement,
+  LocalAgentChannel,
+  LocalAgentHandshake,
+  LocalAgentInvocation,
+  LocalAgentInvocationEnvelope,
+  LocalAgentInvocationStream,
+  LocalAgentNormalizedEvent,
+  LocalAgentProtocolAuditEvent,
+  LocalAgentRegistration,
+  LocalAgentSession,
+  LocalAgentStreamEvent,
+  LocalCliCompatibilityEntry,
+  LocalCliCompatibilityResult
+} from "./local-agent-protocol.ts";
 
 export function llmModelToDto(model: LLMModel) {
   return {
@@ -154,5 +171,129 @@ export function providerOutputParseResultToDto(result: ProviderOutputParseResult
       ...event,
       createdAt: event.createdAt.toISOString()
     }))
+  };
+}
+
+export function localAgentRegistrationToDto(registration: LocalAgentRegistration) {
+  return {
+    ...registration,
+    registeredAt: registration.registeredAt.toISOString(),
+    lastSeenAt: registration.lastSeenAt?.toISOString(),
+    containsSecretMaterial: false,
+    credentialCacheAccessAllowed: false
+  };
+}
+
+export function localAgentSessionToDto(session: LocalAgentSession) {
+  return {
+    ...session,
+    issuedAt: session.issuedAt.toISOString(),
+    expiresAt: session.expiresAt.toISOString(),
+    revokedAt: session.revokedAt?.toISOString()
+  };
+}
+
+export function localAgentChannelToDto(channel: LocalAgentChannel) {
+  return {
+    ...channel,
+    createdAt: channel.createdAt.toISOString(),
+    establishedAt: channel.establishedAt?.toISOString(),
+    expiresAt: channel.expiresAt?.toISOString(),
+    revokedAt: channel.revokedAt?.toISOString(),
+    productionCrypto: false,
+    realTransport: false
+  };
+}
+
+export function localAgentHandshakeToDto(handshake: LocalAgentHandshake) {
+  return {
+    ...handshake,
+    issuedAt: handshake.issuedAt.toISOString(),
+    completedAt: handshake.completedAt?.toISOString(),
+    expiresAt: handshake.expiresAt.toISOString(),
+    productionCrypto: false
+  };
+}
+
+export function localAgentCapabilityAdvertisementToDto(advertisement: LocalAgentCapabilityAdvertisement) {
+  return {
+    ...advertisement,
+    advertisedAt: advertisement.advertisedAt.toISOString()
+  };
+}
+
+export function localCliCompatibilityEntryToDto(entry: LocalCliCompatibilityEntry) {
+  return {
+    ...entry,
+    createdAt: entry.createdAt.toISOString(),
+    updatedAt: entry.updatedAt.toISOString()
+  };
+}
+
+export function localCliCompatibilityResultToDto(result: LocalCliCompatibilityResult) {
+  return {
+    ...result,
+    checkedAt: result.checkedAt.toISOString()
+  };
+}
+
+export function localAgentInvocationEnvelopeToDto(envelope: LocalAgentInvocationEnvelope) {
+  return {
+    ...envelope,
+    createdAt: envelope.createdAt.toISOString(),
+    containsSecretMaterial: false
+  };
+}
+
+export function localAgentNormalizedEventToDto(event: LocalAgentNormalizedEvent) {
+  return {
+    ...event,
+    createdAt: event.createdAt.toISOString()
+  };
+}
+
+export function localAgentInvocationToDto(invocation: LocalAgentInvocation) {
+  return {
+    ...invocation,
+    startedAt: invocation.startedAt?.toISOString(),
+    completedAt: invocation.completedAt?.toISOString(),
+    normalizedEvents: invocation.normalizedEvents.map(localAgentNormalizedEventToDto)
+  };
+}
+
+export function localAgentInvocationStreamToDto(stream: LocalAgentInvocationStream) {
+  return {
+    ...stream,
+    startedAt: stream.startedAt.toISOString(),
+    completedAt: stream.completedAt?.toISOString()
+  };
+}
+
+export function localAgentStreamEventToDto(event: LocalAgentStreamEvent) {
+  return {
+    ...event,
+    createdAt: event.createdAt.toISOString()
+  };
+}
+
+export function localAgentConsentRequestToDto(consentRequest: LocalAgentConsentRequest) {
+  return {
+    ...consentRequest,
+    requestedAt: consentRequest.requestedAt.toISOString(),
+    expiresAt: consentRequest.expiresAt?.toISOString()
+  };
+}
+
+export function localAgentConsentDecisionToDto(decision: LocalAgentConsentDecision) {
+  return {
+    ...decision,
+    decidedAt: decision.decidedAt.toISOString()
+  };
+}
+
+export function localAgentProtocolAuditEventToDto(event: LocalAgentProtocolAuditEvent) {
+  return {
+    ...event,
+    createdAt: event.createdAt.toISOString()
   };
 }

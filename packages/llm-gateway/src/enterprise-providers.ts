@@ -6,6 +6,7 @@ import {
   createPolicySubject
 } from "@aichestra/policy";
 import type { PolicyAction } from "@aichestra/policy";
+import type { LocalAgentConsentLevel, LocalAgentInvocation, LocalAgentProtocolService } from "./local-agent-protocol.ts";
 
 export type ProviderKind =
   | "cloud_api"
@@ -139,7 +140,7 @@ export type ProviderInvocationResult = {
   id: string;
   providerId: string;
   providerKind: ProviderKind;
-  status: "completed" | "failed" | "blocked" | "unavailable";
+  status: "completed" | "failed" | "blocked" | "unavailable" | "awaiting_consent";
   output: string;
   normalizedEvents: NormalizedProviderEvent[];
   usage?: {
@@ -207,13 +208,6 @@ export type LocalAgentDescriptor = {
   lastSeenAt?: Date;
 };
 
-export type LocalAgentConsentLevel =
-  | "read_only"
-  | "workspace_write"
-  | "shell_execution"
-  | "network_or_secret_access"
-  | "danger_full_access";
-
 export type LocalAgentInvocationRequest = {
   id: string;
   taskId: string;
@@ -265,6 +259,11 @@ export type ProviderAuditEvent = {
     | "credential_resolution_blocked"
     | "local_agent_required"
     | "local_agent_unavailable"
+    | "channel_required"
+    | "awaiting_consent"
+    | "consent_denied"
+    | "provider_template_incompatible"
+    | "mock_completed"
     | "local_cli_invocation_requested"
     | "local_cli_invocation_blocked"
     | "credential_cache_access_denied"
@@ -508,6 +507,7 @@ export class ProviderAbstractionService {
   private readonly tokenResolver: TokenResolver;
   private readonly policyService: PolicyService;
   private readonly localAgents: LocalAgentDescriptor[];
+  private readonly localAgentProtocolService?: LocalAgentProtocolService;
 
   constructor(input: {
     catalog?: ProviderCatalogService;
@@ -516,6 +516,7 @@ export class ProviderAbstractionService {
     tokenResolver?: TokenResolver;
     policyService?: PolicyService;
     localAgents?: LocalAgentDescriptor[];
+    localAgentProtocolService?: LocalAgentProtocolService;
   } = {}) {
     this.auditRepository = input.auditRepository ?? new InMemoryProviderAuditRepository();
     this.catalog = input.catalog ?? new ProviderCatalogService(undefined, this.auditRepository);
@@ -523,14 +524,17 @@ export class ProviderAbstractionService {
     this.tokenResolver = input.tokenResolver ?? new MockTokenResolver(this.catalog);
     this.policyService = input.policyService ?? new PolicyService();
     this.localAgents = input.localAgents ?? [];
+    this.localAgentProtocolService = input.localAgentProtocolService;
   }
 
   getConfig() {
     return {
       status: "available",
       providerCatalogCount: this.catalog.listProviders().length,
-      localAgentSupportEnabled: false,
-      connectedLocalAgents: this.localAgents.filter((agent) => agent.status === "connected").length,
+      localAgentSupportEnabled: this.localAgentProtocolService !== undefined,
+      connectedLocalAgents: this.localAgentProtocolService
+        ? this.localAgentProtocolService.getConfig().connectedAgents
+        : this.localAgents.filter((agent) => agent.status === "connected").length,
       credentialManagerKind: "static",
       tokenResolverKind: "mock"
     };
@@ -571,6 +575,17 @@ export class ProviderAbstractionService {
   }
 
   listLocalAgents(): LocalAgentDescriptor[] {
+    if (this.localAgentProtocolService) {
+      return this.localAgentProtocolService.listAgents().map((agent) => ({
+        id: agent.id,
+        userId: agent.userId,
+        hostId: agent.hostId,
+        version: agent.agentVersion,
+        status: agent.status === "revoked" || agent.status === "pending" ? "disconnected" : agent.status,
+        capabilities: agent.capabilities.filter((capability) => capability.enabled).map((capability) => capability.kind),
+        lastSeenAt: agent.lastSeenAt
+      }));
+    }
     return this.localAgents.map((agent) => structuredClone(agent));
   }
 
@@ -636,7 +651,9 @@ export class ProviderAbstractionService {
         modelId: request.modelId,
         providerKind: provider.kind,
         environment: {
-          localAgentConnected: this.localAgents.some((agent) => agent.status === "connected"),
+          localAgentConnected: this.localAgentProtocolService
+            ? this.localAgentProtocolService.getConfig().connectedAgents > 0
+            : this.localAgents.some((agent) => agent.status === "connected"),
           ptyEnabled: false
         },
         metadata: { source: "provider_abstraction" }
@@ -667,11 +684,14 @@ export class ProviderAbstractionService {
       return result;
     }
 
-    const adapter = createProviderAdapter(provider, this.localAgents);
+    const adapter = createProviderAdapter(provider, this.localAgents, this.localAgentProtocolService);
     const result = await adapter.invoke(request);
     if (result.status !== "completed") {
+      const eventType = provider.kind === "local_cli"
+        ? providerAuditEventTypeForLocalCliResult(result)
+        : "provider_invocation_blocked";
       this.recordAuditEvent({
-        eventType: provider.kind === "local_cli" ? "local_agent_required" : "provider_invocation_blocked",
+        eventType,
         actorId: request.actorId,
         taskId: request.taskId,
         taskRunId: request.taskRunId,
@@ -681,6 +701,20 @@ export class ProviderAbstractionService {
         operation: "provider.invoke",
         result: result.status === "failed" ? "failed" : "blocked",
         reason: result.error?.code,
+        metadata: result.metadata
+      });
+    } else if (provider.kind === "local_cli") {
+      this.recordAuditEvent({
+        eventType: "mock_completed",
+        actorId: request.actorId,
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        providerId: provider.id,
+        providerKind: provider.kind,
+        authType: provider.auth.type,
+        operation: "provider.invoke",
+        result: "allowed",
+        reason: "mock_completed",
         metadata: result.metadata
       });
     }
@@ -742,10 +776,12 @@ export class CloudIamProviderAdapter extends CloudApiProviderAdapter {}
 export class LocalCliProviderAdapter implements ProviderAdapter {
   private readonly provider: ProviderCatalogEntry;
   private readonly localAgents: LocalAgentDescriptor[];
+  private readonly localAgentProtocolService?: LocalAgentProtocolService;
 
-  constructor(provider: ProviderCatalogEntry, localAgents: LocalAgentDescriptor[] = []) {
+  constructor(provider: ProviderCatalogEntry, localAgents: LocalAgentDescriptor[] = [], localAgentProtocolService?: LocalAgentProtocolService) {
     this.provider = provider;
     this.localAgents = localAgents;
+    this.localAgentProtocolService = localAgentProtocolService;
   }
 
   getProviderId(): string {
@@ -760,7 +796,10 @@ export class LocalCliProviderAdapter implements ProviderAdapter {
     return validateProviderCatalogEntry(this.provider);
   }
 
-  async invoke(_request?: ProviderInvocationRequest): Promise<ProviderInvocationResult> {
+  async invoke(request?: ProviderInvocationRequest): Promise<ProviderInvocationResult> {
+    if (this.localAgentProtocolService) {
+      return this.invokeThroughProtocol(request);
+    }
     const connected = this.localAgents.find((agent) => agent.status === "connected");
     if (!connected) {
       return createProviderResult({
@@ -780,6 +819,221 @@ export class LocalCliProviderAdapter implements ProviderAdapter {
       message: "Aichestra Local Agent invocation is not implemented in v0.",
       metadata: { local_agent_id: connected.id }
     });
+  }
+
+  private async invokeThroughProtocol(request?: ProviderInvocationRequest): Promise<ProviderInvocationResult> {
+    const requestedAgentId = stringFromRecord(request?.context, "localAgentId") ?? stringFromRecord(request?.metadata, "localAgentId");
+    const requestedAgent = requestedAgentId ? this.localAgentProtocolService?.getAgent(requestedAgentId) : undefined;
+    const connected = requestedAgent?.status === "connected"
+      ? requestedAgent
+      : this.localAgentProtocolService?.findConnectedAgent(request?.actorId);
+    if (!connected || !this.localAgentProtocolService) {
+      const unavailableAgent = requestedAgent && requestedAgent.status !== "connected"
+        ? requestedAgent
+        : this.localAgentProtocolService?.listAgents().find((agent) => agent.status === "disconnected" || agent.status === "revoked");
+      if (unavailableAgent) {
+        return createProviderResult({
+          providerId: this.provider.id,
+          providerKind: "local_cli",
+          status: "unavailable",
+          code: "local_agent_unavailable",
+          message: `Local Agent is ${unavailableAgent.status}.`,
+          metadata: {
+            local_agent_id: unavailableAgent.id,
+            local_agent_status: unavailableAgent.status,
+            credential_access: "never_read_tokens"
+          }
+        });
+      }
+      return createProviderResult({
+        providerId: this.provider.id,
+        providerKind: "local_cli",
+        status: "unavailable",
+        code: "local_agent_required",
+        message: "Local CLI providers require a connected Aichestra Local Agent.",
+        metadata: { credential_access: "never_read_tokens" }
+      });
+    }
+    const fixtureAgent = connected.metadata.fixtureDaemon === true;
+    const activeChannel = this.localAgentProtocolService.getActiveChannel(connected.id);
+    if (fixtureAgent && !activeChannel) {
+      return createProviderResult({
+        providerId: this.provider.id,
+        providerKind: "local_cli",
+        status: "unavailable",
+        code: "channel_required",
+        message: "Fixture Local Agent provider invocation requires an established mock channel.",
+        metadata: {
+          local_agent_id: connected.id,
+          mock_channel_required: true,
+          real_transport_enabled: false
+        }
+      });
+    }
+    const templateId = providerTemplateIdForCatalogEntry(this.provider);
+    const localCliConfig = seedLocalCliProviderConfigs().find((item) => item.id === templateId);
+    const compatibility = fixtureAgent
+      ? this.localAgentProtocolService.checkCompatibility({
+        providerId: this.provider.id,
+        agentId: connected.id,
+        command: localCliConfig?.command ?? commandForProvider(this.provider),
+        providerTemplateId: templateId,
+        parserMode: localCliConfig?.parser.mode ?? "raw",
+        reportedVersion: stringFromRecord(connected.metadata, "fixtureReportedVersion") ?? connected.agentVersion,
+        metadata: { source: "provider_abstraction" }
+      })
+      : undefined;
+    if (compatibility && !compatibility.compatible) {
+      return createProviderResult({
+        providerId: this.provider.id,
+        providerKind: "local_cli",
+        status: "blocked",
+        code: "provider_template_incompatible",
+        message: compatibility.reason,
+        metadata: {
+          local_agent_id: connected.id,
+          compatibility_result_id: compatibility.id,
+          provider_template_id: templateId,
+          parser_mode: compatibility.parserMode,
+          warnings: compatibility.warnings
+        }
+      });
+    }
+
+    const existingInvocationId = stringFromRecord(request?.context, "localAgentInvocationId") ?? stringFromRecord(request?.metadata, "localAgentInvocationId");
+    let invocation: LocalAgentInvocation | undefined = existingInvocationId
+      ? this.localAgentProtocolService.getInvocation(existingInvocationId)
+      : undefined;
+    if (existingInvocationId && !invocation) {
+      return createProviderResult({
+        providerId: this.provider.id,
+        providerKind: "local_cli",
+        status: "blocked",
+        code: "local_agent_invocation_not_found",
+        message: `Local Agent invocation not found: ${existingInvocationId}`,
+        metadata: { local_agent_invocation_id: existingInvocationId }
+      });
+    }
+    if (invocation?.state === "consent_denied") {
+      return createProviderResult({
+        providerId: this.provider.id,
+        providerKind: "local_cli",
+        status: "blocked",
+        code: "consent_denied",
+        message: invocation.statusReason ?? "Local Agent consent was denied.",
+        metadata: {
+          local_agent_id: connected.id,
+          local_agent_invocation_id: invocation.id
+        }
+      });
+    }
+    if (!invocation) {
+      invocation = this.localAgentProtocolService.createInvocationEnvelope({
+        taskId: request?.taskId,
+        taskRunId: request?.taskRunId,
+        actorId: request?.actorId,
+        providerId: this.provider.id,
+        localAgentId: connected.id,
+        workspaceRef: request?.workspaceRef ?? "workspace_mock_local_cli",
+        instructionSetHash: request?.instructionSetHash,
+        promptRef: request?.id,
+        requiredConsentLevel: "read_only",
+        sandboxProfileId: "sandbox_default_deny",
+        networkPolicyId: "network_default_deny",
+        redactionPolicyId: "redaction_default",
+        secretScopeIds: [],
+        timeoutMs: 120000,
+        metadata: {
+          providerInvocationId: request?.id,
+          localCliExecutionEnabled: false,
+          credentialAccess: "never_read_tokens",
+          requireChannel: fixtureAgent,
+          channelId: activeChannel?.id,
+          compatibilityRequired: fixtureAgent,
+          compatibilityCompatible: compatibility?.compatible,
+          compatibilityResultId: compatibility?.id,
+          providerTemplateId: templateId,
+          parserMode: localCliConfig?.parser.mode ?? "raw",
+          fixtureDaemon: fixtureAgent
+        }
+      }).invocation;
+    }
+
+    const dispatched = await this.localAgentProtocolService.dispatchInvocation(invocation.id);
+    if (dispatched.state === "awaiting_consent") {
+      return createProviderResult({
+        providerId: this.provider.id,
+        providerKind: "local_cli",
+        status: "awaiting_consent",
+        code: "awaiting_consent",
+        message: "Local Agent invocation is awaiting user consent.",
+        metadata: {
+          local_agent_id: connected.id,
+          local_agent_invocation_id: dispatched.id,
+          consent_request_id: this.localAgentProtocolService.listConsentRequests({ invocationId: dispatched.id, pendingOnly: true }).at(-1)?.id
+        }
+      });
+    }
+    if (dispatched.state === "policy_blocked" || dispatched.state === "consent_denied") {
+      return createProviderResult({
+        providerId: this.provider.id,
+        providerKind: "local_cli",
+        status: "blocked",
+        code: dispatched.state === "consent_denied" ? "consent_denied" : dispatched.statusReason ?? dispatched.state,
+        message: dispatched.statusReason ?? "Local Agent invocation blocked.",
+        metadata: {
+          local_agent_id: connected.id,
+          local_agent_invocation_id: dispatched.id,
+          state: dispatched.state
+        }
+      });
+    }
+    if (dispatched.state === "local_agent_unavailable") {
+      return createProviderResult({
+        providerId: this.provider.id,
+        providerKind: "local_cli",
+        status: "unavailable",
+        code: "local_agent_unavailable",
+        message: dispatched.statusReason ?? "Local Agent unavailable.",
+        metadata: {
+          local_agent_id: connected.id,
+          local_agent_invocation_id: dispatched.id
+        }
+      });
+    }
+    const completed = this.localAgentProtocolService.completeInvocation({
+      invocationId: dispatched.id,
+      exitCode: 0,
+      statusReason: "mock_completed",
+      metadata: { providerId: this.provider.id }
+    });
+    const normalizedEvents = completed.normalizedEvents.map((event) => ({
+      id: event.id,
+      source: event.source,
+      type: event.type,
+      payload: event.payload,
+      createdAt: event.createdAt
+    }));
+    return {
+      id: createId("providerresult"),
+      providerId: this.provider.id,
+      providerKind: "local_cli",
+      status: "completed",
+      output: outputFromLocalAgentInvocation(completed),
+      normalizedEvents,
+      createdAt: new Date(),
+      completedAt: completed.completedAt ?? new Date(),
+      metadata: sanitizeProviderMetadata({
+        local_agent_id: connected.id,
+        local_agent_invocation_id: completed.id,
+        mock_transport: true,
+        fixture_daemon: fixtureAgent,
+        stream_event_count: this.localAgentProtocolService.listStreamEvents({ invocationId: completed.id }).length,
+        provider_template_id: templateId,
+        credential_access: "never_read_tokens",
+        direct_local_cli_execution: false
+      })
+    };
   }
 
   mapError(error: unknown) {
@@ -830,11 +1084,11 @@ export class PtyInteractiveFallbackProviderAdapter implements ProviderAdapter {
   }
 }
 
-export function createProviderAdapter(provider: ProviderCatalogEntry, localAgents: LocalAgentDescriptor[] = []): ProviderAdapter {
+export function createProviderAdapter(provider: ProviderCatalogEntry, localAgents: LocalAgentDescriptor[] = [], localAgentProtocolService?: LocalAgentProtocolService): ProviderAdapter {
   if (provider.kind === "oauth_api") return new OAuthApiProviderAdapter(provider);
   if (provider.kind === "workload_identity_api") return new WorkloadIdentityProviderAdapter(provider);
   if (provider.kind === "cloud_iam") return new CloudIamProviderAdapter(provider);
-  if (provider.kind === "local_cli") return new LocalCliProviderAdapter(provider, localAgents);
+  if (provider.kind === "local_cli") return new LocalCliProviderAdapter(provider, localAgents, localAgentProtocolService);
   if (provider.kind === "pty_interactive_fallback") return new PtyInteractiveFallbackProviderAdapter(provider);
   return new CloudApiProviderAdapter(provider);
 }
@@ -1237,6 +1491,43 @@ function sanitizeProviderMetadata(metadata: Record<string, unknown>): Record<str
     }
   }
   return clone;
+}
+
+function providerAuditEventTypeForLocalCliResult(result: ProviderInvocationResult): ProviderAuditEvent["eventType"] {
+  if (result.error?.code === "local_agent_required") return "local_agent_required";
+  if (result.error?.code === "local_agent_unavailable") return "local_agent_unavailable";
+  if (result.error?.code === "channel_required") return "channel_required";
+  if (result.error?.code === "awaiting_consent" || result.status === "awaiting_consent") return "awaiting_consent";
+  if (result.error?.code === "consent_denied") return "consent_denied";
+  if (result.error?.code === "provider_template_incompatible") return "provider_template_incompatible";
+  return "local_cli_invocation_blocked";
+}
+
+function stringFromRecord(record: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function outputFromLocalAgentInvocation(invocation: LocalAgentInvocation): string {
+  return invocation.normalizedEvents
+    .filter((event) => event.source === "stdout")
+    .map((event) => {
+      const text = event.payload.text;
+      return typeof text === "string" ? text : JSON.stringify(event.payload);
+    })
+    .join("\n");
+}
+
+function providerTemplateIdForCatalogEntry(provider: ProviderCatalogEntry): string {
+  const templateId = provider.metadata.templateId;
+  return typeof templateId === "string" ? templateId : `${provider.id}-template`;
+}
+
+function commandForProvider(provider: ProviderCatalogEntry): string {
+  if (provider.vendor === "anthropic") return "claude";
+  if (provider.vendor === "openai") return "codex";
+  if (provider.vendor === "google") return "gemini";
+  return "custom";
 }
 
 function policyActionForProviderKind(kind: ProviderKind): PolicyAction {

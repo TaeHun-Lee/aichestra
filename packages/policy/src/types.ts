@@ -73,10 +73,26 @@ export type PolicyAction =
   | "provider.local_cli.invoke"
   | "provider.pty.invoke"
   | "provider.cloud_api.invoke"
+  | "local_agent.register"
+  | "local_agent.channel.create"
+  | "local_agent.handshake.verify"
+  | "local_agent.capability.advertise"
+  | "local_agent.compatibility.check"
   | "local_agent.invoke"
+  | "local_agent.consent.request"
+  | "local_agent.consent.approve"
+  | "local_agent.cancel"
+  | "local_agent.revoke"
+  | "local_agent.event.receive"
+  | "local_agent.stream.receive"
+  | "local_agent.session.approve"
+  | "local_agent.session.expire"
+  | "local_cli.invoke"
+  | "local_cli.template.use"
   | "local_cli.file_write"
   | "local_cli.shell_execution"
   | "local_cli.network_access"
+  | "local_cli.danger_full_access"
   | "credential.cache.read"
   | "credential.cache.upload"
   | "secret.metadata.read"
@@ -227,10 +243,26 @@ const policyActions = new Set<PolicyAction>([
   "provider.local_cli.invoke",
   "provider.pty.invoke",
   "provider.cloud_api.invoke",
+  "local_agent.register",
+  "local_agent.channel.create",
+  "local_agent.handshake.verify",
+  "local_agent.capability.advertise",
+  "local_agent.compatibility.check",
   "local_agent.invoke",
+  "local_agent.consent.request",
+  "local_agent.consent.approve",
+  "local_agent.cancel",
+  "local_agent.revoke",
+  "local_agent.event.receive",
+  "local_agent.stream.receive",
+  "local_agent.session.approve",
+  "local_agent.session.expire",
+  "local_cli.invoke",
+  "local_cli.template.use",
   "local_cli.file_write",
   "local_cli.shell_execution",
   "local_cli.network_access",
+  "local_cli.danger_full_access",
   "credential.cache.read",
   "credential.cache.upload",
   "secret.metadata.read",

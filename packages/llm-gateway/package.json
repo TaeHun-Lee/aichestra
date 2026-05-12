@@ -9,6 +9,7 @@
   "dependencies": {
     "@aichestra/adapters": "workspace:*",
     "@aichestra/core": "workspace:*",
-    "@aichestra/policy": "workspace:*"
+    "@aichestra/policy": "workspace:*",
+    "@aichestra/security": "workspace:*"
   }
 }

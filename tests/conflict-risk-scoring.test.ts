@@ -35,8 +35,8 @@ test("conflict scoring returns safe risk for no overlap", () => {
 
 test("conflict scoring returns low safe risk for docs-only overlap", () => {
   const risk = createConflictRisk(
-    lease("lease_a", "run_a", ["docs/architecture.md"]),
-    lease("lease_b", "run_b", ["docs/architecture.md"])
+    lease("lease_a", "run_a", ["docs/foundations/architecture.md"]),
+    lease("lease_b", "run_b", ["docs/foundations/architecture.md"])
   );
 
   assert.equal(risk.riskScore, 0.1);

@@ -226,20 +226,267 @@ CREATE TABLE IF NOT EXISTS provider_audit_events (
   created_at timestamptz NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS local_agent_descriptors (
+-- Local Agent Protocol v1 schema skeleton. Runtime remains in-memory until a
+-- future persistent protocol repository task wires these tables.
+CREATE TABLE IF NOT EXISTS local_agent_registrations (
   id text PRIMARY KEY,
   user_id text NOT NULL,
   host_id text NOT NULL,
-  version text NOT NULL,
+  display_name text NOT NULL,
+  agent_version text NOT NULL,
+  platform text NOT NULL,
   status text NOT NULL,
   capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
-  last_seen_at timestamptz
+  registered_at timestamptz NOT NULL,
+  last_seen_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX IF NOT EXISTS idx_provider_catalog_kind_status ON provider_catalog_entries (kind, status);
 CREATE INDEX IF NOT EXISTS idx_provider_audit_provider ON provider_audit_events (provider_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_provider_audit_task ON provider_audit_events (task_id, task_run_id);
-CREATE INDEX IF NOT EXISTS idx_local_agent_user_status ON local_agent_descriptors (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_local_agent_registrations_user_status ON local_agent_registrations (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_local_agent_registrations_host ON local_agent_registrations (host_id);
+CREATE INDEX IF NOT EXISTS idx_local_agent_registrations_last_seen ON local_agent_registrations (last_seen_at);
+
+CREATE TABLE IF NOT EXISTS local_agent_sessions (
+  id text PRIMARY KEY,
+  agent_id text NOT NULL,
+  user_id text NOT NULL,
+  status text NOT NULL,
+  issued_at timestamptz NOT NULL,
+  expires_at timestamptz NOT NULL,
+  revoked_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_sessions_agent_status ON local_agent_sessions (agent_id, status);
+CREATE INDEX IF NOT EXISTS idx_local_agent_sessions_user_status ON local_agent_sessions (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_local_agent_sessions_expires ON local_agent_sessions (expires_at);
+
+CREATE TABLE IF NOT EXISTS local_agent_channels (
+  id text PRIMARY KEY,
+  agent_id text NOT NULL,
+  user_id text NOT NULL,
+  channel_kind text NOT NULL,
+  status text NOT NULL,
+  handshake_status text NOT NULL,
+  created_at timestamptz NOT NULL,
+  established_at timestamptz,
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_channels_agent_status ON local_agent_channels (agent_id, status);
+CREATE INDEX IF NOT EXISTS idx_local_agent_channels_user_status ON local_agent_channels (user_id, status);
+CREATE INDEX IF NOT EXISTS idx_local_agent_channels_kind_status ON local_agent_channels (channel_kind, status);
+CREATE INDEX IF NOT EXISTS idx_local_agent_channels_expires ON local_agent_channels (expires_at);
+
+CREATE TABLE IF NOT EXISTS local_agent_handshakes (
+  id text PRIMARY KEY,
+  channel_id text NOT NULL,
+  agent_id text NOT NULL,
+  challenge text NOT NULL,
+  response_status text NOT NULL,
+  issued_at timestamptz NOT NULL,
+  completed_at timestamptz,
+  expires_at timestamptz NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_handshakes_channel ON local_agent_handshakes (channel_id);
+CREATE INDEX IF NOT EXISTS idx_local_agent_handshakes_agent_status ON local_agent_handshakes (agent_id, response_status);
+CREATE INDEX IF NOT EXISTS idx_local_agent_handshakes_expires ON local_agent_handshakes (expires_at);
+
+CREATE TABLE IF NOT EXISTS local_agent_capability_advertisements (
+  id text PRIMARY KEY,
+  agent_id text NOT NULL,
+  agent_version text NOT NULL,
+  platform text NOT NULL,
+  capabilities jsonb NOT NULL DEFAULT '[]'::jsonb,
+  supported_provider_templates jsonb NOT NULL DEFAULT '[]'::jsonb,
+  supported_parser_modes jsonb NOT NULL DEFAULT '[]'::jsonb,
+  supported_consent_levels jsonb NOT NULL DEFAULT '[]'::jsonb,
+  supported_sandbox_kinds jsonb NOT NULL DEFAULT '[]'::jsonb,
+  max_timeout_ms integer NOT NULL,
+  supports_streaming boolean NOT NULL,
+  supports_cancellation boolean NOT NULL,
+  advertised_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_capability_advertisements_agent ON local_agent_capability_advertisements (agent_id, advertised_at);
+CREATE INDEX IF NOT EXISTS idx_local_agent_capability_advertisements_version ON local_agent_capability_advertisements (agent_version);
+
+CREATE TABLE IF NOT EXISTS local_cli_compatibility_entries (
+  id text PRIMARY KEY,
+  vendor text NOT NULL,
+  command text NOT NULL,
+  version_range text NOT NULL,
+  provider_template_id text NOT NULL,
+  parser_mode text NOT NULL,
+  stdout_policy text NOT NULL,
+  stderr_policy text NOT NULL,
+  supported boolean NOT NULL,
+  notes text NOT NULL,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_cli_compatibility_entries_template ON local_cli_compatibility_entries (provider_template_id);
+CREATE INDEX IF NOT EXISTS idx_local_cli_compatibility_entries_vendor_command ON local_cli_compatibility_entries (vendor, command);
+CREATE INDEX IF NOT EXISTS idx_local_cli_compatibility_entries_supported ON local_cli_compatibility_entries (supported);
+
+CREATE TABLE IF NOT EXISTS local_cli_compatibility_results (
+  id text PRIMARY KEY,
+  provider_id text NOT NULL,
+  agent_id text NOT NULL,
+  command text NOT NULL,
+  reported_version text,
+  compatible boolean NOT NULL,
+  reason text NOT NULL,
+  parser_mode text NOT NULL,
+  warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_cli_compatibility_results_agent ON local_cli_compatibility_results (agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_local_cli_compatibility_results_provider ON local_cli_compatibility_results (provider_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_local_cli_compatibility_results_compatible ON local_cli_compatibility_results (compatible);
+
+CREATE TABLE IF NOT EXISTS local_agent_invocation_envelopes (
+  id text PRIMARY KEY,
+  task_id text,
+  task_run_id text,
+  provider_id text NOT NULL,
+  local_agent_id text NOT NULL,
+  workspace_ref text NOT NULL,
+  instruction_set_hash text,
+  prompt_ref text,
+  required_consent_level text NOT NULL,
+  sandbox_profile_id text,
+  network_policy_id text,
+  redaction_policy_id text,
+  secret_scope_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  timeout_ms integer NOT NULL,
+  signature_status text NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_envelopes_provider ON local_agent_invocation_envelopes (provider_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_local_agent_envelopes_agent ON local_agent_invocation_envelopes (local_agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_local_agent_envelopes_task ON local_agent_invocation_envelopes (task_id, task_run_id);
+
+CREATE TABLE IF NOT EXISTS local_agent_invocations (
+  id text PRIMARY KEY,
+  envelope_id text NOT NULL,
+  state text NOT NULL,
+  status_reason text,
+  started_at timestamptz,
+  completed_at timestamptz,
+  exit_code integer,
+  redaction_applied boolean NOT NULL DEFAULT false,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_invocations_envelope ON local_agent_invocations (envelope_id);
+CREATE INDEX IF NOT EXISTS idx_local_agent_invocations_state ON local_agent_invocations (state, created_at);
+
+CREATE TABLE IF NOT EXISTS local_agent_consent_requests (
+  id text PRIMARY KEY,
+  invocation_id text NOT NULL,
+  user_id text NOT NULL,
+  provider_id text,
+  workspace_ref text,
+  consent_level text NOT NULL,
+  requested_capability_kinds jsonb NOT NULL DEFAULT '[]'::jsonb,
+  timeout_ms integer,
+  safety_notes jsonb NOT NULL DEFAULT '[]'::jsonb,
+  reason text NOT NULL,
+  requested_at timestamptz NOT NULL,
+  expires_at timestamptz,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_consent_requests_invocation ON local_agent_consent_requests (invocation_id);
+CREATE INDEX IF NOT EXISTS idx_local_agent_consent_requests_user_level ON local_agent_consent_requests (user_id, consent_level);
+CREATE INDEX IF NOT EXISTS idx_local_agent_consent_requests_expires ON local_agent_consent_requests (expires_at);
+
+CREATE TABLE IF NOT EXISTS local_agent_consent_decisions (
+  id text PRIMARY KEY,
+  consent_request_id text NOT NULL,
+  user_id text NOT NULL,
+  decision text NOT NULL,
+  reason text,
+  decided_at timestamptz NOT NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_consent_decisions_request ON local_agent_consent_decisions (consent_request_id);
+CREATE INDEX IF NOT EXISTS idx_local_agent_consent_decisions_user_decision ON local_agent_consent_decisions (user_id, decision);
+CREATE INDEX IF NOT EXISTS idx_local_agent_consent_decisions_decided ON local_agent_consent_decisions (decided_at);
+
+CREATE TABLE IF NOT EXISTS local_agent_invocation_streams (
+  id text PRIMARY KEY,
+  invocation_id text NOT NULL,
+  state text NOT NULL,
+  event_count integer NOT NULL,
+  started_at timestamptz NOT NULL,
+  completed_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_invocation_streams_invocation ON local_agent_invocation_streams (invocation_id);
+CREATE INDEX IF NOT EXISTS idx_local_agent_invocation_streams_state ON local_agent_invocation_streams (state, started_at);
+
+CREATE TABLE IF NOT EXISTS local_agent_stream_events (
+  id text PRIMARY KEY,
+  stream_id text NOT NULL,
+  invocation_id text NOT NULL,
+  sequence integer NOT NULL,
+  source text NOT NULL,
+  type text NOT NULL,
+  payload_preview jsonb NOT NULL,
+  redacted boolean NOT NULL,
+  created_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_stream_events_stream_sequence ON local_agent_stream_events (stream_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_local_agent_stream_events_invocation_sequence ON local_agent_stream_events (invocation_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_local_agent_stream_events_source_type ON local_agent_stream_events (source, type);
+
+CREATE TABLE IF NOT EXISTS local_agent_normalized_events (
+  id text PRIMARY KEY,
+  invocation_id text NOT NULL,
+  source text NOT NULL,
+  type text NOT NULL,
+  payload jsonb NOT NULL,
+  redacted boolean NOT NULL,
+  created_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_events_invocation ON local_agent_normalized_events (invocation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_local_agent_events_source_type ON local_agent_normalized_events (source, type);
+
+CREATE TABLE IF NOT EXISTS local_agent_protocol_audit_events (
+  id text PRIMARY KEY,
+  event_type text NOT NULL,
+  actor_id text,
+  agent_id text,
+  invocation_id text,
+  task_id text,
+  task_run_id text,
+  result text NOT NULL,
+  reason text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_agent_protocol_audit_event_type ON local_agent_protocol_audit_events (event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_local_agent_protocol_audit_agent ON local_agent_protocol_audit_events (agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_local_agent_protocol_audit_invocation ON local_agent_protocol_audit_events (invocation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_local_agent_protocol_audit_task ON local_agent_protocol_audit_events (task_id, task_run_id);
 
 CREATE TABLE IF NOT EXISTS agent_runs (
   id text PRIMARY KEY,

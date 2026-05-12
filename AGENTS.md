@@ -4,7 +4,7 @@
 
 Aichestra is an LLM/agent orchestration control plane for collaborative AI-assisted software development.
 
-Design and work-order source documents live under `design_docs/`. The canonical bootstrap document is `design_docs/AICHESTRA_BOOTSTRAP.md`.
+Design and work-order source documents live under `docs/briefs/`. The canonical bootstrap document is `docs/briefs/AICHESTRA_BOOTSTRAP.md`. See `docs/README.md` for the full layout.
 
 ## Core principle
 
@@ -28,7 +28,7 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - `apps/worker` owns workflow execution.
 - `packages/git-adapter` abstracts Git provider behavior.
 - `packages/improvement` owns Phase 4 Preparation, Auto-improvement v0, and Governance v1 failure signals, deterministic clusters, improvement candidates, draft proposal metadata, draft registry changes, proposal readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness checks, apply gates, governance audit events, eval requirement metadata, canary rollout plan metadata, safety policies, repository interfaces, DTO mappers, mock engine behavior, and in-memory services.
-- `packages/llm-gateway` abstracts model providers, owns LLM Gateway v0 provider-neutral interfaces, mock provider behavior, OpenAI-compatible skeleton behavior, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, and Enterprise LLM Provider Abstraction v0 provider catalog/auth/credential/token/adapter/local-agent boundary skeletons.
+- `packages/llm-gateway` abstracts model providers, owns LLM Gateway v0 provider-neutral interfaces, mock provider behavior, OpenAI-compatible skeleton behavior, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 provider catalog/auth/credential/token/adapter/local-agent boundary skeletons, and Aichestra Local Agent Protocol v1 registration/session/invocation/consent/event/audit models, mock signed channels, fixture daemon simulation, compatibility matrix, mock transport, DTOs, and in-memory repositories.
 - `packages/registry` owns Skill, Harness, and Instruction registries, exact and simple semver version refs, repository boundaries, DTO mappers, registry audit logs, append-only history, rollback, approval queues, local eval result attachment, checksum verification, mock mutation authorization, local package manifests, import/export, package diffs, and deterministic registry resolution.
 - `packages/policy` owns Policy-as-code Skeleton v0 provider-neutral policy models, static/default policy rules, policy decision audit, DTOs, and policy service boundaries for Git, LLM, Runner, Registry, and Auto-improvement operations.
 - `packages/runner` owns agent runner contracts, deterministic `MockAgentRunner`, disabled-by-default `LocalAgentRunner`, controlled fixture command execution boundaries, workspace validation, harness execution policy, instruction assembly, in-memory runner repositories, command result capture, and runner DTOs/services.
@@ -81,7 +81,10 @@ Do not implement real external API calls in the MVP scaffold. Use explicit inter
 - Enterprise LLM Provider Abstraction v0 must remain skeleton-only: do not call Claude, Codex, Gemini, Vertex, Bedrock, Foundry, or any provider API/CLI.
 - Provider auth config must not contain raw provider tokens. `local_cli` providers must use `external_cli_session` with `credentialAccess = never_read_tokens`.
 - Do not read or upload provider-owned credential caches such as `~/.codex/auth.json`, `~/.claude`, Google credential caches, OS keychains, or vendor CLI session files.
-- Aichestra Local Agent is a future user-machine daemon boundary and is not the same as Local Agent Runner. Do not implement real Local Agent daemon/protocol or vendor CLI execution until an explicit future task.
+- Aichestra Local Agent is a future user-machine daemon boundary and is not the same as Local Agent Runner. Do not implement a real Local Agent daemon, real network transport, or vendor CLI execution until an explicit future task.
+- Aichestra Local Agent Protocol v1 is mock-first metadata coordination only: no real daemon, no WebSocket/gRPC/HTTP tunnel, no vendor CLI execution, no credential cache reads, no PTY automation, no direct local CLI execution from Cloud, and no secret forwarding.
+- Local Agent Protocol v1 dispatch must go through `LocalAgentProtocolService`, `LocalAgentTransport`, static policy decisions, mock channel/handshake state, compatibility checks, consent records, sandbox/network/redaction references, and Local Agent protocol audit events.
+- `MockLocalAgentTransport` and `FixtureLocalAgentDaemon` must remain in-memory and must not run commands, read credential caches, or use network transport.
 - PTY interactive fallback, danger/full-access local CLI modes, local CLI shell execution, local CLI file write, and local CLI network access are denied by default.
 - Policy-as-code v0 must remain static/mock-first: do not add real OPA/Rego, Cedar, external policy services, dynamic policy code upload, `eval()`, or user-provided policy execution.
 - Policy decisions must not weaken existing safety gates. Budget checks, harness policy, registry approval/eval/checksum gates, mock RBAC, governance apply gates, and provider-disabled defaults remain authoritative.

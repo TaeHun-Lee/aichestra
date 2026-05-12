@@ -22,7 +22,24 @@ import {
   budgetDecisionToDto,
   credentialReferenceResultToDto,
   createDefaultLlmGatewayService,
+  LocalAgentProtocolError,
+  LocalAgentProtocolService,
+  localAgentCapabilityAdvertisementToDto,
+  localAgentChannelToDto,
   localAgentDescriptorToDto,
+  localAgentConsentDecisionToDto,
+  localAgentConsentRequestToDto,
+  localAgentHandshakeToDto,
+  localAgentInvocationEnvelopeToDto,
+  localAgentInvocationStreamToDto,
+  localAgentInvocationToDto,
+  localAgentNormalizedEventToDto,
+  localAgentProtocolAuditEventToDto,
+  localAgentRegistrationToDto,
+  localAgentSessionToDto,
+  localAgentStreamEventToDto,
+  localCliCompatibilityEntryToDto,
+  localCliCompatibilityResultToDto,
   localCliProviderConfigToDto,
   isLlmModelStatus,
   isLlmProviderKind,
@@ -142,6 +159,7 @@ type RouteContext = {
   policyService: PolicyService;
   providerAbstractionService: ProviderAbstractionService;
   securityService: SecurityControlService;
+  localAgentProtocolService: LocalAgentProtocolService;
 };
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -229,6 +247,49 @@ function recordValue(value: unknown): Record<string, unknown> {
 
 function stringArrayValue(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function isLocalAgentConsentLevel(value: unknown): value is "read_only" | "workspace_write" | "shell_execution" | "network_or_secret_access" | "danger_full_access" {
+  return value === "read_only" ||
+    value === "workspace_write" ||
+    value === "shell_execution" ||
+    value === "network_or_secret_access" ||
+    value === "danger_full_access";
+}
+
+function isLocalAgentRegistrationStatus(value: unknown): value is "pending" | "connected" | "disconnected" | "revoked" | "unknown" {
+  return value === "pending" || value === "connected" || value === "disconnected" || value === "revoked" || value === "unknown";
+}
+
+function isLocalAgentConsentDecision(value: unknown): value is "approved" | "approved_once" | "approved_for_session" | "denied" | "expired" {
+  return value === "approved" || value === "approved_once" || value === "approved_for_session" || value === "denied" || value === "expired";
+}
+
+function isLocalAgentChannelKind(value: unknown): value is "mock_in_memory" | "future_websocket" | "future_grpc" | "future_http_tunnel" {
+  return value === "mock_in_memory" || value === "future_websocket" || value === "future_grpc" || value === "future_http_tunnel";
+}
+
+function isProviderParserMode(value: unknown): value is "raw" | "json" | "jsonl" | "ndjson" {
+  return value === "raw" || value === "json" || value === "jsonl" || value === "ndjson";
+}
+
+function parserModeArrayValue(value: unknown): Array<"raw" | "json" | "jsonl" | "ndjson"> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter(isProviderParserMode);
+}
+
+function consentLevelArrayValue(value: unknown): Array<"read_only" | "workspace_write" | "shell_execution" | "network_or_secret_access" | "danger_full_access"> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter(isLocalAgentConsentLevel);
+}
+
+function sendLocalAgentProtocolError(response: ServerResponse, error: unknown): void {
+  if (error instanceof LocalAgentProtocolError) {
+    const statusCode = error.code.includes("not_found") ? 404 : error.code.startsWith("invalid_") ? 400 : 409;
+    sendJson(response, statusCode, { error: error.code, message: error.message });
+    return;
+  }
+  sendJson(response, 400, { error: "local_agent_protocol_error", message: error instanceof Error ? error.message : "Local Agent Protocol error." });
 }
 
 function policyEvaluationRequestFromBody(body: Record<string, unknown>) {
@@ -338,6 +399,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           connectedLocalAgents: context.providerAbstractionService.getConfig().connectedLocalAgents,
           credentialManagerKind: context.providerAbstractionService.getConfig().credentialManagerKind,
           tokenResolverKind: context.providerAbstractionService.getConfig().tokenResolverKind
+        },
+        localAgentProtocol: {
+          status: context.localAgentProtocolService.getConfig().status,
+          transportKind: context.localAgentProtocolService.getConfig().transportKind,
+          mockTransportEnabled: context.localAgentProtocolService.getConfig().mockTransportEnabled,
+          fixtureDaemonSupportEnabled: context.localAgentProtocolService.getConfig().fixtureDaemonSupportEnabled,
+          mockChannelSupportEnabled: context.localAgentProtocolService.getConfig().mockChannelSupportEnabled,
+          connectedLocalAgents: context.localAgentProtocolService.getConfig().connectedAgents,
+          connectedFixtureAgents: context.localAgentProtocolService.getConfig().connectedFixtureAgents,
+          activeMockChannels: context.localAgentProtocolService.getConfig().activeMockChannels,
+          pendingConsentRequests: context.localAgentProtocolService.getConfig().pendingConsentRequests,
+          realTransportEnabled: false,
+          vendorCliExecutionEnabled: false,
+          localCliExecutionEnabled: false,
+          credentialCacheAccessAllowed: false
         },
         security: {
           secretManagerKind: context.securityService.getConfig().secretManagerKind,
@@ -555,6 +631,447 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             metadata: { source: "api_redaction_test" }
           });
           sendJson(response, 200, { result: redactionResultToDto(result) });
+          return;
+        }
+      }
+    }
+
+    if (segments[0] === "local-agents") {
+      const localAgentService = context.localAgentProtocolService;
+
+      if (segments[1] === "fixture") {
+        if (method === "POST" && segments[2] === "start") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            const userId = stringValue(body.userId);
+            if (!userId) {
+              sendJson(response, 400, { error: "invalid_fixture_agent", message: "userId is required." });
+              return;
+            }
+            const started = localAgentService.startFixtureAgent({
+              userId,
+              hostId: stringValue(body.hostId),
+              displayName: stringValue(body.displayName),
+              agentVersion: stringValue(body.agentVersion),
+              platform: stringValue(body.platform),
+              scenario: body.scenario === "timeout" || body.scenario === "parser_error" || body.scenario === "stderr_progress" || body.scenario === "cancellation" ? body.scenario : undefined,
+              metadata: recordValue(body.metadata)
+            });
+            sendJson(response, 201, {
+              localAgent: localAgentRegistrationToDto(started.agent),
+              advertisement: localAgentCapabilityAdvertisementToDto(started.advertisement)
+            });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        const fixtureAgentId = segments[2];
+        if (fixtureAgentId && method === "POST" && segments[3] === "stop") {
+          try {
+            sendJson(response, 200, { localAgent: localAgentRegistrationToDto(localAgentService.stopFixtureAgent(fixtureAgentId)) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        if (fixtureAgentId && method === "POST" && segments[3] === "disconnect") {
+          try {
+            sendJson(response, 200, { localAgent: localAgentRegistrationToDto(localAgentService.disconnectAgent(fixtureAgentId)) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        if (fixtureAgentId && method === "POST" && segments[3] === "reconnect") {
+          try {
+            sendJson(response, 200, { localAgent: localAgentRegistrationToDto(localAgentService.reconnectAgent(fixtureAgentId)) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "compatibility") {
+        if (method === "GET") {
+          sendJson(response, 200, {
+            entries: localAgentService.listCompatibilityEntries().map(localCliCompatibilityEntryToDto),
+            results: localAgentService.listCompatibilityResults({
+              agentId: url.searchParams.get("agentId") ?? undefined,
+              providerId: url.searchParams.get("providerId") ?? undefined
+            }).map(localCliCompatibilityResultToDto)
+          });
+          return;
+        }
+        if (method === "POST" && segments[2] === "check") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            const providerId = stringValue(body.providerId);
+            const agentId = stringValue(body.agentId);
+            const command = stringValue(body.command);
+            const providerTemplateId = stringValue(body.providerTemplateId);
+            const parserMode = stringValue(body.parserMode);
+            if (!providerId || !agentId || !command || !providerTemplateId || !isProviderParserMode(parserMode)) {
+              sendJson(response, 400, { error: "invalid_compatibility_check", message: "providerId, agentId, command, providerTemplateId, and parserMode are required." });
+              return;
+            }
+            const result = localAgentService.checkCompatibility({
+              providerId,
+              agentId,
+              command,
+              providerTemplateId,
+              parserMode,
+              reportedVersion: stringValue(body.reportedVersion),
+              metadata: recordValue(body.metadata)
+            });
+            sendJson(response, result.compatible ? 200 : 409, { result: localCliCompatibilityResultToDto(result) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "channels") {
+        const channelId = segments[2];
+        if (!channelId) {
+          sendJson(response, 400, { error: "missing_channel_id", message: "channel id is required." });
+          return;
+        }
+        if (method === "POST" && segments[3] === "handshake") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            const result = localAgentService.verifyHandshake({
+              channelId,
+              response: stringValue(body.response),
+              actorId: stringValue(body.actorId),
+              metadata: recordValue(body.metadata)
+            });
+            sendJson(response, result.channel.status === "established" ? 200 : 409, {
+              channel: localAgentChannelToDto(result.channel),
+              handshake: localAgentHandshakeToDto(result.handshake)
+            });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        if (method === "POST" && segments[3] === "revoke") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            sendJson(response, 200, { channel: localAgentChannelToDto(localAgentService.revokeChannel(channelId, stringValue(body.actorId))) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "invocations") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            invocations: localAgentService.listInvocations({
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+              localAgentId: url.searchParams.get("localAgentId") ?? undefined,
+              providerId: url.searchParams.get("providerId") ?? undefined
+            }).map(localAgentInvocationToDto)
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            const providerId = stringValue(body.providerId);
+            const localAgentId = stringValue(body.localAgentId);
+            const workspaceRef = stringValue(body.workspaceRef);
+            if (!providerId || !localAgentId || !workspaceRef || !isLocalAgentConsentLevel(body.requiredConsentLevel)) {
+              sendJson(response, 400, { error: "invalid_local_agent_invocation", message: "providerId, localAgentId, workspaceRef, and valid requiredConsentLevel are required." });
+              return;
+            }
+            const result = localAgentService.createInvocationEnvelope({
+              providerId,
+              localAgentId,
+              workspaceRef,
+              taskId: stringValue(body.taskId),
+              taskRunId: stringValue(body.taskRunId),
+              actorId: stringValue(body.actorId),
+              instructionSetHash: stringValue(body.instructionSetHash),
+              promptRef: stringValue(body.promptRef),
+              requiredConsentLevel: body.requiredConsentLevel,
+              sandboxProfileId: stringValue(body.sandboxProfileId),
+              networkPolicyId: stringValue(body.networkPolicyId),
+              redactionPolicyId: stringValue(body.redactionPolicyId),
+              secretScopeIds: stringArrayValue(body.secretScopeIds),
+              timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
+              metadata: recordValue(body.metadata)
+            });
+            const consentRequest = body.requestConsent === false ? undefined : localAgentService.requestConsent(result.invocation.id);
+            sendJson(response, 201, {
+              envelope: localAgentInvocationEnvelopeToDto(result.envelope),
+              invocation: localAgentInvocationToDto(localAgentService.getInvocation(result.invocation.id) ?? result.invocation),
+              consentRequest: consentRequest ? localAgentConsentRequestToDto(consentRequest) : undefined
+            });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        const invocationId = segments[2];
+        if (!invocationId) {
+          sendJson(response, 400, { error: "missing_invocation_id", message: "invocation id is required." });
+          return;
+        }
+        const invocation = localAgentService.getInvocation(invocationId);
+        if (!invocation) {
+          sendJson(response, 404, { error: "local_agent_invocation_not_found", message: `Local Agent invocation not found: ${invocationId}` });
+          return;
+        }
+        if (method === "GET" && segments.length === 3) {
+          const envelope = localAgentService.getEnvelope(invocation.envelopeId);
+          sendJson(response, 200, {
+            invocation: localAgentInvocationToDto(invocation),
+            envelope: envelope ? localAgentInvocationEnvelopeToDto(envelope) : undefined
+          });
+          return;
+        }
+        if (method === "POST" && segments[3] === "dispatch") {
+          try {
+            const dispatched = await localAgentService.dispatchInvocation(invocationId);
+            sendJson(response, dispatched.state === "running" || dispatched.state === "completed" ? 200 : 409, {
+              invocation: localAgentInvocationToDto(dispatched),
+              consentRequests: localAgentService.listConsentRequests({ invocationId }).map(localAgentConsentRequestToDto)
+            });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        if (method === "POST" && segments[3] === "cancel") {
+          try {
+            sendJson(response, 200, { invocation: localAgentInvocationToDto(await localAgentService.cancelInvocation(invocationId)) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        if (method === "POST" && segments[3] === "complete") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            const completed = localAgentService.completeInvocation({
+              invocationId,
+              exitCode: typeof body.exitCode === "number" ? body.exitCode : undefined,
+              statusReason: stringValue(body.statusReason),
+              metadata: recordValue(body.metadata)
+            });
+            sendJson(response, completed.state === "completed" ? 200 : 409, { invocation: localAgentInvocationToDto(completed) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        if (method === "GET" && segments[3] === "events") {
+          sendJson(response, 200, { events: localAgentService.listEvents({ invocationId }).map(localAgentNormalizedEventToDto) });
+          return;
+        }
+        if (method === "GET" && segments[3] === "stream") {
+          const stream = localAgentService.getStreamForInvocation(invocationId);
+          if (segments.length === 4) {
+            sendJson(response, 200, { stream: stream ? localAgentInvocationStreamToDto(stream) : undefined });
+            return;
+          }
+          if (segments[4] === "events") {
+            sendJson(response, 200, {
+              stream: stream ? localAgentInvocationStreamToDto(stream) : undefined,
+              events: localAgentService.listStreamEvents({ invocationId }).map(localAgentStreamEventToDto)
+            });
+            return;
+          }
+        }
+      }
+
+      if (segments[1] === "consent-requests") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            consentRequests: localAgentService.listConsentRequests({
+              userId: url.searchParams.get("userId") ?? undefined,
+              invocationId: url.searchParams.get("invocationId") ?? undefined,
+              pendingOnly: url.searchParams.get("pendingOnly") === "true"
+            }).map(localAgentConsentRequestToDto)
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "decision") {
+          const consentRequestId = segments[2];
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            const userId = stringValue(body.userId);
+            if (!userId || !isLocalAgentConsentDecision(body.decision)) {
+              sendJson(response, 400, { error: "invalid_consent_decision", message: "userId and valid decision are required." });
+              return;
+            }
+            const decision = localAgentService.recordConsentDecision({
+              consentRequestId,
+              userId,
+              decision: body.decision,
+              reason: stringValue(body.reason),
+              metadata: recordValue(body.metadata)
+            });
+            sendJson(response, 201, { decision: localAgentConsentDecisionToDto(decision) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+      }
+
+      if (method === "GET" && segments[1] === "consent-queue") {
+        sendJson(response, 200, {
+          consentRequests: localAgentService.listConsentRequests({ pendingOnly: true }).map(localAgentConsentRequestToDto)
+        });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "consent-history") {
+        sendJson(response, 200, {
+          approved: localAgentService.listConsentDecisions().filter((decision) => decision.decision === "approved" || decision.decision === "approved_once" || decision.decision === "approved_for_session").map(localAgentConsentDecisionToDto),
+          denied: localAgentService.listConsentDecisions().filter((decision) => decision.decision === "denied" || decision.decision === "expired").map(localAgentConsentDecisionToDto)
+        });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "audit") {
+        sendJson(response, 200, {
+          auditEvents: localAgentService.listAuditEvents({
+            agentId: url.searchParams.get("agentId") ?? undefined,
+            invocationId: url.searchParams.get("invocationId") ?? undefined,
+            providerId: url.searchParams.get("providerId") ?? undefined
+          }).map(localAgentProtocolAuditEventToDto)
+        });
+        return;
+      }
+
+      if (method === "GET" && segments.length === 1) {
+        sendJson(response, 200, { localAgents: localAgentService.listAgents().map(localAgentRegistrationToDto) });
+        return;
+      }
+
+      if (method === "POST" && segments[1] === "register") {
+        try {
+          const body = await readJson(request) as Record<string, unknown>;
+          const userId = stringValue(body.userId);
+          const hostId = stringValue(body.hostId);
+          const displayName = stringValue(body.displayName);
+          const agentVersion = stringValue(body.agentVersion);
+          const platform = stringValue(body.platform);
+          if (!userId || !hostId || !displayName || !agentVersion || !platform) {
+            sendJson(response, 400, { error: "invalid_local_agent_registration", message: "userId, hostId, displayName, agentVersion, and platform are required." });
+            return;
+          }
+          const agent = localAgentService.registerAgent({
+            userId,
+            hostId,
+            displayName,
+            agentVersion,
+            platform,
+            status: isLocalAgentRegistrationStatus(body.status) ? body.status : undefined,
+            metadata: recordValue(body.metadata),
+            actorId: stringValue(body.actorId)
+          });
+          sendJson(response, 201, { localAgent: localAgentRegistrationToDto(agent) });
+        } catch (error) {
+          sendLocalAgentProtocolError(response, error);
+        }
+        return;
+      }
+
+      const agentId = segments[1];
+      if (agentId) {
+        const agent = localAgentService.getAgent(agentId);
+        if (!agent) {
+          sendJson(response, 404, { error: "local_agent_not_found", message: `Local Agent not found: ${agentId}` });
+          return;
+        }
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            localAgent: localAgentRegistrationToDto(agent),
+            sessions: localAgentService.listSessions({ agentId }).map(localAgentSessionToDto)
+          });
+          return;
+        }
+        if (segments[2] === "channels") {
+          if (method === "GET") {
+            sendJson(response, 200, {
+              channels: localAgentService.listChannels({ agentId }).map(localAgentChannelToDto),
+              handshakes: localAgentService.listHandshakes({ agentId }).map(localAgentHandshakeToDto)
+            });
+            return;
+          }
+          if (method === "POST") {
+            try {
+              const body = await readJson(request) as Record<string, unknown>;
+              const created = localAgentService.createChannel({
+                agentId,
+                channelKind: isLocalAgentChannelKind(body.channelKind) ? body.channelKind : undefined,
+                expiresInMs: typeof body.expiresInMs === "number" ? body.expiresInMs : undefined,
+                actorId: stringValue(body.actorId),
+                metadata: recordValue(body.metadata)
+              });
+              sendJson(response, 201, {
+                channel: localAgentChannelToDto(created.channel),
+                handshake: localAgentHandshakeToDto(created.handshake)
+              });
+            } catch (error) {
+              sendLocalAgentProtocolError(response, error);
+            }
+            return;
+          }
+        }
+        if (segments[2] === "capabilities") {
+          if (method === "GET") {
+            sendJson(response, 200, {
+              capabilities: agent.capabilities,
+              advertisements: localAgentService.listCapabilityAdvertisements({ agentId }).map(localAgentCapabilityAdvertisementToDto)
+            });
+            return;
+          }
+          if (method === "POST" && segments[3] === "advertise") {
+            try {
+              const body = await readJson(request) as Record<string, unknown>;
+              const advertisement = localAgentService.advertiseCapabilities({
+                agentId,
+                supportedProviderTemplates: stringArrayValue(body.supportedProviderTemplates),
+                supportedParserModes: parserModeArrayValue(body.supportedParserModes),
+                supportedConsentLevels: consentLevelArrayValue(body.supportedConsentLevels),
+                supportedSandboxKinds: stringArrayValue(body.supportedSandboxKinds),
+                maxTimeoutMs: typeof body.maxTimeoutMs === "number" ? body.maxTimeoutMs : undefined,
+                supportsStreaming: typeof body.supportsStreaming === "boolean" ? body.supportsStreaming : undefined,
+                supportsCancellation: typeof body.supportsCancellation === "boolean" ? body.supportsCancellation : undefined,
+                metadata: recordValue(body.metadata)
+              });
+              sendJson(response, 201, { advertisement: localAgentCapabilityAdvertisementToDto(advertisement) });
+            } catch (error) {
+              sendLocalAgentProtocolError(response, error);
+            }
+            return;
+          }
+        }
+        if (method === "POST" && segments[2] === "heartbeat") {
+          try {
+            sendJson(response, 200, { localAgent: localAgentRegistrationToDto(localAgentService.heartbeat(agentId)) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
+          return;
+        }
+        if (method === "POST" && segments[2] === "revoke") {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            sendJson(response, 200, { localAgent: localAgentRegistrationToDto(localAgentService.revokeAgent(agentId, stringValue(body.actorId))) });
+          } catch (error) {
+            sendLocalAgentProtocolError(response, error);
+          }
           return;
         }
       }
@@ -2189,7 +2706,8 @@ export function createApiServerWithStorage(storage: StorageProvider) {
   const store = storage.repositoryFactory.createDataStore();
   const policyService = new PolicyService();
   const securityService = new SecurityControlService({ policyService });
-  const providerAbstractionService = new ProviderAbstractionService({ policyService });
+  const localAgentProtocolService = new LocalAgentProtocolService({ policyService, securityService });
+  const providerAbstractionService = new ProviderAbstractionService({ policyService, localAgentProtocolService });
   const registryService = createRegistryService({
     ...storage.repositoryFactory.createRegistryRepositories(),
     authorizer: new PolicyBackedRegistryMutationAuthorizer({ policyService })
@@ -2242,7 +2760,8 @@ export function createApiServerWithStorage(storage: StorageProvider) {
       improvementServices,
       policyService,
       providerAbstractionService,
-      securityService
+      securityService,
+      localAgentProtocolService
     });
   });
 }

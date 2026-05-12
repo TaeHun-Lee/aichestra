@@ -4,14 +4,14 @@ Aichestra is an AgentOps control plane for coordinating LLM usage, AI coding age
 
 This repository is an MVP scaffold. It is intentionally mock-first: no runtime code calls real LLM providers, Git hosting APIs, MCP gateways, secret stores, or production databases.
 
-Design and work-order source documents live under `design_docs/`; the canonical bootstrap document is `design_docs/AICHESTRA_BOOTSTRAP.md`.
+Design and work-order source documents live under `docs/briefs/`; the canonical bootstrap document is `docs/briefs/AICHESTRA_BOOTSTRAP.md`. See `docs/README.md` for the full documentation layout.
 
 ## Architecture
 
 - `packages/core`: domain models, status transitions, validation schemas, seed data, instruction resolution, Conflict Manager scoring, and merge simulation interfaces.
 - `packages/git-adapter`: Git provider behavior, mock branch/PR creation, conflict risk, and local-only dry-run merge simulation.
 - `packages/improvement`: Phase 4 Preparation, Auto-improvement v0, and Governance v1 models, repository interfaces, in-memory repositories, DTOs, deterministic clustering, candidates, draft proposals, draft registry changes, readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, and auto-improvement safety policies.
-- `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, OpenAI-compatible skeleton, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, and Enterprise LLM Provider Abstraction v0 catalog/auth/credential/token/adapter/local-agent boundary skeletons.
+- `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, OpenAI-compatible skeleton, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 catalog/auth/credential/token/adapter/local-agent boundary skeletons, and Local Agent Protocol v1 mock channels/fixture daemon/compatibility/streaming models.
 - `packages/policy`: provider-neutral Policy-as-code Skeleton v0 models, static/mock policy engine, default restrictive rules, policy decision audit, DTOs, and policy service boundaries.
 - `packages/registry`: Skill, Harness, and Instruction registry interfaces, repository boundaries, DTO mappers, audit logs, history, rollback, approval queue read models, local eval result attachment, checksum verification, mock RBAC, local package manifests, import/export, semver range resolution v0, package diffs, validation helpers, and deterministic resolver.
 - `packages/runner`: provider-neutral agent runner contracts, deterministic MockAgentRunner, disabled-by-default LocalAgentRunner, harness execution policy, instruction assembly, in-memory runner repositories, runner DTOs/services, and mock test runner contracts.
@@ -101,7 +101,26 @@ curl -X POST http://localhost:3000/providers/invoke \
 curl http://localhost:3000/providers/audit
 ```
 
-Local CLI provider entries require a future Aichestra Local Agent and use `external_cli_session` with `credentialAccess = never_read_tokens`. Aichestra does not read or upload vendor credential caches such as `~/.codex/auth.json`, `~/.claude`, or Google credential caches.
+Local CLI provider entries require Local Agent Protocol coordination and use `external_cli_session` with `credentialAccess = never_read_tokens`. Aichestra does not read or upload vendor credential caches such as `~/.codex/auth.json`, `~/.claude`, or Google credential caches.
+
+Local Agent Protocol v1 adds mock-first coordination for future user-machine Local Agents. It registers agent metadata, models mock signed channels, fixture daemon simulation, capability advertisements, compatibility checks, consent and invocation envelopes, records normalized redacted stream events, and uses only in-memory mock transport:
+
+```bash
+curl http://localhost:3000/local-agents
+curl -X POST http://localhost:3000/local-agents/fixture/start \
+  -H "Content-Type: application/json" \
+  -d '{ "userId": "user_demo_admin", "hostId": "host_demo", "displayName": "Demo Fixture Agent", "agentVersion": "0.1.0-fixture", "platform": "linux-x64" }'
+curl -X POST http://localhost:3000/local-agents/register \
+  -H "Content-Type: application/json" \
+  -d '{ "userId": "user_demo_admin", "hostId": "host_demo", "displayName": "Demo Local Agent", "agentVersion": "0.0.0-mock", "platform": "linux-x64" }'
+curl http://localhost:3000/local-agents/compatibility
+curl http://localhost:3000/local-agents/consent-requests
+curl http://localhost:3000/local-agents/consent-queue
+curl http://localhost:3000/local-agents/invocations
+curl http://localhost:3000/local-agents/audit
+```
+
+Local Agent Protocol v1 does not implement a real production daemon, WebSocket/gRPC/HTTP tunnel, PTY automation, vendor CLI execution, credential-cache reads, real secret forwarding, production crypto, or production sandboxing. Direct `local_cli` execution from Aichestra Cloud remains blocked.
 
 Secrets and Sandbox Design v0 adds metadata-only security boundaries. It does not retrieve real secrets, inject secrets, run production sandboxes, or enforce network egress at the OS/container layer:
 
@@ -330,7 +349,7 @@ pnpm build
 
 Optional Postgres repository contract tests are skipped unless `AICHESTRA_TEST_DATABASE_URL` is set.
 
-Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v0 provider/catalog/virtual-key/budget/usage/API behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0 provider/service/API behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
+Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v0 provider/catalog/virtual-key/budget/usage/API behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0 provider/service/API behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
 
 ## First Vertical Slice
 
@@ -373,6 +392,7 @@ Included:
 - Policy-as-code Skeleton v0 static policy engine, provider-neutral policy models, restrictive default rules, policy audit read model, `/policy/*` API visibility, health metadata, dashboard visibility, and Git/LLM/Runner/Registry service-boundary checks.
 - Enterprise LLM Provider Abstraction v0 provider kind/auth models, provider catalog skeletons, CredentialManager/TokenResolver interfaces, blocked ProviderAdapter skeletons, Local CLI provider contract, Aichestra Local Agent boundary models, parser/redaction utilities, `/providers/*` API visibility, health metadata, provider audit events, dashboard visibility, and policy hooks.
 - Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, `/security/*` API visibility, health metadata, dashboard visibility, and runner sandbox-session policy hooks.
+- Aichestra Local Agent Protocol v1 registration/session/capability models, mock signed channel and handshake models, fixture daemon simulation, capability advertisements, CLI compatibility matrix, invocation envelopes, consent lifecycle, normalized stream event records, in-memory mock transport, `/local-agents/*` API visibility, health metadata, dashboard visibility, provider integration, protocol audit events, and redaction/policy/security gates.
 
 Deferred:
 
@@ -387,7 +407,7 @@ Deferred:
 - Real Kubernetes, Temporal, MCP gateway, SSO, SCIM, and billing.
 - Production-grade RBAC and secret storage.
 - Production OPA/Rego or Cedar integration, policy bundle management, production auth-backed policy subjects, and persistent policy audit repositories.
-- Real enterprise LLM provider API calls, OAuth/device-code/WIF/IAM token exchange, vendor credential cache access, Aichestra Local Agent daemon/protocol, vendor CLI execution, and PTY terminal automation.
+- Real enterprise LLM provider API calls, OAuth/device-code/WIF/IAM token exchange, vendor credential cache access, Aichestra Local Agent daemon or real transport, vendor CLI execution, and PTY terminal automation.
 - Real Vault/cloud secret manager integration, production secret injection, container/VM sandboxing, OS-level network egress enforcement, and Local Agent secret forwarding.
 - Signed artifacts, full package signing, artifact provenance/SBOM, and real artifact registry integration.
 - Production auto-improvement, real proposal generation, draft registry change apply workflow, real eval execution, real canary execution, and automatic registry mutation.
@@ -402,8 +422,8 @@ Deferred:
 
 ## Next Steps
 
-1. Start Aichestra Local Agent Protocol v0 only after keeping secrets, sandbox, policy, provider, runner, and redaction boundaries explicit.
-2. Implement Real Git Adapter v1 only if controlled GitHub branch/PR creation is needed in an integration-test environment.
+1. Implement Real Git Adapter v1 if controlled GitHub branch/PR creation is needed in an integration-test environment, or LLM Gateway v1 if controlled real provider calls should be enabled next.
+2. Harden Local Agent Protocol persistence and consent UX before any real daemon or local CLI work.
 3. Harden LLM Gateway v0 with persistent model catalog/audit repositories before real provider calls.
 4. Harden Local Agent Runner v1 with production sandbox runtime planning before any real agent CLI integration.
 5. Add production DB operational controls such as pooling, backups, restore drills, and migration governance.

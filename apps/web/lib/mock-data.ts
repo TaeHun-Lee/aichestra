@@ -1,6 +1,6 @@
 import { createSeededStore } from "@aichestra/db";
 import { GitHubGitProvider, GitIntegrationService, MockGitProvider } from "@aichestra/git-adapter";
-import { OpenAICompatibleLLMProvider, ProviderAbstractionService, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
+import { LocalAgentProtocolService, OpenAICompatibleLLMProvider, ProviderAbstractionService, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
 import { PolicyService, createPolicyContext, createPolicyResource, createPolicySubject } from "@aichestra/policy";
 import { PolicyBackedRegistryMutationAuthorizer, createRegistryService } from "@aichestra/registry";
 import { AgentRunnerService, MockAgentRunner, agentRunnerConfigToDto, createAgentRunnerConfigFromEnv } from "@aichestra/runner";
@@ -239,7 +239,72 @@ export async function getDashboardData() {
     actorId: task.requesterUserId,
     metadata: { source: "dashboard" }
   });
-  const providerAbstractionService = new ProviderAbstractionService({ policyService });
+  const localAgentProtocolService = new LocalAgentProtocolService({ policyService, securityService });
+  const fixtureStarted = localAgentProtocolService.startFixtureAgent({
+    userId: task.requesterUserId,
+    hostId: "host_dashboard_mock",
+    displayName: "Dashboard Mock Local Agent",
+    agentVersion: "0.1.0-fixture",
+    platform: "linux-x64",
+    metadata: { source: "dashboard" }
+  });
+  const protocolAgent = fixtureStarted.agent;
+  const protocolChannel = localAgentProtocolService.connectChannel(protocolAgent.id);
+  const protocolCompatibility = localAgentProtocolService.checkCompatibility({
+    providerId: "codex-cli-local",
+    agentId: protocolAgent.id,
+    command: "codex",
+    providerTemplateId: "codex-cli-jsonl",
+    parserMode: "jsonl",
+    reportedVersion: "0.1.0",
+    metadata: { source: "dashboard" }
+  });
+  const protocolInvocation = localAgentProtocolService.createInvocationEnvelope({
+    taskId: task.id,
+    taskRunId: latestTaskRun?.id,
+    actorId: task.requesterUserId,
+    providerId: "codex-cli-local",
+    localAgentId: protocolAgent.id,
+    workspaceRef: "workspace_dashboard_protocol",
+    promptRef: "prompt_dashboard_protocol",
+    requiredConsentLevel: "read_only",
+    sandboxProfileId: "sandbox_default_deny",
+    networkPolicyId: "network_default_deny",
+    redactionPolicyId: "redaction_default",
+    secretScopeIds: [],
+    metadata: {
+      source: "dashboard",
+      requireChannel: true,
+      channelId: protocolChannel.channel.id,
+      compatibilityRequired: true,
+      compatibilityCompatible: protocolCompatibility.compatible,
+      compatibilityResultId: protocolCompatibility.id,
+      providerTemplateId: "codex-cli-jsonl",
+      fixtureDaemon: true
+    }
+  });
+  const protocolConsentRequest = localAgentProtocolService.requestConsent(protocolInvocation.invocation.id);
+  const protocolConsentDecision = localAgentProtocolService.recordConsentDecision({
+    consentRequestId: protocolConsentRequest.id,
+    userId: task.requesterUserId,
+    decision: "approved_once",
+    reason: "dashboard mock consent"
+  });
+  const protocolDispatched = await localAgentProtocolService.dispatchInvocation(protocolInvocation.invocation.id);
+  localAgentProtocolService.receiveInvocationEvent({
+    invocationId: protocolDispatched.id,
+    source: "stdout",
+    type: "message",
+    payload: { text: "dashboard stdout OPENAI_API_KEY=sk-dashboard-secret" }
+  });
+  const protocolCompleted = localAgentProtocolService.completeInvocation({
+    invocationId: protocolDispatched.id,
+    exitCode: 0,
+    statusReason: "dashboard_mock_completed"
+  });
+  localAgentProtocolService.recordDirectLocalCliExecutionBlocked({ providerId: "codex-cli-local", metadata: { source: "dashboard" } });
+  localAgentProtocolService.recordCredentialCacheAccessDenied({ providerId: "codex-cli-local", metadata: { requestedPath: "~/.codex/auth.json" } });
+  const providerAbstractionService = new ProviderAbstractionService({ policyService, localAgentProtocolService });
   const providerValidation = providerAbstractionService.validateProvider("claude-code-local");
   const providerInvocation = await providerAbstractionService.invoke({
     providerId: "claude-code-local",
@@ -351,6 +416,21 @@ export async function getDashboardData() {
     redactionPolicies: securityService.listRedactionPolicies(),
     redactionTest,
     securityAuditEvents: securityService.listAuditEvents(),
+    localAgentProtocolConfig: localAgentProtocolService.getConfig(),
+    localAgentRegistrations: localAgentProtocolService.listAgents(),
+    localAgentConsentRequests: localAgentProtocolService.listConsentRequests(),
+    localAgentConsentDecision: protocolConsentDecision,
+    localAgentInvocations: localAgentProtocolService.listInvocations(),
+    localAgentInvocation: protocolCompleted,
+    localAgentEvents: localAgentProtocolService.listEvents({ invocationId: protocolCompleted.id }),
+    localAgentChannels: localAgentProtocolService.listChannels({ agentId: protocolAgent.id }),
+    localAgentHandshakes: localAgentProtocolService.listHandshakes({ agentId: protocolAgent.id }),
+    localAgentCapabilityAdvertisements: localAgentProtocolService.listCapabilityAdvertisements({ agentId: protocolAgent.id }),
+    localAgentCompatibilityEntries: localAgentProtocolService.listCompatibilityEntries(),
+    localAgentCompatibilityResults: localAgentProtocolService.listCompatibilityResults({ agentId: protocolAgent.id }),
+    localAgentStream: localAgentProtocolService.getStreamForInvocation(protocolCompleted.id),
+    localAgentStreamEvents: localAgentProtocolService.listStreamEvents({ invocationId: protocolCompleted.id }),
+    localAgentAuditEvents: localAgentProtocolService.listAuditEvents(),
     providerAbstractionConfig: providerAbstractionService.getConfig(),
     providerCatalog: providerAbstractionService.listProviders(),
     providerAuthTypes: providerAbstractionService.listAuthTypes(),
