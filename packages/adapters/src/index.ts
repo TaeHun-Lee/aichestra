@@ -1,4 +1,5 @@
 export * from "./interfaces.ts";
+export * from "./git/github-app.ts";
 export * from "./git/github-client.ts";
 export * from "./git/github-git-provider.ts";
 export * from "./git/github-webhooks.ts";

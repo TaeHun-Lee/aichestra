@@ -510,6 +510,89 @@ test("LLM Gateway v1 resolves OpenAI-compatible API key through SecretRef and ke
   assert.equal(revoked.config.apiKeyConfigured, false);
 });
 
+test("denied SecretRefs do not fall back to configured legacy env credentials", () => {
+  const env = envWithSecrets({
+    AICHESTRA_ALLOWED_SECRET_ENV_KEYS: "AICHESTRA_GITHUB_TOKEN,AICHESTRA_LLM_API_KEY,AICHESTRA_GITHUB_WEBHOOK_SECRET",
+    AICHESTRA_GIT_PROVIDER: "github",
+    AICHESTRA_ENABLE_REMOTE_GIT: "true",
+    AICHESTRA_ALLOW_REMOTE_BRANCH_CREATE: "true",
+    AICHESTRA_ALLOW_REMOTE_PR_CREATE: "true",
+    AICHESTRA_GITHUB_OWNER: "aichestra",
+    AICHESTRA_GITHUB_REPO: "demo-backend",
+    AICHESTRA_GITHUB_ALLOWED_REPOS: "aichestra/demo-backend",
+    AICHESTRA_GITHUB_TOKEN_SECRET_REF: "secretref_git_disabled_fallback_v1",
+    AICHESTRA_ENABLE_GITHUB_WEBHOOKS: "true",
+    AICHESTRA_GITHUB_WEBHOOK_SECRET: "webhook-secret-value",
+    AICHESTRA_GITHUB_WEBHOOK_SECRET_REF: "secretref_webhook_disabled_fallback_v1",
+    AICHESTRA_GITHUB_WEBHOOK_ALLOWED_REPOS: "aichestra/demo-backend",
+    AICHESTRA_LLM_PROVIDER: "openai_compatible",
+    AICHESTRA_ENABLE_REMOTE_LLM: "true",
+    AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION: "true",
+    AICHESTRA_LLM_BASE_URL: "https://llm.example/v1",
+    AICHESTRA_LLM_ALLOWED_MODELS: "gpt-test",
+    AICHESTRA_LLM_DEFAULT_MODEL: "gpt-test",
+    AICHESTRA_LLM_API_KEY_SECRET_REF: "secretref_llm_disabled_fallback_v1"
+  });
+  const security = new SecurityControlService({ env });
+  createEnvSecretRef(security, {
+    id: "secretref_git_disabled_fallback_v1",
+    secretKind: "github_token",
+    envKey: "AICHESTRA_GITHUB_TOKEN",
+    status: "disabled"
+  });
+  createEnvSecretRef(security, {
+    id: "secretref_webhook_disabled_fallback_v1",
+    secretKind: "github_webhook_secret",
+    envKey: "AICHESTRA_GITHUB_WEBHOOK_SECRET",
+    status: "disabled"
+  });
+  createEnvSecretRef(security, {
+    id: "secretref_llm_disabled_fallback_v1",
+    secretKind: "llm_api_key",
+    envKey: "AICHESTRA_LLM_API_KEY",
+    status: "disabled"
+  });
+  const fallbackEvents: string[] = [];
+  const legacyCredentialFallbackAuditor = (event: { envKey: string }) => fallbackEvents.push(event.envKey);
+
+  const git = createGitProviderFromEnv(env, {
+    credentialResolver: resolveForGit(security),
+    legacyCredentialFallbackAuditor
+  });
+  const webhook = createGitHubWebhookRuntimeFromEnv(env, {
+    secretResolver: (request) => {
+      const resolved = security.resolveCredentialForInternalUse(request);
+      return {
+        ok: resolved.allowed,
+        status: resolved.status,
+        value: resolved.value,
+        reason: resolved.blockedReason,
+        credentialHandleId: resolved.credentialHandle?.id
+      };
+    },
+    legacySecretFallbackAuditor: legacyCredentialFallbackAuditor
+  });
+  const llm = createLlmProviderFromEnv(env, {
+    credentialResolver: (request) => security.resolveCredentialForInternalUse(request),
+    legacyCredentialFallbackAuditor
+  });
+
+  assert.equal(git.config.githubCredentialSource, "secret_ref");
+  assert.equal(git.config.githubCredentialStatus, "denied");
+  assert.equal(git.config.githubCredentialReason, "secret_ref_disabled");
+  assert.equal(git.config.githubConfigured, false);
+  assert.equal(webhook.config.webhookSecretSource, "secret_ref");
+  assert.equal(webhook.config.webhookSecretStatus, "denied");
+  assert.equal(webhook.config.webhookSecretReason, "secret_ref_disabled");
+  assert.equal(webhook.config.webhookSecretConfigured, false);
+  assert.equal(llm.config.credentialSource, "secret_ref");
+  assert.equal(llm.config.credentialStatus, "denied");
+  assert.equal(llm.config.credentialReason, "secret_ref_disabled");
+  assert.equal(llm.config.apiKeyConfigured, false);
+  assert.deepEqual(fallbackEvents, []);
+  assert.equal(noSecretValue([git.config, webhook.config, llm.config, security.listAuditEvents()]), true);
+});
+
 test("legacy env credential fallback is audited without exposing values", () => {
   const env = envWithSecrets({
     AICHESTRA_ALLOWED_SECRET_ENV_KEYS: "AICHESTRA_GITHUB_TOKEN,AICHESTRA_LLM_API_KEY,AICHESTRA_GITHUB_WEBHOOK_SECRET",

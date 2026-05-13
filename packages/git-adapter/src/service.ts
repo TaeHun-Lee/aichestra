@@ -24,6 +24,7 @@ import {
   createPolicySubject
 } from "@aichestra/policy";
 import type { PolicyAction, PolicyDecision } from "@aichestra/policy";
+import type { GitHubAppTokenCheckInput } from "./github-app.ts";
 
 export type GitIntegrationServiceInput = {
   store: InMemoryAichestraStore;
@@ -31,6 +32,16 @@ export type GitIntegrationServiceInput = {
   config: GitProviderRuntimeConfig;
   actorId?: string;
   policyService?: PolicyService;
+  githubAppTokenIssuer?: {
+    createInstallationToken(input: GitHubAppTokenCheckInput): {
+      status: string;
+      tokenHandleId?: string;
+      policyDecisionId?: string;
+      authorizationDecisionId?: string;
+      auditEventId?: string;
+      metadata: Record<string, unknown>;
+    };
+  };
 };
 
 export type CreateGitBranchInput = {
@@ -82,6 +93,7 @@ export class GitIntegrationService {
   private readonly config: GitProviderRuntimeConfig;
   private readonly actorId: string;
   private readonly policyService: PolicyService;
+  private readonly githubAppTokenIssuer?: GitIntegrationServiceInput["githubAppTokenIssuer"];
 
   constructor(input: GitIntegrationServiceInput) {
     this.store = input.store;
@@ -89,6 +101,7 @@ export class GitIntegrationService {
     this.config = input.config;
     this.actorId = input.actorId ?? "mock-git-actor";
     this.policyService = input.policyService ?? new PolicyService();
+    this.githubAppTokenIssuer = input.githubAppTokenIssuer;
   }
 
   getConfig(): GitProviderRuntimeConfig {
@@ -99,6 +112,7 @@ export class GitIntegrationService {
       remotePullRequestCreateEnabled: this.config.remotePullRequestCreateEnabled,
       remoteMergeEnabled: false,
       githubConfigured: this.config.githubConfigured,
+      githubAuthMode: this.config.githubAuthMode ?? "legacy_token",
       githubOwnerConfigured: Boolean(this.config.githubOwner),
       githubRepoConfigured: Boolean(this.config.githubRepo),
       githubAllowedRepoCount: this.githubAllowedRepos().length,
@@ -108,6 +122,14 @@ export class GitIntegrationService {
       githubCredentialSource: this.config.githubCredentialSource ?? "none",
       githubCredentialStatus: this.config.githubCredentialStatus ?? (this.config.githubConfigured ? "resolved" : "missing"),
       githubCredentialReason: this.config.githubCredentialReason,
+      githubAppEnabled: this.config.githubAppEnabled ?? false,
+      githubAppConfigured: this.config.githubAppConfigured ?? false,
+      githubAppPrivateKeySecretRefConfigured: this.config.githubAppPrivateKeySecretRefConfigured ?? false,
+      githubAppWebhookSecretRefConfigured: this.config.githubAppWebhookSecretRefConfigured ?? false,
+      githubAppAllowedInstallationCount: this.config.githubAppAllowedInstallationCount ?? 0,
+      githubAppAllowedRepoCount: this.config.githubAppAllowedRepoCount ?? 0,
+      githubAppTokenProviderKind: this.config.githubAppTokenProviderKind ?? "disabled",
+      githubLegacyTokenFallbackEnabled: this.config.githubLegacyTokenFallbackEnabled ?? false,
       envSecretProviderEnabled: this.config.envSecretProviderEnabled ?? false,
       allowedSecretEnvKeyCount: this.config.allowedSecretEnvKeyCount ?? 0
     };
@@ -286,6 +308,28 @@ export class GitIntegrationService {
       });
       return { ok: false, reason: this.provider.getProviderKind() === "github" ? "policy_denied" : branchPolicy.reason };
     }
+    const appToken = this.prepareGitHubAppToken(repo, "branch_create", {
+      taskId: input.taskId,
+      taskRunId: input.taskRunId,
+      branchName: input.branchName
+    });
+    if (!appToken.ok) {
+      this.recordAudit("github_branch_create_blocked", repoId, {
+        providerKind: "github",
+        repoId,
+        repoRef: repoSlug(repo),
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        branchName: input.branchName,
+        operation: "create_branch",
+        result: "blocked",
+        reason: appToken.reason,
+        policyDecisionId: appToken.policyDecisionId,
+        authorizationDecisionId: appToken.authorizationDecisionId,
+        auditEventId: appToken.auditEventId
+      });
+      return { ok: false, reason: appToken.reason };
+    }
 
     try {
       await this.provider.createBranch({
@@ -341,8 +385,22 @@ export class GitIntegrationService {
           branchName: input.branchName,
           branchLeaseId: branchLease?.id,
           operation: "create_branch",
-          result: "succeeded"
+          result: "succeeded",
+          tokenHandleId: appToken.tokenHandleId,
+          authMode: this.config.githubAuthMode ?? "legacy_token"
         });
+        if ((this.config.githubAuthMode ?? "legacy_token") === "github_app") {
+          this.recordAudit("github_app_operation_used_for_branch_create", repoId, {
+            providerKind: "github",
+            repoId,
+            repoRef: repoSlug(repo),
+            taskId: input.taskId,
+            taskRunId: input.taskRunId,
+            branchName: input.branchName,
+            tokenHandleId: appToken.tokenHandleId,
+            authMode: this.config.githubAuthMode ?? "legacy_token"
+          });
+        }
       }
 
       return { ok: true, branch, branchLease };
@@ -474,6 +532,28 @@ export class GitIntegrationService {
       });
       return { ok: false, reason: this.provider.getProviderKind() === "github" ? "policy_denied" : pullRequestPolicy.reason };
     }
+    const appToken = this.prepareGitHubAppToken(repo, "pr_create", {
+      taskId: input.taskId,
+      taskRunId: input.taskRunId,
+      branchName: input.branchName
+    });
+    if (!appToken.ok) {
+      this.recordAudit("github_pr_create_blocked", repoId, {
+        providerKind: "github",
+        repoId,
+        repoRef: repoSlug(repo),
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        branchName: input.branchName,
+        operation: "create_pull_request",
+        result: "blocked",
+        reason: appToken.reason,
+        policyDecisionId: appToken.policyDecisionId,
+        authorizationDecisionId: appToken.authorizationDecisionId,
+        auditEventId: appToken.auditEventId
+      });
+      return { ok: false, reason: appToken.reason };
+    }
 
     const request: CreatePullRequestRequest = {
       taskId: input.taskId,
@@ -492,6 +572,18 @@ export class GitIntegrationService {
     this.recordProviderAudit(result.ok ? "pull_request_created" : "pull_request_create_blocked", result.auditEvent);
     if (this.provider.getProviderKind() === "github") {
       this.recordProviderAudit(result.ok ? "github_pr_created" : "github_pr_create_blocked", result.auditEvent);
+      if (result.ok && (this.config.githubAuthMode ?? "legacy_token") === "github_app") {
+        this.recordAudit("github_app_operation_used_for_pr_create", repoId, {
+          providerKind: "github",
+          repoId,
+          repoRef: repoSlug(repo),
+          taskId: input.taskId,
+          taskRunId: input.taskRunId,
+          branchName: input.branchName,
+          tokenHandleId: appToken.tokenHandleId,
+          authMode: this.config.githubAuthMode ?? "legacy_token"
+        });
+      }
     }
 
     if (!result.ok || !result.data) {
@@ -632,6 +724,27 @@ export class GitIntegrationService {
       });
       return { ok: false, changedFiles: [], reason: "policy_denied" };
     }
+    const appToken = this.prepareGitHubAppToken(repo, "changed_files_read", {
+      taskId: input.taskId,
+      taskRunId: input.taskRunId
+    });
+    if (!appToken.ok) {
+      this.recordAudit("github_changed_files_blocked", repoId, {
+        providerKind: "github",
+        repoId,
+        repoRef: repoSlug(repo),
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        pullRequestNumber: input.pullRequestNumber,
+        operation: "get_changed_files",
+        result: "blocked",
+        reason: appToken.reason,
+        policyDecisionId: appToken.policyDecisionId,
+        authorizationDecisionId: appToken.authorizationDecisionId,
+        auditEventId: appToken.auditEventId
+      });
+      return { ok: false, changedFiles: [], reason: appToken.reason };
+    }
 
     const result = await this.provider.getChangedFiles({
       repoId,
@@ -641,6 +754,18 @@ export class GitIntegrationService {
       repoRef: this.repoRef(repo)
     });
     this.recordProviderAudit(result.ok ? "github_changed_files_read" : "github_changed_files_blocked", result.auditEvent);
+    if (result.ok && (this.config.githubAuthMode ?? "legacy_token") === "github_app") {
+      this.recordAudit("github_app_operation_used_for_changed_files", repoId, {
+        providerKind: "github",
+        repoId,
+        repoRef: repoSlug(repo),
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        pullRequestNumber: input.pullRequestNumber,
+        tokenHandleId: appToken.tokenHandleId,
+        authMode: this.config.githubAuthMode ?? "legacy_token"
+      });
+    }
     return {
       ok: result.ok,
       changedFiles: result.data ?? [],
@@ -855,6 +980,62 @@ export class GitIntegrationService {
 
   private githubAllowedBranchPrefix(): string {
     return this.config.githubAllowedBranchPrefix ?? "ai/";
+  }
+
+  private prepareGitHubAppToken(
+    repo: Repo,
+    purpose: "branch_create" | "pr_create" | "changed_files_read",
+    input: { taskId?: string; taskRunId?: string; branchName?: string }
+  ): {
+    ok: boolean;
+    reason?: string;
+    tokenHandleId?: string;
+    policyDecisionId?: string;
+    authorizationDecisionId?: string;
+    auditEventId?: string;
+  } {
+    if (this.provider.getProviderKind() !== "github" || (this.config.githubAuthMode ?? "legacy_token") !== "github_app") {
+      return { ok: true };
+    }
+    if (!this.githubAppTokenIssuer) {
+      return { ok: false, reason: "github_app_token_provider_unavailable" };
+    }
+    const result = this.githubAppTokenIssuer.createInstallationToken({
+      repoRef: repoSlug(repo),
+      purpose,
+      actorId: this.actorId,
+      policyContext: {
+        remoteGitEnabled: this.config.remoteGitEnabled,
+        remoteBranchCreateEnabled: this.config.remoteBranchCreateEnabled,
+        remotePullRequestCreateEnabled: this.config.remotePullRequestCreateEnabled,
+        repoAllowlisted: this.repoAllowlisted(repo),
+        branchPrefixAllowed: input.branchName ? this.branchPrefixAllowed(input.branchName) : true,
+        credentialsConfigured: this.config.githubConfigured,
+        taskId: input.taskId,
+        taskRunId: input.taskRunId,
+        branchName: input.branchName
+      },
+      metadata: {
+        operation: purpose,
+        repoId: repo.id
+      }
+    });
+    if (result.status === "issued_mock" || result.status === "issued_gated") {
+      return {
+        ok: true,
+        tokenHandleId: result.tokenHandleId,
+        policyDecisionId: result.policyDecisionId,
+        authorizationDecisionId: result.authorizationDecisionId,
+        auditEventId: result.auditEventId
+      };
+    }
+    return {
+      ok: false,
+      reason: typeof result.metadata.reason === "string" ? result.metadata.reason : `github_app_token_${result.status}`,
+      policyDecisionId: result.policyDecisionId,
+      authorizationDecisionId: result.authorizationDecisionId,
+      auditEventId: result.auditEventId
+    };
   }
 
   private evaluatePolicy(action: PolicyAction, resourceKind: "branch" | "pull_request" | "git_operation", resourceId: string, input: {

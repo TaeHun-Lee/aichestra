@@ -1,6 +1,6 @@
 # Webhook Retry And Dead-Letter v0
 
-Status: planning-only. No background retry worker is implemented in v0.
+Status: planning plus local runtime skeleton. No background retry worker is implemented in v0.
 
 ## Retryable Errors
 
@@ -40,7 +40,7 @@ It must not store raw payloads, private keys, webhook secrets, installation toke
 
 - Max retry attempts: 5.
 - Planned backoff: exponential backoff with jitter in a future worker.
-- Current v0: read-only model and deterministic seed records only.
+- Current v0: read-only model and deterministic seed records, plus local receiver metadata that marks processing failures as `dead_lettered` with `retryable: false`.
 
 ## Manual Replay Review
 
@@ -61,4 +61,4 @@ Planned metrics:
 
 ## Production Notes
 
-Production requires queue storage, retry worker ownership, poison-message handling, dashboard review tooling, and alerting. v0 does not deliver alerts or replay messages.
+Production requires queue storage, retry worker ownership, durable dead-letter records, poison-message handling, dashboard review tooling, and alerting. v0 does not deliver alerts or replay messages.

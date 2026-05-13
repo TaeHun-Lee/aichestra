@@ -255,6 +255,39 @@ export class GitWebhookReceiverService {
       return { ok: false, statusCode: verification.verified ? 403 : 401, status: "rejected", reason, event, verification };
     }
 
+    const existingDelivery = this.findEventByDeliveryId(deliveryId);
+    if (existingDelivery) {
+      if (existingDelivery.payloadHash !== payloadHash) {
+        this.recordWebhookAudit("github_webhook_duplicate_rejected", "rejected", {
+          deliveryId,
+          repoRef,
+          result: "rejected",
+          reason: "replay_rejected",
+          sanitizedMetadata: {
+            eventType,
+            action,
+            existingEventId: existingDelivery.id,
+            existingPayloadHash: existingDelivery.payloadHash,
+            payloadHash
+          }
+        });
+        return { ok: false, statusCode: 409, status: "rejected", reason: "replay_rejected", event: existingDelivery, verification };
+      }
+      this.recordWebhookAudit("github_webhook_duplicate_ignored", "ignored", {
+        deliveryId,
+        repoRef,
+        result: "ignored",
+        reason: "duplicate_delivery",
+        sanitizedMetadata: {
+          eventType,
+          action,
+          existingEventId: existingDelivery.id,
+          payloadHash
+        }
+      });
+      return { ok: true, statusCode: 202, status: "ignored", reason: "duplicate_delivery", event: existingDelivery, verification };
+    }
+
     const event = this.recordEvent(eventType, deliveryId, repoRef, action, payloadHash, true, "verified", {
       verifyPolicyDecisionId: verifyPolicy.id,
       receivePolicyDecisionId: receivePolicy.id
@@ -311,7 +344,7 @@ export class GitWebhookReceiverService {
       const failed = this.store.updateGitWebhookEvent(event.id, {
         status: "failed",
         processedAt: new Date(),
-        metadata: { ...event.metadata, reason }
+        metadata: { ...event.metadata, reason, processingStatus: "dead_lettered", retryable: false }
       });
       this.recordWebhookAudit("github_webhook_processed", "failed", {
         deliveryId,
@@ -319,6 +352,13 @@ export class GitWebhookReceiverService {
         result: "failed",
         reason,
         sanitizedMetadata: { eventType, action }
+      });
+      this.recordWebhookAudit("github_webhook_dead_lettered", "failed", {
+        deliveryId,
+        repoRef,
+        result: "failed",
+        reason,
+        sanitizedMetadata: { eventType, action, retryable: false }
       });
       return { ok: false, statusCode: 500, status: "failed", reason, event: failed, verification };
     }
@@ -386,6 +426,10 @@ export class GitWebhookReceiverService {
       processedAt: status === "rejected" || status === "ignored" || status === "failed" ? new Date() : undefined,
       metadata: sanitizeMetadata(metadata)
     });
+  }
+
+  private findEventByDeliveryId(deliveryId: string): GitWebhookEvent | undefined {
+    return this.store.listGitWebhookEvents({ deliveryId }).at(0);
   }
 
   private evaluatePolicy(

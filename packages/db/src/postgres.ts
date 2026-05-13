@@ -462,11 +462,12 @@ export class PostgresAichestraStore extends InMemoryAichestraStore {
     return row ? mapGitWebhookEvent(row) : undefined;
   }
 
-  override listGitWebhookEvents(filter: { repoRef?: string; eventType?: string; status?: GitWebhookEvent["status"] } = {}): GitWebhookEvent[] {
+  override listGitWebhookEvents(filter: { repoRef?: string; eventType?: string; status?: GitWebhookEvent["status"]; deliveryId?: string } = {}): GitWebhookEvent[] {
     const conditions = [
       filter.repoRef ? `repo_ref = ${sqlLiteral(filter.repoRef)}` : undefined,
       filter.eventType ? `event_type = ${sqlLiteral(filter.eventType)}` : undefined,
-      filter.status ? `status = ${sqlLiteral(filter.status)}` : undefined
+      filter.status ? `status = ${sqlLiteral(filter.status)}` : undefined,
+      filter.deliveryId ? `delivery_id = ${sqlLiteral(filter.deliveryId)}` : undefined
     ].filter(Boolean);
     const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
     return this.rows(`${gitWebhookEventSelect()}${where} ORDER BY received_at DESC, id`).map(mapGitWebhookEvent);

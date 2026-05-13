@@ -1,6 +1,6 @@
 # Webhook Replay Protection v0
 
-Status: planning-only. No production-grade distributed replay cache is implemented in v0.
+Status: planning plus local runtime skeleton. No production-grade distributed replay cache is implemented in v0.
 
 ## Delivery ID Strategy
 
@@ -30,13 +30,15 @@ Status: planning-only. No production-grade distributed replay cache is implement
 
 ## Persistence Requirements
 
+- The v2 GitHub webhook receiver now uses the current receiver store to classify duplicate delivery ids before mutating read models.
 - Production needs durable delivery records and payload hashes.
 - Production queue consumers must be idempotent.
-- In-memory classification is acceptable only for v0 tests and dashboard/readiness examples.
+- In-memory/local classification is acceptable only for v0 tests, single-process demos, and dashboard/readiness examples.
 
 ## Audit Events
 
 - `github_webhook_processed`
+- `github_webhook_duplicate_ignored`
 - `github_webhook_duplicate_rejected`
 - `github_webhook_payload_rejected`
 

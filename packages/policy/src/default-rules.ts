@@ -302,6 +302,208 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_github_app_configure_deny_without_gate",
+      name: "Deny GitHub App configuration without enable gate",
+      description: "GitHub App configuration requires the explicit GitHub App enable gate.",
+      effect: "deny",
+      action: "github_app.configure",
+      resourceKind: "github_app",
+      conditions: {
+        environmentEquals: {
+          githubAppEnabled: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_configure_allow_admin_mock_v1",
+      name: "Allow gated GitHub App metadata configuration",
+      description: "Platform, security, system, and service actors may validate GitHub App metadata when no private key material is exposed.",
+      effect: "allow",
+      action: "github_app.configure",
+      resourceKind: "github_app",
+      conditions: {
+        subjectRolesAny: ["platform_admin", "security_admin", "system_admin", "system"],
+        environmentEquals: {
+          githubAppEnabled: true,
+          privateKeyMaterialExposed: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_installation_use_deny_unallowlisted",
+      name: "Deny unallowlisted GitHub App installation use",
+      description: "GitHub App installations must be explicitly allowlisted before use.",
+      effect: "deny",
+      action: "github_app.installation.use",
+      resourceKind: "github_app_installation",
+      conditions: {
+        environmentEquals: {
+          installationAllowlisted: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_installation_use_allow_mock_v1",
+      name: "Allow allowlisted GitHub App installation metadata use",
+      description: "GitHub App installation metadata may be used only when the App mode and installation gates pass.",
+      effect: "allow",
+      action: "github_app.installation.use",
+      resourceKind: "github_app_installation",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          githubAppEnabled: true,
+          githubAppAuthMode: true,
+          installationAllowlisted: true,
+          privateKeyMaterialExposed: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_repo_grant_use_deny_unallowlisted",
+      name: "Deny unallowlisted GitHub App repository grant",
+      description: "GitHub App repository grants must match the configured repo allowlist.",
+      effect: "deny",
+      action: "github_app.repo_grant.use",
+      resourceKind: "github_app_repo_grant",
+      conditions: {
+        environmentEquals: {
+          repoAllowlisted: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_repo_grant_use_allow_mock_v1",
+      name: "Allow allowlisted GitHub App repository grant",
+      description: "Repository grants may be used when the App is gated, the installation is allowlisted, and destructive operations remain disabled.",
+      effect: "allow",
+      action: "github_app.repo_grant.use",
+      resourceKind: "github_app_repo_grant",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          githubAppEnabled: true,
+          githubAppAuthMode: true,
+          installationAllowlisted: true,
+          repoAllowlisted: true,
+          destructiveOperation: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_token_issue_deny_disabled",
+      name: "Deny GitHub App token issue when disabled",
+      description: "GitHub App installation token issuance requires GitHub App auth mode and enable gates.",
+      effect: "deny",
+      action: "github_app.installation_token.issue",
+      resourceKind: "github_app_installation",
+      conditions: {
+        environmentEquals: {
+          githubAppEnabled: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_token_issue_deny_legacy_mode",
+      name: "Deny GitHub App token issue outside App auth mode",
+      description: "Installation token issuance cannot run while legacy token auth mode is selected.",
+      effect: "deny",
+      action: "github_app.installation_token.issue",
+      resourceKind: "github_app_installation",
+      conditions: {
+        environmentEquals: {
+          githubAppAuthMode: false
+        }
+      },
+      priority: 990,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_token_issue_deny_missing_secretref",
+      name: "Deny GitHub App token issue without private-key SecretRef",
+      description: "Installation token issuance requires an active private-key SecretRef metadata record.",
+      effect: "deny",
+      action: "github_app.installation_token.issue",
+      resourceKind: "github_app_installation",
+      conditions: {
+        environmentEquals: {
+          privateKeySecretRefConfigured: false
+        }
+      },
+      priority: 980,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_token_issue_deny_unallowlisted_installation",
+      name: "Deny GitHub App token issue for unallowlisted installation",
+      description: "Installation token issuance requires the installation id to be allowlisted.",
+      effect: "deny",
+      action: "github_app.installation_token.issue",
+      resourceKind: "github_app_installation",
+      conditions: {
+        environmentEquals: {
+          installationAllowlisted: false
+        }
+      },
+      priority: 970,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_token_issue_deny_unallowlisted_repo",
+      name: "Deny GitHub App token issue for unallowlisted repo",
+      description: "Installation token issuance requires the repository grant to match the allowlist.",
+      effect: "deny",
+      action: "github_app.installation_token.issue",
+      resourceKind: "github_app_installation",
+      conditions: {
+        environmentEquals: {
+          repoAllowlisted: false
+        }
+      },
+      priority: 960,
+      enabled: true
+    },
+    {
+      id: "policy_github_app_token_issue_allow_mock_v1",
+      name: "Allow mock GitHub App token handle issuance",
+      description: "Mock installation token handles may be issued only after GitHub App, SecretRef metadata, installation, repo, Auth/RBAC, and non-destructive operation gates pass.",
+      effect: "allow",
+      action: "github_app.installation_token.issue",
+      resourceKind: "github_app_installation",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          githubAppEnabled: true,
+          githubAppAuthMode: true,
+          appIdConfigured: true,
+          privateKeySecretRefConfigured: true,
+          secretRefActive: true,
+          installationAllowlisted: true,
+          repoAllowlisted: true,
+          privateKeyMaterialExposed: false,
+          installationTokenExchangeEnabled: false,
+          mockTokenProvider: true,
+          destructiveOperation: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
       id: "policy_git_merge_deny",
       name: "Deny Git merge",
       description: "Provider merge is not implemented in Real Git Adapter v0.",

@@ -35,6 +35,7 @@
 - [auth-rbac-readiness.md](foundations/auth-rbac-readiness.md)
 - [auth-rbac/v0-plan.md](foundations/auth-rbac/v0-plan.md)
 - [auth-rbac/v0.md](foundations/auth-rbac/v0.md)
+- [auth-rbac/v1-plan.md](foundations/auth-rbac/v1-plan.md)
 - [secretref-provider-credentials/v1.md](foundations/secretref-provider-credentials/v1.md) (+ plan; Auth/RBAC + Policy-backed credential checks)
 - [observability-audit-retention/v0.md](foundations/observability-audit-retention/v0.md) (+ plan; common audit envelope, retention/redaction classes, metric/trace skeletons)
 - [persistent-storage-schema-v0.md](foundations/persistent-storage-schema-v0.md)
@@ -48,7 +49,7 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 |---|---|---|
 | Conflict Manager | [features/conflict-manager/](features/conflict-manager/) | v0, v1 |
 | Persistent DB | [features/persistent-db/](features/persistent-db/) | v1 (+ plan) |
-| Real Git Adapter | [features/real-git-adapter/](features/real-git-adapter/) | v0, v1, v2 (+ plans, audits/v0-readiness) |
+| Real Git Adapter | [features/real-git-adapter/](features/real-git-adapter/) | v0, v1, v2, github-app-controlled-v1 (+ plans, audits/v0-readiness) |
 | LLM Gateway | [features/llm-gateway/](features/llm-gateway/) | v0, v1, v2 (+ plans) |
 | MCP Gateway | [features/mcp-gateway/](features/mcp-gateway/) | v0 (+ plan) |
 | Local Agent Runner | [features/local-agent-runner/](features/local-agent-runner/) | v0, v1 (+ plans) |
@@ -70,6 +71,12 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 
 - [persistent-db-production-operations/](roadmaps/persistent-db-production-operations/) - Persistent DB Production Operations v1: DB operations runbook, migration readiness, index review, retention/audit growth, webhook persistence, backup/restore, and pooling planning.
 - [secret-backend-migration/](roadmaps/secret-backend-migration/) - Secret Backend Migration Planning v0: backend options, SecretRef provider migration, credential kind migration, lease/rotation, env fallback deprecation, readiness APIs, health, and dashboard planning.
+- [auth-rbac-production/](roadmaps/auth-rbac-production/) - Production Auth/RBAC v1 Planning: IdP options, role/permission matrix, tenant/scope model, service accounts/system actors, request context propagation, mock actor deprecation, readiness APIs, health, and dashboard planning.
+- [policy-bundle-opa-cedar/](roadmaps/policy-bundle-opa-cedar/) - Policy Bundle / OPA-Cedar Planning v0: engine comparison, bundle schema, domain mapping, review workflow, tests, rollout/rollback, break-glass, readiness APIs, health, and dashboard planning.
+- [staging-deployment-profile/](roadmaps/staging-deployment-profile/) - Staging Deployment Profile v0: non-production profile contract, staging gate matrix, integration-test policy, promotion/rollback criteria, risk register, readiness APIs, health, and dashboard planning.
+- [staging-ci-cd-pipeline/](roadmaps/staging-ci-cd-pipeline/) - Staging CI/CD Pipeline Planning v0: CI job matrix, optional integration-test gates, secret/env safety, artifacts/reports, staging promotion, cleanup/rollback, readiness APIs, health, and dashboard planning.
+- [github-app-integration-test-profile/](roadmaps/github-app-integration-test-profile/) - GitHub App integration-test profile v1: skipped-by-default live-test profile, required gates, safety checks, cleanup policy, readiness APIs, health, and dashboard planning.
+- [llm-gateway-integration-test-profile/](roadmaps/llm-gateway-integration-test-profile/) - LLM Gateway integration-test profile v1: skipped-by-default OpenAI-compatible live-test profile, model allowlist, budget cap, SecretRef preference, readiness APIs, health, and dashboard planning.
 
 ## audits/
 
@@ -97,6 +104,8 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 - [audit-source-inventory.md](reference/audit-source-inventory.md)
 - [github-app-permission-matrix.md](reference/github-app-permission-matrix.md)
 - [github-webhook-event-allowlist.md](reference/github-webhook-event-allowlist.md)
+- [production-rbac-permission-matrix.md](reference/production-rbac-permission-matrix.md)
+- [staging-environment-gate-matrix.md](reference/staging-environment-gate-matrix.md)
 - [runtime-component-inventory.md](reference/runtime-component-inventory.md)
 - [environment-gate-matrix.md](reference/environment-gate-matrix.md)
 - [Aichestra_Closed_Enterprise_LLM_Provider_Design](reference/) — `.docx`, `.pdf`, `_LLM_Readable/` (json/md/txt 변환본).

@@ -35,7 +35,12 @@ async function collectFiles(dir) {
 }
 
 function hasExternalRuntimeCall(text) {
-  return /fetch\(\s*["']https?:\/\//.test(text) || /https\.request\(/.test(text);
+  return [
+    /fetch\(\s*["']https?:\/\//,
+    /fetch\(\s*`https?:\/\//,
+    /fetch\(\s*new\s+URL\(\s*["'`]https?:\/\//,
+    /https\.request\(/
+  ].some((pattern) => pattern.test(text));
 }
 
 const failures = [];

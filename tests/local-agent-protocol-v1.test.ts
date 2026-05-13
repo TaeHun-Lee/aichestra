@@ -296,6 +296,9 @@ test("Enterprise Provider local_cli observes v1 channel, consent, compatibility,
   assert.equal((await disconnectedProvider.invoke({ providerId: "codex-cli-local", actorId: disconnected.userId, prompt: "no real cli" })).error?.code, "local_agent_unavailable");
 
   const { agent } = protocol.startFixtureAgent({ userId: "user_provider_fixture" });
+  const actorMismatch = await disconnectedProvider.invoke({ providerId: "codex-cli-local", actorId: "user_without_connected_agent", prompt: "must not borrow another user's agent" });
+  assert.equal(actorMismatch.error?.code, "local_agent_required");
+
   const noChannel = await disconnectedProvider.invoke({ providerId: "codex-cli-local", actorId: agent.userId, prompt: "no real cli", context: { localAgentId: agent.id } });
   assert.equal(noChannel.error?.code, "channel_required");
 

@@ -28,6 +28,9 @@ export type PolicyResourceKind =
   | "branch"
   | "pull_request"
   | "git_operation"
+  | "github_app"
+  | "github_app_installation"
+  | "github_app_repo_grant"
   | "llm_model"
   | "llm_provider"
   | "llm_route"
@@ -80,6 +83,10 @@ export type PolicyAction =
   | "git.merge"
   | "git.rebase"
   | "git.branch.delete"
+  | "github_app.configure"
+  | "github_app.installation.use"
+  | "github_app.repo_grant.use"
+  | "github_app.installation_token.issue"
   | "llm.completion"
   | "llm.remote_completion"
   | "llm.model.use"
@@ -274,6 +281,10 @@ const policyActions = new Set<PolicyAction>([
   "git.merge",
   "git.rebase",
   "git.branch.delete",
+  "github_app.configure",
+  "github_app.installation.use",
+  "github_app.repo_grant.use",
+  "github_app.installation_token.issue",
   "llm.completion",
   "llm.remote_completion",
   "llm.model.use",
@@ -353,6 +364,9 @@ const policyResourceKinds = new Set<PolicyResourceKind>([
   "branch",
   "pull_request",
   "git_operation",
+  "github_app",
+  "github_app_installation",
+  "github_app_repo_grant",
   "llm_model",
   "llm_provider",
   "llm_route",

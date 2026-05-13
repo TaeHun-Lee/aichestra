@@ -32,6 +32,8 @@ export type GitHubGitProviderOptions = {
   remoteBranchCreateEnabled?: boolean;
   remotePullRequestCreateEnabled?: boolean;
   token?: string;
+  configured?: boolean;
+  authMode?: "legacy_token" | "github_app";
   owner?: string;
   repo?: string;
   allowedRepos?: string[];
@@ -98,6 +100,7 @@ export class GitHubGitProvider implements GitProvider {
   private readonly remoteBranchCreateEnabled: boolean;
   private readonly remotePullRequestCreateEnabled: boolean;
   private readonly configured: boolean;
+  private readonly authMode: "legacy_token" | "github_app";
   private readonly owner?: string;
   private readonly repo?: string;
   private readonly allowedRepos: string[];
@@ -109,7 +112,8 @@ export class GitHubGitProvider implements GitProvider {
     this.remoteGitEnabled = options.remoteGitEnabled ?? false;
     this.remoteBranchCreateEnabled = options.remoteBranchCreateEnabled ?? false;
     this.remotePullRequestCreateEnabled = options.remotePullRequestCreateEnabled ?? false;
-    this.configured = typeof options.token === "string" && options.token.length > 0;
+    this.configured = options.configured ?? (typeof options.token === "string" && options.token.length > 0);
+    this.authMode = options.authMode ?? "legacy_token";
     this.owner = optionalNonEmpty(options.owner);
     this.repo = optionalNonEmpty(options.repo);
     this.allowedRepos = normalizeAllowedRepos(options.allowedRepos ?? []);
@@ -130,6 +134,7 @@ export class GitHubGitProvider implements GitProvider {
       remotePullRequestCreateEnabled: this.remotePullRequestCreateEnabled,
       remoteMergeEnabled: false,
       githubConfigured: this.configured,
+      githubAuthMode: this.authMode,
       githubOwnerConfigured: Boolean(this.owner),
       githubRepoConfigured: Boolean(this.repo),
       githubAllowedRepoCount: this.allowedRepos.length,

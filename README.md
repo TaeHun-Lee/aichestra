@@ -9,11 +9,11 @@ Design and work-order source documents live under `docs/briefs/`; the canonical 
 ## Architecture
 
 - `packages/core`: domain models, status transitions, validation schemas, seed data, instruction resolution, Conflict Manager scoring, and merge simulation interfaces.
-- `packages/git-adapter`: Git provider behavior, mock branch/PR creation, conflict risk, local-only dry-run merge simulation, gated GitHub operations, disabled-by-default webhook receive, and PR/branch sync read models.
+- `packages/git-adapter`: Git provider behavior, mock branch/PR creation, conflict risk, local-only dry-run merge simulation, gated GitHub operations, disabled-by-default webhook receive, PR/branch sync read models, and GitHub App Controlled Implementation v1 runtime/status boundaries.
 - `packages/improvement`: Phase 4 Preparation, Auto-improvement v0, and Governance v1 models, repository interfaces, in-memory repositories, DTOs, deterministic clustering, candidates, draft proposals, draft registry changes, readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, and auto-improvement safety policies.
 - `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, gated OpenAI-compatible HTTP provider path, LLM Gateway v2 route/fallback/routing-decision read models, disabled provider skeletons, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 catalog/auth/credential/token/adapter/local-agent boundary skeletons, and Local Agent Protocol v1 mock channels/fixture daemon/compatibility/streaming models.
 - `packages/mcp-gateway`: MCP Gateway v0 server/tool catalog models, deterministic `MockMCPGateway`, disabled real MCP transport skeleton, invocation/audit repositories, DTOs, and Auth/RBAC, Policy, Security redaction, and Secrets/Sandbox integration.
-- `packages/deployment-readiness`: Production Deployment Readiness Planning v0 read-only deployment profiles, readiness checks, production risks, GitHub App / Production Webhook Hardening Planning v0 models, Persistent DB Production Operations v1 readiness models, Secret Backend Migration Planning v0 readiness models, DTOs, and seeded planning summary models.
+- `packages/deployment-readiness`: Production Deployment Readiness Planning v0 read-only deployment profiles, readiness checks, production risks, GitHub App / Production Webhook Hardening Planning v0 models, Persistent DB Production Operations v1 readiness models, Secret Backend Migration Planning v0 readiness models, Production Auth/RBAC v1 planning readiness models, Policy Bundle / OPA-Cedar Planning v0 readiness models, Staging Deployment Profile v0 readiness models, Staging CI/CD Pipeline Planning v0 readiness models, GitHub App integration-test profile v1 readiness models, DTOs, and seeded planning summary models.
 - `packages/policy`: provider-neutral Policy-as-code Skeleton v0 models, static/mock policy engine, default restrictive rules, policy decision audit, DTOs, and policy service boundaries.
 - `packages/auth`: Production Auth/RBAC Planning v0 provider-neutral identity/RBAC models, deterministic MockAuthProvider, disabled future auth provider placeholders, AuthorizationService, request context helpers, and sanitized auth audit events.
 - `packages/registry`: Skill, Harness, and Instruction registry interfaces, repository boundaries, DTO mappers, audit logs, history, rollback, approval queue read models, local eval result attachment, checksum verification, mock RBAC, local package manifests, import/export, semver range resolution v0, package diffs, validation helpers, and deterministic resolver.
@@ -27,6 +27,8 @@ Design and work-order source documents live under `docs/briefs/`; the canonical 
 - `apps/web`: dashboard skeleton with Next-style folders, API-backed dashboard read-model provider, explicit demo fallback, and a dependency-free local dev server.
 
 ## Install
+
+Use Node 24.x. The repo pins Node 24 through Volta and `.nvmrc`.
 
 ```bash
 pnpm install
@@ -92,6 +94,37 @@ AICHESTRA_GITHUB_WEBHOOK_INTEGRATION_TESTS=false
 The preferred GitHub credential path is `AICHESTRA_GITHUB_TOKEN_SECRET_REF` with `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=true` and `AICHESTRA_ALLOWED_SECRET_ENV_KEYS` containing the referenced env key. `AICHESTRA_GITHUB_TOKEN` remains a legacy fallback when no SecretRef is configured.
 
 The preferred webhook secret path is `AICHESTRA_GITHUB_WEBHOOK_SECRET_REF` through the same SecretRef-backed credential boundary. `AICHESTRA_GITHUB_WEBHOOK_SECRET` remains a gated legacy fallback. Webhook secrets are used only inside the verifier boundary and are never returned by `/health`, `/git/github/webhooks/config`, webhook audit, Git audit, or dashboard read models.
+
+GitHub App Controlled Implementation v1 adds an optional GitHub App auth mode with a disabled/mock token provider boundary. It is metadata-only by default: no private key is read, no JWT is signed, no installation token is exchanged with GitHub, and no default test calls GitHub.
+
+```bash
+AICHESTRA_GITHUB_AUTH_MODE=legacy_token
+AICHESTRA_ENABLE_GITHUB_APP=false
+AICHESTRA_GITHUB_APP_ID=
+AICHESTRA_GITHUB_APP_SLUG=
+AICHESTRA_GITHUB_APP_PRIVATE_KEY_SECRET_REF=
+AICHESTRA_GITHUB_APP_WEBHOOK_SECRET_REF=
+AICHESTRA_GITHUB_APP_ALLOWED_INSTALLATIONS=
+AICHESTRA_GITHUB_APP_ALLOWED_REPOS=
+AICHESTRA_GITHUB_APP_ALLOWED_BRANCH_PREFIX=ai/
+AICHESTRA_GITHUB_APP_INTEGRATION_TESTS=false
+```
+
+When `AICHESTRA_GITHUB_AUTH_MODE=github_app`, branch creation, PR creation, and changed-file reads still require the existing remote Git gates, repo allowlists, branch prefix, Auth/RBAC allow, Policy allow, and a successful GitHub App token-handle check. Token handles are metadata only and never expose an installation token.
+
+GitHub App integration-test profile v1 adds a read-only optional live-test readiness surface. Default tests still skip live GitHub behavior. Future live tests require every explicit gate, a non-production repo allowlist, `AICHESTRA_GITHUB_APP_ALLOWED_BRANCH_PREFIX=ai/`, `AICHESTRA_ALLOW_REMOTE_MERGE=false`, and SecretRef metadata for private key/webhook secrets. Health, readiness, and dashboard expose counts/booleans only:
+
+```bash
+curl http://localhost:3000/readiness/github-app-integration/summary
+curl http://localhost:3000/dashboard/github-app-integration
+```
+
+LLM Gateway integration-test profile v1 adds a read-only optional live-test readiness surface for the OpenAI-compatible remote path. Default tests still skip live provider behavior. Future live tests require every explicit gate, an explicit model allowlist/default model, a small budget cap, safe prompt class, fallback disabled, and SecretRef-preferred credential metadata. Health, readiness, and dashboard expose counts/booleans only:
+
+```bash
+curl http://localhost:3000/readiness/llm-integration/summary
+curl http://localhost:3000/dashboard/llm-integration
+```
 
 LLM Gateway v2 remains mock-first by default. Route selection uses mock routes unless explicit routing and remote provider gates are enabled:
 
@@ -187,6 +220,34 @@ curl http://localhost:3000/dashboard/readiness
 
 Production remains blocked until real auth, real secret backend, required Postgres operations, policy bundle management, durable observability backend, audit export/retention enforcement, backup/restore, tenant isolation, and production deployment controls are implemented. Readiness endpoints are read-only, local/seeded, and do not call external services or expose secrets.
 
+Staging Deployment Profile v0 adds a non-production staging profile contract, staging environment gate matrix, integration-test policy, risk register, read-only staging readiness APIs, safe `/health` staging metadata, and a dashboard panel. It does not deploy anything, add infrastructure manifests, enable production traffic, call providers, or mark staging as production-ready:
+
+```bash
+curl http://localhost:3000/readiness/staging/profile
+curl http://localhost:3000/readiness/staging/gates
+curl http://localhost:3000/readiness/staging/checks
+curl http://localhost:3000/readiness/staging/promotion-criteria
+curl http://localhost:3000/readiness/staging/rollback-criteria
+curl http://localhost:3000/readiness/staging/summary
+curl http://localhost:3000/dashboard/staging
+```
+
+Staging readiness responses expose booleans, counts, statuses, blockers, and warnings only. Remote merge, remote MCP, vendor CLI execution, production auth, real secret backend integration, policy bundle runtime, external observability export, and production traffic remain blocked.
+
+Staging CI/CD Pipeline Planning v0 adds planning-only pipeline profiles, job matrix metadata, optional integration-test gates, secret/env safety rules, artifact/report policy, staging promotion criteria, cleanup/rollback policy, read-only CI/CD readiness APIs, safe `/health` metadata, and a dashboard panel. It does not create active workflows, deploy anything, call providers, run remote integrations by default, or expose secrets/env values:
+
+```bash
+curl http://localhost:3000/readiness/ci-cd/profiles
+curl http://localhost:3000/readiness/ci-cd/jobs
+curl http://localhost:3000/readiness/ci-cd/integration-gates
+curl http://localhost:3000/readiness/ci-cd/checks
+curl http://localhost:3000/readiness/ci-cd/risks
+curl http://localhost:3000/readiness/ci-cd/summary
+curl http://localhost:3000/dashboard/ci-cd
+```
+
+CI/CD readiness responses expose job/gate names, booleans, counts, statuses, blockers, and warnings only. Optional Postgres, remote Git/GitHub App/webhook, remote LLM, remote MCP, and external auth profiles are disabled by default and require explicit future gates before any live run.
+
 Observability / Audit Retention v0 adds a read-only common audit envelope, retention/redaction metadata, metric snapshot, trace skeleton, source coverage, and dashboard visibility. It does not export audit logs, call external observability services, deliver alerts, or delete retained data:
 
 ```bash
@@ -215,6 +276,45 @@ curl http://localhost:3000/readiness/github-app/endpoint
 curl http://localhost:3000/readiness/github-app/risks
 curl http://localhost:3000/dashboard/github-app
 ```
+
+GitHub App Controlled Implementation v1 adds runtime/status-only endpoints for the gated GitHub App boundary:
+
+```bash
+curl http://localhost:3000/git/github-app/config
+curl http://localhost:3000/git/github-app/installations
+curl http://localhost:3000/git/github-app/repository-grants
+curl -X POST http://localhost:3000/git/github-app/validate
+curl -X POST http://localhost:3000/git/github-app/installations/<installation_id>/token/check \
+  -H "Content-Type: application/json" \
+  -d '{ "repoRef": "aichestra/demo", "purpose": "branch_create" }'
+curl http://localhost:3000/git/github-app/audit
+```
+
+These endpoints do not create a live GitHub App, read private keys, return installation tokens, expose webhook secrets, or call GitHub in default runtime/tests.
+
+GitHub App integration-test profile v1 adds a skipped-by-default optional live-test profile with read-only readiness APIs and dashboard visibility:
+
+```bash
+curl http://localhost:3000/readiness/github-app-integration/profile
+curl http://localhost:3000/readiness/github-app-integration/test-cases
+curl http://localhost:3000/readiness/github-app-integration/safety-checks
+curl http://localhost:3000/readiness/github-app-integration/summary
+curl http://localhost:3000/dashboard/github-app-integration
+```
+
+The profile reports missing gates, unsafe gates, repo allowlist count, required branch prefix, test cases, safety checks, cleanup policy, and no-secret/no-env status only. It does not call GitHub, generate a live installation token, expose private keys/tokens/webhook secrets, auto-merge, force-push, or delete branches in default tests.
+
+LLM Gateway integration-test profile v1 adds skipped-by-default optional live-test readiness APIs and dashboard visibility:
+
+```bash
+curl http://localhost:3000/readiness/llm-integration/profile
+curl http://localhost:3000/readiness/llm-integration/test-cases
+curl http://localhost:3000/readiness/llm-integration/safety-checks
+curl http://localhost:3000/readiness/llm-integration/summary
+curl http://localhost:3000/dashboard/llm-integration
+```
+
+The profile reports missing gates, unsafe gates, provider readiness, model allowlist count, budget status, test cases, safety checks, and no-secret/no-env/no-raw-response status only. It does not call a live LLM provider, expose API keys/env values, enable streaming/tool calls, use vendor CLI, read credential caches, or run unbounded fallback in default tests.
 
 Persistent DB Production Operations v1 adds a non-destructive DB operations runbook, migration file readiness, index review, retention/audit growth plan, webhook persistence plan, backup/restore and pooling plans, read-only readiness APIs, safe `/health` DB operations metadata, and a dashboard panel. It does not provision or connect to production databases, run migrations automatically, run backups/restores, delete data, or expose database URLs:
 
@@ -258,6 +358,7 @@ curl http://localhost:3000/dashboard/llm
 curl http://localhost:3000/dashboard/agents
 curl http://localhost:3000/dashboard/policy
 curl http://localhost:3000/dashboard/auth
+curl http://localhost:3000/dashboard/auth-production
 curl http://localhost:3000/dashboard/providers
 curl http://localhost:3000/dashboard/security
 curl http://localhost:3000/dashboard/local-agents
@@ -265,6 +366,8 @@ curl http://localhost:3000/dashboard/mcp
 curl http://localhost:3000/dashboard/readiness
 curl http://localhost:3000/dashboard/database
 curl http://localhost:3000/dashboard/secret-backend
+curl http://localhost:3000/dashboard/staging
+curl http://localhost:3000/dashboard/ci-cd
 curl http://localhost:3000/dashboard/observability
 curl http://localhost:3000/dashboard/audit
 ```
@@ -297,6 +400,22 @@ curl http://localhost:3000/auth/audit
 ```
 
 There is no login, logout, password, token, session, SSO, OAuth, OIDC, SAML, or SCIM endpoint. Future providers are disabled placeholders and do not call external identity systems.
+
+Production Auth/RBAC v1 Planning adds production identity/readiness planning only. It defines IdP options, the production RBAC permission matrix, tenant/scope plan, service-account/system actor plan, request context propagation plan, mock actor deprecation plan, `/readiness/auth/*`, `/dashboard/auth-production`, and safe `/health` auth readiness metadata. It does not implement real OIDC, SAML, SCIM, SSO, login/logout, sessions, JWT issuance, password auth, external IdP calls, or service-account credential issuance:
+
+```bash
+curl http://localhost:3000/readiness/auth/providers
+curl http://localhost:3000/readiness/auth/migration-phases
+curl http://localhost:3000/readiness/auth/checks
+curl http://localhost:3000/readiness/auth/risks
+curl http://localhost:3000/readiness/auth/tenant-boundaries
+curl http://localhost:3000/readiness/auth/service-accounts
+curl http://localhost:3000/readiness/auth/permission-matrix
+curl http://localhost:3000/readiness/auth/summary
+curl http://localhost:3000/dashboard/auth-production
+```
+
+Auth readiness responses are read-only and expose no tokens, cookies, session ids, passwords, raw identity assertions, IdP client secrets, or provider credentials. They mark production auth as disabled and production readiness as false.
 
 SecretRef-backed Provider Credentials v1 adds metadata-only provider credential resolution for controlled GitHub, GitHub webhook, and OpenAI-compatible paths. The env provider is disabled by default and reads only the requested allowlisted env key referenced by an active `SecretRef` after Auth/RBAC and Policy checks:
 
@@ -552,6 +671,19 @@ curl -X POST http://localhost:3000/policy/evaluate-many \
 curl http://localhost:3000/policy/audit
 ```
 
+Policy Bundle / OPA-Cedar Planning v0 adds planning-only engine options, bundle plans, policy domain mapping, readiness checks, risks, migration phases, `/readiness/policy-bundles/*`, `/dashboard/policy-bundles`, and safe `/health` policy bundle metadata. It does not implement OPA/Rego, Cedar, external policy decision services, dynamic policy execution, remote bundle loading, hot reload, signed bundle verification, rollout, rollback, or break-glass execution:
+
+```bash
+curl http://localhost:3000/readiness/policy-bundles/engines
+curl http://localhost:3000/readiness/policy-bundles/plans
+curl http://localhost:3000/readiness/policy-bundles/domain-mapping
+curl http://localhost:3000/readiness/policy-bundles/checks
+curl http://localhost:3000/readiness/policy-bundles/risks
+curl http://localhost:3000/readiness/policy-bundles/migration-phases
+curl http://localhost:3000/readiness/policy-bundles/summary
+curl http://localhost:3000/dashboard/policy-bundles
+```
+
 ## Test
 
 ```bash
@@ -563,7 +695,7 @@ pnpm build
 
 Optional Postgres repository contract tests are skipped unless `AICHESTRA_TEST_DATABASE_URL` is set.
 
-Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v1/v2 provider/catalog/routing/fallback/virtual-key/budget/usage/API/OpenAI-compatible mocked HTTP behavior, MCP Gateway v0 catalog/invocation/policy/auth/API/health/dashboard/no-secret behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Production Auth/RBAC Planning v0 domain/provider/authorization/API/health/dashboard/no-secret behavior, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, Observability / Audit Retention v0 envelope/sanitizer/source-normalization/retention/API/dashboard/metric/trace/no-secret behavior, GitHub App / Production Webhook Hardening Planning v0 permission/event/replay/dead-letter/API/dashboard/no-secret behavior, Persistent DB Production Operations v1 migration/index/retention/webhook/API/health/dashboard/no-DB-url behavior, Dashboard API-backed Read Model v0 endpoints/provider/fallback/no-secret behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0/v1/v2 provider/service/API/webhook/sync behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
+Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v1/v2 provider/catalog/routing/fallback/virtual-key/budget/usage/API/OpenAI-compatible mocked HTTP behavior, MCP Gateway v0 catalog/invocation/policy/auth/API/health/dashboard/no-secret behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Policy Bundle / OPA-Cedar Planning v0 readiness models/API/health/dashboard/no-dynamic-execution/no-secret behavior, Production Auth/RBAC Planning v0 domain/provider/authorization/API/health/dashboard/no-secret behavior, Production Auth/RBAC v1 Planning readiness models/API/health/dashboard/no-token/no-session behavior, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, Observability / Audit Retention v0 envelope/sanitizer/source-normalization/retention/API/dashboard/metric/trace/no-secret behavior, GitHub App / Production Webhook Hardening Planning v0 permission/event/replay/dead-letter/API/dashboard/no-secret behavior, GitHub App Controlled Implementation v1 config/token-provider/SecretRef/Auth/RBAC/Policy/API/health/dashboard/no-secret behavior, GitHub App integration-test profile v1 readiness models/API/health/dashboard/skipped-live-test/no-secret/no-env/no-destructive-git behavior, Persistent DB Production Operations v1 migration/index/retention/webhook/API/health/dashboard/no-DB-url behavior, Staging Deployment Profile v0 profile/gates/checks/promotion/rollback/API/health/dashboard/no-secret/no-env behavior, Staging CI/CD Pipeline Planning v0 profiles/jobs/integration-gates/checks/risks/API/health/dashboard/no-secret/no-env behavior, Dashboard API-backed Read Model v0 endpoints/provider/fallback/no-secret behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0/v1/v2 provider/service/API/webhook/sync behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
 
 ## First Vertical Slice
 
@@ -597,11 +729,15 @@ Included:
 - Skill, Harness, and Instruction Registry Packaging & Versioning v3 with exact refs, semver range resolution v0, package manifests, local import/export, package diffs, repository boundaries, in-memory and file-backed local storage, stable DTOs, audit logs, append-only history, rollback, approval/eval gates, approval queue read models, local eval result attachment, mock mutation RBAC, local checksum verification, APIs, resolver-backed task selection, TaskRun registry refs, and dashboard visibility.
 - Phase 4 Preparation foundations, Auto-improvement v0, and Governance v1 for failure signals, deterministic clusters, improvement candidates, draft proposal metadata, draft registry changes, readiness blockers, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, safety policy guardrails, APIs, tests, and dashboard visibility.
 - Usage ledger and audit log.
-- Dashboard API-backed Read Model v0 shared DTOs, `/dashboard/*` read-only endpoints, API/demo data providers, explicit static fallback, no-secret sanitization, and read-model rendering.
+- Dashboard API-backed Read Model v0 shared DTOs, `/dashboard/*` read-only endpoints, API/demo data providers, explicit static fallback, no-secret sanitization, and read-model rendering, including the Auth/RBAC Production Readiness panel.
 - Observability / Audit Retention v0 common audit envelope, audit taxonomy, retention classes, redaction classes, no-secret audit sanitizer, source normalization, retention policy read models, metric snapshot, trace skeleton, `/observability/*`, `/dashboard/observability`, dashboard rendering, and tests without external observability backends or exporters.
 - GitHub App / Production Webhook Hardening Planning v0 permission matrix, webhook event allowlist, replay classification model, retry/dead-letter and credential/endpoint plans, `/readiness/github-app/*`, `/dashboard/github-app`, and tests without GitHub calls, private key reads, token exchange, or production webhook enablement.
+- GitHub App Controlled Implementation v1 runtime config, installation/repo grant read models, disabled/mock token provider boundary, metadata-only private-key SecretRef checks, Auth/RBAC and Policy integration, `/git/github-app/*`, health/dashboard metadata, and tests without private-key signing, real installation token exchange, GitHub calls, or token exposure.
+- GitHub App integration-test profile v1 read-only profile/test-case/safety-check/summary models, `/readiness/github-app-integration/*`, `/dashboard/github-app-integration`, safe health metadata, skipped live-test skeleton, and tests without default GitHub calls, secret/env exposure, auto-merge, force-push, or branch deletion.
+- LLM Gateway integration-test profile v1 read-only profile/test-case/safety-check/summary models, `/readiness/llm-integration/*`, `/dashboard/llm-integration`, safe health metadata, skipped live-test skeleton, and tests without default LLM calls, API key/env exposure, raw provider response exposure, streaming, tool calling, vendor CLI, or credential cache access.
 - Persistent DB Production Operations v1 DB operations runbook, migration readiness, index review, retention/audit growth plan, webhook persistence plan, backup/restore and pooling plans, `/readiness/database/*`, `/dashboard/database`, health metadata, and tests without production DB connections, automatic migrations, backup/restore jobs, destructive retention jobs, or DB URL exposure.
 - Production Auth/RBAC Planning v0 provider-neutral auth/RBAC models, deterministic MockAuthProvider, disabled future OIDC/SAML/SCIM/service-account provider placeholders, AuthorizationService, RequestContext helpers, PolicySubject mapping, `/auth/*` API visibility, health/dashboard auth mode visibility, sanitized auth audit, and tests.
+- Production Auth/RBAC v1 Planning IdP options, production RBAC permission matrix, tenant/scope model, service account/system actor plan, request context propagation plan, mock actor deprecation plan, `/readiness/auth/*`, `/dashboard/auth-production`, safe health metadata, and tests without real auth, sessions, tokens, cookies, or IdP calls.
 - Persistent DB v1 opt-in Postgres storage for Task, TaskRun, UsageLedger, BranchLease, MergeSimulationResult, MergeQueueEntry, Skill, Harness, Instruction, registry audit/history, registry packages, and registry eval results.
 - Real Integration Foundation v0 storage provider abstraction, repository inventory, Postgres schema design, migration skeleton, auth/RBAC readiness, Real Git Adapter readiness, dashboard read model plan, and repository contract tests.
 - Real Git Adapter v2 provider boundary, deterministic MockGitProvider default, LocalGitProvider fixture-safe changed-file inspection, gated GitHubGitProvider, GitHubClient boundary, controlled GitHub branch/PR/changed-file operations, disabled-by-default GitHub webhook receiver, verifier interface, PR/branch sync read models, GitIntegrationService, `/git/*` API visibility, health metadata, Git/webhook audit events, and dashboard visibility.
@@ -609,6 +745,9 @@ Included:
 - SecretRef-backed Provider Credentials v1 metadata-only SecretRef credential model, explicit env secret provider, Auth/RBAC and Policy-backed credential manager/handle/resolution results, GitHub token/webhook and LLM credential integration, `/security/credentials/*` API visibility, health/dashboard status, credential audit, and redaction tests.
 - Local Agent Runner v1 provider boundary, deterministic MockAgentRunner default, disabled-by-default LocalAgentRunner, controlled fixture command execution boundary, workspace validation, harness policy gates, instruction assembly, `/agents/*` API visibility, health metadata, command result/workspace read models, runner audit events, and dashboard visibility.
 - Policy-as-code Skeleton v0 static policy engine, provider-neutral policy models, restrictive default rules, policy audit read model, `/policy/*` API visibility, health metadata, dashboard visibility, and Git/LLM/Runner/Registry service-boundary checks.
+- Policy Bundle / OPA-Cedar Planning v0 engine comparison, bundle schema, policy domain mapping, review workflow, test strategy, rollout/rollback, break-glass plan, `/readiness/policy-bundles/*`, `/dashboard/policy-bundles`, safe health metadata, and tests without OPA/Cedar/runtime bundle execution, external policy service calls, dynamic policy execution, or secrets.
+- Staging Deployment Profile v0 non-production profile contract, staging environment gate matrix, integration-test policy, risk register, read-only `/readiness/staging/*`, `/dashboard/staging`, safe health metadata, and tests without deployment, external provider calls, secrets, env values, remote MCP, vendor CLI execution, or production traffic.
+- Staging CI/CD Pipeline Planning v0 job matrix, optional integration-test gate policy, secret/env safety, artifact/report policy, staging promotion criteria, cleanup/rollback planning, read-only `/readiness/ci-cd/*`, `/dashboard/ci-cd`, safe health metadata, and tests without active workflows, deployment, default remote integrations, secrets, or env values.
 - Enterprise LLM Provider Abstraction v0 provider kind/auth models, provider catalog skeletons, CredentialManager/TokenResolver interfaces, blocked ProviderAdapter skeletons, Local CLI provider contract, Aichestra Local Agent boundary models, parser/redaction utilities, `/providers/*` API visibility, health metadata, provider audit events, dashboard visibility, and policy hooks.
 - Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, `/security/*` API visibility, health metadata, dashboard visibility, and runner sandbox-session policy hooks.
 - Aichestra Local Agent Protocol v1 registration/session/capability models, mock signed channel and handshake models, fixture daemon simulation, capability advertisements, CLI compatibility matrix, invocation envelopes, consent lifecycle, normalized stream event records, in-memory mock transport, `/local-agents/*` API visibility, health metadata, dashboard visibility, provider integration, protocol audit events, and redaction/policy/security gates.
@@ -623,11 +762,13 @@ Deferred:
 - Local command execution outside controlled fixture/temp workspace mode.
 - BYOK, production provider API key storage, production credential issuance, real streaming, real billing, real non-OpenAI-compatible provider calls, and default remote LLM completions.
 - Real GitHub writes outside explicit gates, and all GitLab/Bitbucket writes.
-- Remote git fetch, push, provider merge, provider rebase, force push, branch deletion, public webhook exposure by default, GitHub App installation flow, GitHub App private key signing, installation token exchange, or reviewer automation.
+- Remote git fetch, push, provider merge, provider rebase, force push, branch deletion, public webhook exposure by default, production GitHub App rollout, GitHub App private key signing, real installation token exchange in default tests/runtime, or reviewer automation.
 - Real Kubernetes, Temporal, MCP gateway, SSO, OAuth/OIDC/SAML login, SCIM, and billing.
-- Production-grade auth/RBAC, production sessions, API-key issuance, tenant isolation, and cloud secret storage.
-- Production OPA/Rego or Cedar integration, policy bundle management, production auth-backed policy subjects, and persistent policy audit repositories.
+- Production-grade auth/RBAC implementation, production sessions, API-key issuance, tenant isolation, and cloud secret storage.
+- Production OPA/Rego or Cedar integration, runtime policy bundle management, signed bundle verification, shadow evaluation, policy rollout/rollback execution, production auth-backed policy subjects, and persistent policy audit repositories.
 - Production observability backend, OpenTelemetry collector/exporters, SIEM export, alert delivery, audit export checkpoints, and retention deletion jobs.
+- Real staging deployment, staging infrastructure manifests, staging CI/CD pipeline execution, or production traffic.
+- Active CI workflow creation, live deployment jobs, default remote integration tests, unredacted CI artifact uploads, and automated remote cleanup jobs.
 - Real enterprise LLM provider API calls, OAuth/device-code/WIF/IAM token exchange, vendor credential cache access, Aichestra Local Agent daemon or real transport, vendor CLI execution, and PTY terminal automation.
 - Real Vault/cloud secret manager integration, production secret rotation jobs, production secret injection, container/VM sandboxing, OS-level network egress enforcement, and Local Agent secret forwarding.
 - Signed artifacts, full package signing, artifact provenance/SBOM, and real artifact registry integration.
@@ -643,8 +784,8 @@ Deferred:
 
 ## Next Steps
 
-1. Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1 if secret backend planning is sufficiently mature.
-2. Harden production auth/RBAC with real IdP planning, tenant scoping, durable auth repositories, and session/service-account design before any production login work.
+1. Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+2. Harden production auth/RBAC implementation with real IdP adapters, tenant scoping, durable auth repositories, and session/service-account design before any production login work.
 3. Harden audit retention/export with durable common audit storage, legal hold, tenant scoping, and secure export checkpoints before any production SIEM integration.
 4. Harden Local Agent Protocol persistence and consent UX before any real daemon or local CLI work.
 5. Harden LLM Gateway v2 with persistent route/model catalog/audit repositories and production secret backend planning before broader provider calls.

@@ -1,6 +1,6 @@
 # CI/CD And Release Plan v0
 
-Planning only. No production deployment pipeline is implemented.
+Planning only. No production deployment pipeline is implemented. Staging CI/CD Pipeline Planning v0 is the current first-class CI/CD readiness surface; see `docs/roadmaps/staging-ci-cd-pipeline/`.
 
 ## Required Validation Commands
 
@@ -30,11 +30,13 @@ CI should use Node 24.x to avoid the current local warning seen under Node 20.x.
 - Postgres contract tests: set `AICHESTRA_TEST_DATABASE_URL`.
 - GitHub integration tests: enable every explicit Git provider/integration env gate.
 - GitHub webhook integration tests: enable every explicit webhook env gate.
-- LLM integration tests: enable every explicit remote LLM env gate.
+- LLM integration tests: use LLM Gateway integration-test profile v1 and enable every explicit OpenAI-compatible live-test env gate only in reviewed non-production CI.
 - MCP integration tests: future only; no real MCP transport exists in v0.
 - External auth tests: future only; no real auth provider exists.
 
 Default CI must not call external providers.
+
+Staging CI/CD Pipeline Planning v0 models these optional profiles behind read-only `/readiness/ci-cd/*` and `/dashboard/ci-cd` metadata. It does not create active workflows or run optional profiles by default.
 
 ## Security Checks
 

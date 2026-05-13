@@ -1,13 +1,13 @@
 # GitHub App Credentials v0
 
-Status: planning-only. No private key signing or installation token exchange is implemented.
+Status: planning plus controlled runtime alignment. GitHub App Controlled Implementation v1 adds metadata-only private-key SecretRef checks and mock token-handle issuance, but no private key signing or live installation token exchange is implemented.
 
 ## Private Key Handling
 
 - GitHub App private keys must live in a future real secret backend behind `SecretRef`.
 - Aichestra must not store private keys in source, config, audit, dashboard, logs, tests, or read models.
 - The env SecretRef provider is not sufficient for production private-key management.
-- v0 does not generate, read, parse, or sign with a GitHub App private key.
+- v0 and GitHub App Controlled Implementation v1 do not generate, read, parse, or sign with a GitHub App private key.
 
 ## App And Installation IDs
 
@@ -25,14 +25,14 @@ Future work may:
 4. use the short-lived token only inside `GitHubClient`;
 5. audit metadata only.
 
-v0 implements none of these steps.
+v0 implements none of these live steps. GitHub App Controlled Implementation v1 implements only the metadata request/result boundary and mock token-handle result for deterministic tests and gated status checks.
 
 ## SecretRefs
 
-Future planned refs:
+Supported/planned refs:
 
-- GitHub App private key SecretRef
-- GitHub App webhook secret SecretRef
+- GitHub App private key SecretRef (`github_app_private_key`) as metadata-only runtime support in GitHub App Controlled Implementation v1.
+- GitHub App webhook secret SecretRef as metadata/config support.
 - optional installation-level metadata refs, if needed
 
 SecretRef ids may appear in metadata. Secret values must not.

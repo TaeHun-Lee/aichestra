@@ -60,7 +60,7 @@ Implemented v0 metrics are deterministic read models, not backend time series:
 - retention policy count;
 - external exporter enabled flag, always `0`.
 
-Future production metrics should add API request count/error/latency, worker queue depth, run duration, retry count, policy/auth denial counts, secret resolution allow/deny counts, Git webhook verification counts, LLM cost/provider error counts, MCP invocation counts, runner command blocked/timeout counts, Local Agent connection/consent counts, audit export lag, and retention partition size.
+Future production metrics should add API request count/error/latency, worker queue depth, run duration, retry count, auth context resolution count, authorization deny count, mock actor usage count, service account usage count, role binding evaluation count, unknown actor deny count, policy/auth denial counts, secret resolution allow/deny counts, Git webhook verification counts, LLM cost/provider error counts, MCP invocation counts, runner command blocked/timeout counts, Local Agent connection/consent counts, audit export lag, and retention partition size.
 
 ## Traces
 
@@ -108,7 +108,7 @@ Future production dashboards still need API health/error rates, workflow through
 
 No real alert delivery is implemented.
 
-Future alerting should cover API error rate/latency, worker backlog, migration failures, Postgres health, secret backend failures, auth provider failures, policy bundle failures, webhook verification spikes, LLM provider error/cost spikes, MCP high/critical invocation attempts, and audit export lag.
+Future alerting should cover API error rate/latency, worker backlog, migration failures, Postgres health, secret backend failures, auth provider failures, mock actor usage in staging/production, unknown actor denials, policy bundle failures, webhook verification spikes, LLM provider error/cost spikes, MCP high/critical invocation attempts, and audit export lag.
 
 ## Audit Export Requirements
 

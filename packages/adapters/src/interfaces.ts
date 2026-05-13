@@ -165,6 +165,7 @@ export type GitProviderConfigView = {
   remotePullRequestCreateEnabled: boolean;
   remoteMergeEnabled: false;
   githubConfigured: boolean;
+  githubAuthMode?: "legacy_token" | "github_app";
   githubOwnerConfigured?: boolean;
   githubRepoConfigured?: boolean;
   githubAllowedRepoCount?: number;

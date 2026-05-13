@@ -15,6 +15,7 @@ export type SecretRefStatus = "active" | "disabled" | "revoked";
 export type SecretKind =
   | "mock_metadata"
   | "github_token"
+  | "github_app_private_key"
   | "github_webhook_secret"
   | "llm_api_key"
   | "provider_api_key"
@@ -129,6 +130,7 @@ export type SecretAuditEventType =
 
 export type CredentialPurpose =
   | "github_api_call"
+  | "github_app_private_key_signing"
   | "github_webhook_verification"
   | "llm_api_call"
   | "provider_api_call"

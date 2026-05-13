@@ -1,16 +1,16 @@
 # GitHub App Permission Matrix
 
-Status: GitHub App / Production Webhook Hardening Planning v0.
+Status: GitHub App / Production Webhook Hardening Planning v0 plus GitHub App Controlled Implementation v1 alignment.
 
-This matrix defines the target least-privilege GitHub App posture. It is planning data only. Aichestra does not create a GitHub App, request installation access tokens, or call GitHub App APIs in v0.
+This matrix defines the target least-privilege GitHub App posture. GitHub App Controlled Implementation v1 can issue metadata-only mock token handles after local gates pass, but Aichestra still does not create a GitHub App, sign JWTs, request live installation access tokens, or call GitHub App APIs by default.
 
 | Aichestra capability | GitHub permission | Required level | Risk | Production default | Approval requirement | Audit requirement | Current implementation | Future only |
 |---|---|---:|---|---|---|---|---|---|
 | Repository identity and allowlist checks | `metadata` | read | low | allow | app permission review | audit app descriptor and repository grant metadata | token-gated GitHub path has repo metadata behavior; GitHub App path is not live | no |
 | Changed-file refresh and branch read models | `contents` | read | medium | allow after review | integration owner approval | audit read-model refresh result and repo ref | gated token path can read changed files | no |
-| Future branch creation through installation token | `contents` | write | high | future_review | security plus integration owner approval | audit branch-create request, policy decision, repo grant, and result | token-gated branch create exists; GitHub App path is not live | yes |
+| Branch creation through controlled GitHub App boundary | `contents` | write | high | future_review | security plus integration owner approval | audit branch-create request, policy decision, repo grant, token handle id, and result | token-gated branch create exists; GitHub App v1 mock token-handle path exists; live installation token path is not implemented | no for mock path; live path future |
 | PR sync and PR read models | `pull_requests` | read | medium | allow after review | integration owner approval | audit PR sync read outcome | gated token/webhook read models exist | no |
-| Future PR creation through installation token | `pull_requests` | write | medium | future_review | security plus integration owner approval | audit PR-create request, policy decision, repo grant, and result | token-gated PR create exists; GitHub App path is not live | yes |
+| PR creation through controlled GitHub App boundary | `pull_requests` | write | medium | future_review | security plus integration owner approval | audit PR-create request, policy decision, repo grant, token handle id, and result | token-gated PR create exists; GitHub App v1 mock token-handle path exists; live installation token path is not implemented | no for mock path; live path future |
 | Check status read model | `checks` | read | medium | allow after review | read-only app permission review | audit check ingestion outcomes | read-model planning only | yes |
 | Commit status read model | `statuses` | read | medium | allow after review | read-only app permission review | audit status ingestion outcomes | read-model planning only | yes |
 | Future issue linking | `issues` | read | medium | future_review | separate product/security approval | audit issue metadata reads if enabled | not implemented | yes |

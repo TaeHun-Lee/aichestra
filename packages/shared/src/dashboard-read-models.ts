@@ -129,6 +129,23 @@ export type PolicyReadModel = {
   blockedExamples: DashboardJsonObject[];
 };
 
+export type PolicyBundleReadinessReadModel = {
+  summary: DashboardJsonObject;
+  engineOptions: DashboardJsonObject[];
+  bundlePlans: DashboardJsonObject[];
+  domainMappings: DashboardJsonObject[];
+  readinessChecks: DashboardJsonObject[];
+  risks: DashboardJsonObject[];
+  migrationPhases: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  recommendedPath: DashboardJsonObject;
+  reviewWorkflow: DashboardJsonObject;
+  testStrategy: DashboardJsonObject;
+  rolloutRollback: DashboardJsonObject;
+  breakGlass: DashboardJsonObject;
+  noExecutionStatus: DashboardJsonObject;
+};
+
 export type AuthReadModel = {
   config: DashboardJsonObject;
   currentActor: DashboardJsonObject;
@@ -143,6 +160,20 @@ export type AuthReadModel = {
   auditEvents: DashboardJsonObject[];
   authorizationExamples: DashboardJsonObject[];
   warning: string;
+};
+
+export type AuthRbacProductionReadinessReadModel = {
+  summary: DashboardJsonObject;
+  providerOptions: DashboardJsonObject[];
+  migrationPhases: DashboardJsonObject[];
+  readinessChecks: DashboardJsonObject[];
+  risks: DashboardJsonObject[];
+  tenantBoundaryPlans: DashboardJsonObject[];
+  serviceAccountPlans: DashboardJsonObject[];
+  permissionMatrix: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  mockActorStatus: DashboardJsonObject;
+  noTokenStatus: DashboardJsonObject;
 };
 
 export type EnterpriseProviderReadModel = {
@@ -243,8 +274,43 @@ export type SecretBackendMigrationReadModel = {
   noSecretStatus: DashboardJsonObject;
 };
 
+export type StagingDeploymentReadModel = {
+  summary: DashboardJsonObject;
+  profile: DashboardJsonObject;
+  integrationGates: DashboardJsonObject[];
+  readinessChecks: DashboardJsonObject[];
+  promotionCriteria: DashboardJsonObject[];
+  rollbackCriteria: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  warnings: DashboardJsonObject[];
+  noSecretStatus: DashboardJsonObject;
+};
+
+export type CICDPipelineReadModel = {
+  summary: DashboardJsonObject;
+  profiles: DashboardJsonObject[];
+  jobs: DashboardJsonObject[];
+  requiredJobs: DashboardJsonObject[];
+  optionalJobs: DashboardJsonObject[];
+  safetyJobs: DashboardJsonObject[];
+  integrationGates: DashboardJsonObject[];
+  readinessChecks: DashboardJsonObject[];
+  risks: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  stagingPromotion: DashboardJsonObject;
+  artifactPolicy: DashboardJsonObject;
+  cleanupRollback: DashboardJsonObject;
+  noSecretStatus: DashboardJsonObject;
+};
+
 export type GitHubAppHardeningReadModel = {
   summary: DashboardJsonObject;
+  runtimeConfig: DashboardJsonObject;
+  runtimeInstallations: DashboardJsonObject[];
+  runtimeRepositoryGrants: DashboardJsonObject[];
+  tokenReadiness: DashboardJsonObject;
+  runtimeAuditEvents: DashboardJsonObject[];
+  controlledImplementation: DashboardJsonObject;
   appDescriptors: DashboardJsonObject[];
   installations: DashboardJsonObject[];
   repositoryGrants: DashboardJsonObject[];
@@ -259,6 +325,32 @@ export type GitHubAppHardeningReadModel = {
   readinessChecks: DashboardJsonObject[];
   productionRisks: DashboardJsonObject[];
   blockers: DashboardJsonObject[];
+  noSecretStatus: DashboardJsonObject;
+};
+
+export type GitHubAppIntegrationTestReadModel = {
+  summary: DashboardJsonObject;
+  profile: DashboardJsonObject;
+  testCases: DashboardJsonObject[];
+  gatedLiveTestCases: DashboardJsonObject[];
+  fixtureTestCases: DashboardJsonObject[];
+  safetyChecks: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  warnings: DashboardJsonObject[];
+  cleanupPolicy: DashboardJsonObject;
+  noSecretStatus: DashboardJsonObject;
+};
+
+export type LLMIntegrationTestReadModel = {
+  summary: DashboardJsonObject;
+  profile: DashboardJsonObject;
+  testCases: DashboardJsonObject[];
+  gatedLiveTestCases: DashboardJsonObject[];
+  mockTestCases: DashboardJsonObject[];
+  safetyChecks: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  warnings: DashboardJsonObject[];
+  gateStatus: DashboardJsonObject;
   noSecretStatus: DashboardJsonObject;
 };
 
@@ -291,12 +383,16 @@ export type DashboardReadModels = {
   tasks: TaskRunSummaryReadModel;
   git: GitIntegrationReadModel;
   githubApp: GitHubAppHardeningReadModel;
+  githubAppIntegration: GitHubAppIntegrationTestReadModel;
   conflicts: ConflictManagerReadModel;
   registry: RegistryReadModel;
   llm: LLMGatewayReadModel;
+  llmIntegration: LLMIntegrationTestReadModel;
   agents: AgentRunnerReadModel;
   policy: PolicyReadModel;
+  policyBundles: PolicyBundleReadinessReadModel;
   auth: AuthReadModel;
+  authProduction: AuthRbacProductionReadinessReadModel;
   providers: EnterpriseProviderReadModel;
   security: SecurityReadModel;
   localAgents: LocalAgentReadModel;
@@ -304,6 +400,8 @@ export type DashboardReadModels = {
   readiness: DeploymentReadinessReadModel;
   database: DatabaseOperationsReadModel;
   secretBackend: SecretBackendMigrationReadModel;
+  staging: StagingDeploymentReadModel;
+  cicd: CICDPipelineReadModel;
   observability: ObservabilityReadModel;
   audit: AuditSummaryReadModel;
 };
@@ -313,12 +411,16 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/tasks",
   "/dashboard/git",
   "/dashboard/github-app",
+  "/dashboard/github-app-integration",
   "/dashboard/conflicts",
   "/dashboard/registry",
   "/dashboard/llm",
+  "/dashboard/llm-integration",
   "/dashboard/agents",
   "/dashboard/policy",
+  "/dashboard/policy-bundles",
   "/dashboard/auth",
+  "/dashboard/auth-production",
   "/dashboard/providers",
   "/dashboard/security",
   "/dashboard/local-agents",
@@ -326,12 +428,14 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/readiness",
   "/dashboard/database",
   "/dashboard/secret-backend",
+  "/dashboard/staging",
+  "/dashboard/ci-cd",
   "/dashboard/observability",
   "/dashboard/audit"
 ] as const;
 
-const sensitiveKeyPattern = /^(token|accessToken|refreshToken|apiKey|api_key|authorization|password|rawSecret|secretValue|credentialValue|privateKey|private_key|databaseUrl|database_url|connectionString|postgresUrl|clientSecret|vaultToken|secretAccessKey)$/i;
-const tokenLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|postgres(?:ql)?:\/\/[^\s"']+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN|AICHESTRA_GITHUB_WEBHOOK_SECRET|GITHUB_APP_PRIVATE_KEY|PRIVATE_KEY|DATABASE_URL|AICHESTRA_DATABASE_URL|AICHESTRA_TEST_DATABASE_URL|SESSION_SECRET|JWT_SECRET|VAULT_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SECRET|GCP_SECRET|AZURE_KEY|AZURE_CLIENT_SECRET|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY))=)[^\s"']+/g;
+const sensitiveKeyPattern = /^(token|accessToken|refreshToken|apiKey|api_key|authorization|password|rawSecret|secretValue|credentialValue|privateKey|private_key|databaseUrl|database_url|connectionString|postgresUrl|clientSecret|vaultToken|secretAccessKey|session|sessionId|cookie|assertion|idToken|samlAssertion)$/i;
+const tokenLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|postgres(?:ql)?:\/\/[^\s"']+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN|AICHESTRA_GITHUB_WEBHOOK_SECRET|GITHUB_APP_PRIVATE_KEY|PRIVATE_KEY|DATABASE_URL|AICHESTRA_DATABASE_URL|AICHESTRA_TEST_DATABASE_URL|SESSION_SECRET|JWT_SECRET|VAULT_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SECRET|GCP_SECRET|AZURE_KEY|AZURE_CLIENT_SECRET|OKTA_TOKEN|AUTH0_CLIENT_SECRET|ENTRA_CLIENT_SECRET|GOOGLE_WORKSPACE_TOKEN|SAML_ASSERTION|OIDC_ID_TOKEN|SCIM_TOKEN|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|SESSION|COOKIE))=)[^\s"']+/g;
 const credentialCachePattern = /~\/\.codex\/auth\.json|~\/\.claude[^\s"']*|Google credential cache/gi;
 
 export function sanitizeDashboardValue(value: unknown): DashboardJsonValue {

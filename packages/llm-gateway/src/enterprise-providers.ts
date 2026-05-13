@@ -831,7 +831,9 @@ export class LocalCliProviderAdapter implements ProviderAdapter {
     if (!connected || !this.localAgentProtocolService) {
       const unavailableAgent = requestedAgent && requestedAgent.status !== "connected"
         ? requestedAgent
-        : this.localAgentProtocolService?.listAgents().find((agent) => agent.status === "disconnected" || agent.status === "revoked");
+        : request?.actorId
+          ? this.localAgentProtocolService?.listAgents({ userId: request.actorId }).find((agent) => agent.status === "disconnected" || agent.status === "revoked")
+          : this.localAgentProtocolService?.listAgents().find((agent) => agent.status === "disconnected" || agent.status === "revoked");
       if (unavailableAgent) {
         return createProviderResult({
           providerId: this.provider.id,

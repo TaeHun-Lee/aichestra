@@ -164,6 +164,7 @@ export async function getDashboardData() {
       budgetLimitUsd: 1
     })
     : undefined;
+  // Intentionally ungated demo fixture: the provider must return a blocked result and make no HTTP call.
   const remoteLlmBlockedOperation = await new OpenAICompatibleLLMProvider().createCompletion({
     taskId: task.id,
     taskRunId: latestTaskRun?.id ?? "run_dashboard_llm",

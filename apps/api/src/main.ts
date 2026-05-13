@@ -13,6 +13,18 @@ import {
 } from "@aichestra/db";
 import type { StorageProvider } from "@aichestra/db";
 import {
+  authProviderOptionToDto,
+  authRbacMigrationPhaseToDto,
+  authRbacPermissionMatrixEntryToDto,
+  authRbacProductionRiskToDto,
+  authRbacProductionSummaryToDto,
+  authRbacReadinessCheckToDto,
+  cicdIntegrationTestGateToDto,
+  cicdJobDefinitionToDto,
+  cicdPipelineProfileToDto,
+  cicdPipelineReadinessSummaryToDto,
+  cicdReadinessCheckToDto,
+  cicdRiskToDto,
   createDeploymentReadinessService,
   databaseAuditGrowthPlanToDto,
   databaseDeploymentProfileToDto,
@@ -28,6 +40,10 @@ import {
   deploymentReadinessSummaryToDto,
   githubAppCredentialReadinessToDto,
   githubAppDescriptorToDto,
+  githubAppIntegrationTestCaseToDto,
+  githubAppIntegrationTestProfileToDto,
+  githubAppIntegrationTestReadinessSummaryToDto,
+  githubAppIntegrationTestSafetyCheckToDto,
   githubAppInstallationToDto,
   githubAppPermissionMatrixEntryToDto,
   githubAppProductionRiskToDto,
@@ -40,6 +56,17 @@ import {
   githubWebhookEventAllowlistEntryToDto,
   githubWebhookHardeningSummaryToDto,
   githubWebhookReplayProtectionPlanToDto,
+  llmIntegrationTestCaseToDto,
+  llmIntegrationTestProfileToDto,
+  llmIntegrationTestReadinessSummaryToDto,
+  llmIntegrationTestSafetyCheckToDto,
+  policyBundleMigrationPhaseToDto,
+  policyBundlePlanToDto,
+  policyBundleReadinessCheckToDto,
+  policyBundleReadinessSummaryToDto,
+  policyBundleRiskToDto,
+  policyDomainMappingToDto,
+  policyEngineOptionToDto,
   productionRiskToDto,
   readinessCheckToDto,
   secretBackendMigrationPhaseToDto,
@@ -48,9 +75,17 @@ import {
   secretBackendReadinessCheckToDto,
   secretBackendRiskToDto,
   secretLeasePolicyToDto,
-  secretRotationPlanToDto
+  secretRotationPlanToDto,
+  serviceAccountPlanToDto,
+  stagingDeploymentProfileToDto,
+  stagingDeploymentSummaryToDto,
+  stagingIntegrationGateToDto,
+  stagingPromotionCriterionToDto,
+  stagingReadinessCheckToDto,
+  stagingRollbackCriterionToDto,
+  tenantBoundaryPlanToDto
 } from "@aichestra/deployment-readiness";
-import type { DeploymentReadinessService, SecretBackendReadinessCategory } from "@aichestra/deployment-readiness";
+import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, PolicyBundleReadinessCategory, SecretBackendReadinessCategory, StagingReadinessCategory } from "@aichestra/deployment-readiness";
 import {
   AuthorizationService,
   InMemoryAuthRepository,
@@ -71,13 +106,15 @@ import {
 import type { AuthorizationResource, RequestSource, ResourceScope } from "@aichestra/auth";
 import {
   GitIntegrationService,
+  GitHubAppRuntimeService,
   GitWebhookReceiverService,
   LocalGitDryRunMergeSimulator,
   MockMergeSimulator,
+  createGitHubAppRuntimeConfigFromEnv,
   createGitHubWebhookRuntimeFromEnv,
   createGitProviderFromEnv
 } from "@aichestra/git-adapter";
-import type { GitHubWebhookRuntimeConfig, GitProviderRuntimeConfig } from "@aichestra/git-adapter";
+import type { GitHubAppRuntimeConfig, GitHubWebhookRuntimeConfig, GitProviderRuntimeConfig } from "@aichestra/git-adapter";
 import {
   budgetDecisionToDto,
   credentialReferenceResultToDto,
@@ -242,6 +279,8 @@ type RouteContext = {
   storageProvider: StorageProvider;
   gitIntegrationService: GitIntegrationService;
   gitProviderConfig: GitProviderRuntimeConfig;
+  githubAppRuntimeService: GitHubAppRuntimeService;
+  githubAppRuntimeConfig: GitHubAppRuntimeConfig;
   gitWebhookReceiverService: GitWebhookReceiverService;
   gitWebhookConfig: GitHubWebhookRuntimeConfig;
   llmGatewayService: LLMGatewayService;
@@ -496,6 +535,7 @@ function secretProviderKindValue(value: unknown): SecretProviderKind | undefined
 function secretKindValue(value: unknown): SecretKind | undefined {
   return value === "mock_metadata" ||
     value === "github_token" ||
+    value === "github_app_private_key" ||
     value === "github_webhook_secret" ||
     value === "llm_api_key" ||
     value === "provider_api_key" ||
@@ -510,12 +550,23 @@ function secretRefStatusValue(value: unknown): SecretRefStatus | undefined {
   return value === "active" || value === "disabled" || value === "revoked" ? value : undefined;
 }
 
-function credentialPurposeValue(value: unknown): "github_api_call" | "github_webhook_verification" | "llm_api_call" | "provider_api_call" | "webhook_verification_future" | undefined {
+function credentialPurposeValue(value: unknown): "github_api_call" | "github_app_private_key_signing" | "github_webhook_verification" | "llm_api_call" | "provider_api_call" | "webhook_verification_future" | undefined {
   return value === "github_api_call" ||
+    value === "github_app_private_key_signing" ||
     value === "github_webhook_verification" ||
     value === "llm_api_call" ||
     value === "provider_api_call" ||
     value === "webhook_verification_future"
+    ? value
+    : undefined;
+}
+
+function githubInstallationTokenPurposeValue(value: unknown): "branch_create" | "pr_create" | "pr_read" | "changed_files_read" | "webhook_sync" | undefined {
+  return value === "branch_create" ||
+    value === "pr_create" ||
+    value === "pr_read" ||
+    value === "changed_files_read" ||
+    value === "webhook_sync"
     ? value
     : undefined;
 }
@@ -659,6 +710,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const storage = await context.storageProvider.healthCheck();
       const databaseOperations = context.deploymentReadinessService.getDatabaseOperationsSummary();
       const secretBackendMigration = context.deploymentReadinessService.getSecretBackendMigrationSummary();
+      const authRbacProduction = context.deploymentReadinessService.getAuthRbacProductionSummary();
+      const policyBundleReadiness = context.deploymentReadinessService.getPolicyBundleReadinessSummary();
+      const stagingDeployment = context.deploymentReadinessService.getStagingDeploymentSummary();
+      const cicdReadiness = context.deploymentReadinessService.getCicdPipelineReadinessSummary();
+      const githubAppIntegration = context.deploymentReadinessService.getGitHubAppIntegrationTestReadinessSummary();
+      const llmIntegration = context.deploymentReadinessService.getLLMIntegrationTestReadinessSummary();
       const secretRefs = context.securityService.listSecretRefs();
       sendJson(response, storage.healthy ? 200 : 503, {
         status: storage.healthy ? "ok" : "degraded",
@@ -719,6 +776,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           githubIntegrationTestsEnabled: context.gitProviderConfig.githubIntegrationTestsEnabled ?? false,
           githubCredentialSource: context.gitProviderConfig.githubCredentialSource ?? "none",
           githubCredentialStatus: context.gitProviderConfig.githubCredentialStatus ?? (context.gitProviderConfig.githubConfigured ? "resolved" : "missing"),
+          githubAuthMode: context.gitProviderConfig.githubAuthMode ?? "legacy_token",
+          githubAppEnabled: context.githubAppRuntimeConfig.enabled,
+          githubAppConfigured: context.githubAppRuntimeConfig.configured,
+          githubAppIdConfigured: context.githubAppRuntimeConfig.appIdConfigured,
+          githubAppPrivateKeySecretRefConfigured: context.githubAppRuntimeConfig.privateKeySecretRefConfigured,
+          githubAppWebhookSecretRefConfigured: context.githubAppRuntimeConfig.webhookSecretRefConfigured,
+          githubAppAllowedInstallationCount: context.githubAppRuntimeConfig.allowedInstallationIds.length,
+          githubAppAllowedRepoCount: context.githubAppRuntimeConfig.allowedRepos.length,
+          githubAppTokenProviderKind: context.githubAppRuntimeConfig.tokenProviderKind,
+          githubLegacyTokenFallbackEnabled: context.gitProviderConfig.githubLegacyTokenFallbackEnabled ?? false,
           envSecretProviderEnabled: context.gitProviderConfig.envSecretProviderEnabled ?? false,
           githubWebhooksEnabled: context.gitWebhookConfig.webhooksEnabled,
           githubWebhookSecretConfigured: context.gitWebhookConfig.webhookSecretConfigured,
@@ -765,6 +832,124 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           rulesLoaded: context.policyService.getConfig().ruleCount,
           auditEnabled: context.policyService.getConfig().auditEnabled
         },
+        policyBundleReadiness: {
+          status: policyBundleReadiness.status,
+          planningOnly: policyBundleReadiness.planningOnly,
+          productionReady: policyBundleReadiness.productionReady,
+          policyEngineKind: policyBundleReadiness.currentEngineKind,
+          policyBundleManagementStatus: "planned_not_enabled",
+          externalPolicyEngineEnabled: policyBundleReadiness.externalPolicyEngineEnabled,
+          signedBundleSupportEnabled: policyBundleReadiness.signedBundleSupportEnabled,
+          signedBundleVerificationEnabled: policyBundleReadiness.signedBundleVerificationEnabled,
+          staticPolicyRuleCount: context.policyService.getConfig().ruleCount,
+          readinessStatus: policyBundleReadiness.criticalBlockerCount > 0 ? "blocked" : "planning_only",
+          dynamicPolicyExecutionEnabled: policyBundleReadiness.dynamicPolicyExecutionEnabled,
+          remotePolicyLoadingEnabled: policyBundleReadiness.remotePolicyLoadingEnabled,
+          policyCodeExecuted: policyBundleReadiness.policyCodeExecuted,
+          noSecretsExposed: policyBundleReadiness.noSecretsExposed
+        },
+        stagingDeployment: {
+          status: stagingDeployment.status,
+          planningOnly: stagingDeployment.planningOnly,
+          currentProfileId: stagingDeployment.currentProfileId,
+          profileStatus: stagingDeployment.profileStatus,
+          productionReady: stagingDeployment.productionReady,
+          stagingDeployed: stagingDeployment.stagingDeployed,
+          productionTrafficAllowed: stagingDeployment.productionTrafficAllowed,
+          requiredComponentCount: stagingDeployment.requiredComponentCount,
+          requiredEnvGateCount: stagingDeployment.requiredEnvGateCount,
+          forbiddenEnvGateCount: stagingDeployment.forbiddenEnvGateCount,
+          criticalBlockerCount: stagingDeployment.criticalBlockerCount,
+          warningCount: stagingDeployment.warningCount,
+          mockActorWarning: stagingDeployment.mockActorWarning,
+          envFallbackWarning: stagingDeployment.envFallbackWarning,
+          postgresRequired: stagingDeployment.postgresRequired,
+          apiDashboardRequired: stagingDeployment.apiDashboardRequired,
+          remoteMergeForbidden: stagingDeployment.remoteMergeForbidden,
+          remoteMcpForbidden: stagingDeployment.remoteMcpForbidden,
+          vendorCliForbidden: stagingDeployment.vendorCliForbidden,
+          deploymentExecuted: stagingDeployment.deploymentExecuted,
+          externalCallsEnabled: stagingDeployment.externalCallsEnabled,
+          noSecretsExposed: stagingDeployment.noSecretsExposed,
+          envValuesExposed: stagingDeployment.envValuesExposed
+        },
+        cicdPipeline: {
+          status: cicdReadiness.status,
+          planningOnly: cicdReadiness.planningOnly,
+          productionReady: cicdReadiness.productionReady,
+          stagingDeployed: cicdReadiness.stagingDeployed,
+          deploymentWorkflowCreated: cicdReadiness.deploymentWorkflowCreated,
+          activeWorkflowCreated: cicdReadiness.activeWorkflowCreated,
+          expectedNodeVersion: cicdReadiness.expectedNodeVersion,
+          currentNodeVersion: cicdReadiness.currentNodeVersion,
+          nodeVersionStatus: cicdReadiness.nodeVersionStatus,
+          packageManager: cicdReadiness.packageManager,
+          requiredValidationCommandsCount: cicdReadiness.requiredJobCount,
+          optionalIntegrationProfilesCount: cicdReadiness.integrationGateCount,
+          remoteIntegrationTestsEnabledByDefault: cicdReadiness.remoteIntegrationTestsEnabledByDefault,
+          externalCallsEnabledByDefault: cicdReadiness.externalCallsEnabledByDefault,
+          secretsExposed: cicdReadiness.secretsExposed,
+          envValuesExposed: cicdReadiness.envValuesExposed
+        },
+        githubAppIntegrationTests: {
+          status: githubAppIntegration.status,
+          planningOnly: githubAppIntegration.planningOnly,
+          productionReady: githubAppIntegration.productionReady,
+          enabled: githubAppIntegration.liveTestsEnabled,
+          canRunLiveTests: githubAppIntegration.canRunLiveTests,
+          defaultLiveTestsSkipped: githubAppIntegration.defaultLiveTestsSkipped,
+          requiredGatesConfiguredCount: githubAppIntegration.configuredGateCount,
+          missingGatesCount: githubAppIntegration.missingGateCount,
+          unsafeGatesCount: githubAppIntegration.unsafeGateCount,
+          allowedRepoCount: githubAppIntegration.allowedRepoCount,
+          allowedBranchPrefix: githubAppIntegration.allowedBranchPrefix,
+          branchPrefixConfigured: githubAppIntegration.branchPrefixConfigured,
+          branchPrefixMatchesRequired: githubAppIntegration.branchPrefixMatchesRequired,
+          webhookFixtureTestsEnabled: githubAppIntegration.webhookFixtureTestsEnabled,
+          liveWebhookTestsEnabled: githubAppIntegration.liveWebhookTestsEnabled,
+          noAutoMerge: githubAppIntegration.noAutoMerge,
+          noForcePush: githubAppIntegration.noForcePush,
+          noBranchDelete: githubAppIntegration.noBranchDelete,
+          noSecretsExposed: githubAppIntegration.noSecretsExposed,
+          envValuesExposed: githubAppIntegration.envValuesExposed,
+          privateKeyExposed: githubAppIntegration.privateKeyExposed,
+          installationTokenExposed: githubAppIntegration.installationTokenExposed,
+          githubCallsInDefaultTests: githubAppIntegration.githubCallsInDefaultTests
+        },
+        llmIntegrationTests: {
+          status: llmIntegration.status,
+          planningOnly: llmIntegration.planningOnly,
+          productionReady: llmIntegration.productionReady,
+          enabled: llmIntegration.liveTestsEnabled,
+          canRunLiveTests: llmIntegration.canRunLiveTests,
+          defaultLiveTestsSkipped: llmIntegration.defaultLiveTestsSkipped,
+          requiredGatesConfiguredCount: llmIntegration.configuredGateCount,
+          missingGatesCount: llmIntegration.missingGateCount,
+          unsafeGatesCount: llmIntegration.unsafeGateCount,
+          providerKind: llmIntegration.providerKind,
+          remoteLlmEnabled: llmIntegration.remoteLlmEnabled,
+          remoteCompletionEnabled: llmIntegration.remoteCompletionEnabled,
+          baseUrlConfigured: llmIntegration.baseUrlConfigured,
+          apiKeyConfigured: llmIntegration.apiKeyConfigured,
+          secretRefConfigured: llmIntegration.secretRefConfigured,
+          rawEnvApiKeyConfigured: llmIntegration.rawEnvApiKeyConfigured,
+          allowedModelCount: llmIntegration.allowedModelCount,
+          defaultModelConfigured: llmIntegration.defaultModelConfigured,
+          defaultModelAllowlisted: llmIntegration.defaultModelAllowlisted,
+          routingModeAllowed: llmIntegration.routingModeAllowed,
+          fallbackSafe: llmIntegration.fallbackSafe,
+          budgetConfigured: llmIntegration.budgetConfigured,
+          promptClassConfigured: llmIntegration.promptClassConfigured,
+          noStreaming: llmIntegration.noStreaming,
+          noToolCalls: llmIntegration.noToolCalls,
+          noVendorCli: llmIntegration.noVendorCli,
+          noCredentialCacheRead: llmIntegration.noCredentialCacheRead,
+          noSecretsExposed: llmIntegration.noSecretsExposed,
+          envValuesExposed: llmIntegration.envValuesExposed,
+          apiKeyExposed: llmIntegration.apiKeyExposed,
+          rawProviderResponseExposed: llmIntegration.rawProviderResponseExposed,
+          remoteLlmCallsInDefaultTests: llmIntegration.remoteLlmCallsInDefaultTests
+        },
         auth: {
           providerKind: context.authorizationService.getConfig().providerKind,
           authMode: context.authorizationService.getConfig().authMode,
@@ -774,6 +959,28 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           permissionCatalogCount: context.authorizationService.getConfig().permissionCatalogCount,
           secretsExposed: false,
           tokensExposed: false
+        },
+        authReadiness: {
+          status: authRbacProduction.status,
+          planningOnly: authRbacProduction.planningOnly,
+          productionReady: authRbacProduction.productionReady,
+          currentProfileId: authRbacProduction.currentProfileId,
+          productionAuthEnabled: authRbacProduction.productionAuthEnabled,
+          authMode: authRbacProduction.authMode,
+          mockActorEnabled: authRbacProduction.mockActorEnabled,
+          mockActorWarning: authRbacProduction.mockActorWarning,
+          futureIdpConfigured: authRbacProduction.futureIdpConfigured,
+          serviceAccountModelReady: authRbacProduction.serviceAccountModelReady,
+          requestContextPropagationStatus: authRbacProduction.requestContextPropagationStatus,
+          tenantScopeModelReady: authRbacProduction.tenantScopeModelReady,
+          noTokensExposed: authRbacProduction.noTokensExposed,
+          cookiesExposed: authRbacProduction.cookiesExposed,
+          sessionIdsExposed: authRbacProduction.sessionIdsExposed,
+          passwordsExposed: authRbacProduction.passwordsExposed,
+          rawIdentityAssertionsExposed: authRbacProduction.rawIdentityAssertionsExposed,
+          externalIdpCallsEnabled: authRbacProduction.externalIdpCallsEnabled,
+          realSessionsImplemented: authRbacProduction.realSessionsImplemented,
+          realJwtIssuanceImplemented: authRbacProduction.realJwtIssuanceImplemented
         },
         providerAbstraction: {
           status: context.providerAbstractionService.getConfig().status,
@@ -950,6 +1157,53 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "auth") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Production Auth/RBAC readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: authRbacProductionSummaryToDto(readiness.getAuthRbacProductionSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "providers") {
+        sendJson(response, 200, { providers: readiness.listAuthProviderOptions().map(authProviderOptionToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "migration-phases") {
+        sendJson(response, 200, { migrationPhases: readiness.listAuthRbacMigrationPhases().map(authRbacMigrationPhaseToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["identity_provider", "group_sync", "role_mapping", "tenant_isolation", "service_accounts", "local_agent_identity", "webhook_identity", "request_context", "audit_attribution", "mock_actor_deprecation", "policy_subject_mapping", "dashboard_visibility", "break_glass"];
+        sendJson(response, 200, {
+          checks: readiness.listAuthRbacReadinessChecks(category && categories.includes(category) ? { category: category as AuthRbacReadinessCategory } : {})
+            .map(authRbacReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listAuthRbacProductionRisks().map(authRbacProductionRiskToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "tenant-boundaries") {
+        sendJson(response, 200, { tenantBoundaries: readiness.listTenantBoundaryPlans().map(tenantBoundaryPlanToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "service-accounts") {
+        sendJson(response, 200, { serviceAccounts: readiness.listServiceAccountPlans().map(serviceAccountPlanToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "permission-matrix") {
+        sendJson(response, 200, { permissionMatrix: readiness.listProductionRbacPermissionMatrix().map(authRbacPermissionMatrixEntryToDto) });
+        return;
+      }
+      sendJson(response, 404, { error: "auth_readiness_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "secrets") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Secret backend migration readiness endpoints are read-only planning models." });
@@ -1047,6 +1301,198 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "github-app-integration") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "GitHub App integration-test readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "profile") {
+        sendJson(response, 200, { profile: githubAppIntegrationTestProfileToDto(readiness.getGitHubAppIntegrationTestProfile()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "test-cases") {
+        sendJson(response, 200, { testCases: readiness.listGitHubAppIntegrationTestCases().map(githubAppIntegrationTestCaseToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "safety-checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["env_gates", "repo_allowlist", "branch_prefix", "secretref", "cleanup", "no_auto_merge", "no_force_push", "no_branch_delete", "audit", "observability"];
+        sendJson(response, 200, {
+          safetyChecks: readiness.listGitHubAppIntegrationTestSafetyChecks(category && categories.includes(category) ? { category: category as GitHubAppIntegrationTestSafetyCategory } : {})
+            .map(githubAppIntegrationTestSafetyCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: githubAppIntegrationTestReadinessSummaryToDto(readiness.getGitHubAppIntegrationTestReadinessSummary()) });
+        return;
+      }
+      sendJson(response, 404, { error: "github_app_integration_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "llm-integration") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "LLM integration-test readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "profile") {
+        sendJson(response, 200, { profile: llmIntegrationTestProfileToDto(readiness.getLLMIntegrationTestProfile()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "test-cases") {
+        sendJson(response, 200, { testCases: readiness.listLLMIntegrationTestCases().map(llmIntegrationTestCaseToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "safety-checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["env_gates", "secretref", "model_allowlist", "budget", "policy", "auth", "redaction", "audit", "no_streaming", "no_tool_calls", "no_unbounded_fallback"];
+        sendJson(response, 200, {
+          safetyChecks: readiness.listLLMIntegrationTestSafetyChecks(category && categories.includes(category) ? { category: category as LLMIntegrationTestSafetyCategory } : {})
+            .map(llmIntegrationTestSafetyCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: llmIntegrationTestReadinessSummaryToDto(readiness.getLLMIntegrationTestReadinessSummary()) });
+        return;
+      }
+      sendJson(response, 404, { error: "llm_integration_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "policy-bundles") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Policy bundle readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: policyBundleReadinessSummaryToDto(readiness.getPolicyBundleReadinessSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "engines") {
+        sendJson(response, 200, { engines: readiness.listPolicyEngineOptions().map(policyEngineOptionToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "plans") {
+        sendJson(response, 200, { plans: readiness.listPolicyBundlePlans().map(policyBundlePlanToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "domain-mapping") {
+        sendJson(response, 200, { domainMapping: readiness.listPolicyDomainMappings().map(policyDomainMappingToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["engine_selection", "bundle_schema", "signing", "review_workflow", "rollout", "rollback", "tests", "audit", "break_glass", "tenant_scoping", "auth_mapping", "secret_policy", "provider_policy", "dashboard"];
+        sendJson(response, 200, {
+          checks: readiness.listPolicyBundleReadinessChecks(category && categories.includes(category) ? { category: category as PolicyBundleReadinessCategory } : {})
+            .map(policyBundleReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listPolicyBundleRisks().map(policyBundleRiskToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "migration-phases") {
+        sendJson(response, 200, { migrationPhases: readiness.listPolicyBundleMigrationPhases().map(policyBundleMigrationPhaseToDto) });
+        return;
+      }
+      sendJson(response, 404, { error: "policy_bundle_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "staging") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Staging deployment profile endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: stagingDeploymentSummaryToDto(readiness.getStagingDeploymentSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "profile") {
+        sendJson(response, 200, { profile: stagingDeploymentProfileToDto(readiness.getStagingDeploymentProfile()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "gates") {
+        sendJson(response, 200, { gates: readiness.listStagingIntegrationGates().map(stagingIntegrationGateToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["storage", "auth", "secrets", "git", "github_app", "webhook", "llm", "mcp", "runner", "local_agent", "policy", "observability", "dashboard", "ci", "security"];
+        sendJson(response, 200, {
+          checks: readiness.listStagingReadinessChecks(category && categories.includes(category) ? { category: category as StagingReadinessCategory } : {})
+            .map(stagingReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "promotion-criteria") {
+        sendJson(response, 200, { promotionCriteria: readiness.listStagingPromotionCriteria().map(stagingPromotionCriterionToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "rollback-criteria") {
+        sendJson(response, 200, { rollbackCriteria: readiness.listStagingRollbackCriteria().map(stagingRollbackCriterionToDto) });
+        return;
+      }
+      sendJson(response, 404, { error: "staging_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "ci-cd") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Staging CI/CD readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: cicdPipelineReadinessSummaryToDto(readiness.getCicdPipelineReadinessSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "profiles") {
+        sendJson(response, 200, { profiles: readiness.listCicdPipelineProfiles().map(cicdPipelineProfileToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "jobs") {
+        const profileId = url.searchParams.get("profileId") ?? undefined;
+        const category = url.searchParams.get("category") ?? undefined;
+        const profiles = ["local_validation", "pull_request", "integration", "staging", "release_candidate"];
+        const categories = ["install", "lint", "typecheck", "test", "build", "security_scan", "secret_scan", "optional_postgres", "optional_remote_git", "optional_github_app", "optional_webhook", "optional_remote_llm", "optional_mcp", "optional_auth", "dashboard_smoke", "readiness_check"];
+        sendJson(response, 200, {
+          jobs: readiness.listCicdJobDefinitions({
+            profileId: profileId && profiles.includes(profileId) ? profileId as CICDPipelineProfileName : undefined,
+            category: category && categories.includes(category) ? category as CICDJobCategory : undefined
+          }).map(cicdJobDefinitionToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "integration-gates") {
+        sendJson(response, 200, { integrationGates: readiness.listCicdIntegrationTestGates().map(cicdIntegrationTestGateToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["node", "package_manager", "validation", "test_profiles", "secrets", "integration_gates", "artifacts", "cleanup", "rollback", "security", "staging_promotion"];
+        sendJson(response, 200, {
+          checks: readiness.listCicdReadinessChecks(category && categories.includes(category) ? { category: category as CICDReadinessCategory } : {})
+            .map(cicdReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listCicdRisks().map(cicdRiskToDto) });
+        return;
+      }
+      sendJson(response, 404, { error: "cicd_readiness_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "observability") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Observability endpoints are read-only." });
@@ -1141,6 +1587,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { githubApp: dashboard.githubApp });
         return;
       }
+      if (section === "github-app-integration") {
+        sendJson(response, 200, { githubAppIntegration: dashboard.githubAppIntegration });
+        return;
+      }
       if (section === "conflicts") {
         sendJson(response, 200, { conflicts: dashboard.conflicts });
         return;
@@ -1153,6 +1603,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { llm: dashboard.llm });
         return;
       }
+      if (section === "llm-integration") {
+        sendJson(response, 200, { llmIntegration: dashboard.llmIntegration });
+        return;
+      }
       if (section === "agents") {
         sendJson(response, 200, { agents: dashboard.agents });
         return;
@@ -1161,8 +1615,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { policy: dashboard.policy });
         return;
       }
+      if (section === "policy-bundles") {
+        sendJson(response, 200, { policyBundles: dashboard.policyBundles });
+        return;
+      }
       if (section === "auth") {
         sendJson(response, 200, { auth: dashboard.auth });
+        return;
+      }
+      if (section === "auth-production") {
+        sendJson(response, 200, { authProduction: dashboard.authProduction });
         return;
       }
       if (section === "providers") {
@@ -1191,6 +1653,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (section === "secret-backend") {
         sendJson(response, 200, { secretBackend: dashboard.secretBackend });
+        return;
+      }
+      if (section === "staging") {
+        sendJson(response, 200, { staging: dashboard.staging });
+        return;
+      }
+      if (section === "ci-cd") {
+        sendJson(response, 200, { cicd: dashboard.cicd });
         return;
       }
       if (section === "observability") {
@@ -3492,6 +3962,55 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (segments[0] === "git") {
       const gitService = context.gitIntegrationService;
       const webhookService = context.gitWebhookReceiverService;
+      const githubAppService = context.githubAppRuntimeService;
+
+      if (segments[1] === "github-app") {
+        if (method === "GET" && segments.length === 3 && segments[2] === "config") {
+          sendJson(response, 200, { config: githubAppService.getConfigDto() });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "installations") {
+          sendJson(response, 200, { installations: githubAppService.listInstallationsDto() });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "repository-grants") {
+          sendJson(response, 200, { repositoryGrants: githubAppService.listRepositoryGrantsDto() });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "validate") {
+          const validation = githubAppService.validate();
+          sendJson(response, validation.ok ? 200 : 409, validation);
+          return;
+        }
+        if (method === "POST" && segments.length === 6 && segments[2] === "installations" && segments[4] === "token" && segments[5] === "check") {
+          const body = await readJson(request) as Record<string, unknown>;
+          const purpose = githubInstallationTokenPurposeValue(body.purpose) ?? "branch_create";
+          const result = githubAppService.checkInstallationToken({
+            installationId: segments[3],
+            repoRef: stringValue(body.repoRef),
+            purpose,
+            actorId: stringValue(body.actorId),
+            principalId: stringValue(body.principalId),
+            policyContext: typeof body.policyContext === "object" && body.policyContext !== null && !Array.isArray(body.policyContext)
+              ? body.policyContext as Record<string, unknown>
+              : {},
+            metadata: {
+              source: "api_token_check"
+            }
+          });
+          sendJson(response, 200, { result });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "audit") {
+          sendJson(response, 200, { auditEvents: githubAppService.listAuditEventsDto() });
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "github_app_route_not_found" : "method_not_allowed",
+          message: "GitHub App controlled implementation endpoints are metadata/status only and never return tokens."
+        });
+        return;
+      }
 
       if (segments[1] === "github" && segments[2] === "webhooks") {
         if (method === "POST" && segments.length === 3) {
@@ -4189,11 +4708,64 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     },
     legacyCredentialFallbackAuditor: recordLegacyCredentialFallback
   });
+  const githubAppRuntimeService = new GitHubAppRuntimeService({
+    store,
+    config: git.config.githubApp ?? createGitHubAppRuntimeConfigFromEnv(process.env),
+    policyService,
+    actorId: "mock-admin",
+    authorizationChecker: (authorizationRequest) => {
+      const actorId = authorizationRequest.actorId && authorizationRequest.actorId !== "mock-git-actor"
+        ? authorizationRequest.actorId
+        : "mock-admin";
+      const authContext = authorizationService.getAuthContext({ actorId, source: "system" });
+      const decision = authorizationService.check({
+        authContext,
+        action: authorizationRequest.action,
+        resource: {
+          resourceKind: authorizationRequest.resourceKind,
+          resourceId: authorizationRequest.resourceId,
+          metadata: {
+            providerKind: "github",
+            privateKeyMaterialExposed: false
+          }
+        },
+        policyContext: {
+          providerKind: "github",
+          environment: {
+            ...authorizationRequest.policyContext,
+            secretRefActive: true
+          },
+          metadata: {
+            source: "github_app_runtime_service"
+          }
+        }
+      });
+      return {
+        allowed: decision.allowed,
+        reason: decision.reason,
+        actorId: decision.actorId,
+        principalId: decision.principalId,
+        policyDecisionId: decision.policyDecision?.id,
+        authorizationDecisionId: decision.auditEvent?.id
+      };
+    },
+    secretRefMetadataResolver: (secretRefId) => {
+      const secretRef = securityService.getSecretMetadata(secretRefId);
+      return secretRef
+        ? {
+          id: secretRef.id,
+          secretKind: secretRef.secretKind,
+          status: secretRef.status
+        }
+        : undefined;
+    }
+  });
   const gitIntegrationService = new GitIntegrationService({
     store,
     provider: git.provider,
     config: git.config,
-    policyService
+    policyService,
+    githubAppTokenIssuer: githubAppRuntimeService
   });
   const gitWebhook = createGitHubWebhookRuntimeFromEnv(process.env, {
     secretResolver: (resolutionRequest) => {
@@ -4227,7 +4799,9 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     authorizationService,
     securityService
   });
-  const deploymentReadinessService = createDeploymentReadinessService();
+  const deploymentReadinessService = createDeploymentReadinessService({
+    staticPolicyRuleCount: policyService.getConfig().ruleCount
+  });
   const agentRunnerConfig = createAgentRunnerConfigFromEnv();
   const agentRunnerRepositories = createInMemoryAgentRunnerRepositories();
   const agentRunner = agentRunnerConfig.runnerKind === "mock"
@@ -4276,6 +4850,8 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       storageProvider: storage,
       gitIntegrationService,
       gitProviderConfig: git.config,
+      githubAppRuntimeService,
+      githubAppRuntimeConfig: git.config.githubApp ?? createGitHubAppRuntimeConfigFromEnv(process.env),
       gitWebhookReceiverService,
       gitWebhookConfig: gitWebhook.config,
       llmGatewayService,

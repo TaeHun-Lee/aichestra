@@ -17,6 +17,7 @@ export type {
   MergeSimulationResult
 } from "@aichestra/adapters";
 export * from "./service.ts";
+export * from "./github-app.ts";
 export * from "./webhooks.ts";
 export {
   FetchGitHubClient,
@@ -31,6 +32,12 @@ export {
   HmacGitHubWebhookVerifier,
   createGitHubWebhookConfigFromEnv,
   createGitHubWebhookRuntimeFromEnv,
+  createGitHubAppRuntimeConfigFromEnv,
+  createGitHubInstallationTokenRequest,
+  createGitHubInstallationTokenResult,
+  gitHubAppRuntimeConfigToDto,
+  gitHubInstallationTokenResultToDto,
+  sanitizeGitHubAppMetadata,
   hashWebhookPayload,
   supportedGitHubWebhookEvents,
   createGitProviderConfigFromEnv,
@@ -40,6 +47,12 @@ export {
 } from "@aichestra/adapters";
 export type {
   BranchRef,
+  GitHubAppInstallationState,
+  GitHubAppRepositoryGrantState,
+  GitHubAppRuntimeConfig,
+  GitHubInstallationTokenPurpose,
+  GitHubInstallationTokenRequest,
+  GitHubInstallationTokenResult,
   GitHubWebhookRuntimeConfig,
   GitHubWebhookVerificationRequest,
   GitHubWebhookVerifier,

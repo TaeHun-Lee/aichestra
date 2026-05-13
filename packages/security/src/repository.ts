@@ -369,7 +369,7 @@ export function createDefaultSecuritySeed(): {
         name: "Env-backed provider credentials",
         allowedResourceKinds: ["provider_credential", "llm_provider", "repo"],
         allowedActions: ["provider.credential.resolve", "secret.lease.request", "secret.lease.issue"],
-        allowedProviderIds: ["github", "openai_compatible", "openai-api-key"],
+        allowedProviderIds: ["github", "github_app", "openai_compatible", "openai-api-key"],
         maxTtlSeconds: 300,
         requiresApproval: false,
         metadata: {

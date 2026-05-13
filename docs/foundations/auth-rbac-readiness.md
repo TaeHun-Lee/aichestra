@@ -1,6 +1,6 @@
 # Auth and RBAC Readiness
 
-Status update: Production Auth/RBAC Planning v0 is implemented in `docs/foundations/auth-rbac/v0.md` and `packages/auth`. This readiness note remains the earlier foundation snapshot; the canonical v0 design is now the versioned auth/RBAC foundation document.
+Status update: Production Auth/RBAC Planning v0 is implemented in `docs/foundations/auth-rbac/v0.md` and `packages/auth`. Production Auth/RBAC v1 Planning is implemented in `docs/foundations/auth-rbac/v1-plan.md`, `docs/roadmaps/auth-rbac-production/v1.md`, `docs/reference/production-rbac-permission-matrix.md`, and read-only readiness models in `packages/deployment-readiness`. This readiness note remains the earlier foundation snapshot; the canonical designs are now the versioned auth/RBAC foundation and roadmap documents.
 
 ## Current Mock Actor Behavior
 
@@ -99,6 +99,8 @@ Future Phase 5 work should introduce:
 - Request authentication middleware in `apps/api`.
 - Actor resolution before service calls.
 - Durable authorization decisions and audit events.
+
+Production Auth/RBAC v1 Planning refines this into IdP option comparison, tenant/scope modeling, service-account/system actor planning, request context propagation, and mock actor deprecation. It does not implement real SSO, SCIM, sessions, token validation, or tenant enforcement.
 
 ## Why Real Auth Is Out of Scope Here
 

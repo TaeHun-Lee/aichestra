@@ -1,7 +1,7 @@
 import type { AuthorizationService } from "@aichestra/auth";
 import type { InMemoryAichestraStore } from "@aichestra/db";
 import type { DeploymentReadinessService } from "@aichestra/deployment-readiness";
-import type { GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
+import type { GitHubAppRuntimeService, GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
 import type { ImprovementServices } from "@aichestra/improvement";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
 import type { MCPGateway } from "@aichestra/mcp-gateway";
@@ -14,8 +14,10 @@ import {
   sanitizeDashboardArray,
   sanitizeDashboardObject,
   type AgentRunnerReadModel,
+  type AuthRbacProductionReadinessReadModel,
   type AuthReadModel,
   type AuditSummaryReadModel,
+  type CICDPipelineReadModel,
   type ConflictManagerReadModel,
   type DashboardJsonObject,
   type DashboardOverviewReadModel,
@@ -25,15 +27,19 @@ import {
   type DeploymentReadinessReadModel,
   type EnterpriseProviderReadModel,
   type GitHubAppHardeningReadModel,
+  type GitHubAppIntegrationTestReadModel,
   type GitIntegrationReadModel,
   type LLMGatewayReadModel,
+  type LLMIntegrationTestReadModel,
   type LocalAgentReadModel,
   type MCPGatewayReadModel,
   type ObservabilityReadModel,
+  type PolicyBundleReadinessReadModel,
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
   type SecretBackendMigrationReadModel,
+  type StagingDeploymentReadModel,
   type TaskRunSummaryReadModel
 } from "@aichestra/shared";
 
@@ -41,6 +47,7 @@ export type DashboardReadModelContext = {
   store: InMemoryAichestraStore;
   gitIntegrationService: GitIntegrationService;
   gitProviderConfig: GitProviderRuntimeConfig;
+  githubAppRuntimeService: GitHubAppRuntimeService;
   gitWebhookReceiverService: GitWebhookReceiverService;
   gitWebhookConfig: GitHubWebhookRuntimeConfig;
   llmGatewayService: LLMGatewayService;
@@ -242,8 +249,36 @@ function buildGitHubApp(context: DashboardReadModelContext): GitHubAppHardeningR
   const readiness = context.deploymentReadinessService;
   const summary = readiness.getGitHubWebhookHardeningSummary();
   const readinessChecks = readiness.listGitHubAppReadinessChecks();
+  const runtimeConfig = context.githubAppRuntimeService.getConfigDto();
+  const runtimeInstallations = context.githubAppRuntimeService.listInstallationsDto();
+  const runtimeRepositoryGrants = context.githubAppRuntimeService.listRepositoryGrantsDto();
+  const runtimeAuditEvents = context.githubAppRuntimeService.listAuditEventsDto().slice(0, 20);
   return {
     summary: sanitizeDashboardObject(summary),
+    runtimeConfig: sanitizeDashboardObject(runtimeConfig),
+    runtimeInstallations: sanitizeDashboardArray(runtimeInstallations),
+    runtimeRepositoryGrants: sanitizeDashboardArray(runtimeRepositoryGrants),
+    tokenReadiness: sanitizeDashboardObject({
+      authMode: runtimeConfig.authMode,
+      enabled: runtimeConfig.enabled,
+      configured: runtimeConfig.configured,
+      tokenProviderKind: runtimeConfig.tokenProviderKind,
+      privateKeySecretRefConfigured: runtimeConfig.privateKeySecretRefConfigured,
+      allowedInstallationCount: runtimeConfig.allowedInstallationCount,
+      allowedRepoCount: runtimeConfig.allowedRepoCount,
+      legacyTokenFallbackWarning: context.gitProviderConfig.githubLegacyTokenFallbackEnabled === true,
+      realInstallationTokenExchangeEnabled: false
+    }),
+    runtimeAuditEvents: sanitizeDashboardArray(runtimeAuditEvents),
+    controlledImplementation: sanitizeDashboardObject({
+      status: runtimeConfig.configured === true ? "configured_mock" : "disabled_or_blocked",
+      implemented: true,
+      productionReady: false,
+      liveGitHubAppCallsEnabled: false,
+      privateKeySigningEnabled: false,
+      tokenExchangeEnabled: false,
+      rawTokensReturned: false
+    }),
     appDescriptors: sanitizeDashboardArray(readiness.listGitHubAppDescriptors()),
     installations: sanitizeDashboardArray(readiness.listGitHubAppInstallations()),
     repositoryGrants: sanitizeDashboardArray(readiness.listGitHubAppRepositoryGrants()),
@@ -263,8 +298,83 @@ function buildGitHubApp(context: DashboardReadModelContext): GitHubAppHardeningR
       privateKeysStored: false,
       webhookSecretsExposed: false,
       installationTokensIssued: false,
+      tokenHandlesOnly: true,
       rawWebhookPayloadsStored: false,
       externalCallsEnabled: summary.externalCallsEnabled
+    })
+  };
+}
+
+function buildGitHubAppIntegration(context: DashboardReadModelContext): GitHubAppIntegrationTestReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getGitHubAppIntegrationTestReadinessSummary();
+  const safetyChecks = readiness.listGitHubAppIntegrationTestSafetyChecks();
+  const testCases = readiness.listGitHubAppIntegrationTestCases();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profile: sanitizeDashboardObject(readiness.getGitHubAppIntegrationTestProfile()),
+    testCases: sanitizeDashboardArray(testCases),
+    gatedLiveTestCases: sanitizeDashboardArray(testCases.filter((testCase) => testCase.requiresLiveGitHub)),
+    fixtureTestCases: sanitizeDashboardArray(testCases.filter((testCase) => !testCase.requiresLiveGitHub)),
+    safetyChecks: sanitizeDashboardArray(safetyChecks),
+    blockers: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "fail")),
+    warnings: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "warning")),
+    cleanupPolicy: sanitizeDashboardObject({
+      status: summary.cleanupPolicyStatus,
+      branchDeletionAllowed: false,
+      remoteCleanupCallsEnabledByDefault: false,
+      manualCloseOrMarkOnly: true
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      privateKeyExposed: summary.privateKeyExposed,
+      installationTokenExposed: summary.installationTokenExposed,
+      githubCallsInDefaultTests: summary.githubCallsInDefaultTests,
+      noAutoMerge: summary.noAutoMerge,
+      noForcePush: summary.noForcePush,
+      noBranchDelete: summary.noBranchDelete
+    })
+  };
+}
+
+function buildLlmIntegration(context: DashboardReadModelContext): LLMIntegrationTestReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getLLMIntegrationTestReadinessSummary();
+  const safetyChecks = readiness.listLLMIntegrationTestSafetyChecks();
+  const testCases = readiness.listLLMIntegrationTestCases();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profile: sanitizeDashboardObject(readiness.getLLMIntegrationTestProfile()),
+    testCases: sanitizeDashboardArray(testCases),
+    gatedLiveTestCases: sanitizeDashboardArray(testCases.filter((testCase) => testCase.requiresRemoteLLM)),
+    mockTestCases: sanitizeDashboardArray(testCases.filter((testCase) => !testCase.requiresRemoteLLM)),
+    safetyChecks: sanitizeDashboardArray(safetyChecks),
+    blockers: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "fail")),
+    warnings: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "warning")),
+    gateStatus: sanitizeDashboardObject({
+      configuredGateCount: summary.configuredGateCount,
+      missingGateCount: summary.missingGateCount,
+      unsafeGateCount: summary.unsafeGateCount,
+      providerKind: summary.providerKind,
+      baseUrlConfigured: summary.baseUrlConfigured,
+      apiKeyConfigured: summary.apiKeyConfigured,
+      secretRefConfigured: summary.secretRefConfigured,
+      allowedModelCount: summary.allowedModelCount,
+      budgetConfigured: summary.budgetConfigured,
+      fallbackSafe: summary.fallbackSafe,
+      envValuesReturned: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      apiKeyExposed: summary.apiKeyExposed,
+      rawProviderResponseExposed: summary.rawProviderResponseExposed,
+      remoteLlmCallsInDefaultTests: summary.remoteLlmCallsInDefaultTests,
+      noStreaming: summary.noStreaming,
+      noToolCalls: summary.noToolCalls,
+      noVendorCli: summary.noVendorCli,
+      noCredentialCacheRead: summary.noCredentialCacheRead
     })
   };
 }
@@ -340,6 +450,76 @@ function buildSecretBackend(context: DashboardReadModelContext): SecretBackendMi
       rotationJobsImplemented: summary.rotationJobsImplemented,
       productionCredentialIssuanceImplemented: summary.productionCredentialIssuanceImplemented,
       externalCallsEnabled: summary.externalCallsEnabled
+    })
+  };
+}
+
+function buildStaging(context: DashboardReadModelContext): StagingDeploymentReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getStagingDeploymentSummary();
+  const checks = readiness.listStagingReadinessChecks();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profile: sanitizeDashboardObject(readiness.getStagingDeploymentProfile()),
+    integrationGates: sanitizeDashboardArray(readiness.listStagingIntegrationGates()),
+    readinessChecks: sanitizeDashboardArray(checks),
+    promotionCriteria: sanitizeDashboardArray(readiness.listStagingPromotionCriteria()),
+    rollbackCriteria: sanitizeDashboardArray(readiness.listStagingRollbackCriteria()),
+    blockers: sanitizeDashboardArray(checks.filter((check) => check.status === "fail")),
+    warnings: sanitizeDashboardArray(checks.filter((check) => check.status === "warning")),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      deploymentExecuted: summary.deploymentExecuted,
+      externalCallsEnabled: summary.externalCallsEnabled,
+      productionTrafficAllowed: summary.productionTrafficAllowed,
+      stagingDeployed: summary.stagingDeployed
+    })
+  };
+}
+
+function buildCicd(context: DashboardReadModelContext): CICDPipelineReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getCicdPipelineReadinessSummary();
+  const jobs = readiness.listCicdJobDefinitions();
+  const checks = readiness.listCicdReadinessChecks();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profiles: sanitizeDashboardArray(readiness.listCicdPipelineProfiles()),
+    jobs: sanitizeDashboardArray(jobs),
+    requiredJobs: sanitizeDashboardArray(jobs.filter((job) => job.required)),
+    optionalJobs: sanitizeDashboardArray(jobs.filter((job) => !job.required)),
+    safetyJobs: sanitizeDashboardArray(jobs.filter((job) => job.category === "security_scan" || job.category === "secret_scan" || job.category === "dashboard_smoke" || job.category === "readiness_check")),
+    integrationGates: sanitizeDashboardArray(readiness.listCicdIntegrationTestGates()),
+    readinessChecks: sanitizeDashboardArray(checks),
+    risks: sanitizeDashboardArray(readiness.listCicdRisks()),
+    blockers: sanitizeDashboardArray(checks.filter((check) => check.status === "fail")),
+    stagingPromotion: sanitizeDashboardObject({
+      ready: summary.stagingPromotionReady,
+      productionReady: summary.productionReady,
+      stagingDeployed: summary.stagingDeployed,
+      requiredValidationCommandsCount: summary.requiredJobCount,
+      remoteIntegrationTestsEnabledByDefault: summary.remoteIntegrationTestsEnabledByDefault
+    }),
+    artifactPolicy: sanitizeDashboardObject({
+      status: summary.artifactPolicyStatus,
+      rawSecretArtifactsAllowed: false,
+      rawPromptArtifactsAllowed: false,
+      rawProviderOutputArtifactsAllowed: false,
+      rawWebhookPayloadArtifactsAllowed: false
+    }),
+    cleanupRollback: sanitizeDashboardObject({
+      status: summary.cleanupRollbackStatus,
+      cleanupJobsImplemented: false,
+      remoteCleanupCallsEnabled: false,
+      rollbackAutomationImplemented: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: !summary.secretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      externalCallsEnabledByDefault: summary.externalCallsEnabledByDefault,
+      activeWorkflowCreated: summary.activeWorkflowCreated,
+      deploymentWorkflowCreated: summary.deploymentWorkflowCreated
     })
   };
 }
@@ -485,6 +665,66 @@ function buildPolicy(context: DashboardReadModelContext): PolicyReadModel {
   };
 }
 
+function buildPolicyBundles(context: DashboardReadModelContext): PolicyBundleReadinessReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getPolicyBundleReadinessSummary();
+  const checks = readiness.listPolicyBundleReadinessChecks();
+  const risks = readiness.listPolicyBundleRisks();
+  const engineOptions = readiness.listPolicyEngineOptions();
+  const recommended = engineOptions.find((option) => option.status === "recommended") ?? engineOptions.find((option) => option.productionRecommended);
+  return {
+    summary: sanitizeDashboardObject(summary),
+    engineOptions: sanitizeDashboardArray(engineOptions),
+    bundlePlans: sanitizeDashboardArray(readiness.listPolicyBundlePlans()),
+    domainMappings: sanitizeDashboardArray(readiness.listPolicyDomainMappings()),
+    readinessChecks: sanitizeDashboardArray(checks),
+    risks: sanitizeDashboardArray(risks),
+    migrationPhases: sanitizeDashboardArray(readiness.listPolicyBundleMigrationPhases()),
+    blockers: sanitizeDashboardArray(checks.filter((check) => check.status === "fail")),
+    recommendedPath: sanitizeDashboardObject({
+      engineKind: recommended?.engineKind ?? "signed_json_yaml_bundle",
+      displayName: recommended?.displayName ?? "Signed JSON/YAML Policy Bundle",
+      status: recommended?.status ?? "recommended",
+      runtimeImplemented: false,
+      reason: "near_term_schema_driven_bundle_before_real_opa_or_cedar_runtime"
+    }),
+    reviewWorkflow: sanitizeDashboardObject({
+      status: summary.reviewWorkflowStatus,
+      requiredRoles: ["policy_author", "domain_owner", "security_approver"],
+      workflowEngineImplemented: false,
+      auditEventsPlanned: ["policy_bundle_review_requested_future", "policy_bundle_approved_future", "policy_bundle_rejected_future"]
+    }),
+    testStrategy: sanitizeDashboardObject({
+      status: summary.testStrategyStatus,
+      requiredSuites: ["golden_decisions", "deny_by_default_regression", "secret_exposure", "tenant_isolation", "provider_specific"],
+      bundleTestRunnerImplemented: false
+    }),
+    rolloutRollback: sanitizeDashboardObject({
+      rolloutStatus: summary.rolloutStatus,
+      rollbackStatus: summary.rollbackStatus,
+      shadowEvaluationImplemented: false,
+      runtimeActivationImplemented: false
+    }),
+    breakGlass: sanitizeDashboardObject({
+      status: summary.breakGlassStatus,
+      implemented: false,
+      canReadRawSecrets: false,
+      canEnableDestructiveGit: false,
+      requiresPostIncidentReview: true
+    }),
+    noExecutionStatus: sanitizeDashboardObject({
+      dynamicPolicyExecutionEnabled: summary.dynamicPolicyExecutionEnabled,
+      externalPolicyEngineEnabled: summary.externalPolicyEngineEnabled,
+      policyCodeExecuted: summary.policyCodeExecuted,
+      remotePolicyLoadingEnabled: summary.remotePolicyLoadingEnabled,
+      opaIntegrationEnabled: summary.opaIntegrationEnabled,
+      cedarIntegrationEnabled: summary.cedarIntegrationEnabled,
+      noSecretsExposed: summary.noSecretsExposed,
+      runtimeChanged: summary.policyRuntimeChanged
+    })
+  };
+}
+
 function buildAuth(context: DashboardReadModelContext): AuthReadModel {
   const currentContext = context.authorizationService.getAuthContext({
     source: "dashboard",
@@ -536,6 +776,40 @@ function buildAuth(context: DashboardReadModelContext): AuthReadModel {
       }
     ]),
     warning: "Mock auth is visible for planning only and is not production authentication."
+  };
+}
+
+function buildAuthProduction(context: DashboardReadModelContext): AuthRbacProductionReadinessReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getAuthRbacProductionSummary();
+  const checks = readiness.listAuthRbacReadinessChecks();
+  const risks = readiness.listAuthRbacProductionRisks();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    providerOptions: sanitizeDashboardArray(readiness.listAuthProviderOptions()),
+    migrationPhases: sanitizeDashboardArray(readiness.listAuthRbacMigrationPhases()),
+    readinessChecks: sanitizeDashboardArray(checks),
+    risks: sanitizeDashboardArray(risks),
+    tenantBoundaryPlans: sanitizeDashboardArray(readiness.listTenantBoundaryPlans()),
+    serviceAccountPlans: sanitizeDashboardArray(readiness.listServiceAccountPlans()),
+    permissionMatrix: sanitizeDashboardArray(readiness.listProductionRbacPermissionMatrix()),
+    blockers: sanitizeDashboardArray(checks.filter((check) => check.status === "fail")),
+    mockActorStatus: sanitizeDashboardObject({
+      enabled: summary.mockActorEnabled,
+      warning: summary.mockActorWarning,
+      productionReady: false,
+      headerActorOverrideProductionReady: summary.mockHeaderOverrideProductionReady
+    }),
+    noTokenStatus: sanitizeDashboardObject({
+      noTokensExposed: summary.noTokensExposed,
+      cookiesExposed: summary.cookiesExposed,
+      sessionIdsExposed: summary.sessionIdsExposed,
+      passwordsExposed: summary.passwordsExposed,
+      rawIdentityAssertionsExposed: summary.rawIdentityAssertionsExposed,
+      externalIdpCallsEnabled: summary.externalIdpCallsEnabled,
+      realSessionsImplemented: summary.realSessionsImplemented,
+      realJwtIssuanceImplemented: summary.realJwtIssuanceImplemented
+    })
   };
 }
 
@@ -757,12 +1031,16 @@ function buildOverview(
   tasks: TaskRunSummaryReadModel,
   git: GitIntegrationReadModel,
   githubApp: GitHubAppHardeningReadModel,
+  githubAppIntegration: GitHubAppIntegrationTestReadModel,
   conflicts: ConflictManagerReadModel,
   registry: RegistryReadModel,
   llm: LLMGatewayReadModel,
+  llmIntegration: LLMIntegrationTestReadModel,
   agents: AgentRunnerReadModel,
   policy: PolicyReadModel,
+  policyBundles: PolicyBundleReadinessReadModel,
   auth: AuthReadModel,
+  authProduction: AuthRbacProductionReadinessReadModel,
   providers: EnterpriseProviderReadModel,
   security: SecurityReadModel,
   localAgents: LocalAgentReadModel,
@@ -770,6 +1048,8 @@ function buildOverview(
   readiness: DeploymentReadinessReadModel,
   database: DatabaseOperationsReadModel,
   secretBackend: SecretBackendMigrationReadModel,
+  staging: StagingDeploymentReadModel,
+  cicd: CICDPipelineReadModel,
   observability: ObservabilityReadModel,
   audit: AuditSummaryReadModel
 ): DashboardOverviewReadModel {
@@ -797,12 +1077,24 @@ function buildOverview(
       githubAppReadinessBlockers: githubApp.blockers.length,
       githubAppPermissions: githubApp.permissionMatrix.length,
       githubWebhookAllowlistedEvents: githubApp.webhookEventAllowlist.length,
+      githubAppIntegrationMissingGates: githubAppIntegration.summary.missingGateCount ?? 0,
+      githubAppIntegrationUnsafeGates: githubAppIntegration.summary.unsafeGateCount ?? 0,
+      githubAppIntegrationTestCases: githubAppIntegration.testCases.length,
       llmModels: llm.models.length,
       llmUsageEvents: llm.usageEvents.length,
+      llmIntegrationMissingGates: llmIntegration.summary.missingGateCount ?? 0,
+      llmIntegrationUnsafeGates: llmIntegration.summary.unsafeGateCount ?? 0,
+      llmIntegrationTestCases: llmIntegration.testCases.length,
       agentRuns: agents.runs.length,
       policyRules: policy.rules.length,
+      policyBundleReadinessBlockers: policyBundles.blockers.length,
+      policyBundleDomainsMapped: policyBundles.domainMappings.filter((mapping) => mapping.migrationStatus === "mapped").length,
+      policyEngineOptions: policyBundles.engineOptions.length,
       authRoles: auth.roles.length,
       authActors: auth.actors.length,
+      authProductionReadinessBlockers: authProduction.blockers.length,
+      authProviderOptions: authProduction.providerOptions.length,
+      authServiceAccountPlans: authProduction.serviceAccountPlans.length,
       providerCatalogEntries: providers.catalog.length,
       securityAuditEvents: security.auditEvents.length,
       localAgents: localAgents.registrations.length,
@@ -816,6 +1108,12 @@ function buildOverview(
       secretBackendReadinessBlockers: secretBackend.blockers.length,
       secretBackendOptions: secretBackend.backendOptions.length,
       secretRotationPlans: secretBackend.rotationPlans.length,
+      stagingReadinessBlockers: staging.blockers.length,
+      stagingIntegrationGates: staging.integrationGates.length,
+      stagingPromotionCriteria: staging.promotionCriteria.length,
+      cicdReadinessBlockers: cicd.blockers.length,
+      cicdJobs: cicd.jobs.length,
+      cicdIntegrationGates: cicd.integrationGates.length,
       pendingConsentRequests: localAgents.consentQueue.length,
       normalizedAuditEvents: observability.auditSummary.totalEvents ?? 0,
       auditSourcesCovered: observability.sourceCoverage.filter((source) => source.normalized === "yes").length,
@@ -826,12 +1124,16 @@ function buildOverview(
       tasks: { status: statusForCount(tasks.tasks.length), count: tasks.tasks.length, notes: tasks.warnings },
       git: { status: "available", count: git.repos.length, notes: ["Remote Git gates remain explicit and token-free."] },
       githubApp: { status: "available", count: githubApp.blockers.length, notes: ["GitHub App and production webhook hardening are planning-only; no live App or token exchange is implemented."] },
+      githubAppIntegration: { status: "available", count: githubAppIntegration.testCases.length, notes: ["GitHub App integration-test profile v1 is skipped by default and never exposes private keys, installation tokens, or env values."] },
       conflicts: { status: statusForCount(conflicts.mergeQueue.length + conflicts.branchLeases.length), count: conflicts.mergeQueue.length, notes: [] },
       registry: { status: "available", count: registry.skills.length + registry.harnesses.length + registry.instructions.length, notes: [] },
       llm: { status: "available", count: llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
+      llmIntegration: { status: "available", count: llmIntegration.testCases.length, notes: ["LLM Gateway integration-test profile v1 is skipped by default and never exposes API keys, env values, or raw provider responses."] },
       agents: { status: "available", count: agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: policy.rules.length, notes: [] },
+      policyBundles: { status: "available", count: policyBundles.blockers.length, notes: ["Policy Bundle / OPA-Cedar v0 is planning-only; StaticPolicyEngine remains the runtime and no external policy engine is enabled."] },
       auth: { status: "available", count: auth.actors.length, notes: ["Mock auth is not production authentication."] },
+      authProduction: { status: "available", count: authProduction.blockers.length, notes: ["Production Auth/RBAC v1 is planning-only; no real IdP, sessions, JWTs, cookies, or login flow is implemented."] },
       providers: { status: "available", count: providers.catalog.length, notes: ["Provider adapters remain skeleton/mock-first."] },
       security: { status: "available", count: security.auditEvents.length, notes: ["Secrets are metadata-only."] },
       localAgents: { status: "available", count: localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
@@ -839,6 +1141,8 @@ function buildOverview(
       readiness: { status: "available", count: readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       database: { status: "available", count: database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
       secretBackend: { status: "available", count: secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
+      staging: { status: "available", count: staging.blockers.length, notes: ["Staging Deployment Profile v0 is non-production/readiness-only; no deployment, production traffic, or external provider call is enabled."] },
+      cicd: { status: "available", count: cicd.blockers.length, notes: ["Staging CI/CD Pipeline Planning v0 is read-only; it does not create active workflows, deploy, or enable remote integration tests by default."] },
       observability: { status: "available", count: typeof observability.auditSummary.totalEvents === "number" ? observability.auditSummary.totalEvents : 0, notes: ["Observability v0 is in-memory/read-only and has no external exporter."] },
       audit: { status: "available", count: typeof audit.summary.totalEvents === "number" ? audit.summary.totalEvents : 0, notes: [] }
     },
@@ -869,12 +1173,16 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const tasks = buildTasks(context);
   const git = buildGit(context);
   const githubApp = buildGitHubApp(context);
+  const githubAppIntegration = buildGitHubAppIntegration(context);
   const conflicts = buildConflicts(context);
   const registry = buildRegistry(context);
   const llm = buildLlm(context);
+  const llmIntegration = buildLlmIntegration(context);
   const agents = buildAgents(context);
   const policy = buildPolicy(context);
+  const policyBundles = buildPolicyBundles(context);
   const auth = buildAuth(context);
+  const authProduction = buildAuthProduction(context);
   const providers = buildProviders(context);
   const security = buildSecurity(context);
   const localAgents = buildLocalAgents(context);
@@ -882,21 +1190,27 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const readiness = buildReadiness(context);
   const database = buildDatabase(context);
   const secretBackend = buildSecretBackend(context);
+  const staging = buildStaging(context);
+  const cicd = buildCicd(context);
   const observability = buildObservability(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, githubApp, conflicts, registry, llm, agents, policy, auth, providers, security, localAgents, mcp, readiness, database, secretBackend, observability, audit);
+  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, mcp, readiness, database, secretBackend, staging, cicd, observability, audit);
 
   return {
     overview,
     tasks,
     git,
     githubApp,
+    githubAppIntegration,
     conflicts,
     registry,
     llm,
+    llmIntegration,
     agents,
     policy,
+    policyBundles,
     auth,
+    authProduction,
     providers,
     security,
     localAgents,
@@ -904,6 +1218,8 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     readiness,
     database,
     secretBackend,
+    staging,
+    cicd,
     observability,
     audit
   };

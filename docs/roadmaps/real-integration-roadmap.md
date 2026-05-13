@@ -24,7 +24,13 @@
 20. GitHub App / Production Webhook Hardening Planning v0 - implemented
 21. Persistent DB Production Operations v1 - implemented
 22. Secret Backend Migration Planning v0 - implemented
-23. Phase 5 enterprise planning
+23. Production Auth/RBAC v1 Planning - implemented
+24. Policy Bundle / OPA-Cedar Planning v0 - implemented
+25. GitHub App Controlled Implementation v1 - implemented
+26. Staging Deployment Profile v0 - implemented
+27. Staging CI/CD Pipeline Planning v0 - implemented
+28. GitHub App integration-test profile v1 - implemented
+29. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -288,7 +294,7 @@ Goals:
 - Apply redaction to input/output/audit previews.
 - Expose `/mcp/*`, `/health`, and `/dashboard/mcp` visibility without secrets or raw output.
 
-Recommended next step: Production deployment readiness, observability/audit, GitHub App hardening planning, Persistent DB Production Operations v1, and Secret Backend Migration Planning v0 have been completed. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1.
+Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
 
 ## 18. Production Deployment Readiness Planning v0
 
@@ -302,7 +308,7 @@ Goals:
 - Expose planning-only readiness API/dashboard read models without external calls or secrets.
 - Keep production deployment, infrastructure manifests, real auth, real secret backends, real MCP transport, real provider calls, and vendor CLI execution out of scope.
 
-Recommended next step: Observability / Audit Retention v0, GitHub App / production webhook hardening planning, Persistent DB Production Operations v1, and Secret Backend Migration Planning v0 have been completed. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1.
+Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
 
 ## 19. Observability / Audit Retention v0
 
@@ -318,7 +324,7 @@ Goals:
 - Surface observability/audit state in API health and dashboard read models.
 - Keep external observability backends, alert delivery, audit export, and retention deletion jobs out of scope.
 
-Recommended next step: GitHub App / production webhook hardening planning, Persistent DB Production Operations v1, and Secret Backend Migration Planning v0 have been completed. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1.
+Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
 
 ## 20. GitHub App / Production Webhook Hardening Planning v0
 
@@ -332,7 +338,7 @@ Goals:
 - Model replay classification, retry/dead-letter readiness, credential readiness, production endpoint readiness, blockers, and production risks.
 - Keep default runtime mock-first with no GitHub calls, no private key reads, no JWT signing, no installation token exchange, no production webhooks, and no destructive Git operations.
 
-Recommended next step: Persistent DB Production Operations v1 and Secret Backend Migration Planning v0 are implemented. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1 if secret backend planning is sufficiently mature.
+Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
 
 ## 21. Persistent DB Production Operations v1
 
@@ -346,7 +352,7 @@ Goals:
 - Keep DB operations non-destructive: no deletion jobs, no backup/restore jobs, no live partition jobs, no automatic migrations, and no DB URL exposure.
 - Keep default runtime in-memory/mock-first and optional Postgres tests gated by `AICHESTRA_TEST_DATABASE_URL`.
 
-Recommended next step: Secret Backend Migration Planning v0 is implemented. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1 if secret backend planning is sufficiently mature.
+Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
 
 ## 22. Secret Backend Migration Planning v0
 
@@ -360,9 +366,106 @@ Goals:
 - Model lease TTL, rotation, revocation, env fallback deprecation, readiness checks, and production risks.
 - Keep runtime read-only and mock-first: no real secret backend calls, no rotation jobs, no credential issuance, no cache reads, and no env value exposure.
 
-Recommended next step: Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1 if secret backend planning is sufficiently mature.
+Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
 
-## 23. Phase 5 Enterprise Planning
+## 23. Production Auth/RBAC v1 Planning
+
+Implemented with `docs/foundations/auth-rbac/v1-plan.md`, `docs/roadmaps/auth-rbac-production/v1.md`, `docs/reference/production-rbac-permission-matrix.md`, deterministic auth production readiness models in `packages/deployment-readiness`, read-only `/readiness/auth/*` API endpoints, `/dashboard/auth-production`, safe `/health` auth readiness metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Compare OIDC, SAML, SCIM, Microsoft Entra ID, Okta, Auth0, Google Workspace, GitHub Enterprise identity mapping, custom enterprise IdP, and mock provider options without calling IdPs.
+- Define production roles, permissions, allowed actions, denied actions, scopes, audit requirements, and future work.
+- Plan tenant/workspace/project/team/repo scoping across repositories, policy subjects, provider access, SecretRefs, audit queries, and dashboard read models.
+- Plan scoped service accounts and system actors for worker, Git webhook/provider, LLM Gateway, MCP Gateway, Local Agent Protocol, deployment, and observability export.
+- Plan request context propagation and mock actor deprecation.
+- Keep runtime read-only and mock-first: no real OIDC/SAML/SCIM/SSO, no login/logout/session/JWT/password behavior, no external IdP calls, no service-account credential issuance, no tenant isolation enforcement, and no token/cookie/session/assertion exposure.
+
+Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+
+## 24. Policy Bundle / OPA-Cedar Planning v0
+
+Implemented with `docs/roadmaps/policy-bundle-opa-cedar/v0.md`, engine option comparison, policy bundle schema plan, `docs/reference/policy-domain-mapping.md`, review workflow, test strategy, rollout/rollback strategy, break-glass plan, deterministic policy bundle readiness models in `packages/deployment-readiness`, read-only `/readiness/policy-bundles/*` API endpoints, `/dashboard/policy-bundles`, safe `/health` policy bundle metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Compare current static TypeScript rules, OPA/Rego, Cedar, signed JSON/YAML bundles, and custom future policy services.
+- Define future policy bundle models, versioning, review, tests, rollout/rollback, and break-glass planning.
+- Map current Git, Git webhook, LLM, MCP, Runner, Registry, Improvement, SecretRef, Secrets/Sandbox, Provider, Local Agent, Auth, Dashboard, and Deployment Readiness policy domains.
+- Keep `StaticPolicyEngine` as the only runtime.
+- Keep runtime read-only and mock-first: no OPA/Cedar execution, no external policy decision service, no dynamic policy code, no remote bundle loading, no hot reload, no signed bundle verification, no production rollout, and no break-glass execution.
+
+Recommended next step: LLM Gateway integration-test profile v1 is implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+
+## 25. GitHub App Controlled Implementation v1
+
+Implemented with `docs/features/real-git-adapter/github-app-controlled-v1.md`, `docs/features/real-git-adapter/github-app-controlled-v1-plan.md`, `packages/adapters/src/git/github-app.ts`, `packages/git-adapter/src/github-app.ts`, Git provider factory updates, Git service integration, API routes, health/dashboard visibility, Auth/RBAC catalog updates, Policy-as-code rules, SecretRef metadata support, and tests.
+
+Goals:
+
+- Keep legacy token mode as the default and preserve existing SecretRef-backed token behavior.
+- Add controlled GitHub App auth mode behind explicit gates.
+- Model app runtime config, installation state, repository grants, token requests, and token results without live GitHub discovery.
+- Add disabled and mock GitHub App token providers.
+- Require Auth/RBAC, Policy-as-code, active private-key SecretRef metadata, installation allowlist, repo allowlist, branch prefix, and existing remote Git gates before issuing a mock token handle.
+- Return token handle metadata only; never expose private keys, installation tokens, webhook secrets, legacy PATs, raw credentials, or credential cache contents.
+- Integrate branch creation, PR creation, and changed-file reads with the token provider boundary while keeping merge, rebase, force push, branch deletion, workflow/admin/secrets/deployments permissions, GitLab, and Bitbucket out of scope.
+
+Recommended next step: LLM Gateway integration-test profile v1 is implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+
+## 26. Staging Deployment Profile v0
+
+Implemented with `docs/roadmaps/staging-deployment-profile/v0.md`, `docs/roadmaps/staging-deployment-profile/v0-plan.md`, `docs/reference/staging-environment-gate-matrix.md`, deterministic staging readiness models in `packages/deployment-readiness`, read-only `/readiness/staging/*` API endpoints, `/dashboard/staging`, safe `/health` staging metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Define a non-production staging profile without deploying anything.
+- Document required and forbidden staging env gates.
+- Classify staging integrations as gated, blocked, or future.
+- Surface staging readiness checks, promotion criteria, rollback criteria, blockers, warnings, mock actor warning, env fallback warning, and no-secret/no-env status.
+- Keep runtime read-only and mock-first: no deployment, no infrastructure manifests, no production traffic, no external provider calls by default, no remote MCP, no vendor CLI execution, no secrets, and no env values.
+
+Recommended next step: LLM Gateway integration-test profile v1 is implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+
+## 27. Staging CI/CD Pipeline Planning v0
+
+Implemented with `docs/roadmaps/staging-ci-cd-pipeline/v0.md`, `docs/roadmaps/staging-ci-cd-pipeline/v0-plan.md`, job matrix, integration-test gate policy, secret/env safety policy, artifact/report policy, staging promotion criteria, cleanup/rollback policy, deterministic CI/CD readiness models in `packages/deployment-readiness`, read-only `/readiness/ci-cd/*` API endpoints, `/dashboard/ci-cd`, safe `/health` CI/CD metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Define local, pull request, integration, staging, and future release-candidate CI/CD profiles without creating active workflows.
+- Document required validation jobs, optional integration-test gates, secret/env safety, artifact/report handling, staging promotion, and cleanup/rollback expectations.
+- Keep runtime read-only and mock-first: no deployment, no active CI workflow, no external provider calls by default, no remote Git/LLM/MCP/auth/vendor tests by default, no secrets, and no env values.
+
+Recommended next step: GitHub App integration-test profile v1 and LLM Gateway integration-test profile v1 are implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+
+## 28. GitHub App integration-test profile v1
+
+Implemented with `docs/roadmaps/github-app-integration-test-profile/v1.md`, `docs/roadmaps/github-app-integration-test-profile/v1-plan.md`, deterministic GitHub App integration-test profile, test-case, safety-check, and summary models in `packages/deployment-readiness`, read-only `/readiness/github-app-integration/*` API endpoints, `/dashboard/github-app-integration`, safe `/health` metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Define a controlled optional live-test profile for GitHub App config, installation-token, branch, PR, changed-file, webhook fixture, and cleanup checks.
+- Keep live GitHub tests skipped unless every explicit gate, installation allowlist, repo allowlist, branch prefix, SecretRef metadata, and no-merge safety condition is configured.
+- Report missing and unsafe gates as booleans, counts, statuses, and env var names only.
+- Keep runtime read-only and mock-first: no GitHub calls in default tests, no installation token generation, no private-key read, no env value exposure, no auto-merge, no force-push, and no branch deletion.
+
+Recommended next step: LLM Gateway integration-test profile v1 is implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+
+## 29. LLM Gateway integration-test profile v1
+
+Implemented with `docs/roadmaps/llm-gateway-integration-test-profile/v1.md`, `docs/roadmaps/llm-gateway-integration-test-profile/v1-plan.md`, deterministic LLM integration-test profile, test-case, safety-check, and summary models in `packages/deployment-readiness`, read-only `/readiness/llm-integration/*` API endpoints, `/dashboard/llm-integration`, safe `/health` metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Define a controlled optional live-test profile for OpenAI-compatible config, credential readiness, model allowlist, budget guard, mock completion, gated remote completion, usage ledger, audit redaction, and fallback-disabled checks.
+- Keep live LLM tests skipped unless every explicit gate, model allowlist/default model, budget cap, safe prompt class, SecretRef or controlled test-only credential gate, Auth/RBAC, and Policy-as-code condition is configured.
+- Report missing and unsafe gates as booleans, counts, statuses, and env var names only.
+- Keep runtime read-only and mock-first: no LLM calls in default tests, no API key/env value exposure, no raw provider response exposure, no streaming, no tool calls, no vendor CLI, no credential cache reads, and no unbounded fallback.
+
+Recommended next step: Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+
+## 30. Phase 5 Enterprise Planning
 
 Goals:
 

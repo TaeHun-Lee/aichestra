@@ -78,6 +78,7 @@ export class SecurityControlService implements SecretManager {
       allowedSecretEnvKeyCount: envSecretProvider.allowedEnvKeyCount,
       activeSecretRefCount: activeSecretRefs.length,
       githubCredentialConfigured: this.credentialConfiguredFor("github_token"),
+      githubAppPrivateKeyConfigured: this.credentialConfiguredFor("github_app_private_key"),
       githubWebhookSecretConfigured: this.credentialConfiguredFor("github_webhook_secret") || this.credentialConfiguredFor("webhook_secret"),
       llmCredentialConfigured: this.credentialConfiguredFor("llm_api_key"),
       sandboxSupportStatus: "model_only",
@@ -1182,6 +1183,7 @@ function isSecretProviderKind(value: unknown): value is SecretRef["provider"] {
 function isSecretKind(value: unknown): value is SecretRef["secretKind"] {
   return value === "mock_metadata" ||
     value === "github_token" ||
+    value === "github_app_private_key" ||
     value === "github_webhook_secret" ||
     value === "llm_api_key" ||
     value === "provider_api_key" ||
@@ -1202,13 +1204,14 @@ function providerKindForCredentialRequest(request: CredentialResolutionRequest):
   const explicit = typeof request.policyContext?.providerKind === "string" ? request.policyContext.providerKind : undefined;
   if (explicit) return explicit;
   if (request.purpose === "github_api_call") return "github";
+  if (request.purpose === "github_app_private_key_signing") return "github";
   if (request.purpose === "github_webhook_verification" || request.purpose === "webhook_verification_future") return "github";
   if (request.purpose === "llm_api_call") return "openai_compatible";
   return request.providerId ?? "provider";
 }
 
 function credentialPolicyActionForPurpose(request: CredentialResolutionRequest): PolicyAction | undefined {
-  if (request.purpose === "github_api_call" || request.purpose === "github_webhook_verification" || request.purpose === "webhook_verification_future") {
+  if (request.purpose === "github_api_call" || request.purpose === "github_app_private_key_signing" || request.purpose === "github_webhook_verification" || request.purpose === "webhook_verification_future") {
     return "git.credential.resolve";
   }
   if (request.purpose === "llm_api_call") return "llm.credential.resolve";

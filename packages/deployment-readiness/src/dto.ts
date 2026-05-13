@@ -1,4 +1,16 @@
 import type {
+  AuthProviderOption,
+  AuthRbacMigrationPhase,
+  AuthRbacPermissionMatrixEntry,
+  AuthRbacProductionRisk,
+  AuthRbacProductionSummary,
+  AuthRbacReadinessCheck,
+  CICDIntegrationTestGate,
+  CICDJobDefinition,
+  CICDPipelineProfile,
+  CICDPipelineReadinessSummary,
+  CICDReadinessCheck,
+  CICDRisk,
   DatabaseAuditGrowthPlan,
   DatabaseDeploymentProfile,
   DatabaseIndexReviewItem,
@@ -13,6 +25,14 @@ import type {
   DeploymentReadinessSummary,
   GitHubAppCredentialReadiness,
   GitHubAppDescriptor,
+  GitHubAppIntegrationTestCase,
+  GitHubAppIntegrationTestProfile,
+  GitHubAppIntegrationTestReadinessSummary,
+  GitHubAppIntegrationTestSafetyCheck,
+  LLMIntegrationTestCase,
+  LLMIntegrationTestProfile,
+  LLMIntegrationTestReadinessSummary,
+  LLMIntegrationTestSafetyCheck,
   GitHubAppInstallation,
   GitHubAppPermissionMatrixEntry,
   GitHubAppProductionRisk,
@@ -25,6 +45,13 @@ import type {
   GitHubWebhookEventAllowlistEntry,
   GitHubWebhookHardeningSummary,
   GitHubWebhookReplayProtectionPlan,
+  PolicyBundleMigrationPhase,
+  PolicyBundlePlan,
+  PolicyBundleReadinessCheck,
+  PolicyBundleReadinessSummary,
+  PolicyBundleRisk,
+  PolicyDomainMapping,
+  PolicyEngineOption,
   ProductionRisk,
   ReadinessCheck,
   SecretBackendMigrationPhase,
@@ -33,11 +60,19 @@ import type {
   SecretBackendReadinessCheck,
   SecretBackendRisk,
   SecretLeasePolicy,
-  SecretRotationPlan
+  SecretRotationPlan,
+  ServiceAccountPlan,
+  StagingDeploymentProfile,
+  StagingDeploymentSummary,
+  StagingIntegrationGate,
+  StagingPromotionCriterion,
+  StagingReadinessCheck,
+  StagingRollbackCriterion,
+  TenantBoundaryPlan
 } from "./types.ts";
 
 const sensitiveKeyPattern = /^(token|accessToken|refreshToken|apiKey|api_key|authorization|password|rawSecret|secretValue|credentialValue|privateKey|private_key|webhookSecret|session|cookie|databaseUrl|database_url|connectionString|postgresUrl|clientSecret|vaultToken|secretAccessKey)$/i;
-const secretLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|postgres(?:ql)?:\/\/[^\s"']+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN|AICHESTRA_GITHUB_WEBHOOK_SECRET|GITHUB_APP_PRIVATE_KEY|PRIVATE_KEY|DATABASE_URL|AICHESTRA_DATABASE_URL|AICHESTRA_TEST_DATABASE_URL|SESSION_SECRET|JWT_SECRET|VAULT_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SECRET|GCP_SECRET|AZURE_KEY|AZURE_CLIENT_SECRET|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY))=)[^\s"']+/g;
+const secretLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|postgres(?:ql)?:\/\/[^\s"']+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN|AICHESTRA_GITHUB_WEBHOOK_SECRET|GITHUB_APP_PRIVATE_KEY|PRIVATE_KEY|DATABASE_URL|AICHESTRA_DATABASE_URL|AICHESTRA_TEST_DATABASE_URL|SESSION_SECRET|JWT_SECRET|VAULT_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SECRET|GCP_SECRET|AZURE_KEY|AZURE_CLIENT_SECRET|OKTA_TOKEN|AUTH0_CLIENT_SECRET|ENTRA_CLIENT_SECRET|GOOGLE_WORKSPACE_TOKEN|SAML_ASSERTION|OIDC_ID_TOKEN|SCIM_TOKEN|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|SESSION|COOKIE))=)[^\s"']+/g;
 
 function sanitize(value: unknown, key = ""): unknown {
   if (sensitiveKeyPattern.test(key)) return "[redacted]";
@@ -133,6 +168,38 @@ export function githubWebhookHardeningSummaryToDto(summary: GitHubWebhookHardeni
   return sanitize(summary);
 }
 
+export function githubAppIntegrationTestProfileToDto(profile: GitHubAppIntegrationTestProfile) {
+  return sanitize(profile);
+}
+
+export function githubAppIntegrationTestCaseToDto(testCase: GitHubAppIntegrationTestCase) {
+  return sanitize(testCase);
+}
+
+export function githubAppIntegrationTestSafetyCheckToDto(check: GitHubAppIntegrationTestSafetyCheck) {
+  return sanitize(check);
+}
+
+export function githubAppIntegrationTestReadinessSummaryToDto(summary: GitHubAppIntegrationTestReadinessSummary) {
+  return sanitize(summary);
+}
+
+export function llmIntegrationTestProfileToDto(profile: LLMIntegrationTestProfile) {
+  return sanitize(profile);
+}
+
+export function llmIntegrationTestCaseToDto(testCase: LLMIntegrationTestCase) {
+  return sanitize(testCase);
+}
+
+export function llmIntegrationTestSafetyCheckToDto(check: LLMIntegrationTestSafetyCheck) {
+  return sanitize(check);
+}
+
+export function llmIntegrationTestReadinessSummaryToDto(summary: LLMIntegrationTestReadinessSummary) {
+  return sanitize(summary);
+}
+
 export function databaseDeploymentProfileToDto(profile: DatabaseDeploymentProfile) {
   return sanitize(profile);
 }
@@ -198,5 +265,113 @@ export function secretLeasePolicyToDto(policy: SecretLeasePolicy) {
 }
 
 export function secretBackendMigrationSummaryToDto(summary: SecretBackendMigrationSummary) {
+  return sanitize(summary);
+}
+
+export function authProviderOptionToDto(option: AuthProviderOption) {
+  return sanitize(option);
+}
+
+export function authRbacMigrationPhaseToDto(phase: AuthRbacMigrationPhase) {
+  return sanitize(phase);
+}
+
+export function authRbacReadinessCheckToDto(check: AuthRbacReadinessCheck) {
+  return sanitize(check);
+}
+
+export function authRbacProductionRiskToDto(risk: AuthRbacProductionRisk) {
+  return sanitize(risk);
+}
+
+export function tenantBoundaryPlanToDto(plan: TenantBoundaryPlan) {
+  return sanitize(plan);
+}
+
+export function serviceAccountPlanToDto(plan: ServiceAccountPlan) {
+  return sanitize(plan);
+}
+
+export function authRbacPermissionMatrixEntryToDto(entry: AuthRbacPermissionMatrixEntry) {
+  return sanitize(entry);
+}
+
+export function authRbacProductionSummaryToDto(summary: AuthRbacProductionSummary) {
+  return sanitize(summary);
+}
+
+export function policyEngineOptionToDto(option: PolicyEngineOption) {
+  return sanitize(option);
+}
+
+export function policyBundlePlanToDto(plan: PolicyBundlePlan) {
+  return sanitize(plan);
+}
+
+export function policyDomainMappingToDto(mapping: PolicyDomainMapping) {
+  return sanitize(mapping);
+}
+
+export function policyBundleReadinessCheckToDto(check: PolicyBundleReadinessCheck) {
+  return sanitize(check);
+}
+
+export function policyBundleRiskToDto(risk: PolicyBundleRisk) {
+  return sanitize(risk);
+}
+
+export function policyBundleMigrationPhaseToDto(phase: PolicyBundleMigrationPhase) {
+  return sanitize(phase);
+}
+
+export function policyBundleReadinessSummaryToDto(summary: PolicyBundleReadinessSummary) {
+  return sanitize(summary);
+}
+
+export function stagingDeploymentProfileToDto(profile: StagingDeploymentProfile) {
+  return sanitize(profile);
+}
+
+export function stagingIntegrationGateToDto(gate: StagingIntegrationGate) {
+  return sanitize(gate);
+}
+
+export function stagingReadinessCheckToDto(check: StagingReadinessCheck) {
+  return sanitize(check);
+}
+
+export function stagingPromotionCriterionToDto(criterion: StagingPromotionCriterion) {
+  return sanitize(criterion);
+}
+
+export function stagingRollbackCriterionToDto(criterion: StagingRollbackCriterion) {
+  return sanitize(criterion);
+}
+
+export function stagingDeploymentSummaryToDto(summary: StagingDeploymentSummary) {
+  return sanitize(summary);
+}
+
+export function cicdPipelineProfileToDto(profile: CICDPipelineProfile) {
+  return sanitize(profile);
+}
+
+export function cicdJobDefinitionToDto(job: CICDJobDefinition) {
+  return sanitize(job);
+}
+
+export function cicdIntegrationTestGateToDto(gate: CICDIntegrationTestGate) {
+  return sanitize(gate);
+}
+
+export function cicdReadinessCheckToDto(check: CICDReadinessCheck) {
+  return sanitize(check);
+}
+
+export function cicdRiskToDto(risk: CICDRisk) {
+  return sanitize(risk);
+}
+
+export function cicdPipelineReadinessSummaryToDto(summary: CICDPipelineReadinessSummary) {
   return sanitize(summary);
 }

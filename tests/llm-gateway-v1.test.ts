@@ -4,6 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { createApiServerWithStorage } from "@aichestra/api";
 import { createInMemoryStorageProvider, createSeededStore } from "@aichestra/db";
+import { createDeploymentReadinessService } from "@aichestra/deployment-readiness";
 import {
   InMemoryVirtualModelKeyRepository,
   LLMGatewayService,
@@ -380,15 +381,15 @@ test("LLM API and dashboard expose remote flags and mocked remote completion wit
   }
 });
 
+const llmIntegrationReadiness = createDeploymentReadinessService({ env: process.env }).getLLMIntegrationTestReadinessSummary();
+const canRunLegacyRemoteLLMTest = llmIntegrationReadiness.canRunLiveTests &&
+  typeof process.env.AICHESTRA_LLM_API_KEY === "string" &&
+  process.env.AICHESTRA_LLM_API_KEY.trim().length > 0;
+
 test("optional real remote LLM integration is skipped unless every explicit gate is set", {
-  skip: !(
-    process.env.AICHESTRA_LLM_INTEGRATION_TESTS === "true" &&
-    process.env.AICHESTRA_ENABLE_REMOTE_LLM === "true" &&
-    process.env.AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION === "true" &&
-    process.env.AICHESTRA_LLM_API_KEY &&
-    process.env.AICHESTRA_LLM_BASE_URL &&
-    (process.env.AICHESTRA_LLM_ALLOWED_MODELS || process.env.AICHESTRA_LLM_DEFAULT_MODEL)
-  ) ? "remote LLM integration env vars are not fully configured" : false
+  skip: canRunLegacyRemoteLLMTest
+    ? false
+    : `remote LLM integration env vars are not fully configured for this legacy raw-key test: ${llmIntegrationReadiness.missingRequiredEnvVars.join(",") || "unsafe gates present or raw test key absent"}`
 }, async () => {
   const store = createSeededStore();
   const task = store.createTask({ title: "Remote LLM integration", repoId: "repo_demo_backend", baseBranch: "main" });

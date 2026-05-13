@@ -418,13 +418,14 @@ export class InMemoryAichestraStore {
     return this.state.gitWebhookEvents.find((event) => event.id === id);
   }
 
-  listGitWebhookEvents(filter: { repoRef?: string; eventType?: string; status?: GitWebhookEvent["status"] } = {}): GitWebhookEvent[] {
+  listGitWebhookEvents(filter: { repoRef?: string; eventType?: string; status?: GitWebhookEvent["status"]; deliveryId?: string } = {}): GitWebhookEvent[] {
     return this.state.gitWebhookEvents
       .filter((event) => {
         const repoMatches = filter.repoRef === undefined || event.repoRef === filter.repoRef;
         const eventTypeMatches = filter.eventType === undefined || event.eventType === filter.eventType;
         const statusMatches = filter.status === undefined || event.status === filter.status;
-        return repoMatches && eventTypeMatches && statusMatches;
+        const deliveryMatches = filter.deliveryId === undefined || event.deliveryId === filter.deliveryId;
+        return repoMatches && eventTypeMatches && statusMatches && deliveryMatches;
       })
       .sort((left, right) => right.receivedAt.getTime() - left.receivedAt.getTime() || left.id.localeCompare(right.id));
   }

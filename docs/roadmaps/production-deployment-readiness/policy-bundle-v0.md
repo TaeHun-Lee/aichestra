@@ -1,6 +1,8 @@
 # Policy Bundle Plan v0
 
-Planning only. No OPA, Cedar, external policy service, or dynamic policy runtime is implemented.
+Planning only. No OPA, Cedar, external policy service, remote policy loading, signed bundle verification, rollout, break-glass execution, or dynamic policy runtime is implemented.
+
+Detailed v0 planning now lives in `docs/roadmaps/policy-bundle-opa-cedar/`. That package adds read-only readiness models, `/readiness/policy-bundles/*`, `/dashboard/policy-bundles`, and safe `/health` metadata while keeping `StaticPolicyEngine` as the only runtime.
 
 ## Current State
 

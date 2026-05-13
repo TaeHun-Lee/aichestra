@@ -4,6 +4,7 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 
 ## Identity And Access
 
+- Production Auth/RBAC v1 Planning read-only models, docs, APIs, health metadata, role/permission matrix, and dashboard panel implemented.
 - Production OIDC or SAML provider selected and implemented.
 - SCIM/team sync strategy defined where enterprise directory sync is required.
 - RBAC roles reviewed for least privilege.
@@ -37,9 +38,9 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 
 ## Git Integration
 
-- GitHub App vs token strategy selected for planning: GitHub App / Production Webhook Hardening Planning v0 is implemented, but no live GitHub App integration exists.
+- GitHub App vs token strategy selected for planning: GitHub App / Production Webhook Hardening Planning v0 is implemented and GitHub App Controlled Implementation v1 adds a mock/status token-handle boundary, but no live GitHub App token exchange exists.
 - GitHub App permission matrix reviewed; workflows, administration, secrets, and deployments denied by default.
-- GitHub App private key and webhook secret SecretRef plan documented; production requires a real secret backend before use.
+- GitHub App private key and webhook secret SecretRef plan documented; `github_app_private_key` is metadata-only in controlled v1, and production live signing still requires a real secret backend before use.
 - Repo allowlist and branch prefix enforced.
 - Webhook signature verification required.
 - Webhook event allowlist documented.
@@ -81,12 +82,14 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 
 ## Policy
 
+- Policy Bundle / OPA-Cedar Planning v0 read-only models, docs, APIs, health metadata, domain mapping, and dashboard panel implemented.
 - Policy bundle source selected.
 - Rule review and approval required.
 - Policy tests required.
 - Deny-by-default rules preserved.
 - Break-glass process defined and audited.
 - Policy rollout and rollback defined.
+- Real OPA/Rego, Cedar, signed bundle verification, hot reload, shadow evaluation, and production runtime activation remain future work.
 
 ## Observability
 
@@ -113,6 +116,20 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 - Dependency scanning required.
 - Container build and artifact provenance planned.
 - Release and rollback processes documented.
+- Staging CI/CD Pipeline Planning v0 read-only models, docs, APIs, health metadata, and dashboard panel implemented.
+- Active deployment workflows, default remote integration test execution, and live deployment jobs remain unimplemented.
+
+## Staging
+
+- Staging Deployment Profile v0 read-only models, docs, APIs, health metadata, and dashboard panel implemented.
+- Staging remains non-production and is not deployed.
+- Postgres is required or strongly recommended for meaningful staging validation.
+- Dashboard uses API-backed read models and exposes no secrets or env values.
+- Mock actor warning and env fallback warning remain visible.
+- Remote merge, rebase push, force push, branch deletion, remote MCP transport, and vendor CLI execution remain forbidden.
+- GitHub App, GitHub webhook, remote Git, and LLM Gateway integration-test validation require explicit integration gates and non-production data. LLM Gateway integration-test profile v1 is implemented as skipped-by-default readiness data for the OpenAI-compatible path and is not production LLM readiness.
+- Real production auth, real secret backend, policy bundle runtime, external observability export, backup/restore drills, active staging CI/CD execution, and staging deployment remain future work.
+- Promotion criteria and rollback criteria are documented in `docs/roadmaps/staging-deployment-profile/profile-contract-v0.md`.
 
 ## Security
 

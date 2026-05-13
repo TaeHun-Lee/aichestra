@@ -347,6 +347,33 @@ test("webhook receiver processes ping and ignores unsupported events with audit"
   assert.equal(fixture.store.listGitWebhookAuditEvents().some((event) => event.eventType === "github_webhook_unsupported_event"), true);
 });
 
+test("webhook receiver ignores duplicate deliveries and rejects replay hash mismatches", async () => {
+  const fixture = serviceFixture();
+  const firstPayload = prPayload("opened", { sha: "head-sha-duplicate-1" });
+  const first = await fixture.receiver.receiveGitHubWebhook(webhookInput("pull_request", "delivery-duplicate", firstPayload));
+  assert.equal(first.ok, true);
+  assert.equal(first.status, "processed");
+
+  const duplicate = await fixture.receiver.receiveGitHubWebhook(webhookInput("pull_request", "delivery-duplicate", firstPayload));
+  assert.equal(duplicate.ok, true);
+  assert.equal(duplicate.statusCode, 202);
+  assert.equal(duplicate.status, "ignored");
+  assert.equal(duplicate.reason, "duplicate_delivery");
+  assert.equal(fixture.store.listGitWebhookEvents({ deliveryId: "delivery-duplicate" }).length, 1);
+  assert.equal(fixture.store.listGitWebhookAuditEvents().some((event) => event.eventType === "github_webhook_duplicate_ignored"), true);
+
+  const replay = await fixture.receiver.receiveGitHubWebhook(webhookInput("pull_request", "delivery-duplicate", prPayload("opened", { sha: "head-sha-replay" })));
+  assert.equal(replay.ok, false);
+  assert.equal(replay.statusCode, 409);
+  assert.equal(replay.status, "rejected");
+  assert.equal(replay.reason, "replay_rejected");
+  assert.equal(fixture.store.listGitWebhookEvents({ deliveryId: "delivery-duplicate" }).length, 1);
+  assert.equal(fixture.store.listGitWebhookAuditEvents().some((event) =>
+    event.eventType === "github_webhook_duplicate_rejected" &&
+    event.reason === "replay_rejected"
+  ), true);
+});
+
 test("pull_request webhook sync creates PR and branch sync read models and updates merge queue risk non-destructively", async () => {
   const fixture = serviceFixture();
   const task = fixture.store.createTask({ title: "Webhook PR sync", repoId: fixture.repo.id, baseBranch: "main" });

@@ -789,7 +789,7 @@ export class InMemoryLocalAgentCapabilityAdvertisementRepository implements Loca
   listAdvertisements(filter: { agentId?: string } = {}): LocalAgentCapabilityAdvertisement[] {
     return [...this.advertisements.values()]
       .filter((item) => filter.agentId === undefined || item.agentId === filter.agentId)
-      .sort((left, right) => left.advertisedAt.getTime() - right.advertisedAt.getTime() || left.id.localeCompare(right.id))
+      .sort((left, right) => left.advertisedAt.getTime() - right.advertisedAt.getTime())
       .map(clone);
   }
 }
@@ -1139,7 +1139,9 @@ export class LocalAgentProtocolService {
   }
 
   findConnectedAgent(userId?: string): LocalAgentRegistration | undefined {
-    return this.listAgents({ userId, status: "connected" }).at(0) ?? this.listAgents({ status: "connected" }).at(0);
+    return userId
+      ? this.listAgents({ userId, status: "connected" }).at(0)
+      : this.listAgents({ status: "connected" }).at(0);
   }
 
   revokeAgent(agentId: string, actorId?: string): LocalAgentRegistration {

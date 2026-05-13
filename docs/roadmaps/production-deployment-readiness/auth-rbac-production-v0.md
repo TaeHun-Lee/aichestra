@@ -2,6 +2,12 @@
 
 Planning only. No real auth provider is implemented.
 
+## v1 Planning Update
+
+Production Auth/RBAC v1 Planning is implemented in `docs/roadmaps/auth-rbac-production/v1.md` with supporting IdP option, tenant/scope, service-account/system actor, request context, mock actor deprecation, and permission matrix docs. `packages/deployment-readiness` exposes deterministic read-only readiness models through `/readiness/auth/*`, `/dashboard/auth-production`, and safe `/health` metadata.
+
+This update is still planning-only. It does not implement OIDC, SAML, SCIM, SSO, login/logout, sessions, password auth, JWT issuance, external IdP calls, service-account credential issuance, tenant isolation enforcement, or production auth readiness.
+
 ## Current Mock Auth State
 
 Production Auth/RBAC Planning v0 provides provider-neutral models, deterministic mock actors, role bindings, service accounts, disabled future provider placeholders, and `AuthorizationService`. It does not implement real login, token validation, sessions, SSO, OIDC, SAML, SCIM, passwords, or API-key issuance.
@@ -89,3 +95,5 @@ Production requires tenant filters in:
 3. Reject header actor override in production.
 4. Keep mock auth available for local/tests only.
 5. Add tests proving production profile fails closed.
+
+Current v1 planning surfaces the production warning and blockers but does not yet enforce a production AuthProvider.

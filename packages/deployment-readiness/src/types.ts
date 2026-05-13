@@ -73,6 +73,222 @@ export type SecretCredentialKind =
   | "future_local_agent_pairing_secret"
   | "future_service_account_signing_key"
   | "future_byok_key";
+export type AuthProviderOptionKind =
+  | "oidc"
+  | "saml"
+  | "scim"
+  | "github_enterprise"
+  | "google_workspace"
+  | "microsoft_entra"
+  | "okta"
+  | "auth0"
+  | "custom"
+  | "mock";
+export type AuthProviderOptionStatus = "planned" | "recommended" | "future" | "not_recommended" | "disabled";
+export type AuthRbacOperationalComplexity = "low" | "medium" | "high";
+export type AuthRbacMigrationPhaseStatus = "planned" | "ready_for_design" | "blocked" | "future";
+export type AuthRbacReadinessCategory =
+  | "identity_provider"
+  | "group_sync"
+  | "role_mapping"
+  | "tenant_isolation"
+  | "service_accounts"
+  | "local_agent_identity"
+  | "webhook_identity"
+  | "request_context"
+  | "audit_attribution"
+  | "mock_actor_deprecation"
+  | "policy_subject_mapping"
+  | "dashboard_visibility"
+  | "break_glass";
+export type TenantBoundaryKind = "organization" | "workspace" | "team" | "project" | "repo_scope";
+export type TenantBoundaryPlanStatus = "planned" | "future" | "not_ready";
+export type ServiceAccountPlanKind =
+  | "worker"
+  | "git_webhook"
+  | "git_provider"
+  | "llm_gateway"
+  | "mcp_gateway"
+  | "local_agent_protocol"
+  | "deployment"
+  | "observability_export";
+export type ServiceAccountPlanStatus = "planned" | "future" | "not_ready";
+export type ProductionRbacRoleName =
+  | "viewer"
+  | "developer"
+  | "reviewer"
+  | "security_admin"
+  | "platform_admin"
+  | "system_admin"
+  | "service_account_runner"
+  | "git_webhook_service"
+  | "llm_gateway_service"
+  | "mcp_gateway_service"
+  | "local_agent_user"
+  | "local_agent_admin"
+  | "audit_reader"
+  | "break_glass_admin_future";
+export type PolicyEngineOptionKind =
+  | "static_typescript_current"
+  | "opa_rego"
+  | "cedar"
+  | "signed_json_yaml_bundle"
+  | "custom_future";
+export type PolicyEngineOptionStatus = "current" | "planned" | "recommended" | "not_recommended" | "future";
+export type PolicyBundleOperationalComplexity = "low" | "medium" | "high";
+export type PolicyBundleKind = "opa_bundle" | "cedar_policy_set" | "json_yaml_policy_bundle" | "static_typescript_legacy";
+export type PolicyBundlePlanStatus = "planned" | "ready_for_design" | "blocked" | "future";
+export type PolicyDomainName =
+  | "git"
+  | "git_webhook"
+  | "llm"
+  | "mcp"
+  | "runner"
+  | "registry"
+  | "improvement"
+  | "secretref"
+  | "secrets_sandbox"
+  | "local_agent"
+  | "provider"
+  | "auth"
+  | "dashboard"
+  | "deployment_readiness";
+export type PolicyDomainMigrationStatus = "current_static" | "mapped" | "gap" | "future";
+export type PolicyBundleReadinessCategory =
+  | "engine_selection"
+  | "bundle_schema"
+  | "signing"
+  | "review_workflow"
+  | "rollout"
+  | "rollback"
+  | "tests"
+  | "audit"
+  | "break_glass"
+  | "tenant_scoping"
+  | "auth_mapping"
+  | "secret_policy"
+  | "provider_policy"
+  | "dashboard";
+export type PolicyBundleMigrationPhaseStatus = "planned" | "ready_for_design" | "blocked" | "future";
+export type StagingDeploymentStatus = "planned" | "ready_for_internal_validation" | "blocked" | "not_ready";
+export type StagingIntegrationKind =
+  | "postgres"
+  | "github_app"
+  | "github_webhook"
+  | "llm_remote"
+  | "mcp_remote"
+  | "local_agent"
+  | "secret_backend"
+  | "auth_provider"
+  | "policy_bundle"
+  | "observability_export";
+export type StagingIntegrationGateStatus = "allowed" | "blocked" | "gated" | "future";
+export type StagingReadinessCategory =
+  | "storage"
+  | "auth"
+  | "secrets"
+  | "git"
+  | "github_app"
+  | "webhook"
+  | "llm"
+  | "mcp"
+  | "runner"
+  | "local_agent"
+  | "policy"
+  | "observability"
+  | "dashboard"
+  | "ci"
+  | "security";
+export type StagingCriterionStatus = "pass" | "warning" | "fail" | "not_checked";
+export type StagingRollbackCriterionStatus = "planned" | "active_mock" | "future";
+export type CICDPipelineProfileName = "local_validation" | "pull_request" | "integration" | "staging" | "release_candidate";
+export type CICDPipelineProfileStatus = "planned" | "ready_for_dry_run" | "blocked" | "future";
+export type CICDJobCategory =
+  | "install"
+  | "lint"
+  | "typecheck"
+  | "test"
+  | "build"
+  | "security_scan"
+  | "secret_scan"
+  | "optional_postgres"
+  | "optional_remote_git"
+  | "optional_github_app"
+  | "optional_webhook"
+  | "optional_remote_llm"
+  | "optional_mcp"
+  | "optional_auth"
+  | "dashboard_smoke"
+  | "readiness_check";
+export type CICDJobStatus = "planned" | "active_mock" | "future";
+export type CICDIntegrationKind =
+  | "postgres"
+  | "remote_git"
+  | "github_app"
+  | "github_webhook"
+  | "remote_llm"
+  | "remote_mcp"
+  | "external_auth"
+  | "vendor_cli";
+export type CICDReadinessCategory =
+  | "node"
+  | "package_manager"
+  | "validation"
+  | "test_profiles"
+  | "secrets"
+  | "integration_gates"
+  | "artifacts"
+  | "cleanup"
+  | "rollback"
+  | "security"
+  | "staging_promotion";
+export type CICDRiskStatus = "open" | "accepted" | "mitigated" | "deferred";
+export type GitHubAppIntegrationTestProfileStatus = "disabled" | "ready_if_configured" | "blocked" | "future";
+export type GitHubAppIntegrationTestCaseCategory =
+  | "config_validation"
+  | "installation_token"
+  | "branch_create"
+  | "pr_create"
+  | "changed_files"
+  | "webhook_fixture"
+  | "webhook_live_future"
+  | "cleanup";
+export type GitHubAppIntegrationTestCaseStatus = "planned" | "active_mock" | "gated_live" | "future";
+export type GitHubAppIntegrationTestSafetyCategory =
+  | "env_gates"
+  | "repo_allowlist"
+  | "branch_prefix"
+  | "secretref"
+  | "cleanup"
+  | "no_auto_merge"
+  | "no_force_push"
+  | "no_branch_delete"
+  | "audit"
+  | "observability";
+export type LLMIntegrationTestProfileStatus = "disabled" | "ready_if_configured" | "blocked" | "future";
+export type LLMIntegrationTestCaseCategory =
+  | "config_validation"
+  | "credential_resolution"
+  | "model_allowlist"
+  | "budget_guard"
+  | "mock_completion"
+  | "remote_completion"
+  | "usage_ledger"
+  | "audit_redaction"
+  | "fallback_disabled";
+export type LLMIntegrationTestCaseStatus = "planned" | "active_mock" | "gated_live" | "future";
+export type LLMIntegrationTestSafetyCategory =
+  | "env_gates"
+  | "secretref"
+  | "model_allowlist"
+  | "budget"
+  | "policy"
+  | "auth"
+  | "redaction"
+  | "audit"
+  | "no_streaming"
+  | "no_tool_calls"
+  | "no_unbounded_fallback";
 
 export type DeploymentProfile = {
   id: DeploymentProfileName;
@@ -631,5 +847,639 @@ export type SecretBackendMigrationSummary = {
   leasePolicyCount: number;
   noSecretsExposed: true;
   envValuesExposed: false;
+  metadata: Record<string, unknown>;
+};
+
+export type AuthProviderOption = {
+  id: string;
+  providerKind: AuthProviderOptionKind;
+  displayName: string;
+  status: AuthProviderOptionStatus;
+  supportsSso: boolean;
+  supportsScim: boolean;
+  supportsGroups: boolean;
+  supportsServiceAccounts: boolean;
+  supportsMfaSignals: boolean;
+  supportsDeviceTrust: boolean;
+  productionRecommended: boolean;
+  operationalComplexity: AuthRbacOperationalComplexity;
+  notes: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type AuthRbacMigrationPhase = {
+  id: string;
+  name: string;
+  order: number;
+  sourceMode: string;
+  targetMode: string;
+  requiredPreconditions: string[];
+  migrationSteps: string[];
+  validationChecks: string[];
+  rollbackPlan: string[];
+  status: AuthRbacMigrationPhaseStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type AuthRbacReadinessCheck = {
+  id: string;
+  category: AuthRbacReadinessCategory;
+  name: string;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type AuthRbacProductionRisk = {
+  id: string;
+  category: AuthRbacReadinessCategory | "actor_attribution" | "identity_operations" | "service_boundary";
+  title: string;
+  severity: ReadinessSeverity;
+  likelihood: ProductionRiskLikelihood;
+  impact: string;
+  mitigation: string;
+  status: ProductionRiskStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type TenantBoundaryPlan = {
+  id: string;
+  tenantKind: TenantBoundaryKind;
+  description: string;
+  isolationRequirements: string[];
+  dataAccessRules: string[];
+  providerAccessRules: string[];
+  secretAccessRules: string[];
+  auditRequirements: string[];
+  status: TenantBoundaryPlanStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type ServiceAccountPlan = {
+  id: string;
+  serviceAccountKind: ServiceAccountPlanKind;
+  requiredScopes: string[];
+  allowedActions: string[];
+  forbiddenActions: string[];
+  credentialStrategy: string;
+  rotationStrategy: string;
+  auditRequirements: string[];
+  status: ServiceAccountPlanStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type AuthRbacPermissionMatrixEntry = {
+  id: string;
+  roleName: ProductionRbacRoleName;
+  purpose: string;
+  allowedActions: string[];
+  deniedActions: string[];
+  requiredScopes: string[];
+  riskLevel: ReadinessSeverity;
+  productionDefault: "allow" | "deny" | "future_review";
+  auditRequirement: string;
+  currentImplementationStatus: "implemented_mock" | "partial_mock" | "planned" | "future_only";
+  futureWork: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type AuthRbacProductionSummary = {
+  generatedAt: Date;
+  status: "v1_implemented";
+  planningOnly: true;
+  productionReady: false;
+  currentProfileId: DeploymentProfileName;
+  productionAuthEnabled: false;
+  authMode: "mock";
+  mockActorEnabled: boolean;
+  mockActorWarning: string;
+  futureIdpConfigured: false;
+  externalIdpCallsEnabled: false;
+  realSessionsImplemented: false;
+  realJwtIssuanceImplemented: false;
+  passwordLoginImplemented: false;
+  serviceAccountCredentialIssuanceImplemented: false;
+  requestContextPropagationStatus: "partial_mock_only";
+  serviceAccountModelReady: boolean;
+  tenantScopeModelReady: false;
+  policySubjectTenantMappingImplemented: false;
+  mockHeaderOverrideProductionReady: false;
+  providerOptionCount: number;
+  recommendedProviderCount: number;
+  migrationPhaseCount: number;
+  readinessCheckCount: number;
+  criticalBlockerCount: number;
+  riskCount: number;
+  tenantBoundaryPlanCount: number;
+  serviceAccountPlanCount: number;
+  permissionMatrixRoleCount: number;
+  noTokensExposed: true;
+  cookiesExposed: false;
+  sessionIdsExposed: false;
+  passwordsExposed: false;
+  rawIdentityAssertionsExposed: false;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyEngineOption = {
+  id: string;
+  engineKind: PolicyEngineOptionKind;
+  displayName: string;
+  status: PolicyEngineOptionStatus;
+  supportsPartialEvaluation: boolean;
+  supportsSignedBundles: boolean;
+  supportsDecisionLogs: boolean;
+  supportsPolicyTests: boolean;
+  supportsHumanReadableReview: boolean;
+  supportsResourceHierarchy: boolean;
+  supportsTenantIsolation: boolean;
+  operationalComplexity: PolicyBundleOperationalComplexity;
+  productionRecommended: boolean;
+  notes: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyBundlePlan = {
+  id: string;
+  name: string;
+  bundleKind: PolicyBundleKind;
+  status: PolicyBundlePlanStatus;
+  targetDomains: PolicyDomainName[];
+  versioningStrategy: string;
+  signingStrategy: string;
+  reviewStrategy: string;
+  rolloutStrategy: string;
+  rollbackStrategy: string;
+  testStrategy: string;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyDomainMapping = {
+  id: string;
+  domain: PolicyDomainName;
+  currentImplementation: string;
+  futurePolicyBundle: string;
+  requiredInputs: string[];
+  requiredOutputs: string[];
+  migrationStatus: PolicyDomainMigrationStatus;
+  riskLevel: ReadinessSeverity;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyBundleReadinessCheck = {
+  id: string;
+  category: PolicyBundleReadinessCategory;
+  name: string;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyBundleRisk = {
+  id: string;
+  category: PolicyBundleReadinessCategory | "runtime_safety" | "policy_governance" | "migration";
+  title: string;
+  severity: ReadinessSeverity;
+  likelihood: ProductionRiskLikelihood;
+  impact: string;
+  mitigation: string;
+  status: ProductionRiskStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyBundleMigrationPhase = {
+  id: string;
+  name: string;
+  order: number;
+  sourceMode: string;
+  targetMode: string;
+  domains: PolicyDomainName[];
+  requiredPreconditions: string[];
+  migrationSteps: string[];
+  validationChecks: string[];
+  rollbackPlan: string[];
+  status: PolicyBundleMigrationPhaseStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyBundleReadinessSummary = {
+  generatedAt: Date;
+  status: "v0_implemented";
+  planningOnly: true;
+  productionReady: false;
+  currentEngineKind: "static_typescript_current";
+  policyBundleManagementEnabled: false;
+  externalPolicyEngineEnabled: false;
+  opaIntegrationEnabled: false;
+  cedarIntegrationEnabled: false;
+  signedBundleSupportEnabled: false;
+  signedBundleVerificationEnabled: false;
+  dynamicPolicyExecutionEnabled: false;
+  remotePolicyLoadingEnabled: false;
+  policyRuntimeChanged: false;
+  staticPolicyRuleCount: number;
+  engineOptionCount: number;
+  recommendedEngineCount: number;
+  bundlePlanCount: number;
+  domainMappingCount: number;
+  mappedDomainCount: number;
+  readinessCheckCount: number;
+  criticalBlockerCount: number;
+  riskCount: number;
+  migrationPhaseCount: number;
+  reviewWorkflowStatus: "planned_not_implemented";
+  testStrategyStatus: "planned_not_implemented";
+  rolloutStatus: "planned_not_implemented";
+  rollbackStatus: "planned_not_implemented";
+  breakGlassStatus: "planned_not_implemented";
+  noSecretsExposed: true;
+  policyCodeExecuted: false;
+  externalCallsEnabled: false;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentProfile = {
+  id: string;
+  name: "staging";
+  description: string;
+  status: StagingDeploymentStatus;
+  requiredComponents: DeploymentUnit[];
+  requiredEnvGates: string[];
+  forbiddenEnvGates: string[];
+  allowedIntegrations: StagingIntegrationKind[];
+  blockedIntegrations: StagingIntegrationKind[];
+  requiredStorageMode: StorageMode;
+  requiredAuthMode: AuthMode;
+  requiredSecretMode: SecretMode;
+  requiredPolicyMode: PolicyMode;
+  requiredObservabilityMode: ObservabilityMode;
+  readinessChecks: string[];
+  productionBlockers: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingIntegrationGate = {
+  id: string;
+  integrationKind: StagingIntegrationKind;
+  status: StagingIntegrationGateStatus;
+  requiredEnvVars: string[];
+  forbiddenEnvVars: string[];
+  requiredPolicies: string[];
+  requiredSecrets: string[];
+  notes: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingReadinessCheck = {
+  id: string;
+  category: StagingReadinessCategory;
+  name: string;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingPromotionCriterion = {
+  id: string;
+  fromProfile: "local" | "integration";
+  toProfile: "staging";
+  criterion: string;
+  required: boolean;
+  status: StagingCriterionStatus;
+  evidence: string[];
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingRollbackCriterion = {
+  id: string;
+  trigger: string;
+  severity: ReadinessSeverity;
+  requiredAction: string;
+  owner?: string;
+  status: StagingRollbackCriterionStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentSummary = {
+  generatedAt: Date;
+  status: "v0_implemented";
+  planningOnly: true;
+  productionReady: false;
+  stagingDeployed: false;
+  productionTrafficAllowed: false;
+  currentProfileId: DeploymentProfileName;
+  profileStatus: StagingDeploymentStatus;
+  requiredComponentCount: number;
+  requiredEnvGateCount: number;
+  forbiddenEnvGateCount: number;
+  integrationGateCount: number;
+  allowedGateCount: number;
+  gatedGateCount: number;
+  blockedGateCount: number;
+  futureGateCount: number;
+  readinessCheckCount: number;
+  criticalBlockerCount: number;
+  warningCount: number;
+  promotionCriteriaCount: number;
+  promotionCriteriaMetCount: number;
+  rollbackCriteriaCount: number;
+  mockActorWarning: string;
+  envFallbackWarning: string;
+  postgresRequired: true;
+  apiDashboardRequired: true;
+  remoteMergeForbidden: true;
+  remoteMcpForbidden: true;
+  vendorCliForbidden: true;
+  deploymentExecuted: false;
+  externalCallsEnabled: false;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  metadata: Record<string, unknown>;
+};
+
+export type CICDPipelineProfile = {
+  id: string;
+  name: CICDPipelineProfileName;
+  description: string;
+  status: CICDPipelineProfileStatus;
+  requiredJobs: string[];
+  optionalJobs: string[];
+  forbiddenJobs: string[];
+  requiredEnvGates: string[];
+  forbiddenEnvGates: string[];
+  requiredSecrets: string[];
+  artifactPolicy: string;
+  approvalPolicy: string;
+  metadata: Record<string, unknown>;
+};
+
+export type CICDJobDefinition = {
+  id: string;
+  profileId: CICDPipelineProfileName;
+  name: string;
+  category: CICDJobCategory;
+  command: string;
+  required: boolean;
+  allowedToCallExternalServices: boolean;
+  requiresSecrets: boolean;
+  requiredEnvVars: string[];
+  timeoutMinutes?: number;
+  artifacts: string[];
+  status: CICDJobStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type CICDIntegrationTestGate = {
+  id: string;
+  integrationKind: CICDIntegrationKind;
+  enabledByDefault: boolean;
+  requiredEnvVars: string[];
+  requiredSecrets: string[];
+  requiredApprovals: string[];
+  cleanupRequired: boolean;
+  allowedProfiles: CICDPipelineProfileName[];
+  blockedProfiles: CICDPipelineProfileName[];
+  riskLevel: ReadinessSeverity;
+  metadata: Record<string, unknown>;
+};
+
+export type CICDReadinessCheck = {
+  id: string;
+  category: CICDReadinessCategory;
+  name: string;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type CICDRisk = {
+  id: string;
+  category: CICDReadinessCategory | "remote_integration" | "deployment_safety" | "artifact_governance";
+  title: string;
+  severity: ReadinessSeverity;
+  likelihood: ProductionRiskLikelihood;
+  impact: string;
+  mitigation: string;
+  status: CICDRiskStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type CICDPipelineReadinessSummary = {
+  generatedAt: Date;
+  status: "v0_implemented";
+  planningOnly: true;
+  productionReady: false;
+  stagingDeployed: false;
+  deploymentWorkflowCreated: false;
+  activeWorkflowCreated: false;
+  externalCallsEnabledByDefault: false;
+  remoteIntegrationTestsEnabledByDefault: false;
+  secretsExposed: false;
+  envValuesExposed: false;
+  packageManager: "pnpm";
+  expectedNodeVersion: string;
+  voltaNodeVersion: string;
+  currentNodeVersion: string;
+  nodeVersionStatus: "pass" | "warning" | "unknown";
+  profileCount: number;
+  jobCount: number;
+  requiredJobCount: number;
+  optionalJobCount: number;
+  safetyJobCount: number;
+  integrationGateCount: number;
+  disabledByDefaultIntegrationGateCount: number;
+  readinessCheckCount: number;
+  criticalBlockerCount: number;
+  riskCount: number;
+  stagingPromotionReady: false;
+  artifactPolicyStatus: "planned_redacted_only";
+  cleanupRollbackStatus: "planned_manual_only";
+  noSecretScanStatus: "planned_required";
+  metadata: Record<string, unknown>;
+};
+
+export type GitHubAppIntegrationTestProfile = {
+  id: string;
+  name: string;
+  status: GitHubAppIntegrationTestProfileStatus;
+  requiredEnvVars: string[];
+  requiredSecretRefs: string[];
+  allowedRepos: string[];
+  allowedBranchPrefix: string;
+  allowedOperations: string[];
+  forbiddenOperations: string[];
+  cleanupPolicy: string;
+  auditRequirements: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type GitHubAppIntegrationTestCase = {
+  id: string;
+  profileId: string;
+  name: string;
+  category: GitHubAppIntegrationTestCaseCategory;
+  enabledByDefault: boolean;
+  requiresLiveGitHub: boolean;
+  requiredEnvVars: string[];
+  expectedSideEffects: string[];
+  cleanupRequired: boolean;
+  status: GitHubAppIntegrationTestCaseStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type GitHubAppIntegrationTestSafetyCheck = {
+  id: string;
+  category: GitHubAppIntegrationTestSafetyCategory;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type GitHubAppIntegrationTestReadinessSummary = {
+  generatedAt: Date;
+  status: "v1_implemented";
+  planningOnly: true;
+  productionReady: false;
+  liveTestsEnabled: boolean;
+  canRunLiveTests: boolean;
+  defaultLiveTestsSkipped: true;
+  requiredGateCount: number;
+  configuredGateCount: number;
+  missingGateCount: number;
+  unsafeGateCount: number;
+  missingRequiredEnvVars: string[];
+  unsafeGateWarnings: string[];
+  allowedRepoCount: number;
+  allowedBranchPrefix: "ai/";
+  branchPrefixConfigured: boolean;
+  branchPrefixMatchesRequired: boolean;
+  requiredSecretRefCount: number;
+  configuredSecretRefCount: number;
+  testCaseCount: number;
+  gatedLiveTestCaseCount: number;
+  webhookFixtureTestsEnabled: true;
+  liveWebhookTestsEnabled: boolean;
+  cleanupPolicyStatus: "manual_close_or_mark_only";
+  noAutoMerge: true;
+  noForcePush: true;
+  noBranchDelete: true;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  privateKeyExposed: false;
+  installationTokenExposed: false;
+  githubCallsInDefaultTests: false;
+  metadata: Record<string, unknown>;
+};
+
+export type LLMIntegrationTestProfile = {
+  id: string;
+  name: string;
+  status: LLMIntegrationTestProfileStatus;
+  providerKind: "openai_compatible";
+  providerId?: string;
+  requiredEnvVars: string[];
+  requiredSecretRefs: string[];
+  allowedModels: string[];
+  requiredBudgetLimitUsd: number;
+  requiredPolicies: string[];
+  allowedOperations: string[];
+  forbiddenOperations: string[];
+  promptPolicy: string;
+  outputPolicy: string;
+  auditRequirements: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type LLMIntegrationTestCase = {
+  id: string;
+  profileId: string;
+  name: string;
+  category: LLMIntegrationTestCaseCategory;
+  enabledByDefault: boolean;
+  requiresRemoteLLM: boolean;
+  requiredEnvVars: string[];
+  expectedSideEffects: string[];
+  cleanupRequired: boolean;
+  status: LLMIntegrationTestCaseStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type LLMIntegrationTestSafetyCheck = {
+  id: string;
+  category: LLMIntegrationTestSafetyCategory;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type LLMIntegrationTestReadinessSummary = {
+  generatedAt: Date;
+  status: "v1_implemented";
+  planningOnly: true;
+  productionReady: false;
+  liveTestsEnabled: boolean;
+  canRunLiveTests: boolean;
+  defaultLiveTestsSkipped: true;
+  requiredGateCount: number;
+  configuredGateCount: number;
+  missingGateCount: number;
+  unsafeGateCount: number;
+  missingRequiredEnvVars: string[];
+  unsafeGateWarnings: string[];
+  providerKind: "openai_compatible";
+  providerId: "openai_compatible";
+  remoteLlmEnabled: boolean;
+  remoteCompletionEnabled: boolean;
+  baseUrlConfigured: boolean;
+  apiKeyConfigured: boolean;
+  secretRefConfigured: boolean;
+  rawEnvApiKeyConfigured: boolean;
+  credentialSource: "secret_ref" | "test_env" | "none";
+  envSecretProviderEnabled: boolean;
+  allowedSecretEnvKeyConfigured: boolean;
+  allowedModelCount: number;
+  defaultModelConfigured: boolean;
+  defaultModelAllowlisted: boolean;
+  routingMode: string;
+  routingModeAllowed: boolean;
+  fallbackEnabled: boolean;
+  maxFallbackAttempts: number;
+  fallbackSafe: boolean;
+  budgetConfigured: boolean;
+  budgetLimitUsdConfigured: boolean;
+  promptClassConfigured: boolean;
+  requiredSecretRefCount: number;
+  configuredSecretRefCount: number;
+  testCaseCount: number;
+  gatedLiveTestCaseCount: number;
+  mockTestCaseCount: number;
+  noStreaming: true;
+  noToolCalls: true;
+  noVendorCli: true;
+  noCredentialCacheRead: true;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  apiKeyExposed: false;
+  rawProviderResponseExposed: false;
+  remoteLlmCallsInDefaultTests: false;
   metadata: Record<string, unknown>;
 };

@@ -99,7 +99,7 @@ export function hashWebhookPayload(rawBody: Buffer | string): string {
 }
 
 export function createGitHubWebhookConfigFromEnv(env: Record<string, string | undefined> = process.env): GitHubWebhookRuntimeConfig {
-  const secretRef = env.AICHESTRA_GITHUB_WEBHOOK_SECRET_REF?.trim() || undefined;
+  const secretRef = env.AICHESTRA_GITHUB_WEBHOOK_SECRET_REF?.trim() || env.AICHESTRA_GITHUB_APP_WEBHOOK_SECRET_REF?.trim() || undefined;
   const legacySecretConfigured = Boolean(env.AICHESTRA_GITHUB_WEBHOOK_SECRET);
   const allowedRepos = csv(env.AICHESTRA_GITHUB_WEBHOOK_ALLOWED_REPOS);
   return {
