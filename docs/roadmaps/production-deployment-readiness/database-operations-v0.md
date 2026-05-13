@@ -98,3 +98,9 @@ Audit-heavy tables need:
 - Many repositories remain in-memory.
 - No production migration history table beyond SQL execution convention is defined.
 - No partitioning or retention automation exists.
+
+## v1 Follow-Up
+
+Persistent DB Production Operations v1 is implemented in `docs/roadmaps/persistent-db-production-operations/v1.md` with read-only readiness models, migration file checksums, index review, retention/audit growth planning, webhook persistence planning, backup/restore runbook, connection pooling plan, `/readiness/database/*`, `/dashboard/database`, and safe `/health` DB operations metadata.
+
+v1 still does not make the database production-ready. Production remains blocked until pooled DB access, migration governance enforcement, backup/restore jobs, retention/legal hold, durable replay/dead-letter persistence, partitioning strategy, tenant scoping, real auth, and real secret backend work are implemented and tested.

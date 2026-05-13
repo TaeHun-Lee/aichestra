@@ -20,7 +20,11 @@
 16. LLM Gateway v2 - implemented
 17. MCP Gateway v0 - implemented
 18. Production Deployment Readiness Planning v0 - implemented
-19. Phase 5 enterprise planning
+19. Observability / Audit Retention v0 - implemented
+20. GitHub App / Production Webhook Hardening Planning v0 - implemented
+21. Persistent DB Production Operations v1 - implemented
+22. Secret Backend Migration Planning v0 - implemented
+23. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -284,7 +288,7 @@ Goals:
 - Apply redaction to input/output/audit previews.
 - Expose `/mcp/*`, `/health`, and `/dashboard/mcp` visibility without secrets or raw output.
 
-Recommended next step: Production deployment readiness planning has been completed as a planning/readiness milestone. Continue with GitHub App / production webhook hardening planning, or observability/audit retention implementation v0.
+Recommended next step: Production deployment readiness, observability/audit, GitHub App hardening planning, Persistent DB Production Operations v1, and Secret Backend Migration Planning v0 have been completed. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1.
 
 ## 18. Production Deployment Readiness Planning v0
 
@@ -298,9 +302,67 @@ Goals:
 - Expose planning-only readiness API/dashboard read models without external calls or secrets.
 - Keep production deployment, infrastructure manifests, real auth, real secret backends, real MCP transport, real provider calls, and vendor CLI execution out of scope.
 
-Recommended next step: GitHub App / production webhook hardening planning, or observability/audit retention implementation v0.
+Recommended next step: Observability / Audit Retention v0, GitHub App / production webhook hardening planning, Persistent DB Production Operations v1, and Secret Backend Migration Planning v0 have been completed. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1.
 
-## 19. Phase 5 Enterprise Planning
+## 19. Observability / Audit Retention v0
+
+Implemented with `docs/foundations/observability-audit-retention/v0.md`, `docs/foundations/observability-audit-retention/v0-plan.md`, `docs/reference/audit-source-inventory.md`, `packages/observability`, read-only `/observability/*` API endpoints, `/dashboard/observability`, and deterministic tests.
+
+Goals:
+
+- Define a provider-neutral common audit taxonomy and `AuditEventEnvelope`.
+- Normalize existing module audit sources into a shared read model where practical.
+- Add retention and redaction class models plus read-only retention policies.
+- Add audit sanitizer coverage for API keys, GitHub tokens, webhook secrets, bearer tokens, JWT-like strings, env dumps, credential cache paths, raw prompts/tool input, and large metadata.
+- Add metric and trace skeleton read models without external exporters.
+- Surface observability/audit state in API health and dashboard read models.
+- Keep external observability backends, alert delivery, audit export, and retention deletion jobs out of scope.
+
+Recommended next step: GitHub App / production webhook hardening planning, Persistent DB Production Operations v1, and Secret Backend Migration Planning v0 have been completed. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1.
+
+## 20. GitHub App / Production Webhook Hardening Planning v0
+
+Implemented with `docs/roadmaps/github-app-production-webhook-hardening/v0.md`, `docs/reference/github-app-permission-matrix.md`, `docs/reference/github-webhook-event-allowlist.md`, deterministic planning/readiness models in `packages/deployment-readiness`, read-only `/readiness/github-app/*` API endpoints, `/dashboard/github-app`, dashboard rendering, planned GitHub webhook metric definitions, and tests.
+
+Goals:
+
+- Define the future GitHub App target architecture without implementing live GitHub App behavior.
+- Document least-privilege permissions, denying workflows, administration, secrets, and deployments by default.
+- Document webhook event allowlist behavior and read-model-only side effects.
+- Model replay classification, retry/dead-letter readiness, credential readiness, production endpoint readiness, blockers, and production risks.
+- Keep default runtime mock-first with no GitHub calls, no private key reads, no JWT signing, no installation token exchange, no production webhooks, and no destructive Git operations.
+
+Recommended next step: Persistent DB Production Operations v1 and Secret Backend Migration Planning v0 are implemented. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1 if secret backend planning is sufficiently mature.
+
+## 21. Persistent DB Production Operations v1
+
+Implemented with `docs/roadmaps/persistent-db-production-operations/v1.md`, supporting runbooks, deterministic database operations readiness models in `packages/deployment-readiness`, read-only `/readiness/database/*` API endpoints, `/dashboard/database`, safe `/health` database operations metadata, and tests.
+
+Goals:
+
+- Define production DB operations without provisioning or connecting to production databases.
+- Surface migration file metadata and checksums without executing migrations.
+- Plan connection pooling, migration governance, backup/restore, index review, retention/audit growth, and webhook replay/dead-letter persistence.
+- Keep DB operations non-destructive: no deletion jobs, no backup/restore jobs, no live partition jobs, no automatic migrations, and no DB URL exposure.
+- Keep default runtime in-memory/mock-first and optional Postgres tests gated by `AICHESTRA_TEST_DATABASE_URL`.
+
+Recommended next step: Secret Backend Migration Planning v0 is implemented. Continue with Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1 if secret backend planning is sufficiently mature.
+
+## 22. Secret Backend Migration Planning v0
+
+Implemented with `docs/roadmaps/secret-backend-migration/v0.md`, backend option comparison, SecretRef provider migration, credential kind migration, lease/rotation strategy, env fallback deprecation plan, deterministic secret backend readiness models in `packages/deployment-readiness`, read-only `/readiness/secrets/*` API endpoints, `/dashboard/secret-backend`, safe `/health` secret backend metadata, and tests.
+
+Goals:
+
+- Compare Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, custom future backends, env legacy fallback, and mock behavior.
+- Define SecretRef migration from env fallback to a selected real backend without moving actual secret values.
+- Plan credential migration for GitHub, webhook, LLM, provider API, MCP, Local Agent, OAuth/cloud identity, service account signing, and future BYOK credentials.
+- Model lease TTL, rotation, revocation, env fallback deprecation, readiness checks, and production risks.
+- Keep runtime read-only and mock-first: no real secret backend calls, no rotation jobs, no credential issuance, no cache reads, and no env value exposure.
+
+Recommended next step: Production Auth/RBAC v1 planning, or GitHub App controlled implementation v1 if secret backend planning is sufficiently mature.
+
+## 23. Phase 5 Enterprise Planning
 
 Goals:
 

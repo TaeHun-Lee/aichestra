@@ -38,6 +38,9 @@ importers:
       '@aichestra/mcp-gateway':
         specifier: workspace:*
         version: link:packages/mcp-gateway
+      '@aichestra/observability':
+        specifier: workspace:*
+        version: link:packages/observability
       '@aichestra/policy':
         specifier: workspace:*
         version: link:packages/policy
@@ -89,6 +92,9 @@ importers:
       '@aichestra/mcp-gateway':
         specifier: workspace:*
         version: link:../../packages/mcp-gateway
+      '@aichestra/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@aichestra/policy':
         specifier: workspace:*
         version: link:../../packages/policy
@@ -258,6 +264,8 @@ importers:
       '@aichestra/security':
         specifier: workspace:*
         version: link:../security
+
+  packages/observability: {}
 
   packages/policy:
     dependencies:

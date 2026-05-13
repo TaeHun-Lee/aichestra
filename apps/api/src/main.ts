@@ -14,12 +14,43 @@ import {
 import type { StorageProvider } from "@aichestra/db";
 import {
   createDeploymentReadinessService,
+  databaseAuditGrowthPlanToDto,
+  databaseDeploymentProfileToDto,
+  databaseIndexReviewItemToDto,
+  databaseMigrationStatusToDto,
+  databaseOperationRiskToDto,
+  databaseOperationsSummaryToDto,
+  databaseReadinessCheckToDto,
+  databaseRetentionPlanToDto,
+  databaseSchemaInventoryItemToDto,
+  databaseWebhookPersistencePlanToDto,
   deploymentProfileToDto,
   deploymentReadinessSummaryToDto,
+  githubAppCredentialReadinessToDto,
+  githubAppDescriptorToDto,
+  githubAppInstallationToDto,
+  githubAppPermissionMatrixEntryToDto,
+  githubAppProductionRiskToDto,
+  githubAppReadinessCheckToDto,
+  githubAppRepositoryGrantToDto,
+  githubProductionWebhookEndpointPlanToDto,
+  githubWebhookDeadLetterPlanToDto,
+  githubWebhookDeadLetterRecordToDto,
+  githubWebhookDeliveryRecordToDto,
+  githubWebhookEventAllowlistEntryToDto,
+  githubWebhookHardeningSummaryToDto,
+  githubWebhookReplayProtectionPlanToDto,
   productionRiskToDto,
-  readinessCheckToDto
+  readinessCheckToDto,
+  secretBackendMigrationPhaseToDto,
+  secretBackendMigrationSummaryToDto,
+  secretBackendOptionToDto,
+  secretBackendReadinessCheckToDto,
+  secretBackendRiskToDto,
+  secretLeasePolicyToDto,
+  secretRotationPlanToDto
 } from "@aichestra/deployment-readiness";
-import type { DeploymentReadinessService } from "@aichestra/deployment-readiness";
+import type { DeploymentReadinessService, SecretBackendReadinessCategory } from "@aichestra/deployment-readiness";
 import {
   AuthorizationService,
   InMemoryAuthRepository,
@@ -98,6 +129,20 @@ import {
   mcpToolInvocationResultToDto
 } from "@aichestra/mcp-gateway";
 import type { MCPGateway, MCPToolInvocationStatus } from "@aichestra/mcp-gateway";
+import {
+  auditQueryResultToDto,
+  auditRedactionClassToDto,
+  auditRetentionClassToDto,
+  auditRetentionPolicyToDto,
+  auditSourceCoverageToDto,
+  auditSummaryToDto,
+  createObservabilityService,
+  metricDefinitionToDto,
+  metricSnapshotToDto,
+  observabilityConfigToDto,
+  traceSpanToDto
+} from "@aichestra/observability";
+import type { AuditCategory, AuditOutcome, AuditSeverity, ObservabilityService } from "@aichestra/observability";
 import {
   AgentRunnerService,
   MockAgentRunner,
@@ -212,6 +257,7 @@ type RouteContext = {
   localAgentProtocolService: LocalAgentProtocolService;
   mcpGatewayService: MCPGateway;
   deploymentReadinessService: DeploymentReadinessService;
+  observabilityService: ObservabilityService;
 };
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -256,6 +302,62 @@ async function readRawBody(request: IncomingMessage): Promise<Buffer> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+const observabilityAuditCategories = new Set<AuditCategory>([
+  "auth",
+  "policy",
+  "credential",
+  "git",
+  "git_webhook",
+  "llm",
+  "mcp",
+  "runner",
+  "registry",
+  "improvement",
+  "local_agent",
+  "security",
+  "dashboard",
+  "system"
+]);
+const observabilityAuditOutcomes = new Set<AuditOutcome>(["success", "denied", "blocked", "failed", "skipped", "unknown"]);
+const observabilityAuditSeverities = new Set<AuditSeverity>(["debug", "info", "warning", "error", "critical"]);
+
+function csvQueryValues(url: URL, ...names: string[]): string[] {
+  return names.flatMap((name) => url.searchParams.getAll(name))
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function parseAuditCategories(url: URL): AuditCategory[] | undefined {
+  const values = csvQueryValues(url, "category", "categories");
+  const categories = values.filter((value): value is AuditCategory => observabilityAuditCategories.has(value as AuditCategory));
+  return categories.length > 0 ? categories : undefined;
+}
+
+function parseAuditOutcome(url: URL): AuditOutcome | undefined {
+  const value = url.searchParams.get("outcome") ?? undefined;
+  return value && observabilityAuditOutcomes.has(value as AuditOutcome) ? value as AuditOutcome : undefined;
+}
+
+function parseAuditSeverity(url: URL): AuditSeverity | undefined {
+  const value = url.searchParams.get("severity") ?? undefined;
+  return value && observabilityAuditSeverities.has(value as AuditSeverity) ? value as AuditSeverity : undefined;
+}
+
+function parseDateQuery(url: URL, name: string): Date | undefined {
+  const value = url.searchParams.get(name);
+  if (!value) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+function parsePositiveIntegerQuery(url: URL, name: string): number | undefined {
+  const value = url.searchParams.get(name);
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function isMergeSimulationStatus(value: unknown): value is MergeSimulationStatus {
@@ -555,6 +657,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 
     if (method === "GET" && url.pathname === "/health") {
       const storage = await context.storageProvider.healthCheck();
+      const databaseOperations = context.deploymentReadinessService.getDatabaseOperationsSummary();
+      const secretBackendMigration = context.deploymentReadinessService.getSecretBackendMigrationSummary();
+      const secretRefs = context.securityService.listSecretRefs();
       sendJson(response, storage.healthy ? 200 : 503, {
         status: storage.healthy ? "ok" : "degraded",
         service: "aichestra-api",
@@ -563,6 +668,42 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           healthy: storage.healthy,
           message: storage.message,
           checkedAt: storage.checkedAt.toISOString()
+        },
+        databaseOperations: {
+          status: databaseOperations.status,
+          planningOnly: databaseOperations.planningOnly,
+          productionReady: databaseOperations.productionReady,
+          storageProviderKind: databaseOperations.storageProviderKind,
+          databaseUrlConfigured: databaseOperations.databaseUrlConfigured,
+          databaseUrlExposed: databaseOperations.databaseUrlExposed,
+          optionalPostgresTestUrlConfigured: databaseOperations.testDatabaseUrlConfigured,
+          migrationRunnerAvailable: databaseOperations.migrationRunnerAvailable,
+          migrationFileCount: databaseOperations.migrationFileCount,
+          poolingEnabled: false,
+          backupConfigured: false,
+          restoreTested: false,
+          retentionDeletionJobsEnabled: false,
+          productionDbConnectionAttempted: false,
+          noSecretsExposed: true
+        },
+        secretBackendMigration: {
+          status: secretBackendMigration.status,
+          planningOnly: secretBackendMigration.planningOnly,
+          productionReady: secretBackendMigration.productionReady,
+          currentProfileId: secretBackendMigration.currentProfileId,
+          envFallbackAllowedForCurrentProfile: secretBackendMigration.envFallbackAllowedForCurrentProfile,
+          envFallbackWarning: secretBackendMigration.envFallbackWarning,
+          realSecretBackendConfigured: secretBackendMigration.realSecretBackendConfigured,
+          activeSecretRefCount: secretRefs.filter((secretRef) => secretRef.status === "active").length,
+          disabledSecretRefCount: secretRefs.filter((secretRef) => secretRef.status === "disabled").length,
+          revokedSecretRefCount: secretRefs.filter((secretRef) => secretRef.status === "revoked").length,
+          noSecretValuesExposed: secretBackendMigration.noSecretsExposed,
+          noEnvValuesExposed: !secretBackendMigration.envValuesExposed,
+          credentialCachesRead: secretBackendMigration.credentialCachesRead,
+          credentialResolutionAttempted: secretBackendMigration.credentialResolutionAttempted,
+          rotationJobsImplemented: secretBackendMigration.rotationJobsImplemented,
+          productionCredentialIssuanceImplemented: secretBackendMigration.productionCredentialIssuanceImplemented,
+          externalCallsEnabled: secretBackendMigration.externalCallsEnabled
         },
         git: {
           providerKind: context.gitProviderConfig.providerKind,
@@ -680,6 +821,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           secretsExposed: false,
           tokensExposed: false
         },
+        observability: {
+          status: context.observabilityService.getConfig().status,
+          aggregationMode: context.observabilityService.getConfig().aggregationMode,
+          normalizedAuditEventCount: context.observabilityService.getAuditSummary().totalEvents,
+          auditSourceCount: context.observabilityService.listAuditSources().length,
+          retentionPolicyCount: context.observabilityService.listRetentionPolicies().length,
+          metricDefinitionCount: context.observabilityService.listMetricDefinitions().length,
+          traceSkeletonEnabled: true,
+          externalBackendEnabled: false,
+          externalExportEnabled: false,
+          alertDeliveryEnabled: false,
+          retentionDeletionJobsEnabled: false,
+          rawPayloadStorageEnabled: false,
+          secretsExposed: false,
+          tokensExposed: false
+        },
         security: {
           secretManagerKind: context.securityService.getConfig().secretManagerKind,
           credentialManagerKind: context.securityService.getConfig().credentialManagerKind,
@@ -739,6 +896,228 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "database") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Database operations readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: databaseOperationsSummaryToDto(readiness.getDatabaseOperationsSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "profiles") {
+        sendJson(response, 200, { profiles: readiness.listDatabaseDeploymentProfiles().map(databaseDeploymentProfileToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const profileId = url.searchParams.get("profileId") ?? undefined;
+        sendJson(response, 200, {
+          checks: readiness.listDatabaseReadinessChecks(profileId === "local" || profileId === "integration" || profileId === "staging" || profileId === "production" ? { profileId } : {})
+            .map(databaseReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listDatabaseOperationRisks().map(databaseOperationRiskToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "migrations") {
+        sendJson(response, 200, { migrations: readiness.getDatabaseMigrationStatus().map(databaseMigrationStatusToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "schema") {
+        sendJson(response, 200, { schema: readiness.getDatabaseSchemaInventory().map(databaseSchemaInventoryItemToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "index-review") {
+        sendJson(response, 200, { indexReview: readiness.getDatabaseIndexReview().map(databaseIndexReviewItemToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "retention") {
+        sendJson(response, 200, { retention: databaseRetentionPlanToDto(readiness.getDatabaseRetentionPlan()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "audit-growth") {
+        sendJson(response, 200, { auditGrowth: databaseAuditGrowthPlanToDto(readiness.getDatabaseAuditGrowthPlan()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "webhook-persistence") {
+        sendJson(response, 200, { webhookPersistence: databaseWebhookPersistencePlanToDto(readiness.getDatabaseWebhookPersistencePlan()) });
+        return;
+      }
+      sendJson(response, 404, { error: "database_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "secrets") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Secret backend migration readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: secretBackendMigrationSummaryToDto(readiness.getSecretBackendMigrationSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "backends") {
+        sendJson(response, 200, { backends: readiness.listSecretBackendOptions().map(secretBackendOptionToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "migration-phases") {
+        sendJson(response, 200, { migrationPhases: readiness.listSecretBackendMigrationPhases().map(secretBackendMigrationPhaseToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["backend_selection", "secret_ref_schema", "lease_ttl", "rotation", "audit", "auth_policy", "env_fallback", "provider_integration", "dashboard", "observability", "incident_response"];
+        sendJson(response, 200, {
+          checks: readiness.listSecretBackendReadinessChecks(category && categories.includes(category) ? { category: category as SecretBackendReadinessCategory } : {})
+            .map(secretBackendReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listSecretBackendRisks().map(secretBackendRiskToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "rotation-plans") {
+        sendJson(response, 200, { rotationPlans: readiness.listSecretRotationPlans().map(secretRotationPlanToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "lease-policies") {
+        sendJson(response, 200, { leasePolicies: readiness.listSecretLeasePolicies().map(secretLeasePolicyToDto) });
+        return;
+      }
+      sendJson(response, 404, { error: "secret_backend_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "github-app") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "GitHub App readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, {
+          summary: githubWebhookHardeningSummaryToDto(readiness.getGitHubWebhookHardeningSummary()),
+          descriptors: readiness.listGitHubAppDescriptors().map(githubAppDescriptorToDto),
+          installations: readiness.listGitHubAppInstallations().map(githubAppInstallationToDto),
+          repositoryGrants: readiness.listGitHubAppRepositoryGrants().map(githubAppRepositoryGrantToDto),
+          readinessChecks: readiness.listGitHubAppReadinessChecks().map(githubAppReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "permissions") {
+        sendJson(response, 200, { permissions: readiness.listGitHubAppPermissionMatrix().map(githubAppPermissionMatrixEntryToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "webhook-events") {
+        sendJson(response, 200, { events: readiness.listGitHubWebhookEventAllowlist().map(githubWebhookEventAllowlistEntryToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "replay-protection") {
+        sendJson(response, 200, {
+          plan: githubWebhookReplayProtectionPlanToDto(readiness.getGitHubWebhookReplayProtectionPlan()),
+          deliveryRecords: readiness.listGitHubWebhookDeliveryRecords().map(githubWebhookDeliveryRecordToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "dead-letter") {
+        sendJson(response, 200, {
+          plan: githubWebhookDeadLetterPlanToDto(readiness.getGitHubWebhookDeadLetterPlan()),
+          records: readiness.listGitHubWebhookDeadLetterRecords().map(githubWebhookDeadLetterRecordToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "credentials") {
+        sendJson(response, 200, { readiness: githubAppCredentialReadinessToDto(readiness.getGitHubAppCredentialReadiness()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "endpoint") {
+        sendJson(response, 200, { endpoint: githubProductionWebhookEndpointPlanToDto(readiness.getGitHubProductionWebhookEndpointPlan()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listGitHubAppProductionRisks().map(githubAppProductionRiskToDto) });
+        return;
+      }
+      sendJson(response, 404, { error: "github_app_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "observability") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Observability endpoints are read-only." });
+        return;
+      }
+      const observability = context.observabilityService;
+      if (segments.length === 2 && segments[1] === "config") {
+        sendJson(response, 200, {
+          config: observabilityConfigToDto(observability.getConfig()),
+          retentionPolicies: observability.listRetentionPolicies().map(auditRetentionPolicyToDto)
+        } as JsonValue);
+        return;
+      }
+      if (segments[1] === "audit") {
+        if (segments.length === 3 && segments[2] === "events") {
+          sendJson(response, 200, auditQueryResultToDto(observability.listAuditEvents({
+            categories: parseAuditCategories(url),
+            eventTypes: csvQueryValues(url, "eventType", "eventTypes"),
+            actorId: url.searchParams.get("actorId") ?? undefined,
+            taskId: url.searchParams.get("taskId") ?? undefined,
+            taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+            providerId: url.searchParams.get("providerId") ?? undefined,
+            outcome: parseAuditOutcome(url),
+            severity: parseAuditSeverity(url),
+            since: parseDateQuery(url, "since"),
+            until: parseDateQuery(url, "until"),
+            limit: parsePositiveIntegerQuery(url, "limit")
+          })) as JsonValue);
+          return;
+        }
+        if (segments.length === 3 && segments[2] === "summary") {
+          sendJson(response, 200, { summary: auditSummaryToDto(observability.getAuditSummary()) } as JsonValue);
+          return;
+        }
+        if (segments.length === 3 && segments[2] === "retention-classes") {
+          sendJson(response, 200, { retentionClasses: observability.listRetentionClasses().map(auditRetentionClassToDto) } as JsonValue);
+          return;
+        }
+        if (segments.length === 3 && segments[2] === "redaction-classes") {
+          sendJson(response, 200, { redactionClasses: observability.listRedactionClasses().map(auditRedactionClassToDto) } as JsonValue);
+          return;
+        }
+        if (segments.length === 3 && segments[2] === "sources") {
+          sendJson(response, 200, { sources: observability.listAuditSources().map(auditSourceCoverageToDto) } as JsonValue);
+          return;
+        }
+      }
+      if (segments.length === 2 && segments[1] === "metrics") {
+        sendJson(response, 200, { metrics: observability.listMetricDefinitions().map(metricDefinitionToDto) } as JsonValue);
+        return;
+      }
+      if (segments.length === 3 && segments[1] === "metrics" && segments[2] === "snapshot") {
+        sendJson(response, 200, { snapshot: metricSnapshotToDto(observability.getMetricSnapshot()) } as JsonValue);
+        return;
+      }
+      if (segments.length === 2 && segments[1] === "traces") {
+        sendJson(response, 200, {
+          traceSpans: observability.listTraceSpans({
+            traceId: url.searchParams.get("traceId") ?? undefined,
+            taskId: url.searchParams.get("taskId") ?? undefined,
+            taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+            providerId: url.searchParams.get("providerId") ?? undefined,
+            limit: parsePositiveIntegerQuery(url, "limit")
+          }).map(traceSpanToDto)
+        } as JsonValue);
+        return;
+      }
+      sendJson(response, 404, { error: "observability_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "dashboard") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Dashboard read models are read-only." });
@@ -756,6 +1135,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (section === "git") {
         sendJson(response, 200, { git: dashboard.git });
+        return;
+      }
+      if (section === "github-app") {
+        sendJson(response, 200, { githubApp: dashboard.githubApp });
         return;
       }
       if (section === "conflicts") {
@@ -800,6 +1183,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (section === "readiness") {
         sendJson(response, 200, { readiness: dashboard.readiness });
+        return;
+      }
+      if (section === "database") {
+        sendJson(response, 200, { database: dashboard.database });
+        return;
+      }
+      if (section === "secret-backend") {
+        sendJson(response, 200, { secretBackend: dashboard.secretBackend });
+        return;
+      }
+      if (section === "observability") {
+        sendJson(response, 200, { observability: dashboard.observability });
         return;
       }
       if (section === "audit") {
@@ -3856,6 +4251,25 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     policyService,
     securityService
   });
+  const observabilityService = createObservabilityService({
+    sourceProvider: () => ({
+      coreAuditLogs: store.listAuditLogs().filter((event) => !event.action.startsWith("git.")),
+      authAuditEvents: authorizationService.listAuditEvents(),
+      policyAuditEntries: policyService.listAuditEntries(),
+      securityAuditEvents: securityService.listAuditEvents(),
+      gitAuditEvents: gitIntegrationService.listGitAuditEvents(),
+      gitWebhookAuditEvents: gitWebhookReceiverService.listAuditEvents(),
+      llmAuditEvents: llmGatewayService.listAuditEvents(),
+      mcpAuditEvents: mcpGatewayService.listAuditEvents(),
+      agentRunAuditEvents: agentRunnerService.listAuditEvents(),
+      registryAuditLogs: registryService.listAuditLogs(),
+      improvementGovernanceAuditEvents: improvementServices.governance.listAuditEvents(),
+      localAgentAuditEvents: localAgentProtocolService.listAuditEvents(),
+      providerAuditEvents: providerAbstractionService.listAuditEvents(),
+      deploymentReadinessChecks: deploymentReadinessService.listChecks(),
+      deploymentRisks: deploymentReadinessService.listRisks()
+    })
+  });
   return createServer((request, response) => {
     void handleRequest(request, response, {
       store,
@@ -3876,7 +4290,8 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       securityService,
       localAgentProtocolService,
       mcpGatewayService,
-      deploymentReadinessService
+      deploymentReadinessService,
+      observabilityService
     });
   });
 }

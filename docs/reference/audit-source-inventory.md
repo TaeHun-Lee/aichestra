@@ -1,0 +1,32 @@
+# Audit Source Inventory
+
+This inventory tracks current module-specific audit sources and how Observability / Audit Retention v0 normalizes them into `AuditEventEnvelope`.
+
+| Module | Audit source | Current repository/storage | Normalized | Key event types | Sensitive fields | Retention class | Redaction class | Missing gaps |
+|---|---|---|---|---|---|---|---|---|
+| Core workflow | `AuditLog` | `InMemoryAichestraStore.auditLogs` | yes | task/workflow/store audit actions | generic metadata, task refs | `operational` | `internal_metadata` | No durable common audit table. |
+| Auth/RBAC | `AuthAuditEvent` | `InMemoryAuthRepository` | yes | authorization allow/deny, mock auth context | actor/principal ids, auth mode | `security` | `sensitive_metadata` | Production IdP/session audit not implemented. |
+| Policy | `PolicyDecisionAuditEntry` | `PolicyService` in-memory audit repository | yes | policy allow/deny, matched rules | policy context metadata | `security` | `sensitive_metadata` | No signed policy bundle or durable policy audit store. |
+| SecretRef/Credentials | `SecurityAuditEvent` credential events | `SecurityControlService` in-memory repositories | yes | credential resolve/check/allow/deny | secret ref ids, env-key names, provider ids | `security` | `secret_adjacent` | Real secret backend audit remains future work. |
+| Secrets/Sandbox | `SecurityAuditEvent` security events | `SecurityControlService` in-memory repositories | yes | secret lease checks, sandbox, network, redaction decisions | secret refs, sandbox ids, redacted previews | `security` | `secret_adjacent` | No production sandbox/network runtime audit. |
+| Git | `git.*` `AuditLog` | `InMemoryAichestraStore.auditLogs` via `GitIntegrationService` | yes | branch/PR/config/remote operation audit | repo refs, branch names, provider ids | `operational` | `sensitive_metadata` | GitHub App production hardening is planning-only; no installation token audit exists yet. |
+| GitHub Webhook | `GitWebhookAuditEvent` | `InMemoryAichestraStore.gitWebhookAuditEvents` plus GitHub App hardening planning read models | yes | verification, receive, process, reject, sync, planned duplicate/dead-letter events | delivery ids, repo refs, payload hashes | `security` | `never_store_raw` | Production endpoint, durable replay store, queue, and dead-letter worker remain future. |
+| LLM Gateway | `LLMAuditEvent` | `LLMGatewayService` in-memory audit repository | yes | route, completion, block, provider error, budget/policy denial | model ids, provider ids, redacted prompt/output previews | `operational` | `contains_user_content_redacted` | No broad provider audit or durable route/audit store. |
+| MCP Gateway | `MCPToolAuditEvent` | `InMemoryMCPToolAuditRepository` | yes | tool invoked/completed/denied/blocked | tool input/output previews, server/tool ids | `operational` | `contains_user_content_redacted` | Real MCP transport audit remains future. |
+| Runner | `AgentRunAuditEvent` | `InMemoryAgentRunAuditRepository` | yes | run lifecycle, command blocked/executed, workspace status | stdout/stderr previews, workspace paths | `operational` | `contains_user_content_redacted` | Production sandbox and durable runner audit remain future. |
+| Registry | `RegistryAuditLogEntry` | registry audit repository | yes | create/update/status/approval/eval/import/rollback | before/after registry snapshots | `compliance` | `internal_metadata` | Production mutation auth and signed artifacts remain future. |
+| Improvement Governance | `ImprovementGovernanceAuditEvent` | improvement governance in-memory repository | yes | proposal decision, eval metadata, canary/apply gates | proposal ids, review metadata | `compliance` | `internal_metadata` | Real eval/canary/apply execution remains future and disabled. |
+| Local Agent Protocol | `LocalAgentProtocolAuditEvent` | local-agent protocol in-memory repository | yes | registration, channel, consent, invocation, stream, cache denied | host ids, agent ids, stream previews, credential cache references | `operational` | `contains_user_content_redacted` | Real daemon/transport/vendor CLI audit remains future. |
+| Enterprise Provider Abstraction | `ProviderAuditEvent` | provider abstraction in-memory audit repository | partial | provider catalog, validate, local-agent-required, blocked invocation | provider ids, auth types, credential access metadata | `operational` | `secret_adjacent` | Future provider-specific audit streams are not implemented. |
+| Deployment Readiness | `ReadinessCheck`, `ProductionRisk`, GitHub App hardening readiness records, DB operations readiness records, Secret Backend Migration readiness records | deterministic seeded read-only service | partial | observability blocker checks, GitHub App/webhook hardening blockers, DB operations blockers, secret backend blockers and risks | planning metadata only | `operational` | `public_metadata` | Not an audit stream; included as readiness context only. |
+
+## Sensitive Field Rules
+
+- Do not store raw secrets, provider tokens, webhook secrets, credential values, raw webhook payloads, unredacted prompt/tool input, unredacted provider output, or credential cache contents in normalized envelopes.
+- Credential cache paths such as `~/.codex/auth.json`, `~/.claude`, Google credential cache paths, and application-default-credential paths must be redacted.
+- Environment variable names may appear as names, but values must be masked.
+- Metadata is sanitized and size-limited before storage or API/dashboard return.
+
+## v0 Coverage Notes
+
+All major existing audit sources are normalized or represented as partial planning/context sources. v0 does not physically migrate source repositories into one durable table, does not export records externally, and does not delete records according to retention policy.

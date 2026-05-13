@@ -68,6 +68,13 @@ function jsonHasUnsafeSecret(value: unknown): boolean {
     text.includes("OPENAI_API_KEY=") ||
     text.includes("ANTHROPIC_API_KEY=") ||
     text.includes("GITHUB_TOKEN=") ||
+    text.includes("GITHUB_APP_PRIVATE_KEY=") ||
+    text.includes("VAULT_TOKEN=") ||
+    text.includes("AWS_SECRET_ACCESS_KEY=") ||
+    text.includes("GCP_SECRET=") ||
+    text.includes("AZURE_KEY=") ||
+    text.includes("postgres://") ||
+    text.includes("db-password") ||
     text.includes("auth.json");
 }
 
@@ -87,6 +94,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const overview = await getJson(port, "/dashboard/overview") as { overview: { source: string; safety: { noSecretsExposed: boolean; remoteMergeEnabled: boolean } } };
     const tasks = await getJson(port, "/dashboard/tasks") as { tasks: { tasks: unknown[]; taskRuns: unknown[] } };
     const git = await getJson(port, "/dashboard/git") as { git: { config: { remoteGitEnabled: boolean }; blockedExamples: unknown[]; remoteAuditEvents: unknown[] } };
+    const githubApp = await getJson(port, "/dashboard/github-app") as { githubApp: { summary: { productionReady: boolean; externalCallsEnabled: boolean }; permissionMatrix: unknown[]; webhookEventAllowlist: unknown[]; noSecretStatus: { noSecretsExposed: boolean } } };
     const llm = await getJson(port, "/dashboard/llm") as { llm: { models: unknown[]; blockedExamples: unknown[] } };
     const agents = await getJson(port, "/dashboard/agents") as { agents: { config: { localCommandExecutionEnabled: boolean }; blockedExamples: unknown[] } };
     const policy = await getJson(port, "/dashboard/policy") as { policy: { rules: unknown[]; blockedExamples: unknown[] } };
@@ -95,6 +103,9 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const security = await getJson(port, "/dashboard/security") as { security: { secretRefs: unknown[]; blockedExamples: unknown[] } };
     const localAgents = await getJson(port, "/dashboard/local-agents") as { localAgents: { config: { realTransportEnabled: boolean; vendorCliExecutionEnabled: boolean }; blockedExamples: unknown[] } };
     const readiness = await getJson(port, "/dashboard/readiness") as { readiness: { summary: { productionReady: boolean; criticalBlockerCount: number }; environmentWarnings: unknown[]; noSecretsExposed: boolean } };
+    const database = await getJson(port, "/dashboard/database") as { database: { summary: { productionReady: boolean; databaseUrlExposed: boolean; productionDbConnectionAttempted: boolean }; migrations: unknown[]; indexReview: unknown[]; noSecretStatus: { databaseUrlExposed: boolean } } };
+    const secretBackend = await getJson(port, "/dashboard/secret-backend") as { secretBackend: { summary: { productionReady: boolean; realSecretBackendConfigured: boolean; externalCallsEnabled: boolean }; backendOptions: unknown[]; blockers: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
+    const observability = await getJson(port, "/dashboard/observability") as { observability: { config: { externalBackendEnabled: boolean }; sourceCoverage: unknown[]; noSecretStatus: { noSecretsExposed: boolean } } };
     const audit = await getJson(port, "/dashboard/audit") as { audit: { auditGroups: unknown[]; summary: { noSecretsExposed: boolean } } };
 
     assert.equal(overview.overview.source, "api");
@@ -104,6 +115,11 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(Array.isArray(tasks.tasks.taskRuns), true);
     assert.equal(git.git.config.remoteGitEnabled, false);
     assert.equal(git.git.blockedExamples.length > 0, true);
+    assert.equal(githubApp.githubApp.summary.productionReady, false);
+    assert.equal(githubApp.githubApp.summary.externalCallsEnabled, false);
+    assert.equal(githubApp.githubApp.permissionMatrix.length > 0, true);
+    assert.equal(githubApp.githubApp.webhookEventAllowlist.length > 0, true);
+    assert.equal(githubApp.githubApp.noSecretStatus.noSecretsExposed, true);
     assert.equal(llm.llm.models.length > 0, true);
     assert.equal(llm.llm.blockedExamples.length > 0, true);
     assert.equal(agents.agents.config.localCommandExecutionEnabled, false);
@@ -125,9 +141,25 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(readiness.readiness.summary.criticalBlockerCount > 0, true);
     assert.equal(readiness.readiness.environmentWarnings.includes("mock_actor_warning"), true);
     assert.equal(readiness.readiness.noSecretsExposed, true);
+    assert.equal(database.database.summary.productionReady, false);
+    assert.equal(database.database.summary.databaseUrlExposed, false);
+    assert.equal(database.database.summary.productionDbConnectionAttempted, false);
+    assert.equal(database.database.noSecretStatus.databaseUrlExposed, false);
+    assert.equal(database.database.migrations.length > 0, true);
+    assert.equal(database.database.indexReview.length > 0, true);
+    assert.equal(secretBackend.secretBackend.summary.productionReady, false);
+    assert.equal(secretBackend.secretBackend.summary.realSecretBackendConfigured, false);
+    assert.equal(secretBackend.secretBackend.summary.externalCallsEnabled, false);
+    assert.equal(secretBackend.secretBackend.backendOptions.length > 0, true);
+    assert.equal(secretBackend.secretBackend.blockers.length > 0, true);
+    assert.equal(secretBackend.secretBackend.noSecretStatus.noSecretsExposed, true);
+    assert.equal(secretBackend.secretBackend.noSecretStatus.envValuesExposed, false);
+    assert.equal(observability.observability.config.externalBackendEnabled, false);
+    assert.equal(observability.observability.sourceCoverage.length > 0, true);
+    assert.equal(observability.observability.noSecretStatus.noSecretsExposed, true);
     assert.equal(audit.audit.auditGroups.length > 0, true);
     assert.equal(audit.audit.summary.noSecretsExposed, true);
-    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, llm, agents, policy, auth, providers, security, localAgents, readiness, audit }), false);
+    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, llm, agents, policy, auth, providers, security, localAgents, readiness, database, secretBackend, observability, audit }), false);
   });
 });
 
@@ -155,6 +187,7 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
     ["/dashboard/overview", { overview: { ...demo.overview, source: "api" } }],
     ["/dashboard/tasks", { tasks: demo.tasks }],
     ["/dashboard/git", { git: demo.git }],
+    ["/dashboard/github-app", { githubApp: demo.githubApp }],
     ["/dashboard/conflicts", { conflicts: demo.conflicts }],
     ["/dashboard/registry", { registry: demo.registry }],
     ["/dashboard/llm", { llm: demo.llm }],
@@ -166,6 +199,9 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
     ["/dashboard/local-agents", { localAgents: demo.localAgents }],
     ["/dashboard/mcp", { mcp: demo.mcp }],
     ["/dashboard/readiness", { readiness: demo.readiness }],
+    ["/dashboard/database", { database: demo.database }],
+    ["/dashboard/secret-backend", { secretBackend: demo.secretBackend }],
+    ["/dashboard/observability", { observability: demo.observability }],
     ["/dashboard/audit", { audit: demo.audit }]
   ]);
   const requested: string[] = [];
@@ -207,10 +243,14 @@ test("dashboard renderer consumes read models and preserves static demo fallback
   assert.equal(html.includes("Data source"), true);
   assert.equal(html.includes("demo"), true);
   assert.equal(html.includes("Git Adapter"), true);
+  assert.equal(html.includes("GitHub App / Webhook Hardening"), true);
   assert.equal(html.includes("LLM Gateway"), true);
   assert.equal(html.includes("Auth/RBAC"), true);
   assert.equal(html.includes("Local Agent Protocol"), true);
   assert.equal(html.includes("Production Readiness"), true);
+  assert.equal(html.includes("Database Operations"), true);
+  assert.equal(html.includes("Secret Backend Migration"), true);
+  assert.equal(html.includes("Observability"), true);
   assert.equal(html.includes("credential cache paths redacted"), true);
   assert.equal(html.includes("sk-dashboard-secret"), false);
   assert.equal(html.includes("auth.json"), false);

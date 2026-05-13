@@ -5,6 +5,7 @@ import type { GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRunt
 import type { ImprovementServices } from "@aichestra/improvement";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
 import type { MCPGateway } from "@aichestra/mcp-gateway";
+import type { ObservabilityService } from "@aichestra/observability";
 import type { PolicyService } from "@aichestra/policy";
 import type { RegistryService } from "@aichestra/registry";
 import type { AgentRunnerService } from "@aichestra/runner";
@@ -20,15 +21,19 @@ import {
   type DashboardOverviewReadModel,
   type DashboardReadModels,
   type DashboardReadModelSource,
+  type DatabaseOperationsReadModel,
   type DeploymentReadinessReadModel,
   type EnterpriseProviderReadModel,
+  type GitHubAppHardeningReadModel,
   type GitIntegrationReadModel,
   type LLMGatewayReadModel,
   type LocalAgentReadModel,
   type MCPGatewayReadModel,
+  type ObservabilityReadModel,
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
+  type SecretBackendMigrationReadModel,
   type TaskRunSummaryReadModel
 } from "@aichestra/shared";
 
@@ -49,6 +54,7 @@ export type DashboardReadModelContext = {
   localAgentProtocolService: LocalAgentProtocolService;
   mcpGatewayService: MCPGateway;
   deploymentReadinessService: DeploymentReadinessService;
+  observabilityService: ObservabilityService;
 };
 
 function last<T>(items: T[]): T | undefined {
@@ -228,6 +234,112 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       branchDeletionEnabled: false,
       tokenExposed: false,
       webhookSecretExposed: false
+    })
+  };
+}
+
+function buildGitHubApp(context: DashboardReadModelContext): GitHubAppHardeningReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getGitHubWebhookHardeningSummary();
+  const readinessChecks = readiness.listGitHubAppReadinessChecks();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    appDescriptors: sanitizeDashboardArray(readiness.listGitHubAppDescriptors()),
+    installations: sanitizeDashboardArray(readiness.listGitHubAppInstallations()),
+    repositoryGrants: sanitizeDashboardArray(readiness.listGitHubAppRepositoryGrants()),
+    permissionMatrix: sanitizeDashboardArray(readiness.listGitHubAppPermissionMatrix()),
+    webhookEventAllowlist: sanitizeDashboardArray(readiness.listGitHubWebhookEventAllowlist()),
+    replayProtection: sanitizeDashboardObject(readiness.getGitHubWebhookReplayProtectionPlan()),
+    webhookDeliveries: sanitizeDashboardArray(readiness.listGitHubWebhookDeliveryRecords()),
+    deadLetterPlan: sanitizeDashboardObject(readiness.getGitHubWebhookDeadLetterPlan()),
+    deadLetterRecords: sanitizeDashboardArray(readiness.listGitHubWebhookDeadLetterRecords()),
+    credentialReadiness: sanitizeDashboardObject(readiness.getGitHubAppCredentialReadiness()),
+    productionEndpoint: sanitizeDashboardObject(readiness.getGitHubProductionWebhookEndpointPlan()),
+    readinessChecks: sanitizeDashboardArray(readinessChecks),
+    productionRisks: sanitizeDashboardArray(readiness.listGitHubAppProductionRisks()),
+    blockers: sanitizeDashboardArray(readinessChecks.filter((check) => check.status === "fail")),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      privateKeysStored: false,
+      webhookSecretsExposed: false,
+      installationTokensIssued: false,
+      rawWebhookPayloadsStored: false,
+      externalCallsEnabled: summary.externalCallsEnabled
+    })
+  };
+}
+
+function buildDatabase(context: DashboardReadModelContext): DatabaseOperationsReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getDatabaseOperationsSummary();
+  const checks = readiness.listDatabaseReadinessChecks();
+  const risks = readiness.listDatabaseOperationRisks();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profiles: sanitizeDashboardArray(readiness.listDatabaseDeploymentProfiles()),
+    checks: sanitizeDashboardArray(checks),
+    risks: sanitizeDashboardArray(risks),
+    migrations: sanitizeDashboardArray(readiness.getDatabaseMigrationStatus()),
+    schemaInventory: sanitizeDashboardArray(readiness.getDatabaseSchemaInventory()),
+    indexReview: sanitizeDashboardArray(readiness.getDatabaseIndexReview()),
+    retentionPlan: sanitizeDashboardObject(readiness.getDatabaseRetentionPlan()),
+    auditGrowthPlan: sanitizeDashboardObject(readiness.getDatabaseAuditGrowthPlan()),
+    webhookPersistencePlan: sanitizeDashboardObject(readiness.getDatabaseWebhookPersistencePlan()),
+    criticalRisks: sanitizeDashboardArray(risks.filter((risk) => risk.status === "open" && (risk.severity === "critical" || risk.severity === "high"))),
+    blockers: sanitizeDashboardArray(checks.filter((check) => check.status === "fail")),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      databaseUrlExposed: summary.databaseUrlExposed,
+      databaseUrlValueReturned: false,
+      productionDbConnectionAttempted: summary.productionDbConnectionAttempted,
+      destructiveOperationsEnabled: false,
+      retentionDeletionJobsEnabled: summary.retentionDeletionJobsEnabled
+    })
+  };
+}
+
+function buildSecretBackend(context: DashboardReadModelContext): SecretBackendMigrationReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getSecretBackendMigrationSummary();
+  const checks = readiness.listSecretBackendReadinessChecks();
+  const risks = readiness.listSecretBackendRisks();
+  const rotationPlans = readiness.listSecretRotationPlans();
+  const leasePolicies = readiness.listSecretLeasePolicies();
+  const credentialKinds = [...new Set([
+    ...rotationPlans.map((plan) => plan.secretKind),
+    ...leasePolicies.map((policy) => policy.secretKind)
+  ])];
+  return {
+    summary: sanitizeDashboardObject(summary),
+    backendOptions: sanitizeDashboardArray(readiness.listSecretBackendOptions()),
+    migrationPhases: sanitizeDashboardArray(readiness.listSecretBackendMigrationPhases()),
+    readinessChecks: sanitizeDashboardArray(checks),
+    risks: sanitizeDashboardArray(risks),
+    rotationPlans: sanitizeDashboardArray(rotationPlans),
+    leasePolicies: sanitizeDashboardArray(leasePolicies),
+    blockers: sanitizeDashboardArray(checks.filter((check) => check.status === "fail")),
+    credentialKindStatus: sanitizeDashboardArray(credentialKinds.map((secretKind) => ({
+      secretKind,
+      rotationStatus: rotationPlans.find((plan) => plan.secretKind === secretKind)?.status ?? "future",
+      leaseStatus: leasePolicies.find((policy) => policy.secretKind === secretKind)?.status ?? "future",
+      noSecretValueExposed: true
+    }))),
+    envFallback: sanitizeDashboardObject({
+      allowedForCurrentProfile: summary.envFallbackAllowedForCurrentProfile,
+      warning: summary.envFallbackWarning,
+      envSecretProviderEnabled: summary.envSecretProviderEnabled,
+      allowedSecretEnvKeyCount: summary.allowedSecretEnvKeyCount,
+      productionReady: summary.legacyEnvFallbackProductionReady,
+      envValuesExposed: summary.envValuesExposed
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      credentialCachesRead: summary.credentialCachesRead,
+      credentialResolutionAttempted: summary.credentialResolutionAttempted,
+      rotationJobsImplemented: summary.rotationJobsImplemented,
+      productionCredentialIssuanceImplemented: summary.productionCredentialIssuanceImplemented,
+      externalCallsEnabled: summary.externalCallsEnabled
     })
   };
 }
@@ -583,6 +695,27 @@ function buildReadiness(context: DashboardReadModelContext): DeploymentReadiness
   };
 }
 
+function buildObservability(context: DashboardReadModelContext): ObservabilityReadModel {
+  const observability = context.observabilityService.buildDashboardObservabilityReadModel();
+  return {
+    config: sanitizeDashboardObject(observability.config),
+    auditSummary: sanitizeDashboardObject(observability.auditSummary),
+    recentEvents: sanitizeDashboardArray(observability.recentEvents),
+    recentSecurityEvents: sanitizeDashboardArray(observability.recentSecurityEvents),
+    deniedOrBlockedEvents: sanitizeDashboardArray(observability.deniedOrBlockedEvents),
+    retentionClasses: sanitizeDashboardArray(observability.retentionClasses),
+    redactionClasses: sanitizeDashboardArray(observability.redactionClasses),
+    retentionPolicies: sanitizeDashboardArray(observability.retentionPolicies),
+    metricDefinitions: sanitizeDashboardArray(observability.metricDefinitions),
+    metricSnapshot: sanitizeDashboardObject(observability.metricSnapshot),
+    traceSpans: sanitizeDashboardArray(observability.traceSpans),
+    traceSummary: sanitizeDashboardObject(observability.traceSummary),
+    sourceCoverage: sanitizeDashboardArray(observability.sourceCoverage),
+    productionReadinessBlockers: sanitizeDashboardArray(observability.productionReadinessBlockers),
+    noSecretStatus: sanitizeDashboardObject(observability.noSecretStatus)
+  };
+}
+
 function auditGroup(source: string, events: unknown[]): DashboardJsonObject {
   return sanitizeDashboardObject({
     source,
@@ -623,6 +756,7 @@ function buildOverview(
   source: DashboardReadModelSource,
   tasks: TaskRunSummaryReadModel,
   git: GitIntegrationReadModel,
+  githubApp: GitHubAppHardeningReadModel,
   conflicts: ConflictManagerReadModel,
   registry: RegistryReadModel,
   llm: LLMGatewayReadModel,
@@ -634,6 +768,9 @@ function buildOverview(
   localAgents: LocalAgentReadModel,
   mcp: MCPGatewayReadModel,
   readiness: DeploymentReadinessReadModel,
+  database: DatabaseOperationsReadModel,
+  secretBackend: SecretBackendMigrationReadModel,
+  observability: ObservabilityReadModel,
   audit: AuditSummaryReadModel
 ): DashboardOverviewReadModel {
   const totalTasks = tasks.tasks.length;
@@ -657,6 +794,9 @@ function buildOverview(
       activeInstructions: registry.summary.activeInstructions ?? 0,
       gitRepos: git.repos.length,
       gitPullRequests: git.pullRequests.length,
+      githubAppReadinessBlockers: githubApp.blockers.length,
+      githubAppPermissions: githubApp.permissionMatrix.length,
+      githubWebhookAllowlistedEvents: githubApp.webhookEventAllowlist.length,
       llmModels: llm.models.length,
       llmUsageEvents: llm.usageEvents.length,
       agentRuns: agents.runs.length,
@@ -670,12 +810,22 @@ function buildOverview(
       mcpTools: mcp.tools.length,
       productionReadinessCriticalBlockers: readiness.summary.criticalBlockerCount ?? 0,
       productionReadinessHighRisks: readiness.summary.highRiskOpenCount ?? 0,
+      databaseOperationsCriticalBlockers: database.summary.criticalBlockerCount ?? database.blockers.length,
+      databaseMigrationFiles: database.migrations.length,
+      databaseIndexReviewItems: database.indexReview.length,
+      secretBackendReadinessBlockers: secretBackend.blockers.length,
+      secretBackendOptions: secretBackend.backendOptions.length,
+      secretRotationPlans: secretBackend.rotationPlans.length,
       pendingConsentRequests: localAgents.consentQueue.length,
+      normalizedAuditEvents: observability.auditSummary.totalEvents ?? 0,
+      auditSourcesCovered: observability.sourceCoverage.filter((source) => source.normalized === "yes").length,
+      observabilityTraceSpans: observability.traceSpans.length,
       auditEvents: audit.summary.totalEvents ?? 0
     }),
     sections: {
       tasks: { status: statusForCount(tasks.tasks.length), count: tasks.tasks.length, notes: tasks.warnings },
       git: { status: "available", count: git.repos.length, notes: ["Remote Git gates remain explicit and token-free."] },
+      githubApp: { status: "available", count: githubApp.blockers.length, notes: ["GitHub App and production webhook hardening are planning-only; no live App or token exchange is implemented."] },
       conflicts: { status: statusForCount(conflicts.mergeQueue.length + conflicts.branchLeases.length), count: conflicts.mergeQueue.length, notes: [] },
       registry: { status: "available", count: registry.skills.length + registry.harnesses.length + registry.instructions.length, notes: [] },
       llm: { status: "available", count: llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
@@ -687,6 +837,9 @@ function buildOverview(
       localAgents: { status: "available", count: localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
       mcp: { status: "available", count: mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
       readiness: { status: "available", count: readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
+      database: { status: "available", count: database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
+      secretBackend: { status: "available", count: secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
+      observability: { status: "available", count: typeof observability.auditSummary.totalEvents === "number" ? observability.auditSummary.totalEvents : 0, notes: ["Observability v0 is in-memory/read-only and has no external exporter."] },
       audit: { status: "available", count: typeof audit.summary.totalEvents === "number" ? audit.summary.totalEvents : 0, notes: [] }
     },
     safety: {
@@ -715,6 +868,7 @@ function buildOverview(
 export function buildDashboardReadModels(context: DashboardReadModelContext, source: DashboardReadModelSource = "api"): DashboardReadModels {
   const tasks = buildTasks(context);
   const git = buildGit(context);
+  const githubApp = buildGitHubApp(context);
   const conflicts = buildConflicts(context);
   const registry = buildRegistry(context);
   const llm = buildLlm(context);
@@ -726,13 +880,17 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const localAgents = buildLocalAgents(context);
   const mcp = buildMcp(context);
   const readiness = buildReadiness(context);
+  const database = buildDatabase(context);
+  const secretBackend = buildSecretBackend(context);
+  const observability = buildObservability(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, conflicts, registry, llm, agents, policy, auth, providers, security, localAgents, mcp, readiness, audit);
+  const overview = buildOverview(source, tasks, git, githubApp, conflicts, registry, llm, agents, policy, auth, providers, security, localAgents, mcp, readiness, database, secretBackend, observability, audit);
 
   return {
     overview,
     tasks,
     git,
+    githubApp,
     conflicts,
     registry,
     llm,
@@ -744,6 +902,9 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     localAgents,
     mcp,
     readiness,
+    database,
+    secretBackend,
+    observability,
     audit
   };
 }

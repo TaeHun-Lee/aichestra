@@ -1,8 +1,27 @@
 # Observability And Audit Plan v0
 
-Planning only. No observability backend is implemented.
+## Status
+
+Observability / Audit Retention v0 foundation is implemented in `docs/foundations/observability-audit-retention/v0.md` and `packages/observability`.
+
+This roadmap document remains a production-readiness plan. The v0 implementation reduces schema, taxonomy, redaction, retention, API, and dashboard gaps, but production observability is still not implemented.
+
+## Implemented Foundation
+
+- Common `AuditEventEnvelope` taxonomy.
+- Retention classes and read-only retention policies.
+- Redaction classes and audit sanitizer.
+- In-memory `ObservabilityService` aggregation over existing audit sources.
+- Audit source coverage inventory.
+- Metric definitions and deterministic metric snapshots.
+- Trace-span and correlation-context skeleton models.
+- Read-only `/observability/*` endpoints.
+- Dashboard Observability panel.
+- No-secret/no-token/no-raw-payload tests.
 
 ## Log Categories
+
+Future structured logs should cover:
 
 - API request logs: method, path template, status, request id, actor id, principal id, latency.
 - Workflow logs: task id, task run id, transition, runner kind, retry metadata.
@@ -17,35 +36,35 @@ No log category may include raw secrets, tokens, provider API keys, raw prompts,
 
 ## Audit Event Categories
 
+v0 normalizes these categories:
+
 - Auth/RBAC decisions.
 - Policy decisions.
+- Credential resolution and SecretRef decisions.
 - Git operations and webhook processing.
 - LLM route/completion/budget/credential events.
 - MCP catalog/invocation/block events.
-- SecretRef lifecycle and credential resolution.
 - Sandbox/network/redaction decisions.
 - Runner and Local Agent lifecycle/consent events.
 - Registry and governance mutations.
-- Deployment readiness profile/check/risk read events may remain access logs only in v0.
+- Deployment readiness blocker context.
 
 ## Metrics
 
-- API request count/error/latency by route and status.
-- Worker queue depth, run duration, retry count, failure count.
-- TaskRun status counts.
-- Policy allow/deny counts by action.
-- Auth denial counts by actor kind.
-- Secret resolution allow/deny/missing/revoked counts.
-- Git webhook verification/process counts.
-- LLM usage, cost, route selection, fallback, provider error counts.
-- MCP invocation completed/blocked counts by risk level.
-- Runner command blocked/timeout counts.
-- Local Agent connected/disconnected/consent counts.
-- Audit export lag and retention partition size.
+Implemented v0 metrics are deterministic read models, not backend time series:
+
+- total audit events;
+- denied/blocked/failed counts;
+- security-relevant event counts;
+- audit source coverage;
+- retention policy count;
+- external exporter enabled flag, always `0`.
+
+Future production metrics should add API request count/error/latency, worker queue depth, run duration, retry count, policy/auth denial counts, secret resolution allow/deny counts, Git webhook verification counts, LLM cost/provider error counts, MCP invocation counts, runner command blocked/timeout counts, Local Agent connection/consent counts, audit export lag, and retention partition size.
 
 ## Traces
 
-Future traces should propagate:
+v0 defines `TraceSpan` and `CorrelationContext` read models only. Future distributed traces should propagate:
 
 - request id
 - correlation id
@@ -59,55 +78,53 @@ Future traces should propagate:
 - authorization decision id
 - credential resolution id
 
+There is no OpenTelemetry backend or collector in v0.
+
 ## Retention Classes
 
-- Operational logs: short retention.
-- Debug traces: short retention.
-- Provider request metadata: bounded retention, sanitized.
-- Audit events: long-lived compliance retention.
-- Security audit events: long-lived compliance retention.
-- Redacted runner/provider output previews: bounded by redaction policy.
+Implemented classes:
+
+- `short_debug`
+- `operational`
+- `security`
+- `compliance`
+- `ephemeral`
+
+v0 only models TTL and export/delete posture. It does not delete audit data, partition storage, apply legal holds, or export records.
 
 ## Redaction Strategy
 
-- Redact bearer tokens, API-key-like strings, env dumps, provider tokens, credential cache paths, and raw secrets.
-- Store only previews where output retention is required.
-- Keep raw prompts and raw provider output out of audit by default.
-- Validate no-secret exposure in tests.
+v0 redacts bearer tokens, API-key-like strings, GitHub tokens, webhook secrets, env dumps, provider tokens, credential cache paths, password-like fields, raw prompts, and raw tool input. Output and prompt-related sources use redacted preview classes.
+
+Tests verify no raw secrets in the envelope, observability API, and dashboard read models.
 
 ## Operational Dashboards
 
-- API health and error rates.
-- Task workflow throughput and failures.
-- Git webhook delivery status and replay backlog.
-- LLM cost and provider error dashboards.
-- MCP tool risk and block dashboards.
-- Secret resolution and policy denial dashboards.
-- Local Agent connection/consent dashboard.
-- Audit export and retention dashboard.
+The current dashboard adds an Observability panel for audit summary, source coverage, retention/redaction summaries, metric snapshot, trace skeleton summary, observability readiness blockers, and no-secret status.
+
+Future production dashboards still need API health/error rates, workflow throughput/failures, webhook delivery status, LLM cost/provider errors, MCP risk and block rates, secret resolution and policy denial rates, Local Agent connection/consent, audit export lag, and retention health.
 
 ## Alerts
 
-- API error rate and latency.
-- Worker queue backlog.
-- Migration failure.
-- Postgres connectivity/replication/storage.
-- Secret backend failure.
-- Auth provider failure.
-- Policy bundle load failure.
-- GitHub webhook verification failures spike.
-- LLM provider error/cost spike.
-- MCP high/critical invocation attempt.
-- Audit export lag.
+No real alert delivery is implemented.
+
+Future alerting should cover API error rate/latency, worker backlog, migration failures, Postgres health, secret backend failures, auth provider failures, policy bundle failures, webhook verification spikes, LLM provider error/cost spikes, MCP high/critical invocation attempts, and audit export lag.
 
 ## Audit Export Requirements
 
-- Export sanitized append-only audit records.
-- Preserve actor/principal/team/request correlation.
-- Support retention class tagging.
-- Support tenant/org filtering once tenant isolation exists.
-- Support replay-safe export checkpoints.
+No audit export is implemented in v0.
+
+Future export must:
+
+- export sanitized append-only audit records;
+- preserve actor/principal/team/request correlation;
+- support retention class tagging;
+- support tenant/org filtering once tenant isolation exists;
+- support replay-safe export checkpoints;
+- avoid raw secrets, raw prompts, raw payloads, and credential cache content.
 
 ## Future OpenTelemetry Plan
 
-Adopt OpenTelemetry for logs, metrics, and traces after production profile boundaries exist. The first implementation should instrument local exporters and tests without sending data to external backends by default.
+Adopt OpenTelemetry-compatible logs, metrics, and traces only after production profile boundaries exist. Initial future work should use local exporters and tests without sending data to external backends by default.
+
+Production remains blocked until structured logs, durable metrics/traces, alerting, audit export, retention enforcement, tenant scoping, and secure backend credentials are implemented.

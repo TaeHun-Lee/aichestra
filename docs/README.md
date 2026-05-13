@@ -36,6 +36,7 @@
 - [auth-rbac/v0-plan.md](foundations/auth-rbac/v0-plan.md)
 - [auth-rbac/v0.md](foundations/auth-rbac/v0.md)
 - [secretref-provider-credentials/v1.md](foundations/secretref-provider-credentials/v1.md) (+ plan; Auth/RBAC + Policy-backed credential checks)
+- [observability-audit-retention/v0.md](foundations/observability-audit-retention/v0.md) (+ plan; common audit envelope, retention/redaction classes, metric/trace skeletons)
 - [persistent-storage-schema-v0.md](foundations/persistent-storage-schema-v0.md)
 - [repository-inventory.md](foundations/repository-inventory.md)
 
@@ -65,6 +66,10 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 - [real-integration-roadmap.md](roadmaps/real-integration-roadmap.md) — Real Integration 항목별 v0~vN 추진 로드맵.
 - [real-integration-foundation-v0-plan.md](roadmaps/real-integration-foundation-v0-plan.md) — Foundation v0 통합 계획.
 - [production-deployment-readiness/](roadmaps/production-deployment-readiness/) — Production Deployment Readiness Planning v0: topology, checklist, DB/secret/auth/policy/observability/CI plans.
+- [github-app-production-webhook-hardening/](roadmaps/github-app-production-webhook-hardening/) — GitHub App / Production Webhook Hardening Planning v0: permission matrix, webhook allowlist, replay protection, dead-letter, credentials, and production endpoint planning.
+
+- [persistent-db-production-operations/](roadmaps/persistent-db-production-operations/) - Persistent DB Production Operations v1: DB operations runbook, migration readiness, index review, retention/audit growth, webhook persistence, backup/restore, and pooling planning.
+- [secret-backend-migration/](roadmaps/secret-backend-migration/) - Secret Backend Migration Planning v0: backend options, SecretRef provider migration, credential kind migration, lease/rotation, env fallback deprecation, readiness APIs, health, and dashboard planning.
 
 ## audits/
 
@@ -89,6 +94,9 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 ## reference/
 
 - [dashboard-read-model-inventory.md](reference/dashboard-read-model-inventory.md)
+- [audit-source-inventory.md](reference/audit-source-inventory.md)
+- [github-app-permission-matrix.md](reference/github-app-permission-matrix.md)
+- [github-webhook-event-allowlist.md](reference/github-webhook-event-allowlist.md)
 - [runtime-component-inventory.md](reference/runtime-component-inventory.md)
 - [environment-gate-matrix.md](reference/environment-gate-matrix.md)
 - [Aichestra_Closed_Enterprise_LLM_Provider_Design](reference/) — `.docx`, `.pdf`, `_LLM_Readable/` (json/md/txt 변환본).

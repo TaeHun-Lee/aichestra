@@ -10,15 +10,19 @@ import {
   type DashboardOverviewReadModel,
   type DashboardReadModels,
   type DashboardReadModelSource,
+  type DatabaseOperationsReadModel,
   type DeploymentReadinessReadModel,
   type EnterpriseProviderReadModel,
+  type GitHubAppHardeningReadModel,
   type GitIntegrationReadModel,
   type LLMGatewayReadModel,
   type LocalAgentReadModel,
   type MCPGatewayReadModel,
+  type ObservabilityReadModel,
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
+  type SecretBackendMigrationReadModel,
   type TaskRunSummaryReadModel
 } from "@aichestra/shared";
 
@@ -43,6 +47,12 @@ type ApiDashboardDataProviderOptions = {
 
 function numeric(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function nestedCount(value: unknown, key: string): number {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return 0;
+  const child = (value as Record<string, unknown>)[key];
+  return Array.isArray(child) ? child.length : 0;
 }
 
 function arrayValue(value: unknown): DashboardJsonObject[] {
@@ -75,6 +85,9 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       activeInstructions: numeric(sections.registry.summary.activeInstructions),
       gitRepos: sections.git.repos.length,
       gitPullRequests: sections.git.pullRequests.length,
+      githubAppReadinessBlockers: sections.githubApp.blockers.length,
+      githubAppPermissions: sections.githubApp.permissionMatrix.length,
+      githubWebhookAllowlistedEvents: sections.githubApp.webhookEventAllowlist.length,
       llmModels: sections.llm.models.length,
       llmUsageEvents: sections.llm.usageEvents.length,
       agentRuns: sections.agents.runs.length,
@@ -88,12 +101,22 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       mcpTools: sections.mcp.tools.length,
       productionReadinessCriticalBlockers: numeric(sections.readiness.summary.criticalBlockerCount),
       productionReadinessHighRisks: numeric(sections.readiness.summary.highRiskOpenCount),
+      databaseOperationsCriticalBlockers: numeric(sections.database.summary.criticalBlockerCount),
+      databaseMigrationFiles: sections.database.migrations.length,
+      databaseIndexReviewItems: sections.database.indexReview.length,
+      secretBackendReadinessBlockers: sections.secretBackend.blockers.length,
+      secretBackendOptions: sections.secretBackend.backendOptions.length,
+      secretRotationPlans: sections.secretBackend.rotationPlans.length,
       pendingConsentRequests: sections.localAgents.consentQueue.length,
+      normalizedAuditEvents: numeric(sections.observability.auditSummary.totalEvents),
+      auditSourcesCovered: sections.observability.sourceCoverage.filter((source) => source.normalized === "yes").length,
+      observabilityTraceSpans: sections.observability.traceSpans.length,
       auditEvents: numeric(sections.audit.summary.totalEvents)
     }),
     sections: {
       tasks: { status: totalTasks > 0 ? "available" : "empty", count: totalTasks, notes: sections.tasks.warnings },
       git: { status: "available", count: sections.git.repos.length, notes: ["Remote Git gates remain explicit and token-free."] },
+      githubApp: { status: "available", count: sections.githubApp.blockers.length, notes: ["GitHub App and production webhook hardening are planning-only; no live App or token exchange is implemented."] },
       conflicts: { status: sections.conflicts.branchLeases.length > 0 ? "available" : "empty", count: sections.conflicts.mergeQueue.length, notes: [] },
       registry: { status: "available", count: sections.registry.skills.length + sections.registry.harnesses.length + sections.registry.instructions.length, notes: [] },
       llm: { status: "available", count: sections.llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
@@ -105,6 +128,9 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       localAgents: { status: "available", count: sections.localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
       mcp: { status: "available", count: sections.mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
       readiness: { status: "available", count: sections.readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
+      database: { status: "available", count: sections.database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
+      secretBackend: { status: "available", count: sections.secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
+      observability: { status: "available", count: numeric(sections.observability.auditSummary.totalEvents), notes: ["Observability v0 is in-memory/read-only and has no external exporter."] },
       audit: { status: "available", count: numeric(sections.audit.summary.totalEvents), notes: [] }
     },
     safety: {
@@ -186,6 +212,115 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       ...objectValue(data.gitProviderConfig),
       remoteMergeEnabled: false,
       tokenExposed: false
+    })
+  };
+
+  const githubApp: GitHubAppHardeningReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v0_implemented",
+      planningOnly: true,
+      productionReady: false,
+      githubAppLiveEnabled: false,
+      productionWebhooksEnabled: false,
+      externalCallsEnabled: false,
+      permissionCount: 11,
+      webhookEventCount: 12,
+      blockerCount: 4,
+      noSecretsExposed: true
+    }),
+    appDescriptors: sanitizeDashboardArray([
+      {
+        id: "github_app_descriptor_planned",
+        appSlug: "aichestra-production-planned",
+        status: "planned",
+        permissions: { metadata: "read", contents: "write", pull_requests: "write", workflows: "none", administration: "none", secrets: "none" },
+        events: ["ping", "pull_request", "push", "installation", "installation_repositories"],
+        metadata: { planningOnly: true }
+      }
+    ]),
+    installations: sanitizeDashboardArray([
+      { id: "github_app_installation_planned", status: "planned", repositorySelection: "selected", accountType: "organization" }
+    ]),
+    repositoryGrants: sanitizeDashboardArray([
+      { id: "github_app_repo_grant_demo", repoOwner: "aichestra", repoName: "demo-backend", status: "allowed", permissions: { metadata: "read", pull_requests: "write" } }
+    ]),
+    permissionMatrix: sanitizeDashboardArray([
+      { githubPermissionName: "metadata", requiredLevel: "read", productionDefault: "allow", riskLevel: "low" },
+      { githubPermissionName: "contents", requiredLevel: "write", productionDefault: "future_review", riskLevel: "high" },
+      { githubPermissionName: "pull_requests", requiredLevel: "write", productionDefault: "future_review", riskLevel: "medium" },
+      { githubPermissionName: "workflows", requiredLevel: "none", productionDefault: "deny", riskLevel: "critical" },
+      { githubPermissionName: "administration", requiredLevel: "none", productionDefault: "deny", riskLevel: "critical" },
+      { githubPermissionName: "secrets", requiredLevel: "none", productionDefault: "deny", riskLevel: "critical" }
+    ]),
+    webhookEventAllowlist: sanitizeDashboardArray([
+      { eventName: "ping", supportStatus: "supported_now", sideEffects: ["record_audit"] },
+      { eventName: "pull_request", supportStatus: "supported_now", sideEffects: ["upsert_pr_sync_state"] },
+      { eventName: "push", supportStatus: "supported_now", sideEffects: ["upsert_branch_sync_state"] },
+      { eventName: "installation", supportStatus: "planned", sideEffects: ["future_upsert_installation_read_model"] },
+      { eventName: "workflow_run", supportStatus: "ignored", sideEffects: ["record_unsupported_event_audit"] },
+      { eventName: "deployment", supportStatus: "denied", sideEffects: ["record_denied_event_audit"] }
+    ]),
+    replayProtection: sanitizeDashboardObject({
+      status: "planning_only",
+      deliveryIdUniqueness: "required",
+      payloadHashStrategy: "sha256_metadata_only",
+      productionReady: false,
+      persistenceRequirement: "durable shared storage required before production"
+    }),
+    webhookDeliveries: sanitizeDashboardArray([
+      { deliveryId: "delivery-demo-first", eventType: "pull_request", replayStatus: "first_seen", processingStatus: "processed", payloadHash: "sha256:demo-first" },
+      { deliveryId: "delivery-demo-first", eventType: "pull_request", replayStatus: "duplicate", processingStatus: "ignored", payloadHash: "sha256:demo-first" }
+    ]),
+    deadLetterPlan: sanitizeDashboardObject({
+      status: "planning_only",
+      maxRetryAttempts: 5,
+      backoffStrategy: "exponential_backoff_with_jitter_future_worker",
+      productionReady: false
+    }),
+    deadLetterRecords: sanitizeDashboardArray([
+      { deliveryId: "delivery-demo-dead-letter", eventType: "pull_request", reason: "malformed_payload_non_retryable", retryable: false, sanitizedPayloadPreview: "{\"action\":\"[redacted-invalid-preview]\"}" }
+    ]),
+    credentialReadiness: sanitizeDashboardObject({
+      status: "planning_only",
+      privateKeySecretRefRequired: true,
+      privateKeyConfigured: false,
+      webhookSecretRefRequired: true,
+      webhookSecretConfiguredForProduction: false,
+      installationTokenExchangeImplemented: false,
+      legacyEnvTokenProductionReady: false,
+      noSecretsStored: true
+    }),
+    productionEndpoint: sanitizeDashboardObject({
+      endpointPath: "/git/github/webhooks",
+      status: "planning_only",
+      tlsRequired: true,
+      rawBodyPreservationRequired: true,
+      queueRequired: true,
+      productionReady: false
+    }),
+    readinessChecks: sanitizeDashboardArray([
+      { id: "github_app_private_key_secretref_required", status: "fail", severity: "critical", category: "credentials" },
+      { id: "github_app_permissions_least_privilege_defined", status: "pass", severity: "medium", category: "permissions" },
+      { id: "github_webhook_replay_storage_required", status: "fail", severity: "high", category: "replay" },
+      { id: "github_webhook_dead_letter_worker_required", status: "fail", severity: "high", category: "dead_letter" }
+    ]),
+    productionRisks: sanitizeDashboardArray([
+      { id: "risk_github_app_private_key_mismanagement", severity: "critical", status: "open" },
+      { id: "risk_github_webhook_replay_without_shared_state", severity: "high", status: "open" },
+      { id: "risk_github_app_overprivileged_permissions", severity: "high", status: "open" }
+    ]),
+    blockers: sanitizeDashboardArray([
+      { id: "github_app_private_key_secretref_required", status: "fail", severity: "critical" },
+      { id: "github_webhook_replay_storage_required", status: "fail", severity: "high" },
+      { id: "github_webhook_dead_letter_worker_required", status: "fail", severity: "high" }
+    ]),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      privateKeysStored: false,
+      webhookSecretsExposed: false,
+      installationTokensIssued: false,
+      rawWebhookPayloadsStored: false,
+      externalCallsEnabled: false
     })
   };
 
@@ -465,6 +600,277 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     noSecretsExposed: true
   };
 
+  const database: DatabaseOperationsReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      planningOnly: true,
+      productionReady: false,
+      storageProviderKind: "in_memory",
+      databaseUrlConfigured: false,
+      testDatabaseUrlConfigured: false,
+      migrationRunnerAvailable: true,
+      migrationFileCount: 1,
+      schemaInventoryCount: 11,
+      indexReviewItemCount: 11,
+      readinessCheckCount: 9,
+      criticalBlockerCount: 2,
+      riskCount: 5,
+      poolingStatus: "planned_not_enabled",
+      backupStatus: "planned_not_configured",
+      restoreStatus: "planned_not_tested",
+      retentionDeletionJobsEnabled: false,
+      productionDbConnectionAttempted: false,
+      noSecretsExposed: true,
+      databaseUrlExposed: false
+    }),
+    profiles: sanitizeDashboardArray([
+      { id: "local", status: "partial", storageProvider: "in_memory", postgresRequired: false },
+      { id: "integration", status: "ready_for_testing", storageProvider: "postgres", postgresRequired: false },
+      { id: "staging", status: "not_ready", storageProvider: "postgres_required", postgresRequired: true },
+      { id: "production", status: "not_ready", storageProvider: "postgres_required", postgresRequired: true }
+    ]),
+    checks: sanitizeDashboardArray([
+      { id: "db_pooling_required", category: "pooling", status: "fail", severity: "critical" },
+      { id: "db_backup_restore_required", category: "backup", status: "fail", severity: "critical" },
+      { id: "db_retention_no_deletion_v1", category: "retention", status: "fail", severity: "high" },
+      { id: "db_webhook_dedupe_persistence_required", category: "webhook_dedupe", status: "fail", severity: "high" }
+    ]),
+    risks: sanitizeDashboardArray([
+      { id: "risk_db_psql_cli_runtime", severity: "critical", status: "open", title: "Per-query psql client is not production-grade" },
+      { id: "risk_db_audit_growth_unbounded", severity: "high", status: "open", title: "Audit and event tables can grow without operational controls" }
+    ]),
+    migrations: sanitizeDashboardArray([
+      { id: "migration_0001_initial_aichestra_schema_sql", name: "0001_initial_aichestra_schema.sql", status: "pending", checksum: "sha256:demo" }
+    ]),
+    schemaInventory: sanitizeDashboardArray([
+      { tableName: "tasks", ownerModule: "core", highGrowth: false },
+      { tableName: "git_webhook_events", ownerModule: "git-adapter", highGrowth: true },
+      { tableName: "observability_audit_events", ownerModule: "observability", highGrowth: true, futureOnly: true }
+    ]),
+    indexReview: sanitizeDashboardArray([
+      { tableName: "tasks", status: "recommended", recommendedIndex: "idx_tasks_repo_status_created_at" },
+      { tableName: "git_webhook_events", status: "recommended", recommendedIndex: "delivery_id unique future" },
+      { tableName: "observability_audit_events", status: "future", recommendedIndex: "category,created_at" }
+    ]),
+    retentionPlan: sanitizeDashboardObject({
+      status: "planning_only",
+      deletionJobsEnabled: false,
+      partitioningImplemented: false,
+      legalHoldImplemented: false,
+      highGrowthTables: ["audit_events", "git_webhook_events", "llm_audit_events"]
+    }),
+    auditGrowthPlan: sanitizeDashboardObject({
+      status: "planning_only",
+      noDeletionInV1: true,
+      partitioningCandidates: ["audit_events", "git_webhook_events", "observability_audit_events_future"]
+    }),
+    webhookPersistencePlan: sanitizeDashboardObject({
+      status: "planning_only",
+      deliveryIdUniqueness: "required",
+      payloadHashStrategy: "sha256_metadata_only",
+      backgroundWorkerImplemented: false,
+      rawPayloadStorage: false
+    }),
+    criticalRisks: sanitizeDashboardArray([
+      { id: "risk_db_psql_cli_runtime", severity: "critical" },
+      { id: "risk_db_backup_restore_absent", severity: "critical" }
+    ]),
+    blockers: sanitizeDashboardArray([
+      { id: "db_pooling_required", severity: "critical" },
+      { id: "db_backup_restore_required", severity: "critical" }
+    ]),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      databaseUrlExposed: false,
+      databaseUrlValueReturned: false,
+      productionDbConnectionAttempted: false,
+      destructiveOperationsEnabled: false,
+      retentionDeletionJobsEnabled: false
+    })
+  };
+
+  const secretBackend: SecretBackendMigrationReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v0_implemented",
+      planningOnly: true,
+      productionReady: false,
+      currentProfileId: "local",
+      realSecretBackendConfigured: false,
+      externalCallsEnabled: false,
+      credentialResolutionAttempted: false,
+      rotationJobsImplemented: false,
+      productionCredentialIssuanceImplemented: false,
+      credentialCachesRead: false,
+      envFallbackAllowedForCurrentProfile: true,
+      envFallbackWarning: "env_fallback_allowed_for_local_only",
+      envSecretProviderEnabled: false,
+      allowedSecretEnvKeyCount: 0,
+      legacyEnvFallbackProductionReady: false,
+      backendOptionCount: 7,
+      recommendedBackendCount: 4,
+      migrationPhaseCount: 6,
+      readinessCheckCount: 11,
+      criticalBlockerCount: 2,
+      riskCount: 6,
+      rotationPlanCount: 9,
+      leasePolicyCount: 7,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    backendOptions: sanitizeDashboardArray([
+      { id: "secret_backend_vault", backendKind: "vault", status: "recommended", productionRecommended: true, operationalComplexity: "high" },
+      { id: "secret_backend_aws_secrets_manager", backendKind: "aws_secrets_manager", status: "planned", productionRecommended: true, operationalComplexity: "medium" },
+      { id: "secret_backend_env_legacy", backendKind: "env_legacy", status: "not_recommended", productionRecommended: false, operationalComplexity: "low" },
+      { id: "secret_backend_mock", backendKind: "mock", status: "allowed_for_integration", productionRecommended: false, operationalComplexity: "low" }
+    ]),
+    migrationPhases: sanitizeDashboardArray([
+      { id: "secret_migration_phase_1_inventory", order: 1, status: "ready_for_design", name: "Inventory SecretRefs and legacy env fallbacks" },
+      { id: "secret_migration_phase_3_core_credentials", order: 3, status: "planned", name: "Migrate GitHub, webhook, and LLM credentials" },
+      { id: "secret_migration_phase_6_disable_env_fallback", order: 6, status: "blocked", name: "Disable env fallback for staging and production" }
+    ]),
+    readinessChecks: sanitizeDashboardArray([
+      { id: "secret_backend_selection_required", category: "backend_selection", status: "fail", severity: "critical" },
+      { id: "secret_env_fallback_blocked_for_production", category: "env_fallback", status: "fail", severity: "critical" },
+      { id: "secret_ref_schema_metadata_only", category: "secret_ref_schema", status: "pass", severity: "medium" },
+      { id: "secret_dashboard_panel_available", category: "dashboard", status: "pass", severity: "low" }
+    ]),
+    risks: sanitizeDashboardArray([
+      { id: "risk_secret_env_fallback_in_production", severity: "critical", status: "open", title: "Legacy env fallback used in production" },
+      { id: "risk_secret_backend_outage", severity: "high", status: "open", title: "Secret backend outage blocks provider operations" }
+    ]),
+    rotationPlans: sanitizeDashboardArray([
+      { id: "rotation_github_token", secretKind: "github_token", status: "planned", rotationMode: "manual", targetIntervalDays: 90 },
+      { id: "rotation_github_webhook_secret", secretKind: "github_webhook_secret", status: "planned", rotationMode: "manual", targetIntervalDays: 180 },
+      { id: "rotation_llm_api_key", secretKind: "llm_api_key", status: "planned", rotationMode: "manual", targetIntervalDays: 90 }
+    ]),
+    leasePolicies: sanitizeDashboardArray([
+      { id: "lease_policy_github_token", secretKind: "github_token", status: "planned", maxTtlSeconds: 3600, requiresApproval: true },
+      { id: "lease_policy_github_webhook_secret", secretKind: "github_webhook_secret", status: "planned", maxTtlSeconds: 300, requiresApproval: false },
+      { id: "lease_policy_llm_api_key", secretKind: "llm_api_key", status: "planned", maxTtlSeconds: 1800, requiresApproval: true }
+    ]),
+    blockers: sanitizeDashboardArray([
+      { id: "secret_backend_selection_required", severity: "critical" },
+      { id: "secret_env_fallback_blocked_for_production", severity: "critical" }
+    ]),
+    credentialKindStatus: sanitizeDashboardArray([
+      { secretKind: "github_token", rotationStatus: "planned", leaseStatus: "planned", noSecretValueExposed: true },
+      { secretKind: "github_webhook_secret", rotationStatus: "planned", leaseStatus: "planned", noSecretValueExposed: true },
+      { secretKind: "llm_api_key", rotationStatus: "planned", leaseStatus: "planned", noSecretValueExposed: true }
+    ]),
+    envFallback: sanitizeDashboardObject({
+      allowedForCurrentProfile: true,
+      warning: "env_fallback_allowed_for_local_only",
+      envSecretProviderEnabled: false,
+      allowedSecretEnvKeyCount: 0,
+      productionReady: false,
+      envValuesExposed: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      credentialCachesRead: false,
+      credentialResolutionAttempted: false,
+      rotationJobsImplemented: false,
+      productionCredentialIssuanceImplemented: false,
+      externalCallsEnabled: false
+    })
+  };
+
+  const observabilityEvents = sanitizeDashboardArray([
+    ...git.auditEvents,
+    ...llm.auditEvents,
+    ...agents.auditEvents,
+    ...policy.auditEntries,
+    ...auth.auditEvents,
+    ...security.auditEvents,
+    ...mcp.auditEvents,
+    ...providers.auditEvents,
+    ...localAgents.auditEvents,
+    ...registry.auditLogs
+  ]);
+  const observability: ObservabilityReadModel = {
+    config: sanitizeDashboardObject({
+      status: "v0_implemented",
+      aggregationMode: "in_memory_read_model",
+      externalBackendEnabled: false,
+      externalExportEnabled: false,
+      alertDeliveryEnabled: false,
+      retentionDeletionJobsEnabled: false,
+      rawPayloadStorageEnabled: false,
+      noSecretsExposed: true
+    }),
+    auditSummary: sanitizeDashboardObject({
+      totalEvents: observabilityEvents.length,
+      byCategory: { git: git.auditEvents.length, llm: llm.auditEvents.length, security: security.auditEvents.length, mcp: mcp.auditEvents.length },
+      byOutcome: { success: observabilityEvents.length, denied: 0, blocked: 0, failed: 0, skipped: 0, unknown: 0 },
+      noSecretsExposed: true
+    }),
+    recentEvents: observabilityEvents.slice(-10),
+    recentSecurityEvents: security.auditEvents.slice(-10),
+    deniedOrBlockedEvents: sanitizeDashboardArray([
+      ...security.auditEvents.filter((event) => event.result === "blocked"),
+      ...policy.auditEntries.filter((entry) => entry.decision === "deny")
+    ]),
+    retentionClasses: sanitizeDashboardArray([
+      { id: "short_debug", defaultTtlDays: 7, exportable: false, deleteEligible: true },
+      { id: "operational", defaultTtlDays: 90, exportable: true, deleteEligible: true },
+      { id: "security", defaultTtlDays: 365, exportable: true, deleteEligible: false },
+      { id: "compliance", defaultTtlDays: 2555, exportable: true, deleteEligible: false },
+      { id: "ephemeral", defaultTtlDays: 1, exportable: false, deleteEligible: true }
+    ]),
+    redactionClasses: sanitizeDashboardArray([
+      { id: "public_metadata", maxPreviewBytes: 4096 },
+      { id: "internal_metadata", maxPreviewBytes: 4096 },
+      { id: "sensitive_metadata", maxPreviewBytes: 2048 },
+      { id: "secret_adjacent", maxPreviewBytes: 512 },
+      { id: "contains_user_content_redacted", maxPreviewBytes: 512 },
+      { id: "never_store_raw", maxPreviewBytes: 0 }
+    ]),
+    retentionPolicies: sanitizeDashboardArray([
+      { id: "retention_security_events", retentionClass: "security", deletionMode: "none", status: "active" },
+      { id: "retention_operational_events", retentionClass: "operational", deletionMode: "none", status: "active" },
+      { id: "retention_redacted_user_content_previews", retentionClass: "short_debug", deletionMode: "none", status: "active" }
+    ]),
+    metricDefinitions: sanitizeDashboardArray([
+      { name: "audit.events.total", unit: "count" },
+      { name: "audit.events.denied_blocked", unit: "count" },
+      { name: "traces.spans.total", unit: "count" },
+      { name: "observability.external_exporter.enabled", unit: "boolean" }
+    ]),
+    metricSnapshot: sanitizeDashboardObject({
+      externalExporterEnabled: false,
+      points: [
+        { metricName: "audit.events.total", value: observabilityEvents.length },
+        { metricName: "observability.external_exporter.enabled", value: 0 }
+      ]
+    }),
+    traceSpans: sanitizeDashboardArray([
+      { id: "span_demo_observability", traceId: "trace_demo_observability", name: "dashboard.demo_observability", status: "ok", metadata: { skeletonOnly: true } }
+    ]),
+    traceSummary: sanitizeDashboardObject({ spanCount: 1, externalExporterEnabled: false, skeletonOnly: true }),
+    sourceCoverage: sanitizeDashboardArray([
+      { moduleName: "Auth/RBAC", normalized: "yes", eventCount: auth.auditEvents.length },
+      { moduleName: "Policy", normalized: "yes", eventCount: policy.auditEntries.length },
+      { moduleName: "SecretRef/Credentials", normalized: "yes", eventCount: security.credentialAuditEvents.length },
+      { moduleName: "Secrets/Sandbox", normalized: "yes", eventCount: security.auditEvents.length },
+      { moduleName: "Git", normalized: "yes", eventCount: git.auditEvents.length },
+      { moduleName: "LLM Gateway", normalized: "yes", eventCount: llm.auditEvents.length },
+      { moduleName: "MCP Gateway", normalized: "yes", eventCount: mcp.auditEvents.length },
+      { moduleName: "Runner", normalized: "yes", eventCount: agents.auditEvents.length },
+      { moduleName: "Registry", normalized: "yes", eventCount: registry.auditLogs.length },
+      { moduleName: "Improvement Governance", normalized: "yes", eventCount: nestedCount(registry.governance, "governanceAuditEvents") },
+      { moduleName: "Local Agent Protocol", normalized: "yes", eventCount: localAgents.auditEvents.length },
+      { moduleName: "Deployment Readiness", normalized: "partial", eventCount: readiness.checks.length }
+    ]),
+    productionReadinessBlockers: readiness.checks.filter((check) => check.category === "observability" || check.category === "audit"),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      rawPayloadsStored: false,
+      externalExporterEnabled: false,
+      retentionDeletesEnabled: false
+    })
+  };
+
   const audit: AuditSummaryReadModel = {
     auditGroups: sanitizeDashboardArray([
       { source: "registry", count: registry.auditLogs.length, recentEvents: registry.auditLogs.slice(-5) },
@@ -499,6 +905,7 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     overview: {} as DashboardOverviewReadModel,
     tasks,
     git,
+    githubApp,
     conflicts,
     registry,
     llm,
@@ -510,6 +917,9 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     localAgents,
     mcp,
     readiness,
+    database,
+    secretBackend,
+    observability,
     audit
   };
   const overview = sourceOverview(source, sections);
@@ -550,6 +960,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         overviewResponse,
         tasksResponse,
         gitResponse,
+        githubAppResponse,
         conflictsResponse,
         registryResponse,
         llmResponse,
@@ -561,6 +972,9 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         localAgentsResponse,
         mcpResponse,
         readinessResponse,
+        databaseResponse,
+        secretBackendResponse,
+        observabilityResponse,
         auditResponse
       ] = await Promise.all(dashboardReadModelEndpoints.map((endpoint) => this.getJson(endpoint)));
 
@@ -568,6 +982,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         overview: objectValue((overviewResponse as Record<string, unknown>).overview) as unknown as DashboardOverviewReadModel,
         tasks: objectValue((tasksResponse as Record<string, unknown>).tasks) as unknown as TaskRunSummaryReadModel,
         git: objectValue((gitResponse as Record<string, unknown>).git) as unknown as GitIntegrationReadModel,
+        githubApp: objectValue((githubAppResponse as Record<string, unknown>).githubApp) as unknown as GitHubAppHardeningReadModel,
         conflicts: objectValue((conflictsResponse as Record<string, unknown>).conflicts) as unknown as ConflictManagerReadModel,
         registry: objectValue((registryResponse as Record<string, unknown>).registry) as unknown as RegistryReadModel,
         llm: objectValue((llmResponse as Record<string, unknown>).llm) as unknown as LLMGatewayReadModel,
@@ -579,6 +994,9 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         localAgents: objectValue((localAgentsResponse as Record<string, unknown>).localAgents) as unknown as LocalAgentReadModel,
         mcp: objectValue((mcpResponse as Record<string, unknown>).mcp) as unknown as MCPGatewayReadModel,
         readiness: objectValue((readinessResponse as Record<string, unknown>).readiness) as unknown as DeploymentReadinessReadModel,
+        database: objectValue((databaseResponse as Record<string, unknown>).database) as unknown as DatabaseOperationsReadModel,
+        secretBackend: objectValue((secretBackendResponse as Record<string, unknown>).secretBackend) as unknown as SecretBackendMigrationReadModel,
+        observability: objectValue((observabilityResponse as Record<string, unknown>).observability) as unknown as ObservabilityReadModel,
         audit: objectValue((auditResponse as Record<string, unknown>).audit) as unknown as AuditSummaryReadModel
       };
     } catch (error) {

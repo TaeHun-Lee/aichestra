@@ -323,6 +323,20 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Webhook audit</strong><span>${html(data.git.webhookAuditEvents.map((event) => `${text(event.eventType)}:${text(event.result)}`), "none")}</span></div>
           <div class="item"><strong>Remote blocked example</strong><span>${html(data.git.blockedExamples.map((example) => example.reason), "none")}</span></div>
         </div>
+        <h2>GitHub App / Webhook Hardening</h2>
+        <div class="list">
+          <div class="item"><strong>Status</strong><span>${html(data.githubApp.summary.status, "v0_implemented")} / planning only ${html(data.githubApp.summary.planningOnly, "true")} / production ready false / external calls ${data.githubApp.summary.externalCallsEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Permissions</strong><span>${html(data.githubApp.permissionMatrix.map((entry) => `${text(entry.githubPermissionName)}:${text(entry.requiredLevel)}:${text(entry.productionDefault)}`), "none")}</span></div>
+          <div class="item"><strong>Webhook events</strong><span>${html(data.githubApp.webhookEventAllowlist.map((event) => `${text(event.eventName)}:${text(event.supportStatus)}`), "none")}</span></div>
+          <div class="item"><strong>Replay protection</strong><span>${html(data.githubApp.replayProtection.status, "planning_only")} / delivery id ${html(data.githubApp.replayProtection.deliveryIdUniqueness, "required")} / production ready false</span></div>
+          <div class="item"><strong>Delivery records</strong><span>${html(data.githubApp.webhookDeliveries.map((delivery) => `${text(delivery.deliveryId)}:${text(delivery.replayStatus)}:${text(delivery.processingStatus)}`), "none")}</span></div>
+          <div class="item"><strong>Dead letter</strong><span>${html(data.githubApp.deadLetterPlan.status, "planning_only")} / max attempts ${html(data.githubApp.deadLetterPlan.maxRetryAttempts, "0")} / records ${data.githubApp.deadLetterRecords.length}</span></div>
+          <div class="item"><strong>Credentials</strong><span>private key configured ${data.githubApp.credentialReadiness.privateKeyConfigured === true ? "true" : "false"} / token exchange ${data.githubApp.credentialReadiness.installationTokenExchangeImplemented === true ? "implemented" : "not implemented"} / no secrets stored ${html(data.githubApp.credentialReadiness.noSecretsStored, "true")}</span></div>
+          <div class="item"><strong>Endpoint</strong><span>${html(data.githubApp.productionEndpoint.endpointPath, "/git/github/webhooks")} / TLS required ${html(data.githubApp.productionEndpoint.tlsRequired, "true")} / queue required ${html(data.githubApp.productionEndpoint.queueRequired, "true")} / deployed false</span></div>
+          <div class="item"><strong>Blockers</strong><span>${html(data.githubApp.blockers.map((blocker) => `${text(blocker.id)}:${text(blocker.severity)}`), "none")}</span></div>
+          <div class="item"><strong>Risks</strong><span>${html(data.githubApp.productionRisks.map((risk) => `${text(risk.id)}:${text(risk.severity)}:${text(risk.status)}`), "none")}</span></div>
+          <div class="item"><strong>No-secret status</strong><span>private keys stored ${data.githubApp.noSecretStatus.privateKeysStored === true ? "true" : "false"} / webhook secrets exposed ${data.githubApp.noSecretStatus.webhookSecretsExposed === true ? "true" : "false"} / installation tokens issued ${data.githubApp.noSecretStatus.installationTokensIssued === true ? "true" : "false"}</span></div>
+        </div>
         <h2>LLM Gateway</h2>
         <div class="list">
           <div class="item"><strong>Provider</strong><span>${html(data.llm.config.providerKind)} / remote LLM ${data.llm.config.remoteLlmEnabled === true ? "enabled" : "disabled"} / remote completion ${data.llm.config.remoteCompletionEnabled === true ? "enabled" : "disabled"}</span></div>
@@ -357,6 +371,44 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Missing requirements</strong><span>${html(data.readiness.missingProductionRequirements, "none")}</span></div>
           <div class="item"><strong>Environment warnings</strong><span>${html(data.readiness.environmentWarnings, "none")}</span></div>
           <div class="item"><strong>No-secret exposure</strong><span>${data.readiness.noSecretsExposed === true ? "true" : "false"} / readiness checks are local planning data only</span></div>
+        </div>
+        <h2>Database Operations</h2>
+        <div class="list">
+          <div class="item"><strong>Status</strong><span>${html(data.database.summary.status, "v1_implemented")} / planning only ${html(data.database.summary.planningOnly, "true")} / production ready false / provider ${html(data.database.summary.storageProviderKind, "in_memory")}</span></div>
+          <div class="item"><strong>Deployment profiles</strong><span>${html(data.database.profiles.map((profile) => `${text(profile.id)}:${text(profile.status)}:${text(profile.storageProvider)}`), "none")}</span></div>
+          <div class="item"><strong>Migration readiness</strong><span>runner ${data.database.summary.migrationRunnerAvailable === true ? "available" : "missing"} / files ${html(data.database.summary.migrationFileCount, "0")} / ${html(data.database.migrations.map((migration) => `${text(migration.name)}:${text(migration.status)}`), "none")}</span></div>
+          <div class="item"><strong>Index review</strong><span>${html(data.database.indexReview.map((item) => `${text(item.tableName)}:${text(item.status)}`), "none")}</span></div>
+          <div class="item"><strong>Retention and audit growth</strong><span>deletion jobs ${data.database.retentionPlan.deletionJobsEnabled === true ? "enabled" : "disabled"} / partitioning ${data.database.retentionPlan.partitioningImplemented === true ? "implemented" : "planned"} / audit tables ${html(data.database.auditGrowthPlan.highGrowthTables, "none")}</span></div>
+          <div class="item"><strong>Webhook persistence</strong><span>${html(data.database.webhookPersistencePlan.status, "planning_only")} / delivery uniqueness ${html(data.database.webhookPersistencePlan.deliveryIdUniqueness, "required")} / raw payload storage ${data.database.webhookPersistencePlan.rawPayloadStorage === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Backup and restore</strong><span>backup ${html(data.database.summary.backupStatus, "planned_not_configured")} / restore ${html(data.database.summary.restoreStatus, "planned_not_tested")} / pooling ${html(data.database.summary.poolingStatus, "planned_not_enabled")}</span></div>
+          <div class="item"><strong>Critical risks</strong><span>${html(data.database.criticalRisks.map((risk) => `${text(risk.id)}:${text(risk.severity)}`), "none")}</span></div>
+          <div class="item"><strong>No DB URL exposure</strong><span>configured ${data.database.summary.databaseUrlConfigured === true ? "true" : "false"} / value exposed ${data.database.noSecretStatus.databaseUrlExposed === true ? "true" : "false"} / production connection attempted ${data.database.noSecretStatus.productionDbConnectionAttempted === true ? "true" : "false"}</span></div>
+        </div>
+        <h2>Secret Backend Migration</h2>
+        <div class="list">
+          <div class="item"><strong>Status</strong><span>${html(data.secretBackend.summary.status, "v0_implemented")} / planning only ${html(data.secretBackend.summary.planningOnly, "true")} / production ready false / real backend configured ${data.secretBackend.summary.realSecretBackendConfigured === true ? "true" : "false"}</span></div>
+          <div class="item"><strong>Backend options</strong><span>${html(data.secretBackend.backendOptions.map((option) => `${text(option.backendKind)}:${text(option.status)}:${text(option.productionRecommended)}`), "none")}</span></div>
+          <div class="item"><strong>Env fallback warning</strong><span>${html(data.secretBackend.envFallback.warning, "env_fallback_allowed_for_local_only")} / allowed for current profile ${data.secretBackend.envFallback.allowedForCurrentProfile === true ? "true" : "false"} / env values exposed ${data.secretBackend.envFallback.envValuesExposed === true ? "true" : "false"}</span></div>
+          <div class="item"><strong>Credential kind migration</strong><span>${html(data.secretBackend.credentialKindStatus.map((item) => `${text(item.secretKind)}:rotation=${text(item.rotationStatus)}:lease=${text(item.leaseStatus)}`), "none")}</span></div>
+          <div class="item"><strong>Lease TTL and rotation</strong><span>${html(data.secretBackend.leasePolicies.map((policy) => `${text(policy.secretKind)}:${text(policy.maxTtlSeconds)}s:approval=${text(policy.requiresApproval)}`), "none")} / rotations ${html(data.secretBackend.rotationPlans.map((plan) => `${text(plan.secretKind)}:${text(plan.rotationMode)}:${text(plan.status)}`), "none")}</span></div>
+          <div class="item"><strong>Migration phases</strong><span>${html(data.secretBackend.migrationPhases.map((phase) => `${text(phase.order)}:${text(phase.status)}:${text(phase.name)}`), "none")}</span></div>
+          <div class="item"><strong>Production blockers</strong><span>${html(data.secretBackend.blockers.map((blocker) => `${text(blocker.id)}:${text(blocker.severity)}`), "none")}</span></div>
+          <div class="item"><strong>Secret backend risks</strong><span>${html(data.secretBackend.risks.map((risk) => `${text(risk.id)}:${text(risk.severity)}:${text(risk.status)}`), "none")}</span></div>
+          <div class="item"><strong>No-secret/no-env status</strong><span>no secrets exposed ${data.secretBackend.noSecretStatus.noSecretsExposed === true ? "true" : "false"} / env values exposed ${data.secretBackend.noSecretStatus.envValuesExposed === true ? "true" : "false"} / credential caches read ${data.secretBackend.noSecretStatus.credentialCachesRead === true ? "true" : "false"} / external calls ${data.secretBackend.noSecretStatus.externalCallsEnabled === true ? "enabled" : "disabled"}</span></div>
+        </div>
+        <h2>Observability</h2>
+        <div class="list">
+          <div class="item"><strong>Status</strong><span>${html(data.observability.config.status)} / ${html(data.observability.config.aggregationMode)} / external backend ${data.observability.config.externalBackendEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Audit summary</strong><span>${html(data.observability.auditSummary.totalEvents, "0")} normalized event(s) / no secrets ${html(data.observability.auditSummary.noSecretsExposed, "true")}</span></div>
+          <div class="item"><strong>Denied or blocked</strong><span>${html(data.observability.deniedOrBlockedEvents.map((event) => `${text(event.category)}:${text(event.eventType)}:${text(event.outcome)}`), "none")}</span></div>
+          <div class="item"><strong>Security events</strong><span>${html(data.observability.recentSecurityEvents.map((event) => `${text(event.category)}:${text(event.eventType)}`), "none")}</span></div>
+          <div class="item"><strong>Retention classes</strong><span>${html(data.observability.retentionClasses.map((item) => `${text(item.id)}:${text(item.defaultTtlDays)}`), "none")} / v0 deletes no audit data</span></div>
+          <div class="item"><strong>Redaction classes</strong><span>${html(data.observability.redactionClasses.map((item) => `${text(item.id)}:${text(item.maxPreviewBytes)}`), "none")}</span></div>
+          <div class="item"><strong>Metric snapshot</strong><span>${html(nestedObjects(data.observability.metricSnapshot, "points").map((point) => `${text(point.metricName)}:${text(point.value)}`), "none")}</span></div>
+          <div class="item"><strong>Trace skeleton</strong><span>${html(data.observability.traceSpans.map((span) => `${text(span.name)}:${text(span.status)}`), "none")} / exporter disabled</span></div>
+          <div class="item"><strong>Audit source coverage</strong><span>${html(data.observability.sourceCoverage.map((source) => `${text(source.moduleName)}:${text(source.normalized)}`), "none")}</span></div>
+          <div class="item"><strong>Readiness blockers</strong><span>${html(data.observability.productionReadinessBlockers.map((blocker) => `${text(blocker.id)}:${text(blocker.status ?? blocker.severity)}`), "none")}</span></div>
+          <div class="item"><strong>No-secret status</strong><span>raw payloads stored ${data.observability.noSecretStatus.rawPayloadsStored === true ? "true" : "false"} / external exporter ${data.observability.noSecretStatus.externalExporterEnabled === true ? "enabled" : "disabled"} / retention deletes ${data.observability.noSecretStatus.retentionDeletesEnabled === true ? "enabled" : "disabled"}</span></div>
         </div>
         <h2>Agent Runner</h2>
         <div class="list">

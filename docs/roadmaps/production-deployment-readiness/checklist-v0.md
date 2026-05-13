@@ -14,32 +14,39 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 
 ## Secrets
 
-- SecretRef source migrated from env provider to Vault or cloud secret manager.
-- Secret rotation workflow defined.
-- Lease TTL strategy defined and tested.
-- Legacy env fallback rejected in production profile.
+- Secret Backend Migration Planning v0 read-only models, docs, APIs, health metadata, and dashboard panel implemented.
+- SecretRef source migration from env provider to Vault or cloud secret manager remains future.
+- Secret rotation workflow planned; production jobs are not implemented.
+- Lease TTL strategy defined as planning metadata; backend enforcement remains future.
+- Legacy env fallback modeled as rejected in production profile; live production enforcement remains future.
 - No raw secret exposure in health, dashboard, logs, audit, errors, or readiness output.
 - Credential cache reads remain denied.
 
 ## Database
 
 - Production Postgres required.
-- Connection pooling selected.
-- Migrations run through release-controlled migration job.
-- Backup schedule and restore test process defined.
-- Retention classes defined.
-- Index review completed for task, audit, webhook, registry, LLM, MCP, Local Agent, and policy tables.
+- Persistent DB Production Operations v1 read-only planning implemented; production DB operations are not production-ready.
+- Connection pooling selected and implemented behind the storage provider boundary.
+- Migrations run through release-controlled migration job with migration lock, checksum review, and pre/post checks.
+- Backup schedule and restore test process defined and tested.
+- Retention classes defined and durable table strategy aligned with Observability / Audit Retention v0.
+- Index review completed for task, audit, webhook, registry, LLM, MCP, Local Agent, auth, security, and policy tables.
 - Migration rollback plan documented and tested.
+- Webhook replay/dedupe/dead-letter persistence implemented before production webhooks.
+- Health, readiness, and dashboard expose only booleans/counts/status, never DB URL values.
 
 ## Git Integration
 
-- GitHub App vs token strategy selected.
+- GitHub App vs token strategy selected for planning: GitHub App / Production Webhook Hardening Planning v0 is implemented, but no live GitHub App integration exists.
+- GitHub App permission matrix reviewed; workflows, administration, secrets, and deployments denied by default.
+- GitHub App private key and webhook secret SecretRef plan documented; production requires a real secret backend before use.
 - Repo allowlist and branch prefix enforced.
 - Webhook signature verification required.
-- Webhook delivery replay/idempotency implemented.
+- Webhook event allowlist documented.
+- Webhook delivery replay/idempotency planned; durable shared storage remains unimplemented.
 - Auto-merge remains disabled until explicit future approval.
-- Production webhook endpoint hardened.
-- Rate limit and retry behavior defined.
+- Production webhook endpoint hardening planned; endpoint is not production-ready.
+- Rate limit, retry, and dead-letter behavior planned; no background retry worker exists.
 
 ## LLM Integration
 
@@ -83,13 +90,18 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 
 ## Observability
 
-- Structured logs defined.
-- Metrics defined.
-- Tracing defined.
+- Common audit taxonomy implemented for v0 read models.
+- Retention classes and redaction classes implemented for v0 read models.
+- Audit source inventory maintained.
+- Structured logs defined for production.
+- Metrics defined; v0 metric skeleton implemented without external exporter.
+- GitHub webhook hardening metric definitions added for deliveries, verification, rejection, duplicate, dead-letter, sync success/failure, rate-limit warnings, and latency.
+- Tracing defined; v0 trace skeleton implemented without OpenTelemetry backend.
 - Audit exports defined.
 - Alerts and SLOs defined.
-- Operational dashboards defined.
-- Correlation ids propagated.
+- Operational dashboards defined; v0 Observability dashboard panel implemented.
+- Correlation ids propagated where available and surfaced by common audit envelope.
+- Production retention jobs, legal hold, and external audit export remain unimplemented.
 
 ## CI/CD
 

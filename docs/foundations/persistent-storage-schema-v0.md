@@ -838,3 +838,20 @@ These tables are schema skeletons only in Secrets and Sandbox Design v0. Runtime
 - Add unique `(name, version)` constraints for registry entities and packages.
 - Use repository contract tests before wiring persistent implementations.
 - Persistent DB v1 contract tests run against Postgres only when `AICHESTRA_TEST_DATABASE_URL` is configured.
+
+## Production Operations v1 Notes
+
+Persistent DB Production Operations v1 adds non-destructive readiness models and docs under `docs/roadmaps/persistent-db-production-operations/`. It does not change this schema destructively, run migrations automatically, connect to production databases, or delete data.
+
+Schema gaps that remain production blockers:
+
+- no migration history/lock table;
+- no production pool metadata;
+- no backup/restore metadata table;
+- no durable common `AuditEventEnvelope` table;
+- no dedicated GitHub webhook delivery replay table;
+- no dedicated webhook dead-letter table;
+- no retention/legal hold table;
+- no tenant scoping columns across production records.
+
+Future schema additions must remain additive and must continue to avoid raw secrets, raw webhook payloads, raw prompts/outputs, provider tokens, private keys, and credential cache contents.

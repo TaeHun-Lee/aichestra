@@ -19,6 +19,7 @@
     "@aichestra/improvement": "workspace:*",
     "@aichestra/llm-gateway": "workspace:*",
     "@aichestra/mcp-gateway": "workspace:*",
+    "@aichestra/observability": "workspace:*",
     "@aichestra/policy": "workspace:*",
     "@aichestra/registry": "workspace:*",
     "@aichestra/security": "workspace:*",
