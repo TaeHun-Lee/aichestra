@@ -361,13 +361,17 @@ test("Real Git Adapter v1 can resolve GitHub credentials through SecretRef witho
   assert.equal(noSecretValue(security.listAuditEvents()), true);
 
   const missing = createGitProviderFromEnv({ ...env, AICHESTRA_GITHUB_TOKEN_SECRET_REF: "secretref_missing_git_v1" }, { credentialResolver: resolveForGit(security) });
+  assert.equal(missing.config.githubCredentialSource, "secret_ref");
   assert.equal(missing.config.githubCredentialStatus, "missing");
   assert.equal(missing.config.githubCredentialReason, "secret_ref_missing");
+  assert.equal(missing.config.githubConfigured, false);
 
   security.updateSecretRefStatus("secretref_github_v1", "revoked");
   const revoked = createGitProviderFromEnv(env, { credentialResolver: resolveForGit(security) });
+  assert.equal(revoked.config.githubCredentialSource, "secret_ref");
   assert.equal(revoked.config.githubCredentialStatus, "denied");
   assert.equal(revoked.config.githubCredentialReason, "secret_ref_revoked");
+  assert.equal(revoked.config.githubConfigured, false);
 });
 
 test("Real Git Adapter v2 can resolve GitHub webhook secrets through SecretRef without exposing value", () => {
@@ -415,8 +419,10 @@ test("Real Git Adapter v2 can resolve GitHub webhook secrets through SecretRef w
       };
     }
   });
+  assert.equal(missing.config.webhookSecretSource, "secret_ref");
   assert.equal(missing.config.webhookSecretStatus, "missing");
   assert.equal(missing.config.webhookSecretReason, "secret_ref_missing");
+  assert.equal(missing.config.webhookSecretConfigured, false);
 
   security.updateSecretRefStatus("secretref_github_webhook_v1", "revoked");
   const revoked = createGitHubWebhookRuntimeFromEnv(env, {
@@ -431,8 +437,10 @@ test("Real Git Adapter v2 can resolve GitHub webhook secrets through SecretRef w
       };
     }
   });
+  assert.equal(revoked.config.webhookSecretSource, "secret_ref");
   assert.equal(revoked.config.webhookSecretStatus, "denied");
   assert.equal(revoked.config.webhookSecretReason, "secret_ref_revoked");
+  assert.equal(revoked.config.webhookSecretConfigured, false);
 });
 
 test("LLM Gateway v1 resolves OpenAI-compatible API key through SecretRef and keeps usage/audit redacted", async () => {
@@ -486,16 +494,86 @@ test("LLM Gateway v1 resolves OpenAI-compatible API key through SecretRef and ke
     credentialResolver: (request) => security.resolveCredentialForInternalUse(request),
     httpClient: client
   });
+  assert.equal(missing.config.credentialSource, "secret_ref");
   assert.equal(missing.config.credentialStatus, "missing");
   assert.equal(missing.config.credentialReason, "secret_ref_missing");
+  assert.equal(missing.config.apiKeyConfigured, false);
 
   security.updateSecretRefStatus("secretref_llm_v1", "revoked");
   const revoked = createLlmProviderFromEnv(env, {
     credentialResolver: (request) => security.resolveCredentialForInternalUse(request),
     httpClient: client
   });
+  assert.equal(revoked.config.credentialSource, "secret_ref");
   assert.equal(revoked.config.credentialStatus, "denied");
   assert.equal(revoked.config.credentialReason, "secret_ref_revoked");
+  assert.equal(revoked.config.apiKeyConfigured, false);
+});
+
+test("legacy env credential fallback is audited without exposing values", () => {
+  const env = envWithSecrets({
+    AICHESTRA_ALLOWED_SECRET_ENV_KEYS: "AICHESTRA_GITHUB_TOKEN,AICHESTRA_LLM_API_KEY,AICHESTRA_GITHUB_WEBHOOK_SECRET",
+    AICHESTRA_GIT_PROVIDER: "github",
+    AICHESTRA_ENABLE_REMOTE_GIT: "true",
+    AICHESTRA_ALLOW_REMOTE_BRANCH_CREATE: "true",
+    AICHESTRA_ALLOW_REMOTE_PR_CREATE: "true",
+    AICHESTRA_GITHUB_OWNER: "aichestra",
+    AICHESTRA_GITHUB_REPO: "demo-backend",
+    AICHESTRA_GITHUB_ALLOWED_REPOS: "aichestra/demo-backend",
+    AICHESTRA_ENABLE_GITHUB_WEBHOOKS: "true",
+    AICHESTRA_GITHUB_WEBHOOK_SECRET: "webhook-secret-value",
+    AICHESTRA_GITHUB_WEBHOOK_ALLOWED_REPOS: "aichestra/demo-backend",
+    AICHESTRA_LLM_PROVIDER: "openai_compatible",
+    AICHESTRA_ENABLE_REMOTE_LLM: "true",
+    AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION: "true",
+    AICHESTRA_LLM_BASE_URL: "https://llm.example/v1",
+    AICHESTRA_LLM_ALLOWED_MODELS: "gpt-test",
+    AICHESTRA_LLM_DEFAULT_MODEL: "gpt-test"
+  });
+  const security = new SecurityControlService({ env });
+  const legacyFallbackAuditor = (event: {
+    providerId: string;
+    purpose: string;
+    envKey: string;
+    reason: string;
+    metadata: Record<string, unknown>;
+  }) => {
+    security.recordSecretAudit({
+      eventType: "credential_legacy_env_fallback_used",
+      targetId: event.providerId,
+      result: "allowed",
+      reason: event.reason,
+      metadata: {
+        ...event.metadata,
+        providerId: event.providerId,
+        purpose: event.purpose,
+        envVarName: event.envKey
+      }
+    });
+  };
+
+  const git = createGitProviderFromEnv(env, { legacyCredentialFallbackAuditor: legacyFallbackAuditor });
+  const webhook = createGitHubWebhookRuntimeFromEnv(env, { legacySecretFallbackAuditor: legacyFallbackAuditor });
+  const { client } = createMockHttpClient();
+  const llm = createLlmProviderFromEnv(env, {
+    httpClient: client,
+    legacyCredentialFallbackAuditor: legacyFallbackAuditor
+  });
+
+  assert.equal(git.config.githubCredentialSource, "legacy_env");
+  assert.equal(webhook.config.webhookSecretSource, "legacy_env");
+  assert.equal(llm.config.credentialSource, "legacy_env");
+
+  const events = security.listAuditEvents({ eventType: "credential_legacy_env_fallback_used" });
+  assert.equal(events.length, 3);
+  assert.deepEqual(events.map((event) => event.metadata.envVarName).sort(), [
+    "AICHESTRA_GITHUB_TOKEN",
+    "AICHESTRA_GITHUB_WEBHOOK_SECRET",
+    "AICHESTRA_LLM_API_KEY"
+  ]);
+  assert.equal(events.every((event) => event.result === "allowed"), true);
+  assert.equal(events.every((event) => event.metadata.source === "legacy_env"), true);
+  assert.equal(noSecretValue(events), true);
 });
 
 test("Enterprise Provider Abstraction accepts api_key SecretRef while local_cli remains never-read-tokens", () => {

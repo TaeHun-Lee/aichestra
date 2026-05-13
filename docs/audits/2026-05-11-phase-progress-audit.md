@@ -2,7 +2,7 @@
 
 ## Scope
 
-This audit reflects the current repository state after MCP Gateway v0.
+This audit reflects the current repository state after MCP Gateway v0 and Production Deployment Readiness Planning v0.
 
 Guidance and evidence reviewed:
 
@@ -44,6 +44,10 @@ Guidance and evidence reviewed:
 - `docs/features/llm-gateway/v2.md`
 - `docs/features/mcp-gateway/v0-plan.md`
 - `docs/features/mcp-gateway/v0.md`
+- `docs/roadmaps/production-deployment-readiness/v0-plan.md`
+- `docs/roadmaps/production-deployment-readiness/v0.md`
+- `docs/reference/runtime-component-inventory.md`
+- `docs/reference/environment-gate-matrix.md`
 - `docs/foundations/secretref-provider-credentials/v1-plan.md`
 - `docs/foundations/secretref-provider-credentials/v1.md`
 - `docs/features/local-agent-runner/v0-plan.md`
@@ -79,7 +83,7 @@ Guidance and evidence reviewed:
 | Phase 2: Branch conflict manager, active branch or lease graph, conflict risk scoring, merge queue, conflict visibility | `complete_for_current_milestone` | v0 concepts exist (`BranchLease`, `ConflictRisk`, `MergeQueueEntry`) and v1 adds `MergeSimulationResult`, `MergeSimulator`, `MockMergeSimulator`, `LocalGitDryRunMergeSimulator`, simulation-aware risk and queue fields, API visibility, dashboard visibility, and tests. This is not full Phase 2 completion because semantic/symbol/test impact signals, rebase-needed detection, resolver handoff, human escalation workflow, and provider-backed merge automation remain future work. |
 | Phase 3: Skill Registry, Harness Registry, Instruction Registry, version pinning, separation of Skill / Harness / InstructionArtifact | `v3_implemented` | Separate domain concepts, seed registries, exact and simple semver range refs, repository interfaces, in-memory and file-backed repositories, stable DTOs, registry APIs, registry-backed workflow selection, TaskRun-selected refs, audit logs, approval/eval gates, local checksum verification, append-only history, rollback, approval queue read models, local eval result attachment, mock mutation RBAC, local package manifests, local import/export, package diffs, dashboard visibility, and tests exist. Signed artifacts, full approval workflow, eval execution, full package management, real auth/RBAC, and real artifact registry integration remain future work. |
 | Phase 4: Auto-improvement loop, trace clustering, LLM-based Skill or Harness patch proposals, eval, canary rollout | `v1_implemented` | Mock-only Auto-improvement v0 exists and Governance v1 now adds `ProposalReviewQueueItem`, `ProposalGovernanceDecision`, `ProposalEvalRun`, `CanaryReadiness`, `ProposalApplyGate`, improvement governance audit events, readiness checks that consider governance/eval/canary/draft status, API/dashboard visibility, and tests. This is not production auto-improvement: no LLM calls, no embeddings, no active registry mutation, no proposal auto-approval, no eval execution, no canary execution, and no apply behavior exists. |
-| Phase 5: Enterprise features such as SCIM, audit export, production policy-as-code, private deployment, data residency, advanced security | `planned_only` | Policy-as-code Skeleton v0 and Production Auth/RBAC Planning v0 now exist as static/mock-first scaffolding, but there is no production identity provider, SCIM sync, session management, production policy runtime, audit export, private deployment workflow, data residency control, or advanced enterprise security implementation. |
+| Phase 5: Enterprise features such as SCIM, audit export, production policy-as-code, private deployment, data residency, advanced security | `preparation_started` | Policy-as-code Skeleton v0, Production Auth/RBAC Planning v0, and Production Deployment Readiness Planning v0 now exist as static/mock-first scaffolding and planning artifacts, but there is no production identity provider, SCIM sync, session management, production policy runtime, audit export implementation, private deployment workflow, data residency control, or advanced enterprise security implementation. |
 
 Real integration foundation: `v0_scaffolded`. A storage provider and repository factory abstraction exists in `packages/db/src/storage.ts`; the default runtime remains in-memory. Repository inventory, Postgres-oriented schema design, migration skeleton, auth/RBAC readiness, Real Git Adapter readiness, dashboard read model plan, and real integration roadmap are documented.
 
@@ -104,6 +108,8 @@ Local Agent Protocol: `v1_implemented`. `packages/llm-gateway/src/local-agent-pr
 Dashboard API-backed Read Model: `v0_implemented`. `packages/shared/src/dashboard-read-models.ts` defines stable dashboard read-model DTOs and sanitization helpers. `apps/api/src/dashboard-read-model.ts` aggregates current service/repository/config/audit state for `/dashboard/*` routes without running workflows, calling providers, executing runner commands, creating Local Agent fixture invocations, requesting secret leases, invoking MCP tools, or reading credential caches. `apps/web/lib/dashboard-data-provider.ts` adds API and demo providers, and `apps/web/src/render.ts` consumes read models, including mock Auth/RBAC v0 and MCP Gateway v0 visibility. This is not a production dashboard: production auth scoping, tenant isolation, and analytics remain future work.
 
 MCP Gateway: `v0_implemented`. `packages/mcp-gateway` defines MCP server/tool catalog models, deterministic `MockMCPGateway`, disabled real MCP transport skeletons, invocation/audit repositories, DTOs, Auth/RBAC and Policy-as-code checks, redaction, API routes, health metadata, dashboard visibility, and tests. This is not production MCP integration: no real MCP server transport, stdio/http/sse calls, external integrations, network access, SecretLease forwarding, write/deploy tools, model-generated automatic tool execution, vendor CLI execution, credential-cache reads, or Local Agent MCP forwarding exists.
+
+Production Deployment Readiness Planning: `v0_implemented`. `docs/roadmaps/production-deployment-readiness/` defines topology, checklist, observability/audit, database operations, secret backend migration, auth/RBAC production, policy bundle, and CI/CD release plans. `docs/reference/runtime-component-inventory.md` and `docs/reference/environment-gate-matrix.md` inventory runtime components and gates. `packages/deployment-readiness` adds read-only deployment profile, readiness check, and production risk seed models. `/readiness/deployment/*` and `/dashboard/readiness` expose planning-only metadata without external calls or secrets. This is not production readiness: production auth, real secret backend, policy bundles, observability backend, backup/restore, tenant isolation, and deployment automation remain blockers.
 
 ## 2. MVP Vertical Slice Validation
 
@@ -276,16 +282,16 @@ None found.
 
 ## 9. Recommendation
 
-Recommendation: safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v2, LLM Gateway v2, MCP Gateway v0, SecretRef-backed Provider Credentials v1, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0.
+Recommendation: safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v2, LLM Gateway v2, MCP Gateway v0, Production Deployment Readiness Planning v0, SecretRef-backed Provider Credentials v1, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0.
 
 The repository has moved beyond the v0 baseline. Conflict Manager v1 is implemented with mock/local-only merge simulation, and it should not be interpreted as full Phase 2 completion.
 
-Persistent DB v1, Real Git Adapter v2, LLM Gateway v2, MCP Gateway v0, SecretRef-backed Provider Credentials v1, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox Design v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0 are implemented behind explicit storage/provider/runner/policy/security/read-model boundaries. Production cloud secret backends, Local Agent production daemon/transport work, real MCP transport, vendor CLI execution, and production sandboxing remain future work.
+Persistent DB v1, Real Git Adapter v2, LLM Gateway v2, MCP Gateway v0, Production Deployment Readiness Planning v0, SecretRef-backed Provider Credentials v1, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox Design v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0 are implemented behind explicit storage/provider/runner/policy/security/read-model boundaries. Production deployment, production cloud secret backends, production auth, Local Agent production daemon/transport work, real MCP transport, vendor CLI execution, and production sandboxing remain future work.
 
 Exact next task:
 
 ```text
-MCP Gateway v0, or GitHub App / production webhook hardening planning.
+GitHub App / production webhook hardening planning, or observability/audit retention implementation v0.
 ```
 
 ## Final Summary
@@ -296,7 +302,7 @@ Current phase status:
 - Phase 2: `complete_for_current_milestone`
 - Phase 3: `v3_implemented`
 - Phase 4: `v1_implemented`
-- Phase 5: `planned_only`
+- Phase 5: `preparation_started`
 - Real integration foundation: `v0_scaffolded`
 - Persistent DB: `v1_implemented`
 - Real Git Adapter: `v2_implemented`
@@ -309,6 +315,7 @@ Current phase status:
 - Local Agent Protocol: `v1_implemented`
 - Dashboard API-backed Read Model: `v0_implemented`
 - MCP Gateway: `v0_implemented`
+- Production Deployment Readiness Planning: `v0_implemented`
 
 Validation:
 
@@ -320,8 +327,8 @@ Validation:
 
 Merge recommendation:
 
-Safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v2, LLM Gateway v2, MCP Gateway v0, SecretRef-backed Provider Credentials v1, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0. No critical blockers were found.
+Safe to merge the current MVP vertical slice, Conflict Manager v1 baseline, Phase 3 Packaging & Versioning v3, Phase 4 Governance v1, Persistent DB v1, Real Git Adapter v2, LLM Gateway v2, MCP Gateway v0, Production Deployment Readiness Planning v0, SecretRef-backed Provider Credentials v1, Local Agent Runner v1, Policy-as-code Skeleton v0, Enterprise LLM Provider Abstraction v0, Secrets and Sandbox v0, Local Agent Protocol v1, and Dashboard API-backed Read Model v0. No critical blockers were found for this planning milestone; production remains blocked.
 
 Next recommended Codex task:
 
-MCP Gateway v0, or GitHub App / production webhook hardening planning.
+GitHub App / production webhook hardening planning, or observability/audit retention implementation v0.

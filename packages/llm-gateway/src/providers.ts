@@ -99,10 +99,19 @@ export type OpenAICompatibleProviderInput = {
 
 export type LlmCredentialResolver = (request: CredentialResolutionRequest) => InternalCredentialResolutionResult;
 
+export type LlmLegacyCredentialFallbackAuditEvent = {
+  providerId: "openai_compatible";
+  purpose: "llm_api_call";
+  envKey: "AICHESTRA_LLM_API_KEY";
+  reason: "legacy_env_api_key_configured";
+  metadata: Record<string, unknown>;
+};
+
 export type LlmProviderFactoryOptions = {
   credentialResolver?: LlmCredentialResolver;
   resolvedCredentialValue?: string;
   httpClient?: OpenAICompatibleHttpClient;
+  legacyCredentialFallbackAuditor?: (event: LlmLegacyCredentialFallbackAuditEvent) => void;
 };
 
 export type OpenAICompatibleHttpRequest = {
@@ -738,6 +747,22 @@ function resolveLlmCredential(
   }
   const value = env.AICHESTRA_LLM_API_KEY;
   if (value) {
+    options.legacyCredentialFallbackAuditor?.({
+      providerId: "openai_compatible",
+      purpose: "llm_api_call",
+      envKey: "AICHESTRA_LLM_API_KEY",
+      reason: "legacy_env_api_key_configured",
+      metadata: {
+        providerKind: "openai_compatible",
+        source: "legacy_env",
+        refConfigured: false,
+        remoteLlmEnabled: config.remoteLlmEnabled,
+        remoteCompletionEnabled: config.remoteCompletionEnabled,
+        baseUrlConfigured: config.baseUrlConfigured,
+        modelAllowlisted: config.allowedModels.length > 0 || Boolean(config.defaultModel),
+        envProviderEnabled: config.envSecretProviderEnabled
+      }
+    });
     return {
       id: createId("credres"),
       allowed: true,

@@ -22,7 +22,8 @@ import {
   OpenAICompatibleLLMProvider,
   VertexCompatibleLLMProviderSkeleton,
   createLlmProviderFromEnv,
-  type LlmCredentialResolver
+  type LlmCredentialResolver,
+  type LlmLegacyCredentialFallbackAuditEvent
 } from "./providers.ts";
 import {
   InMemoryLLMFallbackPolicyRepository,
@@ -95,6 +96,7 @@ export type LLMGatewayServiceInput = {
   routeRepository?: LLMRouteRepository;
   fallbackPolicyRepository?: LLMFallbackPolicyRepository;
   routingDecisionRepository?: LLMRoutingDecisionRepository;
+  legacyCredentialFallbackAuditor?: (event: LlmLegacyCredentialFallbackAuditEvent) => void;
 };
 
 export class LLMGatewayService implements LegacyLlmGateway {
@@ -1650,7 +1652,10 @@ function capabilitiesForPromptClass(promptClass: LLMRoutingRequest["promptClass"
 }
 
 export function createDefaultLlmGatewayService(input: Omit<LLMGatewayServiceInput, "provider" | "config"> = {}): LLMGatewayService {
-  const runtime = createLlmProviderFromEnv(process.env, { credentialResolver: input.credentialResolver });
+  const runtime = createLlmProviderFromEnv(process.env, {
+    credentialResolver: input.credentialResolver,
+    legacyCredentialFallbackAuditor: input.legacyCredentialFallbackAuditor
+  });
   return new LLMGatewayService({
     ...input,
     provider: runtime.provider,

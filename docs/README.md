@@ -64,6 +64,7 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 
 - [real-integration-roadmap.md](roadmaps/real-integration-roadmap.md) — Real Integration 항목별 v0~vN 추진 로드맵.
 - [real-integration-foundation-v0-plan.md](roadmaps/real-integration-foundation-v0-plan.md) — Foundation v0 통합 계획.
+- [production-deployment-readiness/](roadmaps/production-deployment-readiness/) — Production Deployment Readiness Planning v0: topology, checklist, DB/secret/auth/policy/observability/CI plans.
 
 ## audits/
 
@@ -88,6 +89,8 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 ## reference/
 
 - [dashboard-read-model-inventory.md](reference/dashboard-read-model-inventory.md)
+- [runtime-component-inventory.md](reference/runtime-component-inventory.md)
+- [environment-gate-matrix.md](reference/environment-gate-matrix.md)
 - [Aichestra_Closed_Enterprise_LLM_Provider_Design](reference/) — `.docx`, `.pdf`, `_LLM_Readable/` (json/md/txt 변환본).
 
 ## adr/

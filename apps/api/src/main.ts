@@ -13,6 +13,14 @@ import {
 } from "@aichestra/db";
 import type { StorageProvider } from "@aichestra/db";
 import {
+  createDeploymentReadinessService,
+  deploymentProfileToDto,
+  deploymentReadinessSummaryToDto,
+  productionRiskToDto,
+  readinessCheckToDto
+} from "@aichestra/deployment-readiness";
+import type { DeploymentReadinessService } from "@aichestra/deployment-readiness";
+import {
   AuthorizationService,
   InMemoryAuthRepository,
   MockAuthProvider,
@@ -203,6 +211,7 @@ type RouteContext = {
   securityService: SecurityControlService;
   localAgentProtocolService: LocalAgentProtocolService;
   mcpGatewayService: MCPGateway;
+  deploymentReadinessService: DeploymentReadinessService;
 };
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -660,6 +669,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           secretsExposed: false,
           tokensExposed: false
         },
+        deploymentReadiness: {
+          currentProfileId: context.deploymentReadinessService.getSummary().currentProfileId,
+          productionReady: false,
+          productionReadinessStatus: context.deploymentReadinessService.getSummary().productionReadinessStatus,
+          criticalBlockerCount: context.deploymentReadinessService.getSummary().criticalBlockerCount,
+          highRiskOpenCount: context.deploymentReadinessService.getSummary().highRiskOpenCount,
+          planningOnly: true,
+          realDeploymentImplemented: false,
+          secretsExposed: false,
+          tokensExposed: false
+        },
         security: {
           secretManagerKind: context.securityService.getConfig().secretManagerKind,
           credentialManagerKind: context.securityService.getConfig().credentialManagerKind,
@@ -677,6 +697,45 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           productionSandboxRuntime: false
         }
       });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "deployment") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Deployment readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "profiles") {
+        sendJson(response, 200, { profiles: readiness.listProfiles().map(deploymentProfileToDto) });
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "profiles") {
+        const profile = readiness.getProfile(segments[3] ?? "");
+        if (!profile) {
+          sendJson(response, 404, { error: "deployment_profile_not_found", message: `Deployment profile not found: ${segments[3]}` });
+          return;
+        }
+        sendJson(response, 200, { profile: deploymentProfileToDto(profile) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const profileId = url.searchParams.get("profileId") ?? undefined;
+        sendJson(response, 200, {
+          checks: readiness.listChecks(profileId === "local" || profileId === "integration" || profileId === "staging" || profileId === "production" ? { profileId } : {})
+            .map(readinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listRisks().map(productionRiskToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: deploymentReadinessSummaryToDto(readiness.getSummary()) });
+        return;
+      }
+      sendJson(response, 404, { error: "deployment_readiness_route_not_found" });
       return;
     }
 
@@ -737,6 +796,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (section === "mcp") {
         sendJson(response, 200, { mcp: dashboard.mcp });
+        return;
+      }
+      if (section === "readiness") {
+        sendJson(response, 200, { readiness: dashboard.readiness });
         return;
       }
       if (section === "audit") {
@@ -842,10 +905,24 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
 
       if (method === "GET" && segments[1] === "invocations" && segments.length === 2) {
-        const readDecision = context.authorizationService.hasPermission(requestContext.authContext, "mcp.tool.list", {
-          resourceKind: "mcp_tool",
-          resourceId: "mcp_invocations",
-          metadata: { readOnly: true }
+        const mcpReadEnvironment = {
+          readOnly: true,
+          serverKind: "mock",
+          serverStatus: "active",
+          realTransportEnabled: false
+        };
+        const readDecision = context.authorizationService.check({
+          authContext: requestContext.authContext,
+          action: "mcp.tool.list",
+          resource: {
+            resourceKind: "mcp_tool",
+            resourceId: "mcp_invocations",
+            metadata: { ...mcpReadEnvironment, mcpGateway: true }
+          },
+          policyContext: {
+            environment: mcpReadEnvironment,
+            metadata: { mcpGateway: true }
+          }
         });
         if (!readDecision.allowed) {
           sendJson(response, 403, { error: "authorization_denied", decision: authorizationDecisionToDto(readDecision) });
@@ -856,10 +933,24 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
 
       if (method === "GET" && segments[1] === "invocations" && segments.length === 3) {
-        const readDecision = context.authorizationService.hasPermission(requestContext.authContext, "mcp.tool.list", {
-          resourceKind: "mcp_tool",
-          resourceId: "mcp_invocations",
-          metadata: { readOnly: true }
+        const mcpReadEnvironment = {
+          readOnly: true,
+          serverKind: "mock",
+          serverStatus: "active",
+          realTransportEnabled: false
+        };
+        const readDecision = context.authorizationService.check({
+          authContext: requestContext.authContext,
+          action: "mcp.tool.list",
+          resource: {
+            resourceKind: "mcp_tool",
+            resourceId: "mcp_invocations",
+            metadata: { ...mcpReadEnvironment, mcpGateway: true }
+          },
+          policyContext: {
+            environment: mcpReadEnvironment,
+            metadata: { mcpGateway: true }
+          }
         });
         if (!readDecision.allowed) {
           sendJson(response, 403, { error: "authorization_denied", decision: authorizationDecisionToDto(readDecision) });
@@ -3670,6 +3761,26 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     authorizer: new PolicyBackedRegistryMutationAuthorizer({ policyService })
   });
   const improvementServices = createImprovementServices(storage.repositoryFactory.createImprovementRepositories(), { policyService });
+  const recordLegacyCredentialFallback = (event: {
+    providerId: string;
+    purpose: string;
+    envKey: string;
+    reason: string;
+    metadata: Record<string, unknown>;
+  }) => {
+    securityService.recordSecretAudit({
+      eventType: "credential_legacy_env_fallback_used",
+      targetId: event.providerId,
+      result: "allowed",
+      reason: event.reason,
+      metadata: {
+        ...event.metadata,
+        providerId: event.providerId,
+        purpose: event.purpose,
+        envVarName: event.envKey
+      }
+    });
+  };
   const git = createGitProviderFromEnv(process.env, {
     credentialResolver: (resolutionRequest) => {
       const resolved = securityService.resolveCredentialForInternalUse(resolutionRequest);
@@ -3680,7 +3791,8 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
         reason: resolved.blockedReason,
         credentialHandleId: resolved.credentialHandle?.id
       };
-    }
+    },
+    legacyCredentialFallbackAuditor: recordLegacyCredentialFallback
   });
   const gitIntegrationService = new GitIntegrationService({
     store,
@@ -3698,7 +3810,8 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
         reason: resolved.blockedReason,
         credentialHandleId: resolved.credentialHandle?.id
       };
-    }
+    },
+    legacySecretFallbackAuditor: recordLegacyCredentialFallback
   });
   const gitWebhookReceiverService = new GitWebhookReceiverService({
     store,
@@ -3711,13 +3824,15 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     usageRepository: store,
     policyService,
     authorizationService,
-    credentialResolver: (resolutionRequest) => securityService.resolveCredentialForInternalUse(resolutionRequest)
+    credentialResolver: (resolutionRequest) => securityService.resolveCredentialForInternalUse(resolutionRequest),
+    legacyCredentialFallbackAuditor: recordLegacyCredentialFallback
   });
   const mcpGatewayService = createDefaultMCPGateway({
     policyService,
     authorizationService,
     securityService
   });
+  const deploymentReadinessService = createDeploymentReadinessService();
   const agentRunnerConfig = createAgentRunnerConfigFromEnv();
   const agentRunnerRepositories = createInMemoryAgentRunnerRepositories();
   const agentRunner = agentRunnerConfig.runnerKind === "mock"
@@ -3760,7 +3875,8 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       providerAbstractionService,
       securityService,
       localAgentProtocolService,
-      mcpGatewayService
+      mcpGatewayService,
+      deploymentReadinessService
     });
   });
 }

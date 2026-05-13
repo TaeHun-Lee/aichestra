@@ -349,6 +349,15 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Blocked examples</strong><span>${html(data.mcp.blockedExamples.map((example) => `${text(example.operation)}:${text(example.reason)}`), "none")}</span></div>
           <div class="item"><strong>LLM and Runner</strong><span>LLM auto tool execution ${data.mcp.integration.llmAutoToolExecution === true ? "enabled" : "disabled"} / runner direct tool execution ${data.mcp.integration.runnerDirectToolExecution === true ? "enabled" : "disabled"}</span></div>
         </div>
+        <h2>Production Readiness</h2>
+        <div class="list">
+          <div class="item"><strong>Profile</strong><span>${html(data.readiness.summary.currentProfileId, "local")} / status ${html(data.readiness.summary.productionReadinessStatus, "blocked")} / production ready false</span></div>
+          <div class="item"><strong>Critical blockers</strong><span>${html(data.readiness.productionBlockers.map((blocker) => `${text(blocker.id)}:${text(blocker.severity)}`), "none")}</span></div>
+          <div class="item"><strong>High-risk areas</strong><span>${html(data.readiness.risks.filter((risk) => risk.status === "open" && (risk.severity === "high" || risk.severity === "critical")).map((risk) => `${text(risk.id)}:${text(risk.severity)}`), "none")}</span></div>
+          <div class="item"><strong>Missing requirements</strong><span>${html(data.readiness.missingProductionRequirements, "none")}</span></div>
+          <div class="item"><strong>Environment warnings</strong><span>${html(data.readiness.environmentWarnings, "none")}</span></div>
+          <div class="item"><strong>No-secret exposure</strong><span>${data.readiness.noSecretsExposed === true ? "true" : "false"} / readiness checks are local planning data only</span></div>
+        </div>
         <h2>Agent Runner</h2>
         <div class="list">
           <div class="item"><strong>Runner</strong><span>${html(data.agents.config.runnerKind)} / local runner ${data.agents.config.localRunnerEnabled === true ? "enabled" : "disabled"} / command execution ${data.agents.config.localCommandExecutionEnabled === true ? "enabled" : "disabled"}</span></div>

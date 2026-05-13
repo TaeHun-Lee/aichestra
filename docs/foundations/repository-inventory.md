@@ -13,10 +13,13 @@ Real Integration Foundation v0 keeps the default runtime in-memory, and Persiste
 
 Dashboard API-backed Read Model v0 does not add persistent storage. `/dashboard/*` routes derive read-only DTOs from existing repositories, service config, and audit repositories, then sanitize output through shared read-model helpers. `DemoDashboardDataProvider` remains a test/offline fixture path and is not production persistence.
 
+Production Deployment Readiness Planning v0 adds read-only seeded deployment profile, readiness check, and production risk models in `packages/deployment-readiness`. These are planning metadata only and do not require persistence in v0.
+
 | Repository or Store | Current Implementation | Priority | Recommended Table | Key Indexes | Retention | Audit Requirements |
 |---|---|---:|---|---|---|---|
 | DashboardReadModels | Derived in `apps/api/src/dashboard-read-model.ts`; consumed by `ApiDashboardDataProvider` | ephemeral_ok | future materialized dashboard views only if needed | section, generated_at, tenant/project when auth exists | Recompute from source tables | Must not trigger workflows/provider calls or expose secrets/tokens/unredacted logs. |
 | Dashboard demo fallback | `DemoDashboardDataProvider` over deterministic `apps/web/lib/mock-data.ts` fixtures | test_only | none | none | Test/offline render lifetime | Must remain explicit and must not be used as production state. |
+| DeploymentReadiness seed model | `packages/deployment-readiness` read-only seed data surfaced by `/readiness/deployment/*` and `/dashboard/readiness` | ephemeral_ok | future `deployment_profiles`, `deployment_readiness_checks`, `production_risks` only if runtime administration is needed | profile_id, status, severity | Planning docs lifecycle | Must not run live infra checks, store secrets, or mark production ready. |
 
 ## Auth/RBAC
 

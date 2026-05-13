@@ -27,6 +27,7 @@ function sanitizeMetadata(input: Record<string, unknown> = {}): Record<string, u
     }
     if (typeof value === "string") {
       output[key] = value
+        .replaceAll(/\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*[^\s"',}]+/gi, "[redacted-env]")
         .replaceAll(/Bearer\s+[A-Za-z0-9._~+/=-]+/g, "Bearer [redacted]")
         .replaceAll(/sk-[A-Za-z0-9_-]{6,}/g, "[redacted]")
         .replaceAll(/ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+/g, "[redacted]")

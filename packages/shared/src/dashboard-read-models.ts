@@ -202,6 +202,17 @@ export type MCPGatewayReadModel = {
   integration: DashboardJsonObject;
 };
 
+export type DeploymentReadinessReadModel = {
+  summary: DashboardJsonObject;
+  profiles: DashboardJsonObject[];
+  checks: DashboardJsonObject[];
+  risks: DashboardJsonObject[];
+  productionBlockers: DashboardJsonObject[];
+  environmentWarnings: string[];
+  missingProductionRequirements: string[];
+  noSecretsExposed: true;
+};
+
 export type AuditSummaryReadModel = {
   auditGroups: DashboardJsonObject[];
   recentEvents: DashboardJsonObject[];
@@ -222,6 +233,7 @@ export type DashboardReadModels = {
   security: SecurityReadModel;
   localAgents: LocalAgentReadModel;
   mcp: MCPGatewayReadModel;
+  readiness: DeploymentReadinessReadModel;
   audit: AuditSummaryReadModel;
 };
 
@@ -239,6 +251,7 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/security",
   "/dashboard/local-agents",
   "/dashboard/mcp",
+  "/dashboard/readiness",
   "/dashboard/audit"
 ] as const;
 

@@ -13,6 +13,7 @@ Design and work-order source documents live under `docs/briefs/`; the canonical 
 - `packages/improvement`: Phase 4 Preparation, Auto-improvement v0, and Governance v1 models, repository interfaces, in-memory repositories, DTOs, deterministic clustering, candidates, draft proposals, draft registry changes, readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, and auto-improvement safety policies.
 - `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, gated OpenAI-compatible HTTP provider path, LLM Gateway v2 route/fallback/routing-decision read models, disabled provider skeletons, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 catalog/auth/credential/token/adapter/local-agent boundary skeletons, and Local Agent Protocol v1 mock channels/fixture daemon/compatibility/streaming models.
 - `packages/mcp-gateway`: MCP Gateway v0 server/tool catalog models, deterministic `MockMCPGateway`, disabled real MCP transport skeleton, invocation/audit repositories, DTOs, and Auth/RBAC, Policy, Security redaction, and Secrets/Sandbox integration.
+- `packages/deployment-readiness`: Production Deployment Readiness Planning v0 read-only deployment profiles, readiness checks, production risks, DTOs, and seeded planning summary models.
 - `packages/policy`: provider-neutral Policy-as-code Skeleton v0 models, static/mock policy engine, default restrictive rules, policy decision audit, DTOs, and policy service boundaries.
 - `packages/auth`: Production Auth/RBAC Planning v0 provider-neutral identity/RBAC models, deterministic MockAuthProvider, disabled future auth provider placeholders, AuthorizationService, request context helpers, and sanitized auth audit events.
 - `packages/registry`: Skill, Harness, and Instruction registry interfaces, repository boundaries, DTO mappers, audit logs, history, rollback, approval queue read models, local eval result attachment, checksum verification, mock RBAC, local package manifests, import/export, semver range resolution v0, package diffs, validation helpers, and deterministic resolver.
@@ -172,6 +173,19 @@ curl http://localhost:3000/mcp/audit
 
 Real MCP transport, stdio/http/sse MCP calls, external MCP servers, network access, write/deploy tools, SecretLease issuance to tools, model-generated automatic tool execution, and Local Agent MCP forwarding remain disabled or unimplemented.
 
+Production Deployment Readiness Planning v0 adds planning-only deployment profiles, readiness checks, production risks, and read-only API/dashboard visibility. It does not deploy infrastructure or enable production traffic:
+
+```bash
+curl http://localhost:3000/readiness/deployment/profiles
+curl http://localhost:3000/readiness/deployment/profiles/production
+curl http://localhost:3000/readiness/deployment/checks
+curl http://localhost:3000/readiness/deployment/risks
+curl http://localhost:3000/readiness/deployment/summary
+curl http://localhost:3000/dashboard/readiness
+```
+
+Production remains blocked until real auth, real secret backend, required Postgres operations, policy bundle management, observability, audit retention, backup/restore, tenant isolation, and production deployment controls are implemented. Readiness endpoints are read-only, local/seeded, and do not call external services or expose secrets.
+
 Dashboard API-backed Read Model v0 exposes read-only dashboard DTOs without running workflows or provider calls:
 
 ```bash
@@ -188,6 +202,7 @@ curl http://localhost:3000/dashboard/providers
 curl http://localhost:3000/dashboard/security
 curl http://localhost:3000/dashboard/local-agents
 curl http://localhost:3000/dashboard/mcp
+curl http://localhost:3000/dashboard/readiness
 curl http://localhost:3000/dashboard/audit
 ```
 

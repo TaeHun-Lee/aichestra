@@ -3,7 +3,7 @@ import type { AuthContext, AuthorizationDecision } from "@aichestra/auth";
 import { AuthorizationService } from "@aichestra/auth";
 import { PolicyService, createPolicyContext, createPolicyResource } from "@aichestra/policy";
 import type { PolicyAction, PolicyDecision } from "@aichestra/policy";
-import { SecurityControlService } from "@aichestra/security";
+import { SecurityControlService, sanitizeSecurityMetadata } from "@aichestra/security";
 import { createInMemoryMCPGatewayRepositories } from "./repository.ts";
 import type { MCPGatewayRepositories } from "./repository.ts";
 import type {
@@ -46,6 +46,34 @@ function toJsonPreview(value: unknown): string {
 
 function booleanMetadata(value: unknown): boolean {
   return value === true;
+}
+
+function sanitizeMCPString(value: string): string {
+  return value
+    .replace(/\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*[^\s"',}]+/gi, "[redacted-env]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{6,}\b/g, "[redacted-api-key]")
+    .replace(/\bghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+\b/g, "[redacted-api-key]")
+    .replace(/~\/\.codex\/auth\.json|~\/\.claude[^\s"']*|Google credential cache/gi, "[redacted-credential-cache]");
+}
+
+function sanitizeMCPValue(value: unknown): unknown {
+  const sanitized = sanitizeSecurityMetadata(value);
+  if (typeof sanitized === "string") return sanitizeMCPString(sanitized);
+  if (Array.isArray(sanitized)) return sanitized.map((item) => sanitizeMCPValue(item));
+  if (sanitized instanceof Date) return sanitized.toISOString();
+  if (sanitized && typeof sanitized === "object") {
+    const output: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(sanitized as Record<string, unknown>)) {
+      output[key] = sanitizeMCPValue(child);
+    }
+    return output;
+  }
+  return sanitized;
+}
+
+function sanitizeMCPRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return sanitizeMCPValue(value) as Record<string, unknown>;
 }
 
 type MCPGatewayInput = {
@@ -394,7 +422,8 @@ export class MockMCPGateway implements MCPGateway {
       return result;
     }
 
-    const output = this.mockOutput(validation.tool, request.input);
+    const rawOutput = this.mockOutput(validation.tool, request.input);
+    const output = sanitizeMCPRecord(rawOutput);
     const redacted = this.securityService.redactText({
       text: toJsonPreview(output),
       taskId: request.taskId,
@@ -402,7 +431,10 @@ export class MockMCPGateway implements MCPGateway {
       actorId: authContext.actor.id,
       metadata: { serverId: request.serverId, toolId: request.toolId }
     });
-    if (redacted.redactionApplied || redacted.truncated) {
+    const outputPreview = sanitizeMCPString(redacted.preview);
+    const outputSanitized = toJsonPreview(rawOutput) !== toJsonPreview(output);
+    const previewSanitized = outputPreview !== redacted.preview;
+    if (redacted.redactionApplied || redacted.truncated || outputSanitized || previewSanitized) {
       this.recordAudit({
         eventType: "mcp_output_redacted",
         serverId: request.serverId,
@@ -413,17 +445,17 @@ export class MockMCPGateway implements MCPGateway {
         taskId: request.taskId,
         taskRunId: request.taskRunId,
         result: "redacted",
-        reason: redacted.redactionApplied ? "redaction_applied" : "output_preview_truncated",
+        reason: redacted.redactionApplied || outputSanitized || previewSanitized ? "redaction_applied" : "output_preview_truncated",
         sanitizedMetadata: { previewBytes: redacted.previewBytes, originalBytes: redacted.originalBytes }
       });
     }
     const result = this.recordResult(request, {
       status: "completed",
       output,
-      outputPreview: redacted.preview,
+      outputPreview,
       policyDecisionId: validation.policyDecision?.id,
       authorizationDecisionId: validation.authorizationDecision?.auditEvent?.id,
-      redactionApplied: redacted.redactionApplied || redacted.truncated,
+      redactionApplied: redacted.redactionApplied || redacted.truncated || outputSanitized || previewSanitized,
       metadata: {
         gatewayKind: "mock",
         deterministic: true,
@@ -443,7 +475,7 @@ export class MockMCPGateway implements MCPGateway {
       result: "completed",
       reason: "mock_mcp_tool_completed",
       sanitizedMetadata: {
-        outputPreview: redacted.preview,
+        outputPreview,
         policyDecisionId: validation.policyDecision?.id,
         authorizationDecisionId: validation.authorizationDecision?.auditEvent?.id
       }
@@ -578,8 +610,8 @@ export class MockMCPGateway implements MCPGateway {
     });
     return {
       purpose: request.purpose,
-      inputPreview: redacted.preview,
-      redactionApplied: redacted.redactionApplied || redacted.truncated
+      inputPreview: sanitizeMCPString(redacted.preview),
+      redactionApplied: redacted.redactionApplied || redacted.truncated || sanitizeMCPString(redacted.preview) !== redacted.preview
     };
   }
 
@@ -609,7 +641,7 @@ export class MockMCPGateway implements MCPGateway {
         return {
           provider: "mock-mcp",
           toolName: tool.name,
-          query: typeof input.query === "string" ? input.query : "",
+          queryObserved: typeof input.query === "string",
           results: [
             { title: "Aichestra Bootstrap", path: "docs/briefs/AICHESTRA_BOOTSTRAP.md", score: 0.97 },
             { title: "MCP Gateway v0", path: "docs/features/mcp-gateway/v0.md", score: 0.91 }

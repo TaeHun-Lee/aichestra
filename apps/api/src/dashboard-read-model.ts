@@ -1,5 +1,6 @@
 import type { AuthorizationService } from "@aichestra/auth";
 import type { InMemoryAichestraStore } from "@aichestra/db";
+import type { DeploymentReadinessService } from "@aichestra/deployment-readiness";
 import type { GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
 import type { ImprovementServices } from "@aichestra/improvement";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
@@ -19,6 +20,7 @@ import {
   type DashboardOverviewReadModel,
   type DashboardReadModels,
   type DashboardReadModelSource,
+  type DeploymentReadinessReadModel,
   type EnterpriseProviderReadModel,
   type GitIntegrationReadModel,
   type LLMGatewayReadModel,
@@ -46,6 +48,7 @@ export type DashboardReadModelContext = {
   securityService: SecurityControlService;
   localAgentProtocolService: LocalAgentProtocolService;
   mcpGatewayService: MCPGateway;
+  deploymentReadinessService: DeploymentReadinessService;
 };
 
 function last<T>(items: T[]): T | undefined {
@@ -564,6 +567,22 @@ function buildMcp(context: DashboardReadModelContext): MCPGatewayReadModel {
   };
 }
 
+function buildReadiness(context: DashboardReadModelContext): DeploymentReadinessReadModel {
+  const summary = context.deploymentReadinessService.getSummary();
+  const checks = context.deploymentReadinessService.listChecks();
+  const risks = context.deploymentReadinessService.listRisks();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profiles: sanitizeDashboardArray(context.deploymentReadinessService.listProfiles()),
+    checks: sanitizeDashboardArray(checks),
+    risks: sanitizeDashboardArray(risks),
+    productionBlockers: sanitizeDashboardArray(summary.criticalBlockers),
+    environmentWarnings: summary.environmentWarnings,
+    missingProductionRequirements: summary.missingProductionRequirements,
+    noSecretsExposed: true
+  };
+}
+
 function auditGroup(source: string, events: unknown[]): DashboardJsonObject {
   return sanitizeDashboardObject({
     source,
@@ -614,6 +633,7 @@ function buildOverview(
   security: SecurityReadModel,
   localAgents: LocalAgentReadModel,
   mcp: MCPGatewayReadModel,
+  readiness: DeploymentReadinessReadModel,
   audit: AuditSummaryReadModel
 ): DashboardOverviewReadModel {
   const totalTasks = tasks.tasks.length;
@@ -648,6 +668,8 @@ function buildOverview(
       localAgents: localAgents.registrations.length,
       mcpServers: mcp.servers.length,
       mcpTools: mcp.tools.length,
+      productionReadinessCriticalBlockers: readiness.summary.criticalBlockerCount ?? 0,
+      productionReadinessHighRisks: readiness.summary.highRiskOpenCount ?? 0,
       pendingConsentRequests: localAgents.consentQueue.length,
       auditEvents: audit.summary.totalEvents ?? 0
     }),
@@ -664,6 +686,7 @@ function buildOverview(
       security: { status: "available", count: security.auditEvents.length, notes: ["Secrets are metadata-only."] },
       localAgents: { status: "available", count: localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
       mcp: { status: "available", count: mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
+      readiness: { status: "available", count: readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       audit: { status: "available", count: typeof audit.summary.totalEvents === "number" ? audit.summary.totalEvents : 0, notes: [] }
     },
     safety: {
@@ -702,8 +725,9 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const security = buildSecurity(context);
   const localAgents = buildLocalAgents(context);
   const mcp = buildMcp(context);
+  const readiness = buildReadiness(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, conflicts, registry, llm, agents, policy, auth, providers, security, localAgents, mcp, audit);
+  const overview = buildOverview(source, tasks, git, conflicts, registry, llm, agents, policy, auth, providers, security, localAgents, mcp, readiness, audit);
 
   return {
     overview,
@@ -719,6 +743,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     security,
     localAgents,
     mcp,
+    readiness,
     audit
   };
 }

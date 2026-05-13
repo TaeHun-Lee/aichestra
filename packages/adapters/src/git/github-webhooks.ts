@@ -43,9 +43,18 @@ export type GitHubWebhookSecretResolution = {
   credentialHandleId?: string;
 };
 
+export type GitHubWebhookLegacySecretFallbackAuditEvent = {
+  providerId: "github";
+  purpose: "github_webhook_verification";
+  envKey: "AICHESTRA_GITHUB_WEBHOOK_SECRET";
+  reason: "legacy_env_webhook_secret_configured";
+  metadata: Record<string, unknown>;
+};
+
 export type GitHubWebhookFactoryOptions = {
   secretResolver?: (request: GitHubWebhookSecretResolutionRequest) => GitHubWebhookSecretResolution;
   resolvedSecretValue?: string;
+  legacySecretFallbackAuditor?: (event: GitHubWebhookLegacySecretFallbackAuditEvent) => void;
 };
 
 export type GitHubWebhookVerificationRequest = {
@@ -158,6 +167,20 @@ function resolveGitHubWebhookSecret(
   }
   const secret = env.AICHESTRA_GITHUB_WEBHOOK_SECRET;
   if (secret) {
+    options.legacySecretFallbackAuditor?.({
+      providerId: "github",
+      purpose: "github_webhook_verification",
+      envKey: "AICHESTRA_GITHUB_WEBHOOK_SECRET",
+      reason: "legacy_env_webhook_secret_configured",
+      metadata: {
+        providerKind: "github",
+        source: "legacy_env",
+        refConfigured: false,
+        githubWebhooksEnabled: config.webhooksEnabled,
+        repoAllowlisted: config.webhookAllowedRepos.length > 0,
+        envProviderEnabled: config.envSecretProviderEnabled
+      }
+    });
     return { ok: true, status: "resolved", value: secret, reason: "legacy_env_webhook_secret_configured" };
   }
   return { ok: false, status: "missing", reason: "github_webhook_secret_missing" };

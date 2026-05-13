@@ -19,7 +19,8 @@
 15. Production Auth/RBAC Planning v0 - implemented
 16. LLM Gateway v2 - implemented
 17. MCP Gateway v0 - implemented
-18. Phase 5 enterprise planning
+18. Production Deployment Readiness Planning v0 - implemented
+19. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -283,9 +284,23 @@ Goals:
 - Apply redaction to input/output/audit previews.
 - Expose `/mcp/*`, `/health`, and `/dashboard/mcp` visibility without secrets or raw output.
 
-Recommended next step: Production deployment readiness planning, or GitHub App / production webhook hardening planning.
+Recommended next step: Production deployment readiness planning has been completed as a planning/readiness milestone. Continue with GitHub App / production webhook hardening planning, or observability/audit retention implementation v0.
 
-## 18. Phase 5 Enterprise Planning
+## 18. Production Deployment Readiness Planning v0
+
+Implemented with `docs/roadmaps/production-deployment-readiness/`, `docs/reference/runtime-component-inventory.md`, `docs/reference/environment-gate-matrix.md`, `packages/deployment-readiness`, read-only `/readiness/deployment/*` API endpoints, `/dashboard/readiness`, and deterministic tests.
+
+Goals:
+
+- Document production deployment topology options for local, integration, staging, and production profiles.
+- Inventory runtime components, environment gates, production blockers, operational gaps, and critical risks.
+- Add read-only deployment profile, readiness check, and production risk models.
+- Expose planning-only readiness API/dashboard read models without external calls or secrets.
+- Keep production deployment, infrastructure manifests, real auth, real secret backends, real MCP transport, real provider calls, and vendor CLI execution out of scope.
+
+Recommended next step: GitHub App / production webhook hardening planning, or observability/audit retention implementation v0.
+
+## 19. Phase 5 Enterprise Planning
 
 Goals:
 

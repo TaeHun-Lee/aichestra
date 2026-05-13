@@ -15,13 +15,14 @@
 | Security | render-time denied lease, sandbox session, network decision, redaction test | API read model from security metadata/audit only | `GET /dashboard/security` | `SecurityReadModel` with configs, refs, scopes, leases, profiles, sessions, policies, GitHub token/webhook and LLM credential status, credential audit, audit, blocked examples | demo creates denied/redacted fixture examples | implemented in v0; updated for SecretRef-backed Provider Credentials v1 |
 | Local Agent Protocol | render-time fixture agent, channel, consent, stream, and blocked examples | API read model from Local Agent Protocol repositories/config | `GET /dashboard/local-agents` | `LocalAgentReadModel` with agents, sessions, channels, handshakes, capabilities, compatibility, consent, invocations, streams, audit | demo fixture agent remains available | implemented in v0 |
 | MCP Gateway | no previous centralized gateway source | API read model from MCP Gateway v0 config/catalog/invocation/audit repositories | `GET /dashboard/mcp` | `MCPGatewayReadModel` with config, server catalog, tool catalog, risk summary, invocations, audit, blocked examples, and integration safety flags | demo exposes deterministic mock MCP catalog metadata | implemented in v0 |
+| Production Readiness | no previous production readiness source | API read model from deployment readiness seed models | `GET /dashboard/readiness` | `DeploymentReadinessReadModel` with profile summary, blockers, risks, warnings, and no-secret flag | demo exposes deterministic planning-only readiness metadata | implemented in v0 |
 | Audit Summary | mixed local service audit lists | API read model from existing audit repositories | `GET /dashboard/audit` | `AuditSummaryReadModel` with sanitized recent audit groups | demo returns synthetic audit groups | implemented in v0 |
 | Next task detail page | `getDashboardData()` fixture lookup | dashboard read model provider | same provider as dashboard | task summary plus latest run/queue detail | demo provider by default in tests | implemented in v0 |
 | Static HTML render | direct service construction in `apps/web/src/render.ts` | `DashboardDataProvider` | provider-selected; API when configured | `DashboardReadModels` | explicit demo fallback | implemented in v0 |
 
 ## Notes
 
-- API-backed dashboard endpoints must not execute provider adapters, GitHub calls, LLM calls, runner commands, MCP tools, Local Agent fixture invocations, or workflow runs.
+- API-backed dashboard endpoints must not execute provider adapters, GitHub calls, LLM calls, runner commands, MCP tools, Local Agent fixture invocations, live readiness checks, deployment actions, or workflow runs.
 - Demo fallback is intentionally allowed for offline/static tests, but it must remain explicit and documented.
 - All read models are sanitized before API/web exposure.
 - Auth/RBAC read models expose mock identity metadata only and do not expose sessions, tokens, cookies, passwords, or provider credentials.

@@ -123,6 +123,7 @@ export type SecretAuditEventType =
   | "credential_resolution_revoked"
   | "credential_env_provider_disabled"
   | "credential_env_key_not_allowlisted"
+  | "credential_legacy_env_fallback_used"
   | "credential_cache_access_denied"
   | "credential_value_redacted";
 

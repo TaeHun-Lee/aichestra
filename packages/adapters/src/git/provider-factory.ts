@@ -34,9 +34,18 @@ export type GitCredentialResolution = {
   credentialHandleId?: string;
 };
 
+export type GitLegacyCredentialFallbackAuditEvent = {
+  providerId: "github";
+  purpose: "github_api_call";
+  envKey: "AICHESTRA_GITHUB_TOKEN";
+  reason: "legacy_env_token_configured";
+  metadata: Record<string, unknown>;
+};
+
 export type GitProviderFactoryOptions = {
   credentialResolver?: (request: GitCredentialResolutionRequest) => GitCredentialResolution;
   resolvedCredentialValue?: string;
+  legacyCredentialFallbackAuditor?: (event: GitLegacyCredentialFallbackAuditEvent) => void;
 };
 
 function flag(value: string | undefined): boolean {
@@ -179,6 +188,22 @@ function resolveGitHubCredential(
   }
   const token = env.AICHESTRA_GITHUB_TOKEN;
   if (token) {
+    options.legacyCredentialFallbackAuditor?.({
+      providerId: "github",
+      purpose: "github_api_call",
+      envKey: "AICHESTRA_GITHUB_TOKEN",
+      reason: "legacy_env_token_configured",
+      metadata: {
+        providerKind: "github",
+        source: "legacy_env",
+        refConfigured: false,
+        remoteGitEnabled: config.remoteGitEnabled,
+        remoteBranchCreateEnabled: config.remoteBranchCreateEnabled,
+        remotePullRequestCreateEnabled: config.remotePullRequestCreateEnabled,
+        repoAllowlisted: (config.githubAllowedRepos?.length ?? 0) > 0,
+        envProviderEnabled: config.envSecretProviderEnabled === true
+      }
+    });
     return { ok: true, status: "resolved", value: token, reason: "legacy_env_token_configured" };
   }
   return { ok: false, status: "missing", reason: "github_credentials_missing" };

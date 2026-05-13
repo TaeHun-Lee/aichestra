@@ -23,6 +23,9 @@ importers:
       '@aichestra/db':
         specifier: workspace:*
         version: link:packages/db
+      '@aichestra/deployment-readiness':
+        specifier: workspace:*
+        version: link:packages/deployment-readiness
       '@aichestra/git-adapter':
         specifier: workspace:*
         version: link:packages/git-adapter
@@ -71,6 +74,9 @@ importers:
       '@aichestra/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aichestra/deployment-readiness':
+        specifier: workspace:*
+        version: link:../../packages/deployment-readiness
       '@aichestra/git-adapter':
         specifier: workspace:*
         version: link:../../packages/git-adapter
@@ -196,6 +202,8 @@ importers:
       '@aichestra/registry':
         specifier: workspace:*
         version: link:../registry
+
+  packages/deployment-readiness: {}
 
   packages/git-adapter:
     dependencies:

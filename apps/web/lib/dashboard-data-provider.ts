@@ -10,6 +10,7 @@ import {
   type DashboardOverviewReadModel,
   type DashboardReadModels,
   type DashboardReadModelSource,
+  type DeploymentReadinessReadModel,
   type EnterpriseProviderReadModel,
   type GitIntegrationReadModel,
   type LLMGatewayReadModel,
@@ -85,6 +86,8 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       localAgents: sections.localAgents.registrations.length,
       mcpServers: sections.mcp.servers.length,
       mcpTools: sections.mcp.tools.length,
+      productionReadinessCriticalBlockers: numeric(sections.readiness.summary.criticalBlockerCount),
+      productionReadinessHighRisks: numeric(sections.readiness.summary.highRiskOpenCount),
       pendingConsentRequests: sections.localAgents.consentQueue.length,
       auditEvents: numeric(sections.audit.summary.totalEvents)
     }),
@@ -101,6 +104,7 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       security: { status: "available", count: sections.security.auditEvents.length, notes: ["Secrets are metadata-only."] },
       localAgents: { status: "available", count: sections.localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
       mcp: { status: "available", count: sections.mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
+      readiness: { status: "available", count: sections.readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       audit: { status: "available", count: numeric(sections.audit.summary.totalEvents), notes: [] }
     },
     safety: {
@@ -418,6 +422,49 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     })
   };
 
+  const readiness: DeploymentReadinessReadModel = {
+    summary: sanitizeDashboardObject({
+      currentProfileId: "local",
+      productionReadinessStatus: "blocked",
+      productionReady: false,
+      criticalBlockerCount: 5,
+      highRiskOpenCount: 5,
+      planningOnly: true,
+      noSecretsExposed: true
+    }),
+    profiles: sanitizeDashboardArray([
+      { id: "local", storageMode: "in_memory", authMode: "mock", secretMode: "metadata_only_env_optional" },
+      { id: "integration", storageMode: "postgres_optional", authMode: "mock", secretMode: "secretref_env" },
+      { id: "staging", storageMode: "postgres_required", authMode: "future_oidc_saml", secretMode: "real_secret_backend_required" },
+      { id: "production", storageMode: "postgres_required", authMode: "production_required", secretMode: "real_secret_backend_required" }
+    ]),
+    checks: sanitizeDashboardArray([
+      { id: "production_auth_required", profileId: "production", status: "fail", severity: "critical", category: "identity" },
+      { id: "production_secret_backend_required", profileId: "production", status: "fail", severity: "critical", category: "secrets" },
+      { id: "production_postgres_required", profileId: "production", status: "fail", severity: "critical", category: "database" }
+    ]),
+    risks: sanitizeDashboardArray([
+      { id: "risk_mock_auth_in_production", severity: "critical", status: "open", title: "Mock auth accidentally promoted" },
+      { id: "risk_env_secret_provider", severity: "critical", status: "open", title: "Env SecretRef provider is insufficient for production" }
+    ]),
+    productionBlockers: sanitizeDashboardArray([
+      { id: "production_auth_required", name: "Production Auth/RBAC required", severity: "critical" },
+      { id: "production_secret_backend_required", name: "Production secret backend required", severity: "critical" }
+    ]),
+    environmentWarnings: [
+      "mock_actor_warning",
+      "in_memory_repository_warning",
+      "missing_production_auth_warning",
+      "missing_real_secret_backend_warning"
+    ],
+    missingProductionRequirements: [
+      "Production Auth/RBAC required",
+      "Production secret backend required",
+      "Production Postgres and migrations required"
+    ],
+    noSecretsExposed: true
+  };
+
   const audit: AuditSummaryReadModel = {
     auditGroups: sanitizeDashboardArray([
       { source: "registry", count: registry.auditLogs.length, recentEvents: registry.auditLogs.slice(-5) },
@@ -428,6 +475,7 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       { source: "auth", count: auth.auditEvents.length, recentEvents: auth.auditEvents.slice(-5) },
       { source: "security", count: security.auditEvents.length, recentEvents: security.auditEvents.slice(-5) },
       { source: "mcp", count: mcp.auditEvents.length, recentEvents: mcp.auditEvents.slice(-5) },
+      { source: "deployment_readiness", count: readiness.checks.length + readiness.risks.length, recentEvents: readiness.productionBlockers.slice(-5) },
       { source: "enterprise_provider", count: providers.auditEvents.length, recentEvents: providers.auditEvents.slice(-5) },
       { source: "local_agent_protocol", count: localAgents.auditEvents.length, recentEvents: localAgents.auditEvents.slice(-5) }
     ]),
@@ -437,11 +485,12 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       ...auth.auditEvents.slice(-3),
       ...security.auditEvents.slice(-3),
       ...mcp.auditEvents.slice(-3),
+      ...readiness.productionBlockers.slice(-3),
       ...localAgents.auditEvents.slice(-3)
     ]),
     summary: sanitizeDashboardObject({
-      groupCount: 10,
-      totalEvents: git.auditEvents.length + llm.auditEvents.length + agents.auditEvents.length + policy.auditEntries.length + auth.auditEvents.length + security.auditEvents.length + mcp.auditEvents.length + providers.auditEvents.length + localAgents.auditEvents.length + registry.auditLogs.length,
+      groupCount: 11,
+      totalEvents: git.auditEvents.length + llm.auditEvents.length + agents.auditEvents.length + policy.auditEntries.length + auth.auditEvents.length + security.auditEvents.length + mcp.auditEvents.length + readiness.checks.length + readiness.risks.length + providers.auditEvents.length + localAgents.auditEvents.length + registry.auditLogs.length,
       noSecretsExposed: true
     })
   };
@@ -460,6 +509,7 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     security,
     localAgents,
     mcp,
+    readiness,
     audit
   };
   const overview = sourceOverview(source, sections);
@@ -510,6 +560,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         securityResponse,
         localAgentsResponse,
         mcpResponse,
+        readinessResponse,
         auditResponse
       ] = await Promise.all(dashboardReadModelEndpoints.map((endpoint) => this.getJson(endpoint)));
 
@@ -527,6 +578,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         security: objectValue((securityResponse as Record<string, unknown>).security) as unknown as SecurityReadModel,
         localAgents: objectValue((localAgentsResponse as Record<string, unknown>).localAgents) as unknown as LocalAgentReadModel,
         mcp: objectValue((mcpResponse as Record<string, unknown>).mcp) as unknown as MCPGatewayReadModel,
+        readiness: objectValue((readinessResponse as Record<string, unknown>).readiness) as unknown as DeploymentReadinessReadModel,
         audit: objectValue((auditResponse as Record<string, unknown>).audit) as unknown as AuditSummaryReadModel
       };
     } catch (error) {
