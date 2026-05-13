@@ -119,7 +119,7 @@ test("sandbox, network, and redaction models fail closed by default", () => {
   const futureSandboxes = security.listSandboxProfiles().filter((profile) => profile.kind.endsWith("_future"));
   const egress = security.evaluateNetworkEgress({ host: "api.example.invalid", port: 443 });
   const redaction = security.redactText({
-    text: "Bearer token-secret OPENAI_API_KEY=sk-secret ~/.claude/key application_default_credentials.json" + "x".repeat(200)
+    text: "Bearer token-secret OPENAI_API_KEY=sk-secret AICHESTRA_GITHUB_WEBHOOK_SECRET=webhook-secret-value ~/.claude/key application_default_credentials.json" + "x".repeat(200)
   });
 
   assert.ok(defaultSandbox);
@@ -133,6 +133,7 @@ test("sandbox, network, and redaction models fail closed by default", () => {
   assert.equal(futureSandboxes.every((profile) => profile.status === "disabled"), true);
   assert.equal(egress.allowed, false);
   assert.equal(redaction.redactedText.includes("sk-secret"), false);
+  assert.equal(redaction.redactedText.includes("webhook-secret-value"), false);
   assert.equal(redaction.redactedText.includes(".claude"), false);
   assert.equal(redaction.previewBytes <= 128, true);
   assert.equal(security.listAuditEvents({ targetKind: "network" }).some((event) => event.eventType === "network_egress_blocked"), true);

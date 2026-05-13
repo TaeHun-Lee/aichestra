@@ -15,6 +15,7 @@ function createPolicyId(prefix: string): string {
 
 function sanitizeDecision(decision: PolicyDecision): PolicyDecision {
   const clone = structuredClone(decision);
+  clone.subject.metadata = clone.subject.metadata ? sanitizeRecord(clone.subject.metadata) : clone.subject.metadata;
   clone.resource.metadata = sanitizeRecord(clone.resource.metadata);
   clone.context.metadata = sanitizeRecord(clone.context.metadata);
   clone.context.environment = sanitizeRecord(clone.context.environment);

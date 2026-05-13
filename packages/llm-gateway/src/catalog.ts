@@ -142,6 +142,12 @@ export function isLlmProviderKind(value: unknown): value is LLMProviderKind {
   return value === "mock" ||
     value === "openai_compatible" ||
     value === "anthropic_compatible" ||
+    value === "gemini_compatible" ||
+    value === "bedrock_compatible" ||
+    value === "vertex_compatible" ||
+    value === "azure_compatible" ||
+    value === "litellm_compatible" ||
+    value === "local_cli" ||
     value === "local" ||
     value === "custom";
 }

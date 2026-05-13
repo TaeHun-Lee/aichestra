@@ -57,6 +57,96 @@ Purpose: durable LLM/runtime usage and cost attribution.
 - Retention: billing and audit retention
 - Migration notes: never drop task/run attribution
 
+## Auth/RBAC Tables
+
+These tables are schema skeletons for Production Auth/RBAC Planning v0. Runtime repositories remain in-memory in v0, and no production SSO, OIDC, SAML, SCIM, session, password, or API-key issuance path is implemented.
+
+### `auth_principals`
+
+Purpose: durable provider-neutral identity metadata.
+
+- Primary key: `id`
+- Important columns: `principal_kind`, `display_name`, `email`, `status`, `identity_provider_id`, `external_subject`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `principal_kind,status`, `identity_provider_id,external_subject`
+- Retention: identity lifecycle
+- Migration notes: never store passwords, OAuth tokens, SSO tokens, session secrets, API key values, provider credentials, or credential-cache paths.
+
+### `auth_actors`
+
+Purpose: durable actor metadata derived from principals.
+
+- Primary key: `id`
+- Important columns: `principal_id`, `actor_kind`, `display_name`, `roles jsonb`, `teams jsonb`, `status`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `principal_id`, `actor_kind,status`
+- Retention: actor lifecycle
+- Migration notes: roles/teams are read-model metadata; role bindings remain authoritative for scoped authorization.
+
+### `auth_teams`
+
+Purpose: team metadata for future SCIM/team sync and role bindings.
+
+- Primary key: `id`
+- Important columns: `name`, `display_name`, `status`, `metadata jsonb`
+- Indexes: `name`, `status`
+- Retention: org/team lifecycle
+
+### `auth_roles`
+
+Purpose: role catalog.
+
+- Primary key: `id`
+- Important columns: `name`, `description`, `permissions jsonb`, `status`, `metadata jsonb`
+- Indexes: `name`, `status`
+- Retention: role lifecycle
+
+### `auth_permissions`
+
+Purpose: permission catalog.
+
+- Primary key: `id`
+- Important columns: `action`, `resource_kind`, `description`, `risk_level`
+- Indexes: `action`, `resource_kind,risk_level`
+- Retention: permission catalog lifecycle
+
+### `auth_role_bindings`
+
+Purpose: principal/team role binding at a resource scope.
+
+- Primary key: `id`
+- Important columns: `principal_id`, `team_id`, `role_id`, `scope_kind`, `scope_id`, `scope jsonb`, `status`, `created_at`, `updated_at`
+- Indexes: `principal_id,status`, `team_id,status`, `role_id,status`, `scope_kind,scope_id`
+- Retention: binding lifecycle and audit retention
+
+### `auth_service_accounts`
+
+Purpose: non-human actor metadata and allowed scopes.
+
+- Primary key: `id`
+- Important columns: `principal_id`, `name`, `owner_team_id`, `allowed_scopes jsonb`, `status`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `principal_id`, `owner_team_id,status`
+- Retention: service account lifecycle
+- Migration notes: store scope metadata only. Do not store service-account secrets or API key raw values.
+
+### `auth_identity_providers`
+
+Purpose: mock and future identity provider metadata.
+
+- Primary key: `id`
+- Important columns: `provider_kind`, `display_name`, `status`, `metadata jsonb`
+- Indexes: `provider_kind,status`
+- Retention: provider config lifecycle
+- Migration notes: store provider metadata only; no IdP client secrets or tokens.
+
+### `auth_audit_events`
+
+Purpose: append-only auth context and authorization audit.
+
+- Primary key: `id`
+- Important columns: `event_type`, `actor_id`, `principal_id`, `action`, `resource_kind`, `resource_id`, `result`, `reason`, `request_id`, `policy_decision_id`, `metadata jsonb`, `created_at`
+- Indexes: `event_type,created_at`, `actor_id,created_at`, `principal_id,created_at`, `action,resource_kind`, `request_id`
+- Retention: long-lived compliance retention
+- Migration notes: metadata must be sanitized and must not include tokens, cookies, passwords, API keys, provider credentials, session secrets, or credential-cache content.
+
 ## LLM Gateway Tables
 
 ### `llm_models`
@@ -99,6 +189,46 @@ Purpose: sanitized request/result trace records for future real LLM calls.
 - Retention: debug/audit retention
 - Migration notes: v1 usage ledger remains the source of cost attribution. Request traces must contain sanitized metadata only; raw prompts and provider secrets are not stored.
 
+### `llm_routes` (future optional)
+
+Purpose: durable route catalog for LLM Gateway v2 provider-aware routing.
+
+- Primary key: `id`
+- Important columns: `name`, `provider_id`, `provider_kind`, `provider_transport_kind`, `model_id`, `priority`, `enabled`, `capabilities jsonb`, `prompt_classes jsonb`, `max_input_tokens`, `max_output_tokens`, cost hints, `requires_remote`, `requires_secret_ref`, `fallback_allowed`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `provider_id,enabled`, `provider_kind,enabled`, `model_id,enabled`, `priority`
+- Retention: route config lifecycle
+- Migration notes: v2 runtime uses an in-memory route repository. Routes store metadata only and must not contain API keys, bearer tokens, credential values, raw prompts, or credential cache paths.
+
+### `llm_fallback_policies` (future optional)
+
+Purpose: durable bounded fallback policy for LLM Gateway v2.
+
+- Primary key: `id`
+- Important columns: `name`, `enabled`, `max_attempts`, `allowed_provider_kinds jsonb`, `disallowed_provider_kinds jsonb`, stop/requirement booleans, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `enabled`, `max_attempts`
+- Retention: fallback policy lifecycle
+- Migration notes: fallback is disabled by default and must not bypass Auth/RBAC, Policy-as-code, SecretRef, model allowlist, provider allowlist, or budget gates.
+
+### `llm_routing_decisions` (future optional)
+
+Purpose: sanitized route decision records for LLM Gateway v2.
+
+- Primary key: `id`
+- Important columns: `request_id`, `selected_provider_id`, `selected_provider_kind`, `selected_model_id`, `selected_route_id`, `fallback_chain jsonb`, `decision`, `reason`, `policy_decision_id`, `budget_decision_id`, `credential_resolution_id`, `metadata jsonb`, `created_at`
+- Indexes: `request_id`, `decision,created_at`, `selected_provider_id,created_at`, `selected_model_id,created_at`
+- Retention: operational/audit retention
+- Migration notes: routing decisions are in-memory in v2. Future persistence must store sanitized ids/reasons only, never raw prompts, raw outputs, provider keys, bearer tokens, or credential values.
+
+### `llm_provider_health_snapshots` (future optional)
+
+Purpose: optional route/provider health visibility for LLM Gateway v2.
+
+- Primary key: `(provider_id, last_checked_at)` or generated `id`
+- Important columns: `provider_id`, `provider_kind`, `status`, `remote_enabled`, `reason`, `metadata jsonb`, `last_checked_at`
+- Indexes: `provider_id,last_checked_at`, `provider_kind,status`
+- Retention: short operational retention
+- Migration notes: v2 derives provider health in memory. Health snapshots must expose status/booleans only and never secret values.
+
 ### `provider_catalog_entries`
 
 Purpose: future durable provider catalog for Enterprise LLM Provider Abstraction.
@@ -118,6 +248,50 @@ Purpose: append-only provider validation, credential, invocation, parser, Local 
 - Indexes: `provider_id,created_at`, `task_id,task_run_id`
 - Retention: compliance/audit retention
 - Migration notes: metadata must be sanitized and must not include raw prompts, provider secrets, bearer tokens, or credential cache content.
+
+## MCP Gateway Tables
+
+These tables are schema skeletons only in MCP Gateway v0. Runtime repositories remain in-memory and no real MCP server transport, network MCP call, SecretLease forwarding, vendor CLI execution, or external integration is wired.
+
+### `mcp_servers` (future optional)
+
+Purpose: durable MCP server catalog for future governed MCP transport.
+
+- Primary key: `id`
+- Important columns: `name`, `display_name`, `description`, `server_kind`, `status`, `owner_team_id`, `allowed_tools jsonb`, `required_secret_refs jsonb`, `sandbox_profile_id`, `network_policy_id`, `redaction_policy_id`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `server_kind,status`, `owner_team_id,status`
+- Retention: server catalog lifecycle
+- Migration notes: server records store metadata and SecretRef ids only. Never store connection tokens, raw secrets, provider credentials, or credential-cache paths.
+
+### `mcp_tools` (future optional)
+
+Purpose: durable MCP tool definition catalog.
+
+- Primary key: `id`
+- Important columns: `server_id`, `name`, `display_name`, `description`, `input_schema jsonb`, `output_schema jsonb`, `risk_level`, `required_permissions jsonb`, `required_secret_refs jsonb`, `allowed_resource_scopes jsonb`, `status`, `metadata jsonb`, `created_at`, `updated_at`
+- Indexes: `server_id,status`, `risk_level,status`, `name`
+- Retention: tool catalog lifecycle
+- Migration notes: tool definitions store schemas, risk, permissions, and SecretRef ids only. No secret values, API keys, bearer tokens, or real connector credentials.
+
+### `mcp_invocations` (future optional)
+
+Purpose: sanitized MCP invocation result records.
+
+- Primary key: `id`
+- Important columns: `request_id`, `server_id`, `tool_id`, `status`, `output_preview`, `error`, `policy_decision_id`, `authorization_decision_id`, `secret_lease_ids jsonb`, `redaction_applied`, `metadata jsonb`, `created_at`, `completed_at`
+- Indexes: `request_id`, `server_id,created_at`, `tool_id,created_at`, `status,created_at`, `policy_decision_id`
+- Retention: operational/audit retention
+- Migration notes: store redacted previews and sanitized metadata only. Do not store raw tool input/output, raw secrets, API keys, bearer tokens, SecretLease values, or credential-cache content.
+
+### `mcp_audit_events` (future optional)
+
+Purpose: append-only MCP gateway audit events.
+
+- Primary key: `id`
+- Important columns: `event_type`, `server_id`, `tool_id`, `request_id`, `actor_id`, `principal_id`, `task_id`, `task_run_id`, `result`, `reason`, `sanitized_metadata jsonb`, `created_at`
+- Indexes: `event_type,created_at`, `server_id,created_at`, `tool_id,created_at`, `actor_id,created_at`, `task_id,task_run_id`
+- Retention: long-lived compliance retention
+- Migration notes: append-only and sanitized. Never store raw secrets, provider tokens, API keys, credential cache content, or unredacted tool output.
 
 ## Local Agent Protocol Tables
 
@@ -335,7 +509,7 @@ Purpose: common task and system audit events, including Git integration audit.
 - Important columns: `actor_user_id`, `action`, `target_type`, `target_id`, `task_id`, `repo_id`, `metadata jsonb`, `created_at`
 - Indexes: `actor_user_id`, `target_type,target_id`, `task_id`, `repo_id`, `created_at`
 - Retention: compliance retention
-- Migration notes: keep append-only. Real Git Adapter v1 records remote Git config validation, GitHub branch/PR creation, changed-file reads, and blocked merge/rebase attempts here with sanitized metadata. GitHub tokens and credential-like strings must never be stored.
+- Migration notes: keep append-only. Real Git Adapter v1 records remote Git config validation, GitHub branch/PR creation, changed-file reads, and blocked merge/rebase attempts here with sanitized metadata. Real Git Adapter v2 mirrors webhook receive/verify/process/sync audit summaries here. GitHub tokens, webhook secrets, and credential-like strings must never be stored.
 
 ### `policy_decision_audit_entries`
 
@@ -356,6 +530,58 @@ Purpose: durable PR metadata for mock, local fixture, and controlled GitHub flow
 - Indexes: `task_id`, `repo_id,status`, `provider,external_id`
 - Retention: task/PR lifetime
 - Migration notes: Real Git Adapter v1 stores GitHub PR numbers in `external_id` and sanitized URLs/status only. Reviewer data, tokens, and raw provider response payloads are not stored.
+
+### `git_webhook_verification_results`
+
+Purpose: durable metadata for GitHub webhook signature verification attempts.
+
+- Primary key: `id`
+- Important columns: `delivery_id`, `verified`, `reason`, `algorithm`, `created_at`
+- Indexes: `delivery_id,created_at`
+- Retention: webhook audit/debug retention
+- Migration notes: stores result metadata only. Webhook secrets, raw signatures, tokens, and raw payloads are not stored.
+
+### `git_webhook_events`
+
+Purpose: durable metadata for GitHub webhook deliveries and processing status.
+
+- Primary key: `id`
+- Important columns: `provider_kind`, `event_type`, `delivery_id`, `repo_ref`, `action`, `payload_hash`, `signature_verified`, `status`, `received_at`, `processed_at`, `task_id`, `task_run_id`, `metadata jsonb`
+- Indexes: `delivery_id`, `repo_ref,status`, `event_type,received_at`
+- Retention: webhook audit/debug retention
+- Migration notes: raw webhook payload is not persisted. `payload_hash` may be stored for traceability; metadata must be sanitized and size-limited.
+
+### `git_pull_request_sync_states`
+
+Purpose: durable PR sync read model updated by verified webhooks or manual safe sync.
+
+- Primary key: `id`
+- Important columns: `repo_ref`, `repo_id`, `pull_request_number`, `provider_pull_request_id`, `pull_request_id`, `task_id`, `task_run_id`, `branch_lease_id`, `merge_queue_entry_id`, `state`, `head_branch`, `base_branch`, `latest_sha`, `changed_files jsonb`, `labels jsonb`, `mergeable_state`, `last_synced_at`, `source_event_id`, `metadata jsonb`
+- Unique key: `(repo_ref, pull_request_number)`
+- Indexes: `repo_ref,state`, `repo_id`, `task_id,task_run_id`
+- Retention: PR/task lifetime plus audit retention
+- Migration notes: unmapped external PRs may create sync rows without task/run linkage. Metadata must not contain raw provider payloads, tokens, or secrets.
+
+### `git_branch_sync_states`
+
+Purpose: durable branch sync read model updated by verified webhooks.
+
+- Primary key: `id`
+- Important columns: `repo_ref`, `repo_id`, `branch_name`, `latest_sha`, `exists`, `protected_branch`, `last_synced_at`, `source_event_id`, `metadata jsonb`
+- Unique key: `(repo_ref, branch_name)`
+- Indexes: `repo_ref,exists`, `repo_id`
+- Retention: branch/task lifetime plus audit retention
+- Migration notes: `exists=false` is metadata from provider events only and does not perform branch deletion.
+
+### `git_webhook_audit_events`
+
+Purpose: append-only audit events for webhook receive, verification, sync, and changed-file refresh behavior.
+
+- Primary key: `id`
+- Important columns: `event_type`, `delivery_id`, `repo_ref`, `result`, `reason`, `sanitized_metadata jsonb`, `created_at`
+- Indexes: `event_type,created_at`, `delivery_id`, `repo_ref,created_at`
+- Retention: compliance and integration audit retention
+- Migration notes: append-only. Sanitized metadata only; no webhook secrets, GitHub tokens, raw credentials, raw payloads, or credential cache paths.
 
 ### `instruction_sets`
 
@@ -527,7 +753,7 @@ These tables are schema skeletons only in Secrets and Sandbox Design v0. Runtime
 - Columns: `provider`, `secret_kind`, `name`, `env_key`, `scope`, `description`, `status`, `metadata jsonb`, `created_at`, `updated_at`
 - Indexes: `provider,status`, `secret_kind,status`, `scope`, `env_key`
 - Retention: secret reference lifecycle
-- Migration notes: never store raw secret values, OAuth tokens, API keys, keychain paths, env var values, or vendor credential cache paths. `env_key` is a reference only for SecretRef-backed Provider Credentials v1.
+- Migration notes: never store raw secret values, OAuth tokens, API keys, webhook secrets, keychain paths, env var values, or vendor credential cache paths. `env_key` is a reference only for SecretRef-backed Provider Credentials v1. `secret_kind` may classify GitHub tokens, GitHub webhook secrets, LLM API keys, provider API keys, and future token/identity placeholders.
 
 ### `secret_scopes`
 
@@ -557,7 +783,7 @@ These tables are schema skeletons only in Secrets and Sandbox Design v0. Runtime
 - Columns: `secret_ref_id`, `secret_kind`, `provider`, `status`, `expires_at`, `metadata jsonb`, `created_at`
 - Indexes: `secret_ref_id,status`, `secret_kind,status`, `expires_at`
 - Retention: short-lived credential resolution evidence
-- Migration notes: handles are metadata-only and must not store raw credential values. v1 keeps handles in request/result metadata only.
+- Migration notes: handles are metadata-only and must not store raw credential values. v1 keeps handles in request/result metadata only and links resolution to authorization/policy/audit ids where available.
 
 ### `sandbox_profiles`
 

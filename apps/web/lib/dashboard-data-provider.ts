@@ -3,6 +3,7 @@ import {
   sanitizeDashboardArray,
   sanitizeDashboardObject,
   type AgentRunnerReadModel,
+  type AuthReadModel,
   type AuditSummaryReadModel,
   type ConflictManagerReadModel,
   type DashboardJsonObject,
@@ -13,6 +14,7 @@ import {
   type GitIntegrationReadModel,
   type LLMGatewayReadModel,
   type LocalAgentReadModel,
+  type MCPGatewayReadModel,
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
@@ -76,9 +78,13 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       llmUsageEvents: sections.llm.usageEvents.length,
       agentRuns: sections.agents.runs.length,
       policyRules: sections.policy.rules.length,
+      authRoles: sections.auth.roles.length,
+      authActors: sections.auth.actors.length,
       providerCatalogEntries: sections.providers.catalog.length,
       securityAuditEvents: sections.security.auditEvents.length,
       localAgents: sections.localAgents.registrations.length,
+      mcpServers: sections.mcp.servers.length,
+      mcpTools: sections.mcp.tools.length,
       pendingConsentRequests: sections.localAgents.consentQueue.length,
       auditEvents: numeric(sections.audit.summary.totalEvents)
     }),
@@ -90,9 +96,11 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       llm: { status: "available", count: sections.llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
       agents: { status: "available", count: sections.agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: sections.policy.rules.length, notes: [] },
+      auth: { status: "available", count: sections.auth.actors.length, notes: ["Mock auth is not production authentication."] },
       providers: { status: "available", count: sections.providers.catalog.length, notes: ["Provider adapters remain skeleton/mock-first."] },
       security: { status: "available", count: sections.security.auditEvents.length, notes: ["Secrets are metadata-only."] },
       localAgents: { status: "available", count: sections.localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
+      mcp: { status: "available", count: sections.mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
       audit: { status: "available", count: numeric(sections.audit.summary.totalEvents), notes: [] }
     },
     safety: {
@@ -108,6 +116,7 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       vendorCliExecutionEnabled: false,
       credentialCacheAccessAllowed: false,
       productionSecretInjection: false,
+      mcpRealTransportEnabled: false,
       noSecretsExposed: true
     },
     warnings: [
@@ -143,11 +152,24 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
 
   const git: GitIntegrationReadModel = {
     config: objectValue(data.gitProviderConfig),
+    webhookConfig: sanitizeDashboardObject({
+      webhooksEnabled: false,
+      webhookSecretConfigured: false,
+      webhookSecretSource: "none",
+      webhookSecretStatus: "missing",
+      webhookAcceptUnverified: false,
+      supportedWebhookEventCount: 7
+    }),
     providers: arrayValue(data.gitProviders),
     repos: arrayValue(data.gitRepos),
     branchRecords: arrayValue(data.gitBranches),
     pullRequests: arrayValue(data.gitPullRequests),
+    webhookEvents: [],
+    webhookAuditEvents: [],
+    pullRequestSyncStates: [],
+    branchSyncStates: [],
     changedFiles: arrayValue(data.gitChangedFiles),
+    changedFilesRefreshStatus: sanitizeDashboardObject({ lastResult: "none", refreshAuditEvents: 0 }),
     mergeQueueLinkage: arrayValue(data.gitMergeQueueLinkage),
     auditEvents: arrayValue(data.gitAuditEvents),
     remoteAuditEvents: arrayValue(data.gitRemoteAuditEvents),
@@ -216,6 +238,12 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
   const llm: LLMGatewayReadModel = {
     config: objectValue(data.llmProviderConfig),
     providers: arrayValue(data.llmProviders),
+    routes: arrayValue(data.llmRoutes),
+    routing: objectValue(data.llmRoutingConfig),
+    providerHealth: arrayValue(data.llmProviderHealth),
+    fallbackPolicies: arrayValue(data.llmFallbackPolicies),
+    routingDecisions: arrayValue(data.llmRoutingDecisions),
+    fallbackAttempts: arrayValue(data.llmFallbackAttempts),
     models: arrayValue(data.llmModels),
     virtualKeys: arrayValue(data.virtualModelKeys),
     usageEvents: arrayValue(data.llmUsageEvents),
@@ -249,6 +277,43 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     rules: arrayValue(data.policyRules),
     auditEntries: arrayValue(data.policyAuditEntries),
     blockedExamples: arrayValue(data.policyDecisions).filter((decision) => decision.allowed !== true)
+  };
+
+  const auth: AuthReadModel = {
+    config: sanitizeDashboardObject({
+      providerKind: "mock",
+      authMode: "mock",
+      productionAuthEnabled: false,
+      mockActorEnabled: true,
+      roleCatalogCount: 7,
+      permissionCatalogCount: 40,
+      secretsExposed: false,
+      tokensExposed: false
+    }),
+    currentActor: sanitizeDashboardObject({
+      actor: { id: "mock-admin", displayName: "Mock Admin", actorKind: "anonymous_mock" },
+      principal: { id: "principal_mock_admin", principalKind: "system", displayName: "Mock Admin Principal" },
+      authMode: "mock",
+      authenticated: true,
+      roles: ["system_admin", "platform_admin"],
+      teams: ["platform"],
+      isMockActor: true,
+      productionAuthEnabled: false
+    }),
+    principals: [],
+    actors: sanitizeDashboardArray([{ id: "mock-admin", actorKind: "anonymous_mock", roles: ["system_admin", "platform_admin"], status: "active" }]),
+    teams: sanitizeDashboardArray([{ id: "team_platform", name: "platform", status: "active" }]),
+    roles: sanitizeDashboardArray([{ id: "role_viewer", name: "viewer" }, { id: "role_developer", name: "developer" }, { id: "role_platform_admin", name: "platform_admin" }]),
+    permissions: sanitizeDashboardArray([{ action: "dashboard.read", resourceKind: "dashboard", riskLevel: "low" }]),
+    roleBindings: [],
+    serviceAccounts: sanitizeDashboardArray([{ id: "svcacct_runner", name: "runner-service", status: "active", rawCredentialStored: false }]),
+    identityProviders: sanitizeDashboardArray([{ id: "idp_mock", providerKind: "mock", status: "active" }, { id: "idp_oidc_future", providerKind: "oidc_future", status: "disabled" }]),
+    auditEvents: [],
+    authorizationExamples: sanitizeDashboardArray([
+      { action: "dashboard.read", allowed: true, reason: "allowed" },
+      { action: "git.merge", allowed: false, reason: "policy_denied" }
+    ]),
+    warning: "Mock auth is visible for planning only and is not production authentication."
   };
 
   const providers: EnterpriseProviderReadModel = {
@@ -315,6 +380,44 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     ])
   };
 
+  const mcp: MCPGatewayReadModel = {
+    config: sanitizeDashboardObject({
+      gatewayKind: "mock",
+      mockGatewayEnabled: true,
+      realTransportEnabled: false,
+      serverCount: 5,
+      activeToolCount: 6,
+      highCriticalEnabledToolCount: 0,
+      externalCallsEnabled: false,
+      secretForwardingEnabled: false,
+      networkAccessEnabled: false
+    }),
+    servers: sanitizeDashboardArray([
+      { id: "mock-github-mcp", serverKind: "mock", status: "active" },
+      { id: "mock-docs-search-mcp", serverKind: "mock", status: "active" },
+      { id: "mock-jira-mcp", serverKind: "mock", status: "active" }
+    ]),
+    tools: sanitizeDashboardArray([
+      { id: "github.get_issue", riskLevel: "low", status: "active" },
+      { id: "docs.search", riskLevel: "low", status: "active" },
+      { id: "db.run_write_query", riskLevel: "critical", status: "disabled" }
+    ]),
+    riskSummary: sanitizeDashboardObject({ low: 2, high: 0, critical: 1, highCriticalEnabled: 0 }),
+    invocations: [],
+    auditEvents: [],
+    blockedExamples: sanitizeDashboardArray([
+      { operation: "mcp.real_transport", reason: "real_mcp_transport_disabled" },
+      { operation: "mcp.tool.secret.resolve", reason: "secret_forwarding_disabled_v0" },
+      { operation: "mcp.tool.network_access", reason: "network_access_denied_by_default" }
+    ]),
+    integration: sanitizeDashboardObject({
+      llmAutoToolExecution: false,
+      runnerDirectToolExecution: false,
+      localAgentMcpTransport: "future_placeholder_disabled",
+      secretsExposed: false
+    })
+  };
+
   const audit: AuditSummaryReadModel = {
     auditGroups: sanitizeDashboardArray([
       { source: "registry", count: registry.auditLogs.length, recentEvents: registry.auditLogs.slice(-5) },
@@ -322,19 +425,23 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       { source: "llm", count: llm.auditEvents.length, recentEvents: llm.auditEvents.slice(-5) },
       { source: "agent_runner", count: agents.auditEvents.length, recentEvents: agents.auditEvents.slice(-5) },
       { source: "policy", count: policy.auditEntries.length, recentEvents: policy.auditEntries.slice(-5) },
+      { source: "auth", count: auth.auditEvents.length, recentEvents: auth.auditEvents.slice(-5) },
       { source: "security", count: security.auditEvents.length, recentEvents: security.auditEvents.slice(-5) },
+      { source: "mcp", count: mcp.auditEvents.length, recentEvents: mcp.auditEvents.slice(-5) },
       { source: "enterprise_provider", count: providers.auditEvents.length, recentEvents: providers.auditEvents.slice(-5) },
       { source: "local_agent_protocol", count: localAgents.auditEvents.length, recentEvents: localAgents.auditEvents.slice(-5) }
     ]),
     recentEvents: sanitizeDashboardArray([
       ...git.auditEvents.slice(-3),
       ...llm.auditEvents.slice(-3),
+      ...auth.auditEvents.slice(-3),
       ...security.auditEvents.slice(-3),
+      ...mcp.auditEvents.slice(-3),
       ...localAgents.auditEvents.slice(-3)
     ]),
     summary: sanitizeDashboardObject({
-      groupCount: 8,
-      totalEvents: git.auditEvents.length + llm.auditEvents.length + agents.auditEvents.length + policy.auditEntries.length + security.auditEvents.length + providers.auditEvents.length + localAgents.auditEvents.length + registry.auditLogs.length,
+      groupCount: 10,
+      totalEvents: git.auditEvents.length + llm.auditEvents.length + agents.auditEvents.length + policy.auditEntries.length + auth.auditEvents.length + security.auditEvents.length + mcp.auditEvents.length + providers.auditEvents.length + localAgents.auditEvents.length + registry.auditLogs.length,
       noSecretsExposed: true
     })
   };
@@ -348,9 +455,11 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     llm,
     agents,
     policy,
+    auth,
     providers,
     security,
     localAgents,
+    mcp,
     audit
   };
   const overview = sourceOverview(source, sections);
@@ -396,9 +505,11 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         llmResponse,
         agentsResponse,
         policyResponse,
+        authResponse,
         providersResponse,
         securityResponse,
         localAgentsResponse,
+        mcpResponse,
         auditResponse
       ] = await Promise.all(dashboardReadModelEndpoints.map((endpoint) => this.getJson(endpoint)));
 
@@ -411,9 +522,11 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         llm: objectValue((llmResponse as Record<string, unknown>).llm) as unknown as LLMGatewayReadModel,
         agents: objectValue((agentsResponse as Record<string, unknown>).agents) as unknown as AgentRunnerReadModel,
         policy: objectValue((policyResponse as Record<string, unknown>).policy) as unknown as PolicyReadModel,
+        auth: objectValue((authResponse as Record<string, unknown>).auth) as unknown as AuthReadModel,
         providers: objectValue((providersResponse as Record<string, unknown>).providers) as unknown as EnterpriseProviderReadModel,
         security: objectValue((securityResponse as Record<string, unknown>).security) as unknown as SecurityReadModel,
         localAgents: objectValue((localAgentsResponse as Record<string, unknown>).localAgents) as unknown as LocalAgentReadModel,
+        mcp: objectValue((mcpResponse as Record<string, unknown>).mcp) as unknown as MCPGatewayReadModel,
         audit: objectValue((auditResponse as Record<string, unknown>).audit) as unknown as AuditSummaryReadModel
       };
     } catch (error) {

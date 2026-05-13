@@ -52,6 +52,256 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_git_webhook_receive_disabled_deny",
+      name: "Deny disabled GitHub webhook receive",
+      description: "GitHub webhook receive requires the explicit v2 webhook enable gate.",
+      effect: "deny",
+      action: "git.webhook.receive",
+      resourceKind: "git_operation",
+      conditions: {
+        environmentEquals: {
+          githubWebhooksEnabled: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_git_webhook_receive_unverified_deny",
+      name: "Deny unverified GitHub webhook receive",
+      description: "GitHub webhook receive requires signature verification.",
+      effect: "deny",
+      action: "git.webhook.receive",
+      resourceKind: "git_operation",
+      conditions: {
+        environmentEquals: {
+          signatureVerified: false
+        }
+      },
+      priority: 950,
+      enabled: true
+    },
+    {
+      id: "policy_git_webhook_receive_allow_v2",
+      name: "Allow verified GitHub webhook receive",
+      description: "Verified GitHub webhooks may be received after v2 enable, secret, signature, and repo gates pass.",
+      effect: "allow",
+      action: "git.webhook.receive",
+      resourceKind: "git_operation",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          githubWebhooksEnabled: true,
+          signatureVerified: true,
+          repoAllowlisted: true,
+          secretConfigured: true
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_git_webhook_verify_disabled_deny",
+      name: "Deny disabled GitHub webhook verification",
+      description: "GitHub webhook verification requires the explicit v2 webhook enable gate.",
+      effect: "deny",
+      action: "git.webhook.verify",
+      resourceKind: "git_operation",
+      conditions: {
+        environmentEquals: {
+          githubWebhooksEnabled: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_git_webhook_verify_unverified_deny",
+      name: "Deny failed GitHub webhook verification",
+      description: "Failed GitHub webhook signatures cannot pass verification policy.",
+      effect: "deny",
+      action: "git.webhook.verify",
+      resourceKind: "git_operation",
+      conditions: {
+        environmentEquals: {
+          signatureVerified: false
+        }
+      },
+      priority: 950,
+      enabled: true
+    },
+    {
+      id: "policy_git_webhook_verify_allow_v2",
+      name: "Allow verified GitHub webhook verification",
+      description: "GitHub webhook verification passes only after the signature has been verified.",
+      effect: "allow",
+      action: "git.webhook.verify",
+      resourceKind: "git_operation",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          githubWebhooksEnabled: true,
+          signatureVerified: true,
+          secretConfigured: true
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_git_webhook_process_disabled_deny",
+      name: "Deny disabled GitHub webhook processing",
+      description: "GitHub webhook processing requires the explicit v2 webhook enable gate.",
+      effect: "deny",
+      action: "git.webhook.process",
+      resourceKind: "git_operation",
+      conditions: {
+        environmentEquals: {
+          githubWebhooksEnabled: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_git_webhook_process_unverified_deny",
+      name: "Deny unverified GitHub webhook processing",
+      description: "GitHub webhook processing requires signature verification.",
+      effect: "deny",
+      action: "git.webhook.process",
+      resourceKind: "git_operation",
+      conditions: {
+        environmentEquals: {
+          signatureVerified: false
+        }
+      },
+      priority: 950,
+      enabled: true
+    },
+    {
+      id: "policy_git_webhook_process_allow_v2",
+      name: "Allow verified GitHub webhook processing",
+      description: "Verified GitHub webhooks may update read models only after v2 gates pass.",
+      effect: "allow",
+      action: "git.webhook.process",
+      resourceKind: "git_operation",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          githubWebhooksEnabled: true,
+          signatureVerified: true,
+          repoAllowlisted: true,
+          secretConfigured: true
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_git_pr_sync_allow_v2",
+      name: "Allow non-destructive GitHub PR sync",
+      description: "GitHub PR sync may update read models when the repo is known or allowlisted and no destructive operation is requested.",
+      effect: "allow",
+      action: "git.pull_request.sync",
+      resourceKind: "pull_request",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          repoAllowlisted: true,
+          destructiveOperation: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_git_branch_sync_allow_v2",
+      name: "Allow non-destructive GitHub branch sync",
+      description: "GitHub branch sync may update read models when the repo is allowlisted and no destructive operation is requested.",
+      effect: "allow",
+      action: "git.branch.sync",
+      resourceKind: "branch",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          repoAllowlisted: true,
+          destructiveOperation: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_git_changed_files_read_disabled_deny",
+      name: "Deny GitHub changed-files read when remote Git is disabled",
+      description: "Changed-file refresh through GitHubClient requires explicit remote Git read gates.",
+      effect: "deny",
+      action: "git.changed_files.read",
+      resourceKind: "git_operation",
+      conditions: {
+        environmentEquals: {
+          remoteGitEnabled: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_git_changed_files_read_allow_v2",
+      name: "Allow gated GitHub changed-files read",
+      description: "Changed-file refresh may call the GitHubClient only after remote Git, credential, and repo allowlist gates pass.",
+      effect: "allow",
+      action: "git.changed_files.read",
+      resourceKind: "git_operation",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          remoteGitEnabled: true,
+          remoteOperationAllowed: true,
+          repoAllowlisted: true,
+          credentialsConfigured: true,
+          destructiveOperation: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_git_credential_resolve_deny",
+      name: "Deny Git credential resolution without configured credentials",
+      description: "Git provider credential resolution requires configured SecretRef or legacy credential metadata before any secret provider read.",
+      effect: "deny",
+      action: "git.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        environmentEquals: {
+          credentialsConfigured: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_git_credential_resolve_allow_env_secretref_v1",
+      name: "Allow Git env-backed SecretRef credential resolution",
+      description: "GitHub credentials and webhook secrets may be resolved only from active env-backed SecretRefs behind the explicit env provider gate.",
+      effect: "allow",
+      action: "git.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          credentialsConfigured: true,
+          secretRefActive: true,
+          envSecretProviderEnabled: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
       id: "policy_git_merge_deny",
       name: "Deny Git merge",
       description: "Provider merge is not implemented in Real Git Adapter v0.",
@@ -263,6 +513,41 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_llm_credential_resolve_deny",
+      name: "Deny LLM credential resolution without configured credentials",
+      description: "LLM provider credential resolution requires configured SecretRef or legacy credential metadata before any secret provider read.",
+      effect: "deny",
+      action: "llm.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        environmentEquals: {
+          credentialsConfigured: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_llm_credential_resolve_allow_env_secretref_v1",
+      name: "Allow LLM env-backed SecretRef credential resolution",
+      description: "OpenAI-compatible API keys may be resolved only from active env-backed SecretRefs behind the explicit env provider gate.",
+      effect: "allow",
+      action: "llm.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        providerKinds: ["openai_compatible"],
+        environmentEquals: {
+          credentialsConfigured: true,
+          secretRefActive: true,
+          envSecretProviderEnabled: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
       id: "policy_llm_active_model_allow",
       name: "Allow active model use",
       description: "Active models may be used when other checks pass.",
@@ -271,6 +556,72 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       resourceKind: "llm_model",
       conditions: { resourceStatuses: ["active"] },
       priority: 100,
+      enabled: true
+    },
+    {
+      id: "policy_llm_route_select_allow_mock_v2",
+      name: "Allow mock LLM route selection",
+      description: "Mock LLM route selection is allowed when the selected provider is mock and budget gates are still enforced separately.",
+      effect: "allow",
+      action: "llm.route.select",
+      resourceKind: "llm_route",
+      conditions: {
+        providerKinds: ["mock"]
+      },
+      priority: 220,
+      enabled: true
+    },
+    {
+      id: "policy_llm_route_select_allow_openai_v2",
+      name: "Allow gated OpenAI-compatible route selection",
+      description: "OpenAI-compatible route selection requires remote gates, credentials, model allowlist, and budget state.",
+      effect: "allow",
+      action: "llm.route.select",
+      resourceKind: "llm_route",
+      conditions: {
+        providerKinds: ["openai_compatible"],
+        environmentEquals: {
+          remoteLlmEnabled: true,
+          remoteCompletionEnabled: true,
+          baseUrlConfigured: true,
+          credentialsConfigured: true,
+          modelAllowlisted: true,
+          budgetAllowed: true
+        }
+      },
+      priority: 240,
+      enabled: true
+    },
+    {
+      id: "policy_llm_fallback_deny_disabled_v2",
+      name: "Deny LLM fallback when disabled",
+      description: "Fallback may not run unless the v2 fallback gate is enabled.",
+      effect: "deny",
+      action: "llm.fallback",
+      resourceKind: "llm_fallback_policy",
+      conditions: {
+        environmentEquals: {
+          fallbackEnabled: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_llm_fallback_allow_bounded_v2",
+      name: "Allow bounded LLM fallback",
+      description: "Fallback may proceed only when the fallback gate and budget state allow it.",
+      effect: "allow",
+      action: "llm.fallback",
+      resourceKind: "llm_fallback_policy",
+      conditions: {
+        environmentEquals: {
+          fallbackEnabled: true,
+          fallbackWithinLimit: true,
+          budgetAllowed: true
+        }
+      },
+      priority: 260,
       enabled: true
     },
     {
@@ -407,7 +758,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "improvement.proposal.approve",
       resourceKind: "improvement_proposal",
-      conditions: { subjectRolesAny: ["system", "registry_admin", "registry_reviewer", "improvement_reviewer"] },
+      conditions: { subjectRolesAny: ["system", "system_admin", "platform_admin", "reviewer", "registry_admin", "registry_reviewer", "improvement_reviewer"] },
       priority: 200,
       enabled: true
     },
@@ -1104,6 +1455,158 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_mcp_server_list_allow_mock_v0",
+      name: "Allow mock MCP server listing",
+      description: "Active mock MCP server metadata may be listed by authenticated read roles.",
+      effect: "allow",
+      action: "mcp.server.list",
+      resourceKind: "mcp_server",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          realTransportEnabled: false
+        }
+      },
+      priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_list_allow_mock_v0",
+      name: "Allow mock MCP tool listing",
+      description: "Active mock MCP tool metadata may be listed by authenticated read roles.",
+      effect: "allow",
+      action: "mcp.tool.list",
+      resourceKind: "mcp_tool",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          serverKind: "mock",
+          serverStatus: "active",
+          realTransportEnabled: false
+        }
+      },
+      priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_invoke_allow_low_risk_mock_v0",
+      name: "Allow low-risk mock MCP tool invocation",
+      description: "Low-risk read-only mock MCP tools may run when they require no secrets, network, write, deploy, or real transport.",
+      effect: "allow",
+      action: "mcp.tool.invoke.low_risk",
+      resourceKind: "mcp_tool",
+      conditions: {
+        subjectRolesAny: ["developer", "service_account_runner", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          serverKind: "mock",
+          serverStatus: "active",
+          toolStatus: "active",
+          riskLevel: "low",
+          readOnly: true,
+          requiresSecrets: false,
+          networkRequired: false,
+          writeOperation: false,
+          deployOperation: false,
+          realTransportEnabled: false,
+          localExecutionRequired: false
+        }
+      },
+      priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_invoke_allow_generic_low_risk_mock_v0",
+      name: "Allow generic low-risk mock MCP invocation",
+      description: "The generic MCP invocation gate allows only low-risk read-only mock tools with all unsafe capabilities disabled.",
+      effect: "allow",
+      action: "mcp.tool.invoke",
+      resourceKind: "mcp_tool",
+      conditions: {
+        subjectRolesAny: ["developer", "service_account_runner", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          serverKind: "mock",
+          serverStatus: "active",
+          toolStatus: "active",
+          riskLevel: "low",
+          readOnly: true,
+          requiresSecrets: false,
+          networkRequired: false,
+          writeOperation: false,
+          deployOperation: false,
+          realTransportEnabled: false,
+          localExecutionRequired: false
+        }
+      },
+      priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_invoke_high_risk_deny_v0",
+      name: "Deny high-risk MCP tool invocation",
+      description: "High-risk MCP tools are denied by default in v0.",
+      effect: "deny",
+      action: "mcp.tool.invoke.high_risk",
+      resourceKind: "mcp_tool",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_invoke_critical_deny_v0",
+      name: "Deny critical MCP tool invocation",
+      description: "Critical MCP tools are denied by default in v0.",
+      effect: "deny",
+      action: "mcp.tool.invoke.critical",
+      resourceKind: "mcp_tool",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_secret_resolve_deny_v0",
+      name: "Deny MCP tool secret resolution",
+      description: "MCP tools do not receive SecretRefs, leases, or raw secret material in v0.",
+      effect: "deny",
+      action: "mcp.tool.secret.resolve",
+      resourceKind: "mcp_tool",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_network_access_deny_v0",
+      name: "Deny MCP tool network access",
+      description: "MCP network transport and tool network egress are disabled in v0.",
+      effect: "deny",
+      action: "mcp.tool.network_access",
+      resourceKind: "mcp_tool",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_write_deny_v0",
+      name: "Deny MCP write tools",
+      description: "MCP write tools are disabled in v0.",
+      effect: "deny",
+      action: "mcp.tool.write",
+      resourceKind: "mcp_tool",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_mcp_tool_deploy_deny_v0",
+      name: "Deny MCP deploy tools",
+      description: "MCP deployment tools are disabled in v0.",
+      effect: "deny",
+      action: "mcp.tool.deploy",
+      resourceKind: "mcp_tool",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
       id: "policy_mcp_tool_call_deny",
       name: "Deny MCP tool calls",
       description: "MCP tool calls are disabled in the mock-first scaffold.",
@@ -1121,6 +1624,56 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "deny",
       action: "secret.read",
       resourceKind: "secret_scope",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_dashboard_read_allow_auth_v0",
+      name: "Allow dashboard read for authenticated mock roles",
+      description: "Dashboard read models are read-only and may be viewed by default v0 roles.",
+      effect: "allow",
+      action: "dashboard.read",
+      resourceKind: "dashboard",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"]
+      },
+      priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_auth_read_allow_v0",
+      name: "Allow auth metadata read",
+      description: "Auth/RBAC v0 metadata contains no tokens or production sessions.",
+      effect: "allow",
+      action: "auth.read",
+      resourceKind: "auth",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"]
+      },
+      priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_auth_authorize_check_allow_v0",
+      name: "Allow authorization check endpoint",
+      description: "Authorization check evaluates mock RBAC and policy without issuing credentials or sessions.",
+      effect: "allow",
+      action: "auth.authorize.check",
+      resourceKind: "auth",
+      conditions: {
+        subjectRolesAny: ["security_admin", "platform_admin", "system_admin", "system"]
+      },
+      priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_auth_admin_future_deny",
+      name: "Deny production auth administration",
+      description: "Production auth administration is not implemented in v0.",
+      effect: "deny",
+      action: "auth.admin",
+      resourceKind: "auth",
       conditions: {},
       priority: 1000,
       enabled: true

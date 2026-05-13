@@ -1,5 +1,7 @@
 # Auth and RBAC Readiness
 
+Status update: Production Auth/RBAC Planning v0 is implemented in `docs/foundations/auth-rbac/v0.md` and `packages/auth`. This readiness note remains the earlier foundation snapshot; the canonical v0 design is now the versioned auth/RBAC foundation document.
+
 ## Current Mock Actor Behavior
 
 The current MVP uses deterministic mock actors:
@@ -32,7 +34,13 @@ The current MVP uses deterministic mock actors:
 - Future real Git writes and PR creation.
 - Future real LLM usage through virtual keys.
 
-## Proposed Actor Model
+## Implemented v0 Actor Model
+
+Auth/RBAC v0 defines provider-neutral `Principal`, `Actor`, `Team`, `Role`, `Permission`, `ResourceScope`, `RoleBinding`, `ServiceAccount`, `IdentityProvider`, `AuthContext`, `RequestContext`, and `AuthAuditEvent` models. `MockAuthProvider` is the default and marks all resolved contexts as mock, not production auth.
+
+No password fields, OAuth tokens, SSO tokens, session secrets, API-key raw values, provider credentials, or credential-cache paths are stored in auth models.
+
+## Earlier Proposed Actor Model
 
 ```ts
 type Actor = {
@@ -94,4 +102,4 @@ Future Phase 5 work should introduce:
 
 ## Why Real Auth Is Out of Scope Here
 
-Real Integration Foundation v0 only prepares storage and boundaries. Adding real auth now would require provider configuration, secrets, session management, token validation, policy review, and enterprise controls that belong in a later integration or Phase 5 task.
+Real Integration Foundation v0 only prepared storage and boundaries. Production Auth/RBAC Planning v0 now adds mock-first auth/RBAC scaffolding, but real auth remains out of scope because it requires provider configuration, secrets, session management, token validation, policy review, tenant scoping, and enterprise controls that belong in a later task.

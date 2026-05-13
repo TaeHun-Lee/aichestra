@@ -2,8 +2,12 @@ import type {
   BudgetDecision,
   LLMAuditEvent,
   LLMCompletionResult,
+  LLMFallbackPolicy,
   LLMModel,
+  LLMProviderHealth,
   LLMProviderRuntimeConfig,
+  LLMRoute,
+  LLMRoutingDecision,
   VirtualModelKey
 } from "./types.ts";
 import type {
@@ -69,6 +73,36 @@ export function llmCompletionResultToDto(result: LLMCompletionResult) {
 
 export function budgetDecisionToDto(decision: BudgetDecision) {
   return { ...decision };
+}
+
+export function llmRouteToDto(route: LLMRoute) {
+  return {
+    ...route,
+    createdAt: route.createdAt.toISOString(),
+    updatedAt: route.updatedAt.toISOString()
+  };
+}
+
+export function llmFallbackPolicyToDto(policy: LLMFallbackPolicy) {
+  return {
+    ...policy,
+    createdAt: policy.createdAt.toISOString(),
+    updatedAt: policy.updatedAt.toISOString()
+  };
+}
+
+export function llmRoutingDecisionToDto(decision: LLMRoutingDecision) {
+  return {
+    ...decision,
+    createdAt: decision.createdAt.toISOString()
+  };
+}
+
+export function llmProviderHealthToDto(health: LLMProviderHealth) {
+  return {
+    ...health,
+    lastCheckedAt: health.lastCheckedAt?.toISOString()
+  };
 }
 
 export function llmConfigToDto(config: LLMProviderRuntimeConfig) {

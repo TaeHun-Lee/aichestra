@@ -20,6 +20,11 @@ import type {
   ConflictRisk,
   CreateRepoInput,
   CreateTaskInput,
+  GitBranchSyncState,
+  GitPullRequestSyncState,
+  GitWebhookAuditEvent,
+  GitWebhookEvent,
+  GitWebhookVerificationResult,
   HarnessPackage,
   InstructionArtifact,
   InstructionSet,
@@ -51,6 +56,11 @@ export type AichestraStoreSnapshot = {
   mergeQueueEntries: MergeQueueEntry[];
   mergeSimulations: MergeSimulationResult[];
   pullRequests: PullRequest[];
+  gitWebhookEvents: GitWebhookEvent[];
+  gitWebhookVerificationResults: GitWebhookVerificationResult[];
+  gitPullRequestSyncStates: GitPullRequestSyncState[];
+  gitBranchSyncStates: GitBranchSyncState[];
+  gitWebhookAuditEvents: GitWebhookAuditEvent[];
   skills: SkillPackage[];
   harnesses: HarnessPackage[];
   instructions: InstructionArtifact[];
@@ -95,6 +105,11 @@ export class InMemoryAichestraStore {
       mergeQueueEntries: cloneArray(seed.mergeQueueEntries ?? []),
       mergeSimulations: cloneArray(seed.mergeSimulations ?? []),
       pullRequests: cloneArray(seed.pullRequests ?? []),
+      gitWebhookEvents: cloneArray(seed.gitWebhookEvents ?? []),
+      gitWebhookVerificationResults: cloneArray(seed.gitWebhookVerificationResults ?? []),
+      gitPullRequestSyncStates: cloneArray(seed.gitPullRequestSyncStates ?? []),
+      gitBranchSyncStates: cloneArray(seed.gitBranchSyncStates ?? []),
+      gitWebhookAuditEvents: cloneArray(seed.gitWebhookAuditEvents ?? []),
       skills: cloneArray(seed.skills ?? seedSkills),
       harnesses: cloneArray(seed.harnesses ?? seedHarnesses),
       instructions: cloneArray(seed.instructions ?? seedInstructions),
@@ -362,6 +377,139 @@ export class InMemoryAichestraStore {
 
   listPullRequests(taskId?: string): PullRequest[] {
     return this.state.pullRequests.filter((pullRequest) => taskId === undefined || pullRequest.taskId === taskId);
+  }
+
+  recordGitWebhookVerificationResult(input: Omit<GitWebhookVerificationResult, "id" | "createdAt">): GitWebhookVerificationResult {
+    const result = {
+      ...input,
+      id: createId("gitverify"),
+      createdAt: new Date()
+    };
+    this.state.gitWebhookVerificationResults.push(result);
+    return result;
+  }
+
+  listGitWebhookVerificationResults(deliveryId?: string): GitWebhookVerificationResult[] {
+    return this.state.gitWebhookVerificationResults
+      .filter((result) => deliveryId === undefined || result.deliveryId === deliveryId)
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
+  }
+
+  recordGitWebhookEvent(input: Omit<GitWebhookEvent, "id" | "receivedAt">): GitWebhookEvent {
+    const event = {
+      ...input,
+      id: createId("gitwebhook"),
+      receivedAt: new Date()
+    };
+    this.state.gitWebhookEvents.push(event);
+    return event;
+  }
+
+  updateGitWebhookEvent(id: string, patch: Partial<GitWebhookEvent>): GitWebhookEvent {
+    const event = this.getGitWebhookEvent(id);
+    if (!event) {
+      throw new Error(`Git webhook event not found: ${id}`);
+    }
+    Object.assign(event, patch);
+    return event;
+  }
+
+  getGitWebhookEvent(id: string): GitWebhookEvent | undefined {
+    return this.state.gitWebhookEvents.find((event) => event.id === id);
+  }
+
+  listGitWebhookEvents(filter: { repoRef?: string; eventType?: string; status?: GitWebhookEvent["status"] } = {}): GitWebhookEvent[] {
+    return this.state.gitWebhookEvents
+      .filter((event) => {
+        const repoMatches = filter.repoRef === undefined || event.repoRef === filter.repoRef;
+        const eventTypeMatches = filter.eventType === undefined || event.eventType === filter.eventType;
+        const statusMatches = filter.status === undefined || event.status === filter.status;
+        return repoMatches && eventTypeMatches && statusMatches;
+      })
+      .sort((left, right) => right.receivedAt.getTime() - left.receivedAt.getTime() || left.id.localeCompare(right.id));
+  }
+
+  upsertGitPullRequestSyncState(input: Omit<GitPullRequestSyncState, "id" | "lastSyncedAt"> & Partial<Pick<GitPullRequestSyncState, "id" | "lastSyncedAt">>): GitPullRequestSyncState {
+    const existing = this.state.gitPullRequestSyncStates.find((state) =>
+      (input.id !== undefined && state.id === input.id) ||
+      (state.repoRef === input.repoRef && state.pullRequestNumber === input.pullRequestNumber)
+    );
+    const now = new Date();
+    if (existing) {
+      Object.assign(existing, input, { id: existing.id, lastSyncedAt: input.lastSyncedAt ?? now });
+      return existing;
+    }
+    const state = {
+      ...input,
+      id: input.id ?? createId("prsync"),
+      lastSyncedAt: input.lastSyncedAt ?? now
+    };
+    this.state.gitPullRequestSyncStates.push(state);
+    return state;
+  }
+
+  listGitPullRequestSyncStates(repoRef?: string): GitPullRequestSyncState[] {
+    return this.state.gitPullRequestSyncStates
+      .filter((state) => repoRef === undefined || state.repoRef === repoRef || state.repoId === repoRef)
+      .sort((left, right) => right.lastSyncedAt.getTime() - left.lastSyncedAt.getTime() || left.id.localeCompare(right.id));
+  }
+
+  getGitPullRequestSyncState(repoRef: string, pullRequestNumber: number): GitPullRequestSyncState | undefined {
+    return this.state.gitPullRequestSyncStates.find((state) =>
+      (state.repoRef === repoRef || state.repoId === repoRef) && state.pullRequestNumber === pullRequestNumber
+    );
+  }
+
+  upsertGitBranchSyncState(input: Omit<GitBranchSyncState, "id" | "lastSyncedAt"> & Partial<Pick<GitBranchSyncState, "id" | "lastSyncedAt">>): GitBranchSyncState {
+    const existing = this.state.gitBranchSyncStates.find((state) =>
+      (input.id !== undefined && state.id === input.id) ||
+      (state.repoRef === input.repoRef && state.branchName === input.branchName)
+    );
+    const now = new Date();
+    if (existing) {
+      Object.assign(existing, input, { id: existing.id, lastSyncedAt: input.lastSyncedAt ?? now });
+      return existing;
+    }
+    const state = {
+      ...input,
+      id: input.id ?? createId("branchsync"),
+      lastSyncedAt: input.lastSyncedAt ?? now
+    };
+    this.state.gitBranchSyncStates.push(state);
+    return state;
+  }
+
+  listGitBranchSyncStates(repoRef?: string): GitBranchSyncState[] {
+    return this.state.gitBranchSyncStates
+      .filter((state) => repoRef === undefined || state.repoRef === repoRef || state.repoId === repoRef)
+      .sort((left, right) => right.lastSyncedAt.getTime() - left.lastSyncedAt.getTime() || left.id.localeCompare(right.id));
+  }
+
+  getGitBranchSyncState(repoRef: string, branchName: string): GitBranchSyncState | undefined {
+    return this.state.gitBranchSyncStates.find((state) =>
+      (state.repoRef === repoRef || state.repoId === repoRef) && state.branchName === branchName
+    );
+  }
+
+  recordGitWebhookAuditEvent(input: Omit<GitWebhookAuditEvent, "id" | "createdAt">): GitWebhookAuditEvent {
+    const event = {
+      ...input,
+      id: createId("gitwhaudit"),
+      createdAt: new Date()
+    };
+    this.state.gitWebhookAuditEvents.push(event);
+    return event;
+  }
+
+  listGitWebhookAuditEvents(filter: { eventType?: string; repoRef?: string; deliveryId?: string } = {}): GitWebhookAuditEvent[] {
+    return this.state.gitWebhookAuditEvents
+      .filter((event) => {
+        const eventTypeMatches = filter.eventType === undefined || event.eventType === filter.eventType;
+        const repoMatches = filter.repoRef === undefined || event.repoRef === filter.repoRef;
+        const deliveryMatches = filter.deliveryId === undefined || event.deliveryId === filter.deliveryId;
+        return eventTypeMatches && repoMatches && deliveryMatches;
+      })
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id));
   }
 
   createMergeQueueEntry(

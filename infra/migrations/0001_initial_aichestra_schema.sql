@@ -87,6 +87,98 @@ CREATE TABLE IF NOT EXISTS pull_requests (
 CREATE INDEX IF NOT EXISTS idx_pull_requests_task ON pull_requests (task_id);
 CREATE INDEX IF NOT EXISTS idx_pull_requests_repo_status ON pull_requests (repo_id, status);
 
+CREATE TABLE IF NOT EXISTS git_webhook_verification_results (
+  id text PRIMARY KEY,
+  delivery_id text NOT NULL,
+  verified boolean NOT NULL,
+  reason text NOT NULL,
+  algorithm text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_webhook_verification_delivery ON git_webhook_verification_results (delivery_id, created_at);
+
+CREATE TABLE IF NOT EXISTS git_webhook_events (
+  id text PRIMARY KEY,
+  provider_kind text NOT NULL,
+  event_type text NOT NULL,
+  delivery_id text NOT NULL,
+  repo_ref text NOT NULL,
+  action text,
+  payload_hash text NOT NULL,
+  signature_verified boolean NOT NULL,
+  status text NOT NULL,
+  received_at timestamptz NOT NULL DEFAULT now(),
+  processed_at timestamptz,
+  task_id text,
+  task_run_id text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_webhook_events_delivery ON git_webhook_events (delivery_id);
+CREATE INDEX IF NOT EXISTS idx_git_webhook_events_repo_status ON git_webhook_events (repo_ref, status);
+CREATE INDEX IF NOT EXISTS idx_git_webhook_events_type_time ON git_webhook_events (event_type, received_at);
+
+CREATE TABLE IF NOT EXISTS git_pull_request_sync_states (
+  id text PRIMARY KEY,
+  repo_ref text NOT NULL,
+  repo_id text,
+  pull_request_number integer NOT NULL,
+  provider_pull_request_id text,
+  pull_request_id text,
+  task_id text,
+  task_run_id text,
+  branch_lease_id text,
+  merge_queue_entry_id text,
+  state text NOT NULL,
+  head_branch text NOT NULL,
+  base_branch text NOT NULL,
+  latest_sha text,
+  changed_files jsonb NOT NULL DEFAULT '[]'::jsonb,
+  labels jsonb,
+  mergeable_state text,
+  last_synced_at timestamptz NOT NULL DEFAULT now(),
+  source_event_id text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (repo_ref, pull_request_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_pr_sync_repo_state ON git_pull_request_sync_states (repo_ref, state);
+CREATE INDEX IF NOT EXISTS idx_git_pr_sync_repo_id ON git_pull_request_sync_states (repo_id);
+CREATE INDEX IF NOT EXISTS idx_git_pr_sync_task_run ON git_pull_request_sync_states (task_id, task_run_id);
+
+CREATE TABLE IF NOT EXISTS git_branch_sync_states (
+  id text PRIMARY KEY,
+  repo_ref text NOT NULL,
+  repo_id text,
+  branch_name text NOT NULL,
+  latest_sha text,
+  exists boolean NOT NULL,
+  protected_branch boolean,
+  last_synced_at timestamptz NOT NULL DEFAULT now(),
+  source_event_id text,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  UNIQUE (repo_ref, branch_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_branch_sync_repo_exists ON git_branch_sync_states (repo_ref, exists);
+CREATE INDEX IF NOT EXISTS idx_git_branch_sync_repo_id ON git_branch_sync_states (repo_id);
+
+CREATE TABLE IF NOT EXISTS git_webhook_audit_events (
+  id text PRIMARY KEY,
+  event_type text NOT NULL,
+  delivery_id text,
+  repo_ref text,
+  result text NOT NULL,
+  reason text,
+  sanitized_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_webhook_audit_event_type ON git_webhook_audit_events (event_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_git_webhook_audit_delivery ON git_webhook_audit_events (delivery_id);
+CREATE INDEX IF NOT EXISTS idx_git_webhook_audit_repo ON git_webhook_audit_events (repo_ref, created_at);
+
 CREATE TABLE IF NOT EXISTS instruction_sets (
   id text PRIMARY KEY,
   task_run_id text NOT NULL REFERENCES task_runs(id),

@@ -16,11 +16,13 @@
   "devDependencies": {
     "@aichestra/adapters": "workspace:*",
     "@aichestra/api": "workspace:*",
+    "@aichestra/auth": "workspace:*",
     "@aichestra/core": "workspace:*",
     "@aichestra/db": "workspace:*",
     "@aichestra/git-adapter": "workspace:*",
     "@aichestra/improvement": "workspace:*",
     "@aichestra/llm-gateway": "workspace:*",
+    "@aichestra/mcp-gateway": "workspace:*",
     "@aichestra/policy": "workspace:*",
     "@aichestra/registry": "workspace:*",
     "@aichestra/runner": "workspace:*",

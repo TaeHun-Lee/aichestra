@@ -12,10 +12,12 @@
   },
   "dependencies": {
     "@aichestra/core": "workspace:*",
+    "@aichestra/auth": "workspace:*",
     "@aichestra/db": "workspace:*",
     "@aichestra/git-adapter": "workspace:*",
     "@aichestra/improvement": "workspace:*",
     "@aichestra/llm-gateway": "workspace:*",
+    "@aichestra/mcp-gateway": "workspace:*",
     "@aichestra/policy": "workspace:*",
     "@aichestra/registry": "workspace:*",
     "@aichestra/security": "workspace:*",

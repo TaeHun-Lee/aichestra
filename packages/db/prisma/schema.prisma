@@ -181,6 +181,98 @@ model PullRequest {
   updatedAt  DateTime @updatedAt
 }
 
+model GitWebhookVerificationResult {
+  id         String   @id
+  deliveryId String
+  verified   Boolean
+  reason     String
+  algorithm  String
+  createdAt  DateTime @default(now())
+
+  @@index([deliveryId, createdAt])
+}
+
+model GitWebhookEvent {
+  id                String   @id
+  providerKind      String
+  eventType         String
+  deliveryId        String
+  repoRef           String
+  action            String?
+  payloadHash       String
+  signatureVerified Boolean
+  status            String
+  receivedAt        DateTime @default(now())
+  processedAt       DateTime?
+  taskId            String?
+  taskRunId         String?
+  metadata          Json
+
+  @@index([deliveryId])
+  @@index([repoRef, status])
+  @@index([eventType, receivedAt])
+}
+
+model GitPullRequestSyncState {
+  id                    String   @id
+  repoRef               String
+  repoId                String?
+  pullRequestNumber     Int
+  providerPullRequestId String?
+  pullRequestId         String?
+  taskId                String?
+  taskRunId             String?
+  branchLeaseId         String?
+  mergeQueueEntryId     String?
+  state                 String
+  headBranch            String
+  baseBranch            String
+  latestSha             String?
+  changedFiles          Json
+  labels                Json?
+  mergeableState        String?
+  lastSyncedAt          DateTime @default(now())
+  sourceEventId         String?
+  metadata              Json
+
+  @@unique([repoRef, pullRequestNumber])
+  @@index([repoRef, state])
+  @@index([repoId])
+  @@index([taskId, taskRunId])
+}
+
+model GitBranchSyncState {
+  id              String   @id
+  repoRef         String
+  repoId          String?
+  branchName      String
+  latestSha       String?
+  exists          Boolean
+  protectedBranch Boolean?
+  lastSyncedAt    DateTime @default(now())
+  sourceEventId   String?
+  metadata        Json
+
+  @@unique([repoRef, branchName])
+  @@index([repoRef, exists])
+  @@index([repoId])
+}
+
+model GitWebhookAuditEvent {
+  id                String   @id
+  eventType         String
+  deliveryId        String?
+  repoRef           String?
+  result            String
+  reason            String?
+  sanitizedMetadata Json
+  createdAt         DateTime @default(now())
+
+  @@index([eventType, createdAt])
+  @@index([deliveryId])
+  @@index([repoRef, createdAt])
+}
+
 model SkillPackage {
   id                String   @id
   name              String

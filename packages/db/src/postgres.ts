@@ -14,6 +14,11 @@ import type {
   BranchLease,
   BranchLeaseStatus,
   ConflictRisk,
+  GitBranchSyncState,
+  GitPullRequestSyncState,
+  GitWebhookAuditEvent,
+  GitWebhookEvent,
+  GitWebhookVerificationResult,
   HarnessPackage,
   InstructionArtifact,
   InstructionSet,
@@ -168,6 +173,11 @@ export class PostgresAichestraStore extends InMemoryAichestraStore {
       mergeQueueEntries: [],
       mergeSimulations: [],
       pullRequests: [],
+      gitWebhookEvents: [],
+      gitWebhookVerificationResults: [],
+      gitPullRequestSyncStates: [],
+      gitBranchSyncStates: [],
+      gitWebhookAuditEvents: [],
       skills: [],
       harnesses: [],
       instructions: [],
@@ -413,6 +423,123 @@ export class PostgresAichestraStore extends InMemoryAichestraStore {
   override listPullRequests(taskId?: string): PullRequest[] {
     const where = taskId ? ` WHERE task_id = ${sqlLiteral(taskId)}` : "";
     return this.rows(`${pullRequestSelect()}${where} ORDER BY created_at, id`).map(mapPullRequest);
+  }
+
+  override recordGitWebhookVerificationResult(input: Parameters<InMemoryAichestraStore["recordGitWebhookVerificationResult"]>[0]): GitWebhookVerificationResult {
+    const result = {
+      ...input,
+      id: createId("gitverify"),
+      createdAt: new Date()
+    };
+    this.insert("git_webhook_verification_results", gitWebhookVerificationToDb(result));
+    return result;
+  }
+
+  override listGitWebhookVerificationResults(deliveryId?: string): GitWebhookVerificationResult[] {
+    const where = deliveryId ? ` WHERE delivery_id = ${sqlLiteral(deliveryId)}` : "";
+    return this.rows(`${gitWebhookVerificationSelect()}${where} ORDER BY created_at DESC, id`).map(mapGitWebhookVerification);
+  }
+
+  override recordGitWebhookEvent(input: Parameters<InMemoryAichestraStore["recordGitWebhookEvent"]>[0]): GitWebhookEvent {
+    const event = {
+      ...input,
+      id: createId("gitwebhook"),
+      receivedAt: new Date()
+    };
+    this.insert("git_webhook_events", gitWebhookEventToDb(event));
+    return event;
+  }
+
+  override updateGitWebhookEvent(id: string, patch: Partial<GitWebhookEvent>): GitWebhookEvent {
+    const current = required(this.getGitWebhookEvent(id), `Git webhook event not found: ${id}`);
+    const updated = { ...current, ...patch };
+    this.update("git_webhook_events", gitWebhookEventToDb(updated), `id = ${sqlLiteral(id)}`);
+    return updated;
+  }
+
+  override getGitWebhookEvent(id: string): GitWebhookEvent | undefined {
+    const row = this.one(`${gitWebhookEventSelect()} WHERE id = ${sqlLiteral(id)}`);
+    return row ? mapGitWebhookEvent(row) : undefined;
+  }
+
+  override listGitWebhookEvents(filter: { repoRef?: string; eventType?: string; status?: GitWebhookEvent["status"] } = {}): GitWebhookEvent[] {
+    const conditions = [
+      filter.repoRef ? `repo_ref = ${sqlLiteral(filter.repoRef)}` : undefined,
+      filter.eventType ? `event_type = ${sqlLiteral(filter.eventType)}` : undefined,
+      filter.status ? `status = ${sqlLiteral(filter.status)}` : undefined
+    ].filter(Boolean);
+    const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+    return this.rows(`${gitWebhookEventSelect()}${where} ORDER BY received_at DESC, id`).map(mapGitWebhookEvent);
+  }
+
+  override upsertGitPullRequestSyncState(input: Parameters<InMemoryAichestraStore["upsertGitPullRequestSyncState"]>[0]): GitPullRequestSyncState {
+    const existing = input.id
+      ? this.one(`${gitPullRequestSyncSelect()} WHERE id = ${sqlLiteral(input.id)}`)
+      : this.one(`${gitPullRequestSyncSelect()} WHERE repo_ref = ${sqlLiteral(input.repoRef)} AND pull_request_number = ${input.pullRequestNumber}`);
+    const now = new Date();
+    const state = {
+      ...input,
+      id: existing ? asString(existing, "id") : input.id ?? createId("prsync"),
+      lastSyncedAt: input.lastSyncedAt ?? now
+    };
+    if (existing) this.update("git_pull_request_sync_states", gitPullRequestSyncToDb(state), `id = ${sqlLiteral(state.id)}`);
+    else this.insert("git_pull_request_sync_states", gitPullRequestSyncToDb(state));
+    return state;
+  }
+
+  override listGitPullRequestSyncStates(repoRef?: string): GitPullRequestSyncState[] {
+    const where = repoRef ? ` WHERE repo_ref = ${sqlLiteral(repoRef)} OR repo_id = ${sqlLiteral(repoRef)}` : "";
+    return this.rows(`${gitPullRequestSyncSelect()}${where} ORDER BY last_synced_at DESC, id`).map(mapGitPullRequestSync);
+  }
+
+  override getGitPullRequestSyncState(repoRef: string, pullRequestNumber: number): GitPullRequestSyncState | undefined {
+    const row = this.one(`${gitPullRequestSyncSelect()} WHERE (repo_ref = ${sqlLiteral(repoRef)} OR repo_id = ${sqlLiteral(repoRef)}) AND pull_request_number = ${pullRequestNumber}`);
+    return row ? mapGitPullRequestSync(row) : undefined;
+  }
+
+  override upsertGitBranchSyncState(input: Parameters<InMemoryAichestraStore["upsertGitBranchSyncState"]>[0]): GitBranchSyncState {
+    const existing = input.id
+      ? this.one(`${gitBranchSyncSelect()} WHERE id = ${sqlLiteral(input.id)}`)
+      : this.one(`${gitBranchSyncSelect()} WHERE repo_ref = ${sqlLiteral(input.repoRef)} AND branch_name = ${sqlLiteral(input.branchName)}`);
+    const now = new Date();
+    const state = {
+      ...input,
+      id: existing ? asString(existing, "id") : input.id ?? createId("branchsync"),
+      lastSyncedAt: input.lastSyncedAt ?? now
+    };
+    if (existing) this.update("git_branch_sync_states", gitBranchSyncToDb(state), `id = ${sqlLiteral(state.id)}`);
+    else this.insert("git_branch_sync_states", gitBranchSyncToDb(state));
+    return state;
+  }
+
+  override listGitBranchSyncStates(repoRef?: string): GitBranchSyncState[] {
+    const where = repoRef ? ` WHERE repo_ref = ${sqlLiteral(repoRef)} OR repo_id = ${sqlLiteral(repoRef)}` : "";
+    return this.rows(`${gitBranchSyncSelect()}${where} ORDER BY last_synced_at DESC, id`).map(mapGitBranchSync);
+  }
+
+  override getGitBranchSyncState(repoRef: string, branchName: string): GitBranchSyncState | undefined {
+    const row = this.one(`${gitBranchSyncSelect()} WHERE (repo_ref = ${sqlLiteral(repoRef)} OR repo_id = ${sqlLiteral(repoRef)}) AND branch_name = ${sqlLiteral(branchName)}`);
+    return row ? mapGitBranchSync(row) : undefined;
+  }
+
+  override recordGitWebhookAuditEvent(input: Parameters<InMemoryAichestraStore["recordGitWebhookAuditEvent"]>[0]): GitWebhookAuditEvent {
+    const event = {
+      ...input,
+      id: createId("gitwhaudit"),
+      createdAt: new Date()
+    };
+    this.insert("git_webhook_audit_events", gitWebhookAuditToDb(event));
+    return event;
+  }
+
+  override listGitWebhookAuditEvents(filter: { eventType?: string; repoRef?: string; deliveryId?: string } = {}): GitWebhookAuditEvent[] {
+    const conditions = [
+      filter.eventType ? `event_type = ${sqlLiteral(filter.eventType)}` : undefined,
+      filter.repoRef ? `repo_ref = ${sqlLiteral(filter.repoRef)}` : undefined,
+      filter.deliveryId ? `delivery_id = ${sqlLiteral(filter.deliveryId)}` : undefined
+    ].filter(Boolean);
+    const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+    return this.rows(`${gitWebhookAuditSelect()}${where} ORDER BY created_at DESC, id`).map(mapGitWebhookAudit);
   }
 
   override createMergeQueueEntry(input: Parameters<InMemoryAichestraStore["createMergeQueueEntry"]>[0]): MergeQueueEntry {
@@ -1149,6 +1276,192 @@ function mapPullRequest(row: Row): PullRequest {
     status: asString(row, "status") as PullRequest["status"],
     createdAt: asDate(row, "createdAt"),
     updatedAt: asDate(row, "updatedAt")
+  };
+}
+
+function gitWebhookVerificationSelect(): string {
+  return `SELECT id, delivery_id AS "deliveryId", verified, reason, algorithm, created_at AS "createdAt" FROM git_webhook_verification_results`;
+}
+
+function gitWebhookVerificationToDb(result: GitWebhookVerificationResult): Record<string, unknown> {
+  return {
+    id: result.id,
+    delivery_id: result.deliveryId,
+    verified: result.verified,
+    reason: result.reason,
+    algorithm: result.algorithm,
+    created_at: result.createdAt
+  };
+}
+
+function mapGitWebhookVerification(row: Row): GitWebhookVerificationResult {
+  return {
+    id: asString(row, "id"),
+    deliveryId: asString(row, "deliveryId"),
+    verified: Boolean(row.verified),
+    reason: asString(row, "reason"),
+    algorithm: asString(row, "algorithm") as GitWebhookVerificationResult["algorithm"],
+    createdAt: asDate(row, "createdAt")
+  };
+}
+
+function gitWebhookEventSelect(): string {
+  return `SELECT id, provider_kind AS "providerKind", event_type AS "eventType", delivery_id AS "deliveryId", repo_ref AS "repoRef", action, payload_hash AS "payloadHash", signature_verified AS "signatureVerified", status, received_at AS "receivedAt", processed_at AS "processedAt", task_id AS "taskId", task_run_id AS "taskRunId", metadata FROM git_webhook_events`;
+}
+
+function gitWebhookEventToDb(event: GitWebhookEvent): Record<string, unknown> {
+  return {
+    id: event.id,
+    provider_kind: event.providerKind,
+    event_type: event.eventType,
+    delivery_id: event.deliveryId,
+    repo_ref: event.repoRef,
+    action: event.action,
+    payload_hash: event.payloadHash,
+    signature_verified: event.signatureVerified,
+    status: event.status,
+    received_at: event.receivedAt,
+    processed_at: event.processedAt,
+    task_id: event.taskId,
+    task_run_id: event.taskRunId,
+    metadata: event.metadata
+  };
+}
+
+function mapGitWebhookEvent(row: Row): GitWebhookEvent {
+  return {
+    id: asString(row, "id"),
+    providerKind: asString(row, "providerKind") as GitWebhookEvent["providerKind"],
+    eventType: asString(row, "eventType"),
+    deliveryId: asString(row, "deliveryId"),
+    repoRef: asString(row, "repoRef"),
+    action: asOptionalString(row, "action"),
+    payloadHash: asString(row, "payloadHash"),
+    signatureVerified: Boolean(row.signatureVerified),
+    status: asString(row, "status") as GitWebhookEvent["status"],
+    receivedAt: asDate(row, "receivedAt"),
+    processedAt: asOptionalDate(row, "processedAt"),
+    taskId: asOptionalString(row, "taskId"),
+    taskRunId: asOptionalString(row, "taskRunId"),
+    metadata: asRecord(row, "metadata")
+  };
+}
+
+function gitPullRequestSyncSelect(): string {
+  return `SELECT id, repo_ref AS "repoRef", repo_id AS "repoId", pull_request_number AS "pullRequestNumber", provider_pull_request_id AS "providerPullRequestId", pull_request_id AS "pullRequestId", task_id AS "taskId", task_run_id AS "taskRunId", branch_lease_id AS "branchLeaseId", merge_queue_entry_id AS "mergeQueueEntryId", state, head_branch AS "headBranch", base_branch AS "baseBranch", latest_sha AS "latestSha", changed_files AS "changedFiles", labels, mergeable_state AS "mergeableState", last_synced_at AS "lastSyncedAt", source_event_id AS "sourceEventId", metadata FROM git_pull_request_sync_states`;
+}
+
+function gitPullRequestSyncToDb(state: GitPullRequestSyncState): Record<string, unknown> {
+  return {
+    id: state.id,
+    repo_ref: state.repoRef,
+    repo_id: state.repoId,
+    pull_request_number: state.pullRequestNumber,
+    provider_pull_request_id: state.providerPullRequestId,
+    pull_request_id: state.pullRequestId,
+    task_id: state.taskId,
+    task_run_id: state.taskRunId,
+    branch_lease_id: state.branchLeaseId,
+    merge_queue_entry_id: state.mergeQueueEntryId,
+    state: state.state,
+    head_branch: state.headBranch,
+    base_branch: state.baseBranch,
+    latest_sha: state.latestSha,
+    changed_files: state.changedFiles,
+    labels: state.labels,
+    mergeable_state: state.mergeableState,
+    last_synced_at: state.lastSyncedAt,
+    source_event_id: state.sourceEventId,
+    metadata: state.metadata
+  };
+}
+
+function mapGitPullRequestSync(row: Row): GitPullRequestSyncState {
+  return {
+    id: asString(row, "id"),
+    repoRef: asString(row, "repoRef"),
+    repoId: asOptionalString(row, "repoId"),
+    pullRequestNumber: asNumber(row, "pullRequestNumber"),
+    providerPullRequestId: asOptionalString(row, "providerPullRequestId"),
+    pullRequestId: asOptionalString(row, "pullRequestId"),
+    taskId: asOptionalString(row, "taskId"),
+    taskRunId: asOptionalString(row, "taskRunId"),
+    branchLeaseId: asOptionalString(row, "branchLeaseId"),
+    mergeQueueEntryId: asOptionalString(row, "mergeQueueEntryId"),
+    state: asString(row, "state") as GitPullRequestSyncState["state"],
+    headBranch: asString(row, "headBranch"),
+    baseBranch: asString(row, "baseBranch"),
+    latestSha: asOptionalString(row, "latestSha"),
+    changedFiles: asArray<string>(row, "changedFiles"),
+    labels: asArray<string>(row, "labels"),
+    mergeableState: asOptionalString(row, "mergeableState"),
+    lastSyncedAt: asDate(row, "lastSyncedAt"),
+    sourceEventId: asOptionalString(row, "sourceEventId"),
+    metadata: asRecord(row, "metadata")
+  };
+}
+
+function gitBranchSyncSelect(): string {
+  return `SELECT id, repo_ref AS "repoRef", repo_id AS "repoId", branch_name AS "branchName", latest_sha AS "latestSha", exists, protected_branch AS "protectedBranch", last_synced_at AS "lastSyncedAt", source_event_id AS "sourceEventId", metadata FROM git_branch_sync_states`;
+}
+
+function gitBranchSyncToDb(state: GitBranchSyncState): Record<string, unknown> {
+  return {
+    id: state.id,
+    repo_ref: state.repoRef,
+    repo_id: state.repoId,
+    branch_name: state.branchName,
+    latest_sha: state.latestSha,
+    exists: state.exists,
+    protected_branch: state.protectedBranch,
+    last_synced_at: state.lastSyncedAt,
+    source_event_id: state.sourceEventId,
+    metadata: state.metadata
+  };
+}
+
+function mapGitBranchSync(row: Row): GitBranchSyncState {
+  return {
+    id: asString(row, "id"),
+    repoRef: asString(row, "repoRef"),
+    repoId: asOptionalString(row, "repoId"),
+    branchName: asString(row, "branchName"),
+    latestSha: asOptionalString(row, "latestSha"),
+    exists: Boolean(row.exists),
+    protectedBranch: typeof row.protectedBranch === "boolean" ? row.protectedBranch : undefined,
+    lastSyncedAt: asDate(row, "lastSyncedAt"),
+    sourceEventId: asOptionalString(row, "sourceEventId"),
+    metadata: asRecord(row, "metadata")
+  };
+}
+
+function gitWebhookAuditSelect(): string {
+  return `SELECT id, event_type AS "eventType", delivery_id AS "deliveryId", repo_ref AS "repoRef", result, reason, sanitized_metadata AS "sanitizedMetadata", created_at AS "createdAt" FROM git_webhook_audit_events`;
+}
+
+function gitWebhookAuditToDb(event: GitWebhookAuditEvent): Record<string, unknown> {
+  return {
+    id: event.id,
+    event_type: event.eventType,
+    delivery_id: event.deliveryId,
+    repo_ref: event.repoRef,
+    result: event.result,
+    reason: event.reason,
+    sanitized_metadata: event.sanitizedMetadata,
+    created_at: event.createdAt
+  };
+}
+
+function mapGitWebhookAudit(row: Row): GitWebhookAuditEvent {
+  return {
+    id: asString(row, "id"),
+    eventType: asString(row, "eventType"),
+    deliveryId: asOptionalString(row, "deliveryId"),
+    repoRef: asOptionalString(row, "repoRef"),
+    result: asString(row, "result") as GitWebhookAuditEvent["result"],
+    reason: asOptionalString(row, "reason"),
+    sanitizedMetadata: asRecord(row, "sanitizedMetadata"),
+    createdAt: asDate(row, "createdAt")
   };
 }
 

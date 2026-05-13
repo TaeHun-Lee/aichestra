@@ -30,6 +30,7 @@ export type DashboardSafetyFlags = {
   vendorCliExecutionEnabled: false;
   credentialCacheAccessAllowed: false;
   productionSecretInjection: false;
+  mcpRealTransportEnabled: false;
   noSecretsExposed: true;
 };
 
@@ -53,11 +54,17 @@ export type TaskRunSummaryReadModel = {
 
 export type GitIntegrationReadModel = {
   config: DashboardJsonObject;
+  webhookConfig: DashboardJsonObject;
   providers: DashboardJsonObject[];
   repos: DashboardJsonObject[];
   branchRecords: DashboardJsonObject[];
   pullRequests: DashboardJsonObject[];
+  webhookEvents: DashboardJsonObject[];
+  webhookAuditEvents: DashboardJsonObject[];
+  pullRequestSyncStates: DashboardJsonObject[];
+  branchSyncStates: DashboardJsonObject[];
   changedFiles: DashboardJsonObject[];
+  changedFilesRefreshStatus: DashboardJsonObject;
   mergeQueueLinkage: DashboardJsonObject[];
   auditEvents: DashboardJsonObject[];
   remoteAuditEvents: DashboardJsonObject[];
@@ -89,6 +96,12 @@ export type RegistryReadModel = {
 export type LLMGatewayReadModel = {
   config: DashboardJsonObject;
   providers: DashboardJsonObject[];
+  routes: DashboardJsonObject[];
+  routing: DashboardJsonObject;
+  providerHealth: DashboardJsonObject[];
+  fallbackPolicies: DashboardJsonObject[];
+  routingDecisions: DashboardJsonObject[];
+  fallbackAttempts: DashboardJsonObject[];
   models: DashboardJsonObject[];
   virtualKeys: DashboardJsonObject[];
   usageEvents: DashboardJsonObject[];
@@ -114,6 +127,22 @@ export type PolicyReadModel = {
   rules: DashboardJsonObject[];
   auditEntries: DashboardJsonObject[];
   blockedExamples: DashboardJsonObject[];
+};
+
+export type AuthReadModel = {
+  config: DashboardJsonObject;
+  currentActor: DashboardJsonObject;
+  principals: DashboardJsonObject[];
+  actors: DashboardJsonObject[];
+  teams: DashboardJsonObject[];
+  roles: DashboardJsonObject[];
+  permissions: DashboardJsonObject[];
+  roleBindings: DashboardJsonObject[];
+  serviceAccounts: DashboardJsonObject[];
+  identityProviders: DashboardJsonObject[];
+  auditEvents: DashboardJsonObject[];
+  authorizationExamples: DashboardJsonObject[];
+  warning: string;
 };
 
 export type EnterpriseProviderReadModel = {
@@ -162,6 +191,17 @@ export type LocalAgentReadModel = {
   blockedExamples: DashboardJsonObject[];
 };
 
+export type MCPGatewayReadModel = {
+  config: DashboardJsonObject;
+  servers: DashboardJsonObject[];
+  tools: DashboardJsonObject[];
+  riskSummary: DashboardJsonObject;
+  invocations: DashboardJsonObject[];
+  auditEvents: DashboardJsonObject[];
+  blockedExamples: DashboardJsonObject[];
+  integration: DashboardJsonObject;
+};
+
 export type AuditSummaryReadModel = {
   auditGroups: DashboardJsonObject[];
   recentEvents: DashboardJsonObject[];
@@ -177,9 +217,11 @@ export type DashboardReadModels = {
   llm: LLMGatewayReadModel;
   agents: AgentRunnerReadModel;
   policy: PolicyReadModel;
+  auth: AuthReadModel;
   providers: EnterpriseProviderReadModel;
   security: SecurityReadModel;
   localAgents: LocalAgentReadModel;
+  mcp: MCPGatewayReadModel;
   audit: AuditSummaryReadModel;
 };
 
@@ -192,14 +234,16 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/llm",
   "/dashboard/agents",
   "/dashboard/policy",
+  "/dashboard/auth",
   "/dashboard/providers",
   "/dashboard/security",
   "/dashboard/local-agents",
+  "/dashboard/mcp",
   "/dashboard/audit"
 ] as const;
 
 const sensitiveKeyPattern = /^(token|accessToken|refreshToken|apiKey|api_key|authorization|password|rawSecret|secretValue|credentialValue)$/i;
-const tokenLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN)=)[^\s"']+/g;
+const tokenLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN|AICHESTRA_GITHUB_WEBHOOK_SECRET|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD))=)[^\s"']+/g;
 const credentialCachePattern = /~\/\.codex\/auth\.json|~\/\.claude[^\s"']*|Google credential cache/gi;
 
 export function sanitizeDashboardValue(value: unknown): DashboardJsonValue {

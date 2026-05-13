@@ -13,12 +13,32 @@ import {
 } from "@aichestra/db";
 import type { StorageProvider } from "@aichestra/db";
 import {
+  AuthorizationService,
+  InMemoryAuthRepository,
+  MockAuthProvider,
+  RequestContextResolver,
+  actorToDto,
+  authAuditEventToDto,
+  authContextToDto,
+  authorizationDecisionToDto,
+  identityProviderToDto,
+  permissionToDto,
+  principalToDto,
+  roleBindingToDto,
+  roleToDto,
+  serviceAccountToDto,
+  teamToDto
+} from "@aichestra/auth";
+import type { AuthorizationResource, RequestSource, ResourceScope } from "@aichestra/auth";
+import {
   GitIntegrationService,
+  GitWebhookReceiverService,
   LocalGitDryRunMergeSimulator,
   MockMergeSimulator,
+  createGitHubWebhookRuntimeFromEnv,
   createGitProviderFromEnv
 } from "@aichestra/git-adapter";
-import type { GitProviderRuntimeConfig } from "@aichestra/git-adapter";
+import type { GitHubWebhookRuntimeConfig, GitProviderRuntimeConfig } from "@aichestra/git-adapter";
 import {
   budgetDecisionToDto,
   credentialReferenceResultToDto,
@@ -48,7 +68,11 @@ import {
   llmAuditEventToDto,
   llmCompletionResultToDto,
   llmConfigToDto,
+  llmFallbackPolicyToDto,
   llmModelToDto,
+  llmProviderHealthToDto,
+  llmRouteToDto,
+  llmRoutingDecisionToDto,
   providerAuditEventToDto,
   providerCatalogEntryToDto,
   providerInvocationResultToDto,
@@ -57,6 +81,15 @@ import {
   virtualModelKeyToDto
 } from "@aichestra/llm-gateway";
 import type { LLMGatewayService } from "@aichestra/llm-gateway";
+import {
+  createDefaultMCPGateway,
+  mcpGatewayConfigToDto,
+  mcpServerCatalogEntryToDto,
+  mcpToolAuditEventToDto,
+  mcpToolDefinitionToDto,
+  mcpToolInvocationResultToDto
+} from "@aichestra/mcp-gateway";
+import type { MCPGateway, MCPToolInvocationStatus } from "@aichestra/mcp-gateway";
 import {
   AgentRunnerService,
   MockAgentRunner,
@@ -110,6 +143,7 @@ import {
   policyDecisionToDto,
   policyRuleToDto
 } from "@aichestra/policy";
+import type { PolicyActorKind } from "@aichestra/policy";
 import {
   PolicyBackedRegistryMutationAuthorizer,
   createRegistryService,
@@ -155,15 +189,20 @@ type RouteContext = {
   storageProvider: StorageProvider;
   gitIntegrationService: GitIntegrationService;
   gitProviderConfig: GitProviderRuntimeConfig;
+  gitWebhookReceiverService: GitWebhookReceiverService;
+  gitWebhookConfig: GitHubWebhookRuntimeConfig;
   llmGatewayService: LLMGatewayService;
   agentRunnerService: AgentRunnerService;
   agentRunnerConfig: AgentRunnerRuntimeConfig;
   registryService: RegistryService;
   improvementServices: ImprovementServices;
   policyService: PolicyService;
+  authorizationService: AuthorizationService;
+  requestContextResolver: RequestContextResolver;
   providerAbstractionService: ProviderAbstractionService;
   securityService: SecurityControlService;
   localAgentProtocolService: LocalAgentProtocolService;
+  mcpGatewayService: MCPGateway;
 };
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -196,6 +235,14 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   }
 
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+async function readRawBody(request: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -266,6 +313,63 @@ function stringArrayValue(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function policyActorKindValue(value: unknown): PolicyActorKind | undefined {
+  return value === "user" ||
+    value === "team" ||
+    value === "system" ||
+    value === "service" ||
+    value === "human_user" ||
+    value === "service_account" ||
+    value === "local_agent" ||
+    value === "external_integration" ||
+    value === "anonymous_mock"
+    ? value
+    : undefined;
+}
+
+function requestSourceValue(value: unknown): RequestSource | undefined {
+  return value === "api" || value === "worker" || value === "dashboard" || value === "test" || value === "system"
+    ? value
+    : undefined;
+}
+
+function resourceScopeValue(value: unknown): ResourceScope | undefined {
+  const record = recordValue(value);
+  const scopeKind = record.scopeKind;
+  if (
+    scopeKind !== "global" &&
+    scopeKind !== "org" &&
+    scopeKind !== "team" &&
+    scopeKind !== "repo" &&
+    scopeKind !== "project" &&
+    scopeKind !== "task" &&
+    scopeKind !== "registry" &&
+    scopeKind !== "provider" &&
+    scopeKind !== "local_agent"
+  ) {
+    return undefined;
+  }
+  return {
+    id: stringValue(record.id) ?? `${scopeKind}:${stringValue(record.scopeId) ?? "global"}`,
+    scopeKind,
+    scopeId: stringValue(record.scopeId),
+    description: stringValue(record.description) ?? "API authorization check scope",
+    metadata: recordValue(record.metadata)
+  };
+}
+
+function authorizationResourceFromBody(body: Record<string, unknown>): AuthorizationResource | undefined {
+  const resourceRecord = recordValue(body.resource);
+  const resourceKind = stringValue(resourceRecord.resourceKind) ?? stringValue(body.resourceKind);
+  if (!resourceKind) return undefined;
+  return {
+    resourceKind,
+    resourceId: stringValue(resourceRecord.resourceId) ?? stringValue(body.resourceId),
+    scope: resourceScopeValue(resourceRecord.scope ?? body.scope),
+    metadata: recordValue(resourceRecord.metadata ?? body.metadata)
+  };
+}
+
 function secretProviderKindValue(value: unknown): SecretProviderKind | undefined {
   return value === "mock" ||
     value === "env" ||
@@ -281,6 +385,7 @@ function secretProviderKindValue(value: unknown): SecretProviderKind | undefined
 function secretKindValue(value: unknown): SecretKind | undefined {
   return value === "mock_metadata" ||
     value === "github_token" ||
+    value === "github_webhook_secret" ||
     value === "llm_api_key" ||
     value === "provider_api_key" ||
     value === "webhook_secret" ||
@@ -294,11 +399,30 @@ function secretRefStatusValue(value: unknown): SecretRefStatus | undefined {
   return value === "active" || value === "disabled" || value === "revoked" ? value : undefined;
 }
 
-function credentialPurposeValue(value: unknown): "github_api_call" | "llm_api_call" | "provider_api_call" | "webhook_verification_future" | undefined {
+function credentialPurposeValue(value: unknown): "github_api_call" | "github_webhook_verification" | "llm_api_call" | "provider_api_call" | "webhook_verification_future" | undefined {
   return value === "github_api_call" ||
+    value === "github_webhook_verification" ||
     value === "llm_api_call" ||
     value === "provider_api_call" ||
     value === "webhook_verification_future"
+    ? value
+    : undefined;
+}
+
+function mcpInvocationStatusCode(status: MCPToolInvocationStatus): number {
+  if (status === "completed") return 200;
+  if (status === "unavailable") return 409;
+  return 403;
+}
+
+function llmPromptClassValue(value: unknown): "code_generation" | "code_review" | "conflict_resolution" | "registry_review" | "summarization" | "general" | "unknown" | undefined {
+  return value === "code_generation" ||
+    value === "code_review" ||
+    value === "conflict_resolution" ||
+    value === "registry_review" ||
+    value === "summarization" ||
+    value === "general" ||
+    value === "unknown"
     ? value
     : undefined;
 }
@@ -308,7 +432,7 @@ function containsRawSecretField(body: Record<string, unknown>): boolean {
     if (/^(value|secretValue|rawSecret|token|apiKey|credentialValue|password)$/i.test(key)) {
       return value !== undefined && value !== null && String(value).length > 0;
     }
-    return typeof value === "string" && (/sk-[A-Za-z0-9_-]{8,}/.test(value) || /Bearer\s+[A-Za-z0-9._~+/=-]+/i.test(value) || /~\/\.codex\/auth\.json|~\/\.claude/i.test(value));
+    return typeof value === "string" && (/sk-[A-Za-z0-9_-]{8,}/.test(value) || /ghp_[A-Za-z0-9_]{8,}/.test(value) || /github_pat_[A-Za-z0-9_]{8,}/.test(value) || /Bearer\s+[A-Za-z0-9._~+/=-]+/i.test(value) || /[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*[^\s]+/i.test(value) || /~\/\.codex\/auth\.json|~\/\.claude/i.test(value));
   });
 }
 
@@ -367,18 +491,23 @@ function policyEvaluationRequestFromBody(body: Record<string, unknown>) {
   if (!isPolicyResourceKind(resourceKind)) {
     return { ok: false as const, error: "invalid_policy_resource_kind", message: "resource.resourceKind must be a valid policy resource kind." };
   }
-  const actorKind = subjectRecord.actorKind;
-  if (actorKind !== undefined && actorKind !== "user" && actorKind !== "team" && actorKind !== "system" && actorKind !== "service") {
-    return { ok: false as const, error: "invalid_policy_actor_kind", message: "subject.actorKind must be user, team, system, or service." };
+  const actorKind = policyActorKindValue(subjectRecord.actorKind);
+  if (subjectRecord.actorKind !== undefined && actorKind === undefined) {
+    return { ok: false as const, error: "invalid_policy_actor_kind", message: "subject.actorKind must be a valid policy actor kind." };
   }
   return {
     ok: true as const,
     request: {
       subject: createPolicySubject({
         actorId: stringValue(subjectRecord.actorId),
-        actorKind: actorKind as "user" | "team" | "system" | "service" | undefined,
+        principalId: stringValue(subjectRecord.principalId),
+        actorKind,
         roles: stringArrayValue(subjectRecord.roles),
-        teams: stringArrayValue(subjectRecord.teams)
+        teams: stringArrayValue(subjectRecord.teams),
+        authMode: stringValue(subjectRecord.authMode),
+        serviceAccountId: stringValue(subjectRecord.serviceAccountId),
+        isMockActor: subjectRecord.isMockActor === true,
+        metadata: recordValue(subjectRecord.metadata)
       }),
       action,
       resource: createPolicyResource({
@@ -440,10 +569,24 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           githubIntegrationTestsEnabled: context.gitProviderConfig.githubIntegrationTestsEnabled ?? false,
           githubCredentialSource: context.gitProviderConfig.githubCredentialSource ?? "none",
           githubCredentialStatus: context.gitProviderConfig.githubCredentialStatus ?? (context.gitProviderConfig.githubConfigured ? "resolved" : "missing"),
-          envSecretProviderEnabled: context.gitProviderConfig.envSecretProviderEnabled ?? false
+          envSecretProviderEnabled: context.gitProviderConfig.envSecretProviderEnabled ?? false,
+          githubWebhooksEnabled: context.gitWebhookConfig.webhooksEnabled,
+          githubWebhookSecretConfigured: context.gitWebhookConfig.webhookSecretConfigured,
+          githubWebhookAcceptUnverified: context.gitWebhookConfig.webhookAcceptUnverified,
+          githubWebhookSupportedEventCount: context.gitWebhookConfig.supportedWebhookEvents.length,
+          githubWebhookAllowedRepoCount: context.gitWebhookConfig.webhookAllowedRepoCount,
+          githubWebhookIntegrationTestsEnabled: context.gitWebhookConfig.webhookIntegrationTestsEnabled,
+          githubWebhookSecretSource: context.gitWebhookConfig.webhookSecretSource,
+          githubWebhookSecretStatus: context.gitWebhookConfig.webhookSecretStatus
         },
         llm: {
           providerKind: context.llmGatewayService.getConfig().providerKind,
+          routingMode: context.llmGatewayService.getConfig().routingMode,
+          fallbackEnabled: context.llmGatewayService.getConfig().fallbackEnabled,
+          maxFallbackAttempts: context.llmGatewayService.getConfig().maxFallbackAttempts,
+          providerCount: context.llmGatewayService.listProviderHealth().length,
+          enabledProviderCount: context.llmGatewayService.listProviderHealth().filter((health) => health.status === "healthy").length,
+          remoteProviderCount: context.llmGatewayService.listProviderHealth().filter((health) => health.remoteEnabled === true).length,
           remoteLlmEnabled: context.llmGatewayService.getConfig().remoteLlmEnabled,
           remoteCompletionEnabled: context.llmGatewayService.getConfig().remoteCompletionEnabled,
           baseUrlConfigured: context.llmGatewayService.getConfig().baseUrlConfigured,
@@ -472,6 +615,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           rulesLoaded: context.policyService.getConfig().ruleCount,
           auditEnabled: context.policyService.getConfig().auditEnabled
         },
+        auth: {
+          providerKind: context.authorizationService.getConfig().providerKind,
+          authMode: context.authorizationService.getConfig().authMode,
+          productionAuthEnabled: false,
+          mockActorEnabled: context.authorizationService.getConfig().mockActorEnabled,
+          roleCatalogCount: context.authorizationService.getConfig().roleCatalogCount,
+          permissionCatalogCount: context.authorizationService.getConfig().permissionCatalogCount,
+          secretsExposed: false,
+          tokensExposed: false
+        },
         providerAbstraction: {
           status: context.providerAbstractionService.getConfig().status,
           providerCatalogCount: context.providerAbstractionService.getConfig().providerCatalogCount,
@@ -495,6 +648,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           localCliExecutionEnabled: false,
           credentialCacheAccessAllowed: false
         },
+        mcp: {
+          gatewayKind: context.mcpGatewayService.getConfig().gatewayKind,
+          realMcpTransportEnabled: context.mcpGatewayService.getConfig().realTransportEnabled,
+          serverCount: context.mcpGatewayService.getConfig().serverCount,
+          activeToolCount: context.mcpGatewayService.getConfig().activeToolCount,
+          highCriticalToolsEnabledCount: context.mcpGatewayService.getConfig().highCriticalEnabledToolCount,
+          externalCallsEnabled: context.mcpGatewayService.getConfig().externalCallsEnabled,
+          secretForwardingEnabled: context.mcpGatewayService.getConfig().secretForwardingEnabled,
+          networkAccessEnabled: context.mcpGatewayService.getConfig().networkAccessEnabled,
+          secretsExposed: false,
+          tokensExposed: false
+        },
         security: {
           secretManagerKind: context.securityService.getConfig().secretManagerKind,
           credentialManagerKind: context.securityService.getConfig().credentialManagerKind,
@@ -502,6 +667,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           allowedSecretEnvKeyCount: context.securityService.getConfig().allowedSecretEnvKeyCount,
           activeSecretRefCount: context.securityService.getConfig().activeSecretRefCount,
           githubCredentialConfigured: context.securityService.getConfig().githubCredentialConfigured,
+          githubWebhookSecretConfigured: context.securityService.getConfig().githubWebhookSecretConfigured,
           llmCredentialConfigured: context.securityService.getConfig().llmCredentialConfigured,
           sandboxSupportStatus: context.securityService.getConfig().sandboxSupportStatus,
           defaultSandboxProfile: context.securityService.getConfig().defaultSandboxProfile,
@@ -553,6 +719,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { policy: dashboard.policy });
         return;
       }
+      if (section === "auth") {
+        sendJson(response, 200, { auth: dashboard.auth });
+        return;
+      }
       if (section === "providers") {
         sendJson(response, 200, { providers: dashboard.providers });
         return;
@@ -565,12 +735,285 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { localAgents: dashboard.localAgents });
         return;
       }
+      if (section === "mcp") {
+        sendJson(response, 200, { mcp: dashboard.mcp });
+        return;
+      }
       if (section === "audit") {
         sendJson(response, 200, { audit: dashboard.audit });
         return;
       }
       sendJson(response, 404, { error: "dashboard_read_model_not_found", message: `Dashboard read model not found: ${section}` });
       return;
+    }
+
+    if (segments[0] === "mcp") {
+      const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+      const mcp = context.mcpGatewayService;
+
+      if (method === "GET" && segments[1] === "config") {
+        const listDecision = mcp.listServers({ authContext: requestContext.authContext });
+        if (!listDecision.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", reason: listDecision.reason, decision: listDecision.authorizationDecision ? authorizationDecisionToDto(listDecision.authorizationDecision) : undefined });
+          return;
+        }
+        sendJson(response, 200, { config: mcpGatewayConfigToDto(mcp.getConfig()) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "servers" && segments.length === 2) {
+        const result = mcp.listServers({ authContext: requestContext.authContext });
+        if (!result.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", reason: result.reason, decision: result.authorizationDecision ? authorizationDecisionToDto(result.authorizationDecision) : undefined });
+          return;
+        }
+        sendJson(response, 200, { servers: result.items.map(mcpServerCatalogEntryToDto) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "servers" && segments.length === 3) {
+        const result = mcp.listServers({ authContext: requestContext.authContext });
+        if (!result.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", reason: result.reason, decision: result.authorizationDecision ? authorizationDecisionToDto(result.authorizationDecision) : undefined });
+          return;
+        }
+        const server = mcp.getServer(segments[2] ?? "");
+        if (!server) {
+          sendJson(response, 404, { error: "mcp_server_not_found", message: `MCP server not found: ${segments[2]}` });
+          return;
+        }
+        sendJson(response, 200, { server: mcpServerCatalogEntryToDto(server) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "servers" && segments.length === 4 && segments[3] === "tools") {
+        const serverId = segments[2] ?? "";
+        const result = mcp.listTools(serverId, { authContext: requestContext.authContext });
+        if (!result.allowed) {
+          const statusCode = result.reason === "server_not_found" ? 404 : 403;
+          sendJson(response, statusCode, { error: statusCode === 404 ? "mcp_server_not_found" : "authorization_denied", reason: result.reason, decision: result.authorizationDecision ? authorizationDecisionToDto(result.authorizationDecision) : undefined });
+          return;
+        }
+        sendJson(response, 200, { tools: result.items.map(mcpToolDefinitionToDto) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "tools" && segments.length === 3) {
+        const tool = mcp.getToolById(segments[2] ?? "");
+        if (!tool) {
+          sendJson(response, 404, { error: "mcp_tool_not_found", message: `MCP tool not found: ${segments[2]}` });
+          return;
+        }
+        const result = mcp.listTools(tool.serverId, { authContext: requestContext.authContext });
+        if (!result.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", reason: result.reason, decision: result.authorizationDecision ? authorizationDecisionToDto(result.authorizationDecision) : undefined });
+          return;
+        }
+        sendJson(response, 200, { tool: mcpToolDefinitionToDto(tool) });
+        return;
+      }
+
+      if (method === "POST" && segments[1] === "tools" && segments.length === 4 && segments[3] === "invoke") {
+        const tool = mcp.getToolById(segments[2] ?? "");
+        if (!tool) {
+          sendJson(response, 404, { error: "mcp_tool_not_found", message: `MCP tool not found: ${segments[2]}` });
+          return;
+        }
+        const body = recordValue(await readJson(request));
+        const input = recordValue(body.input);
+        const result = await mcp.invokeTool({
+          id: stringValue(body.id) ?? requestContext.requestId,
+          serverId: stringValue(body.serverId) ?? tool.serverId,
+          toolId: tool.id,
+          toolName: tool.name,
+          actorId: requestContext.authContext.actor.id,
+          principalId: requestContext.authContext.principal.id,
+          taskId: stringValue(body.taskId),
+          taskRunId: stringValue(body.taskRunId),
+          agentRunId: stringValue(body.agentRunId),
+          authContext: requestContext.authContext,
+          input,
+          purpose: stringValue(body.purpose) ?? "api_mcp_tool_invoke",
+          metadata: recordValue(body.metadata),
+          createdAt: new Date()
+        });
+        sendJson(response, mcpInvocationStatusCode(result.status), { result: mcpToolInvocationResultToDto(result) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "invocations" && segments.length === 2) {
+        const readDecision = context.authorizationService.hasPermission(requestContext.authContext, "mcp.tool.list", {
+          resourceKind: "mcp_tool",
+          resourceId: "mcp_invocations",
+          metadata: { readOnly: true }
+        });
+        if (!readDecision.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", decision: authorizationDecisionToDto(readDecision) });
+          return;
+        }
+        sendJson(response, 200, { invocations: mcp.listInvocations().map(mcpToolInvocationResultToDto) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "invocations" && segments.length === 3) {
+        const readDecision = context.authorizationService.hasPermission(requestContext.authContext, "mcp.tool.list", {
+          resourceKind: "mcp_tool",
+          resourceId: "mcp_invocations",
+          metadata: { readOnly: true }
+        });
+        if (!readDecision.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", decision: authorizationDecisionToDto(readDecision) });
+          return;
+        }
+        const invocation = mcp.getInvocation(segments[2] ?? "");
+        if (!invocation) {
+          sendJson(response, 404, { error: "mcp_invocation_not_found", message: `MCP invocation not found: ${segments[2]}` });
+          return;
+        }
+        sendJson(response, 200, { invocation: mcpToolInvocationResultToDto(invocation) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "audit") {
+        const auditDecision = context.authorizationService.hasPermission(requestContext.authContext, "mcp.audit.read", {
+          resourceKind: "mcp_tool",
+          resourceId: "mcp_audit",
+          metadata: { readOnly: true }
+        });
+        if (!auditDecision.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", decision: authorizationDecisionToDto(auditDecision) });
+          return;
+        }
+        sendJson(response, 200, { auditEvents: mcp.listAuditEvents().map(mcpToolAuditEventToDto) });
+        return;
+      }
+
+      sendJson(response, 404, { error: "mcp_endpoint_not_found", message: `MCP endpoint not found: ${url.pathname}` });
+      return;
+    }
+
+    if (segments[0] === "auth") {
+      const authService = context.authorizationService;
+      const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+
+      if (method === "GET") {
+        const readDecision = authService.hasPermission(requestContext.authContext, "auth.read", {
+          resourceKind: "auth",
+          resourceId: segments[1] ?? "config",
+          metadata: { readOnly: true }
+        });
+        if (!readDecision.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", decision: authorizationDecisionToDto(readDecision) as JsonValue });
+          return;
+        }
+
+        if (segments[1] === "config") {
+          sendJson(response, 200, {
+            config: authService.getConfig(),
+            identityProviders: authService.listIdentityProviders().map(identityProviderToDto),
+            productionAuthEnabled: false,
+            mockAuthWarning: "MockAuthProvider is default and is not production authentication."
+          });
+          return;
+        }
+        if (segments[1] === "me") {
+          sendJson(response, 200, { authContext: authContextToDto(requestContext.authContext) as JsonValue });
+          return;
+        }
+        if (segments[1] === "roles") {
+          sendJson(response, 200, { roles: authService.listRoles().map(roleToDto) as JsonValue });
+          return;
+        }
+        if (segments[1] === "permissions") {
+          sendJson(response, 200, { permissions: authService.listPermissions().map(permissionToDto) as JsonValue });
+          return;
+        }
+        if (segments[1] === "teams") {
+          sendJson(response, 200, { teams: authService.listTeams().map(teamToDto) as JsonValue });
+          return;
+        }
+        if (segments[1] === "actors") {
+          sendJson(response, 200, { actors: authService.listActors().map(actorToDto) as JsonValue });
+          return;
+        }
+        if (segments[1] === "service-accounts") {
+          sendJson(response, 200, { serviceAccounts: authService.listServiceAccounts().map(serviceAccountToDto) as JsonValue });
+          return;
+        }
+        if (segments[1] === "role-bindings") {
+          sendJson(response, 200, { roleBindings: authService.listRoleBindings().map(roleBindingToDto) as JsonValue });
+          return;
+        }
+        if (segments[1] === "principals") {
+          sendJson(response, 200, { principals: authService.listPrincipals().map(principalToDto) as JsonValue });
+          return;
+        }
+        if (segments[1] === "identity-providers") {
+          sendJson(response, 200, { identityProviders: authService.listIdentityProviders().map(identityProviderToDto) as JsonValue });
+          return;
+        }
+        if (segments[1] === "audit") {
+          sendJson(response, 200, {
+            auditEvents: authService.listAuditEvents({
+              actorId: url.searchParams.get("actorId") ?? undefined,
+              principalId: url.searchParams.get("principalId") ?? undefined,
+              eventType: url.searchParams.get("eventType") ?? undefined,
+              action: url.searchParams.get("action") ?? undefined
+            }).map(authAuditEventToDto) as JsonValue
+          });
+          return;
+        }
+      }
+
+      if (method === "POST" && segments[1] === "authorize" && segments[2] === "check") {
+        const gateDecision = authService.hasPermission(requestContext.authContext, "auth.authorize.check", {
+          resourceKind: "auth",
+          resourceId: "authorize_check",
+          metadata: { readOnly: true }
+        });
+        if (!gateDecision.allowed) {
+          sendJson(response, 403, { error: "authorization_denied", decision: authorizationDecisionToDto(gateDecision) as JsonValue });
+          return;
+        }
+
+        const body = await readJson(request) as Record<string, unknown>;
+        const action = stringValue(body.action);
+        const resource = authorizationResourceFromBody(body);
+        if (!action || !resource) {
+          sendJson(response, 400, { error: "invalid_authorization_check", message: "action and resourceKind are required." });
+          return;
+        }
+        const subjectRecord = recordValue(body.subject);
+        const targetAuthContext = authService.getAuthContext({
+          actorId: stringValue(body.actorId) ?? stringValue(subjectRecord.actorId),
+          requestId: stringValue(body.requestId),
+          correlationId: stringValue(body.correlationId),
+          source: requestSourceValue(body.source) ?? "api",
+          metadata: {
+            authorizationCheckTarget: true
+          }
+        });
+        const decision = authService.check({
+          authContext: targetAuthContext,
+          action,
+          resource,
+          policyContext: {
+            taskId: stringValue(body.taskId),
+            taskRunId: stringValue(body.taskRunId),
+            repoId: stringValue(body.repoId),
+            branchName: stringValue(body.branchName),
+            modelId: stringValue(body.modelId),
+            providerKind: stringValue(body.providerKind),
+            runnerKind: stringValue(body.runnerKind),
+            command: stringValue(body.command),
+            riskScore: typeof body.riskScore === "number" ? body.riskScore : undefined,
+            environment: recordValue(body.environment),
+            metadata: recordValue(body.policyMetadata)
+          }
+        });
+        sendJson(response, decision.allowed ? 200 : 403, { decision: authorizationDecisionToDto(decision) as JsonValue });
+        return;
+      }
     }
 
     if (segments[0] === "policy") {
@@ -703,14 +1146,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             sendJson(response, 400, { error: "invalid_credential_resolution_check", message: "secretRefId and purpose are required." });
             return;
           }
+          const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
           const result = securityService.resolveCredential({
             secretRefId,
             purpose,
-            actorId: stringValue(body.actorId),
+            actorId: requestContext.authContext.actor.id,
+            principalId: requestContext.authContext.principal.id,
+            authContext: requestContext.authContext,
             taskId: stringValue(body.taskId),
             taskRunId: stringValue(body.taskRunId),
             providerId: stringValue(body.providerId),
-            policyContext: recordValue(body.policyContext)
+            policyContext: {
+              ...recordValue(body.policyContext),
+              requestedActorId: stringValue(body.actorId)
+            }
           });
           sendJson(response, 200, { result: credentialResolutionResultToDto(result) });
           return;
@@ -2556,6 +3005,46 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 
     if (segments[0] === "git") {
       const gitService = context.gitIntegrationService;
+      const webhookService = context.gitWebhookReceiverService;
+
+      if (segments[1] === "github" && segments[2] === "webhooks") {
+        if (method === "POST" && segments.length === 3) {
+          const result = await webhookService.receiveGitHubWebhook({
+            headers: request.headers,
+            rawBody: await readRawBody(request)
+          });
+          sendJson(response, result.statusCode, result as unknown as JsonValue);
+          return;
+        }
+        if (method === "GET" && segments[3] === "config") {
+          sendJson(response, 200, { config: webhookService.getConfig() });
+          return;
+        }
+        if (method === "GET" && segments[3] === "events" && segments.length === 4) {
+          sendJson(response, 200, {
+            events: webhookService.listEvents({
+              repoRef: url.searchParams.get("repoRef") ?? undefined,
+              eventType: url.searchParams.get("eventType") ?? undefined
+            })
+          });
+          return;
+        }
+        if (method === "GET" && segments[3] === "events" && segments[4]) {
+          const event = webhookService.getEvent(segments[4]);
+          sendJson(response, 200, { event: event ?? notFound("git webhook event", segments[4]) });
+          return;
+        }
+        if (method === "GET" && segments[3] === "audit") {
+          sendJson(response, 200, {
+            auditEvents: webhookService.listAuditEvents({
+              repoRef: url.searchParams.get("repoRef") ?? undefined,
+              deliveryId: url.searchParams.get("deliveryId") ?? undefined,
+              eventType: url.searchParams.get("eventType") ?? undefined
+            })
+          });
+          return;
+        }
+      }
 
       if (method === "GET" && segments[1] === "providers") {
         sendJson(response, 200, { providers: gitService.listProviders() });
@@ -2612,6 +3101,34 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           return;
         }
 
+        if (segments[3] === "pr-sync") {
+          if (method === "GET" && segments.length === 4) {
+            sendJson(response, 200, { pullRequestSyncStates: webhookService.listPullRequestSyncStates(repoId) });
+            return;
+          }
+          if (method === "GET" && segments[4]) {
+            const pullRequestNumber = Number(segments[4]);
+            if (!Number.isInteger(pullRequestNumber) || pullRequestNumber < 1) {
+              sendJson(response, 400, { error: "invalid_pull_request_number", message: "pull request number must be a positive integer." });
+              return;
+            }
+            sendJson(response, 200, { pullRequestSyncState: webhookService.getPullRequestSyncState(repoId, pullRequestNumber) ?? notFound("pull request sync state", `${repoId}:${pullRequestNumber}`) });
+            return;
+          }
+        }
+
+        if (segments[3] === "branch-sync") {
+          if (method === "GET" && segments.length === 4) {
+            sendJson(response, 200, { branchSyncStates: webhookService.listBranchSyncStates(repoId) });
+            return;
+          }
+          if (method === "GET" && segments[4]) {
+            const branchName = decodeURIComponent(segments.slice(4).join("/"));
+            sendJson(response, 200, { branchSyncState: webhookService.getBranchSyncState(repoId, branchName) ?? notFound("branch sync state", `${repoId}:${branchName}`) });
+            return;
+          }
+        }
+
         if (segments[3] === "branches") {
           if (method === "GET" && segments.length === 4) {
             sendJson(response, 200, { branches: await gitService.listBranches(repoId, url.searchParams.get("localPath") ?? undefined) });
@@ -2644,6 +3161,26 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
 
         if (segments[3] === "pull-requests") {
+          if (method === "POST" && segments.length === 6 && segments[5] === "sync") {
+            const pullRequestNumber = Number(segments[4]);
+            if (!Number.isInteger(pullRequestNumber) || pullRequestNumber < 1) {
+              sendJson(response, 400, { error: "invalid_pull_request_number", message: "pull request number must be a positive integer." });
+              return;
+            }
+            const result = webhookService.manualSyncPullRequest(repoId, pullRequestNumber);
+            sendJson(response, result.ok ? 200 : 409, result as unknown as JsonValue);
+            return;
+          }
+          if (method === "POST" && segments.length === 6 && segments[5] === "refresh-changed-files") {
+            const pullRequestNumber = Number(segments[4]);
+            if (!Number.isInteger(pullRequestNumber) || pullRequestNumber < 1) {
+              sendJson(response, 400, { error: "invalid_pull_request_number", message: "pull request number must be a positive integer." });
+              return;
+            }
+            const result = await webhookService.refreshChangedFiles(repoId, pullRequestNumber);
+            sendJson(response, result.ok ? 200 : 409, result as unknown as JsonValue);
+            return;
+          }
           if (method === "GET" && segments.length === 6 && segments[5] === "changed-files") {
             const pullRequestNumber = Number(segments[4]);
             if (!Number.isInteger(pullRequestNumber) || pullRequestNumber < 1) {
@@ -2724,6 +3261,112 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 
     if (segments[0] === "llm") {
       const llmService = context.llmGatewayService;
+
+      if (method === "GET" && segments[1] === "routing" && segments[2] === "config") {
+        sendJson(response, 200, { config: llmService.getRoutingConfig() });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "routing" && segments[2] === "decisions") {
+        sendJson(response, 200, { decisions: llmService.listRoutingDecisions().map(llmRoutingDecisionToDto) });
+        return;
+      }
+
+      if (method === "GET" && segments[1] === "providers" && segments[2] === "health") {
+        sendJson(response, 200, { providerHealth: llmService.listProviderHealth().map(llmProviderHealthToDto) });
+        return;
+      }
+
+      if (segments[1] === "routes") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { routes: llmService.listRoutes().map(llmRouteToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            if (typeof body.id !== "string" || typeof body.name !== "string" || typeof body.providerId !== "string" || !isLlmProviderKind(body.providerKind) || typeof body.modelId !== "string") {
+              sendJson(response, 400, { error: "invalid_llm_route", message: "id, name, providerId, providerKind, and modelId are required." });
+              return;
+            }
+            const promptClasses = Array.isArray(body.promptClasses)
+              ? body.promptClasses.map(llmPromptClassValue).filter((value): value is NonNullable<ReturnType<typeof llmPromptClassValue>> => value !== undefined)
+              : ["general" as const, "unknown" as const];
+            const route = llmService.createRoute({
+              id: body.id,
+              name: body.name,
+              description: stringValue(body.description) ?? "Custom LLM route",
+              providerId: body.providerId,
+              providerKind: body.providerKind,
+              modelId: body.modelId,
+              priority: typeof body.priority === "number" ? body.priority : 500,
+              enabled: body.enabled !== false,
+              capabilities: Array.isArray(body.capabilities) ? body.capabilities.filter((value): value is string => typeof value === "string") : ["completion"],
+              promptClasses,
+              maxInputTokens: typeof body.maxInputTokens === "number" ? body.maxInputTokens : undefined,
+              maxOutputTokens: typeof body.maxOutputTokens === "number" ? body.maxOutputTokens : undefined,
+              estimatedInputTokenCostUsd: typeof body.estimatedInputTokenCostUsd === "number" ? body.estimatedInputTokenCostUsd : undefined,
+              estimatedOutputTokenCostUsd: typeof body.estimatedOutputTokenCostUsd === "number" ? body.estimatedOutputTokenCostUsd : undefined,
+              requiresRemote: body.requiresRemote === true,
+              requiresSecretRef: body.requiresSecretRef === true,
+              fallbackAllowed: body.fallbackAllowed === true,
+              metadata: recordValue(body.metadata)
+            });
+            sendJson(response, 201, { route: llmRouteToDto(route) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_llm_route", message: error instanceof Error ? error.message : "Invalid LLM route." });
+          }
+          return;
+        }
+        if (method === "PATCH" && segments.length === 4 && segments[3] === "status") {
+          const body = await readJson(request) as Record<string, unknown>;
+          if (typeof body.enabled !== "boolean") {
+            sendJson(response, 400, { error: "invalid_llm_route_status", message: "enabled boolean is required." });
+            return;
+          }
+          try {
+            sendJson(response, 200, { route: llmRouteToDto(llmService.updateRouteStatus(segments[2], body.enabled)) });
+          } catch (error) {
+            sendJson(response, 404, { error: "llm_route_not_found", message: error instanceof Error ? error.message : "LLM route not found." });
+          }
+          return;
+        }
+      }
+
+      if (segments[1] === "fallback-policies") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { fallbackPolicies: llmService.listFallbackPolicies().map(llmFallbackPolicyToDto) });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          try {
+            const body = await readJson(request) as Record<string, unknown>;
+            if (typeof body.id !== "string" || typeof body.name !== "string") {
+              sendJson(response, 400, { error: "invalid_llm_fallback_policy", message: "id and name are required." });
+              return;
+            }
+            const policy = llmService.createFallbackPolicy({
+              id: body.id,
+              name: body.name,
+              enabled: body.enabled === true,
+              maxAttempts: typeof body.maxAttempts === "number" ? body.maxAttempts : 0,
+              allowedProviderKinds: Array.isArray(body.allowedProviderKinds) ? body.allowedProviderKinds.filter(isLlmProviderKind) : ["mock"],
+              disallowedProviderKinds: Array.isArray(body.disallowedProviderKinds) ? body.disallowedProviderKinds.filter(isLlmProviderKind) : ["local_cli"],
+              requireSameDataClass: body.requireSameDataClass !== false,
+              requireBudgetRemaining: body.requireBudgetRemaining !== false,
+              requirePolicyAllow: body.requirePolicyAllow !== false,
+              stopOnPolicyDeny: body.stopOnPolicyDeny !== false,
+              stopOnCredentialDeny: body.stopOnCredentialDeny !== false,
+              stopOnBudgetDeny: body.stopOnBudgetDeny !== false,
+              metadata: recordValue(body.metadata)
+            });
+            sendJson(response, 201, { fallbackPolicy: llmFallbackPolicyToDto(policy) });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_llm_fallback_policy", message: error instanceof Error ? error.message : "Invalid LLM fallback policy." });
+          }
+          return;
+        }
+      }
 
       if (method === "GET" && segments[1] === "providers") {
         sendJson(response, 200, { providers: llmService.listProviders() });
@@ -2847,20 +3490,29 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           sendJson(response, 400, { error: "invalid_llm_route", message: "taskId, taskRunId, and prompt are required." });
           return;
         }
+        const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
         const route = llmService.routeRequest({
           taskId,
           taskRunId,
-          actorId: stringValue(body.actorId),
+          actorId: requestContext.authContext.actor.id,
+          principalId: requestContext.authContext.principal.id,
+          authContext: requestContext.authContext,
           modelRef: stringValue(body.modelRef),
+          providerId: stringValue(body.providerId),
           providerKind: isLlmProviderKind(body.providerKind) ? body.providerKind : undefined,
           virtualKeyId: stringValue(body.virtualKeyId),
+          promptClass: llmPromptClassValue(body.promptClass),
+          requestedCapabilities: Array.isArray(body.requestedCapabilities) ? body.requestedCapabilities.filter((value): value is string => typeof value === "string") : undefined,
+          maxFallbackAttempts: typeof body.maxFallbackAttempts === "number" ? body.maxFallbackAttempts : undefined,
           prompt,
           budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined
         });
         sendJson(response, route.ok ? 200 : 409, {
           ok: route.ok,
           model: route.model ? llmModelToDto(route.model) : undefined,
+          route: route.route ? llmRouteToDto(route.route) : undefined,
           budgetDecision: route.budgetDecision ? budgetDecisionToDto(route.budgetDecision) : undefined,
+          routingDecision: route.routingDecision ? llmRoutingDecisionToDto(route.routingDecision) : undefined,
           reason: route.reason
         });
         return;
@@ -2875,14 +3527,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           sendJson(response, 400, { error: "invalid_llm_completion", message: "taskId, taskRunId, and prompt are required." });
           return;
         }
+        const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
         const result = await llmService.routeCompletion({
           taskId,
           taskRunId,
-          actorId: stringValue(body.actorId),
+          actorId: requestContext.authContext.actor.id,
+          principalId: requestContext.authContext.principal.id,
+          authContext: requestContext.authContext,
           modelRef: stringValue(body.modelRef),
           providerId: stringValue(body.providerId),
           providerKind: isLlmProviderKind(body.providerKind) ? body.providerKind : undefined,
           virtualKeyId: stringValue(body.virtualKeyId),
+          promptClass: llmPromptClassValue(body.promptClass),
+          requestedCapabilities: Array.isArray(body.requestedCapabilities) ? body.requestedCapabilities.filter((value): value is string => typeof value === "string") : undefined,
+          maxFallbackAttempts: typeof body.maxFallbackAttempts === "number" ? body.maxFallbackAttempts : undefined,
           prompt,
           systemInstructions: stringValue(body.systemInstructions),
           maxTokens: typeof body.maxTokens === "number" ? body.maxTokens : undefined,
@@ -2896,6 +3554,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           result: result.result ? llmCompletionResultToDto(result.result) : undefined,
           usageEvent: result.usageEvent,
           budgetDecision: result.budgetDecision ? budgetDecisionToDto(result.budgetDecision) : undefined,
+          routingDecision: result.routingDecision ? llmRoutingDecisionToDto(result.routingDecision) : undefined,
+          fallbackAttempts: result.fallbackAttempts?.map(llmRoutingDecisionToDto),
           reason: result.reason
         });
         return;
@@ -2995,7 +3655,14 @@ export type ApiServerOverrides = {
 export function createApiServerWithStorage(storage: StorageProvider, overrides: ApiServerOverrides = {}) {
   const store = storage.repositoryFactory.createDataStore();
   const policyService = new PolicyService();
-  const securityService = new SecurityControlService({ policyService });
+  const authRepository = new InMemoryAuthRepository();
+  const authorizationService = new AuthorizationService({
+    repository: authRepository,
+    provider: new MockAuthProvider({ repository: authRepository }),
+    policyService
+  });
+  const requestContextResolver = new RequestContextResolver(authorizationService);
+  const securityService = new SecurityControlService({ policyService, authorizationService });
   const localAgentProtocolService = new LocalAgentProtocolService({ policyService, securityService });
   const providerAbstractionService = new ProviderAbstractionService({ policyService, localAgentProtocolService });
   const registryService = createRegistryService({
@@ -3021,10 +3688,35 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     config: git.config,
     policyService
   });
+  const gitWebhook = createGitHubWebhookRuntimeFromEnv(process.env, {
+    secretResolver: (resolutionRequest) => {
+      const resolved = securityService.resolveCredentialForInternalUse(resolutionRequest);
+      return {
+        ok: resolved.allowed,
+        status: resolved.status,
+        value: resolved.value,
+        reason: resolved.blockedReason,
+        credentialHandleId: resolved.credentialHandle?.id
+      };
+    }
+  });
+  const gitWebhookReceiverService = new GitWebhookReceiverService({
+    store,
+    gitIntegrationService,
+    config: gitWebhook.config,
+    verifier: gitWebhook.verifier,
+    policyService
+  });
   const llmGatewayService = overrides.llmGatewayService ?? createDefaultLlmGatewayService({
     usageRepository: store,
     policyService,
+    authorizationService,
     credentialResolver: (resolutionRequest) => securityService.resolveCredentialForInternalUse(resolutionRequest)
+  });
+  const mcpGatewayService = createDefaultMCPGateway({
+    policyService,
+    authorizationService,
+    securityService
   });
   const agentRunnerConfig = createAgentRunnerConfigFromEnv();
   const agentRunnerRepositories = createInMemoryAgentRunnerRepositories();
@@ -3055,15 +3747,20 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       storageProvider: storage,
       gitIntegrationService,
       gitProviderConfig: git.config,
+      gitWebhookReceiverService,
+      gitWebhookConfig: gitWebhook.config,
       llmGatewayService,
       agentRunnerService,
       agentRunnerConfig,
       registryService,
       improvementServices,
       policyService,
+      authorizationService,
+      requestContextResolver,
       providerAbstractionService,
       securityService,
-      localAgentProtocolService
+      localAgentProtocolService,
+      mcpGatewayService
     });
   });
 }

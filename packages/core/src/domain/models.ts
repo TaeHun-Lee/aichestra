@@ -246,6 +246,84 @@ export type PullRequest = {
   updatedAt: Date;
 };
 
+export type GitWebhookProviderKind = "github";
+export type GitWebhookEventStatus = "received" | "ignored" | "verified" | "rejected" | "processed" | "failed";
+export type GitWebhookVerificationAlgorithm = "none" | "hmac-sha256" | "mock";
+export type GitWebhookPullRequestState = "open" | "closed" | "merged" | "draft" | "unknown";
+
+export type GitWebhookEvent = {
+  id: string;
+  providerKind: GitWebhookProviderKind;
+  eventType: string;
+  deliveryId: string;
+  repoRef: string;
+  action?: string;
+  payloadHash: string;
+  signatureVerified: boolean;
+  status: GitWebhookEventStatus;
+  receivedAt: Date;
+  processedAt?: Date;
+  taskId?: string;
+  taskRunId?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type GitWebhookVerificationResult = {
+  id: string;
+  deliveryId: string;
+  verified: boolean;
+  reason: string;
+  algorithm: GitWebhookVerificationAlgorithm;
+  createdAt: Date;
+};
+
+export type GitPullRequestSyncState = {
+  id: string;
+  repoRef: string;
+  repoId?: string;
+  pullRequestNumber: number;
+  providerPullRequestId?: string;
+  pullRequestId?: string;
+  taskId?: string;
+  taskRunId?: string;
+  branchLeaseId?: string;
+  mergeQueueEntryId?: string;
+  state: GitWebhookPullRequestState;
+  headBranch: string;
+  baseBranch: string;
+  latestSha?: string;
+  changedFiles: string[];
+  labels?: string[];
+  mergeableState?: string;
+  lastSyncedAt: Date;
+  sourceEventId?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type GitBranchSyncState = {
+  id: string;
+  repoRef: string;
+  repoId?: string;
+  branchName: string;
+  latestSha?: string;
+  exists: boolean;
+  protectedBranch?: boolean;
+  lastSyncedAt: Date;
+  sourceEventId?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type GitWebhookAuditEvent = {
+  id: string;
+  eventType: string;
+  deliveryId?: string;
+  repoRef?: string;
+  result: "received" | "ignored" | "verified" | "rejected" | "processed" | "failed" | "blocked";
+  reason?: string;
+  sanitizedMetadata: Record<string, unknown>;
+  createdAt: Date;
+};
+
 export type MergeQueueEntry = {
   id: string;
   repoId: string;

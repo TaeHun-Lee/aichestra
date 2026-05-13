@@ -15,8 +15,11 @@
 11. Dashboard API-backed Read Model v0 - implemented
 12. LLM Gateway v1 - implemented
 13. SecretRef-backed Provider Credentials v1 - implemented
-14. MCP Gateway planning
-15. Phase 5 enterprise planning
+14. Real Git Adapter v2 - implemented
+15. Production Auth/RBAC Planning v0 - implemented
+16. LLM Gateway v2 - implemented
+17. MCP Gateway v0 - implemented
+18. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -58,7 +61,7 @@ Goals:
 - Record usage ledger entries for successful gateway calls.
 - Keep virtual keys as internal policy objects, not provider API secrets.
 
-Follow-up: Local Agent Runner v0, Real Git Adapter v1, Dashboard API-backed Read Model v0, LLM Gateway v1, and SecretRef-backed Provider Credentials v1 have been completed. Continue with Real Git Adapter v2/webhook planning or LLM Gateway v2 multi-provider routing.
+Follow-up: Local Agent Runner v0, Real Git Adapter v1, Dashboard API-backed Read Model v0, LLM Gateway v1/v2, SecretRef-backed Provider Credentials v1, Real Git Adapter v2, and Production Auth/RBAC Planning v0 have been completed. Continue with MCP Gateway v0, or GitHub App / production webhook hardening planning.
 
 ## 4. Local Agent Runner v0
 
@@ -149,7 +152,7 @@ Implemented constraints:
 - direct cloud-side `local_cli` execution, credential cache read/upload, danger-full-access, shell execution, network access, and secret forwarding remain denied by default;
 - no real Local Agent daemon, WebSocket/gRPC/HTTP tunnel, PTY automation, vendor CLI execution, OAuth/device-code/WIF/IAM exchange, or provider call is implemented.
 
-Recommended next step: Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
+Recommended next step: Real Git Adapter v2, Production Auth/RBAC Planning v0, and LLM Gateway v2 have since been implemented. Continue with MCP Gateway v0, or GitHub App / production webhook hardening planning.
 
 ## 10. Real Git Adapter v1
 
@@ -164,7 +167,7 @@ Goals:
 - Audit config validation, blocked attempts, successful branch/PR creation, changed-file reads, and blocked merge/rebase attempts.
 - Keep merge, rebase, force push, branch deletion, webhooks, GitHub App installation, GitLab, and Bitbucket out of scope.
 
-Recommended next step: LLM Gateway v1 and SecretRef-backed Provider Credentials v1 have been completed. Continue with Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
+Recommended next step: LLM Gateway v1/v2, SecretRef-backed Provider Credentials v1, Real Git Adapter v2, and Production Auth/RBAC Planning v0 have been completed. Continue with MCP Gateway v0, or GitHub App / production webhook hardening planning.
 
 ## 11. Dashboard API-backed Read Model v0
 
@@ -178,7 +181,7 @@ Goals:
 - Avoid workflow execution, provider calls, GitHub calls, LLM calls, runner commands, secret leases, and credential-cache reads from dashboard read endpoints.
 - Sanitize read-model output and avoid exposing secrets or raw tokens.
 
-Recommended next step: LLM Gateway v1 and SecretRef-backed Provider Credentials v1 have been completed. Continue with Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
+Recommended next step: LLM Gateway v1/v2, SecretRef-backed Provider Credentials v1, Real Git Adapter v2, and Production Auth/RBAC Planning v0 have been completed. Continue with MCP Gateway v0, or GitHub App / production webhook hardening planning.
 
 ## 12. LLM Gateway v1
 
@@ -194,7 +197,7 @@ Goals:
 - Record sanitized remote LLM audit events for request, block, completion, failure, provider error, budget block, policy block, and output redaction.
 - Keep BYOK, OAuth/device-code/WIF/IAM, Local CLI execution, broad multi-provider routing, streaming, and production secret manager integration out of scope.
 
-Recommended next step: Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
+Recommended next step: Real Git Adapter v2, Production Auth/RBAC Planning v0, and LLM Gateway v2 have been completed. Continue with MCP Gateway v0, or GitHub App / production webhook hardening planning.
 
 ## 13. SecretRef-backed Provider Credentials v1
 
@@ -206,22 +209,83 @@ Goals:
 - Add active `SecretRef` metadata for GitHub tokens, LLM API keys, provider API keys, and future credential kinds.
 - Add an explicit env-only `EnvSecretProvider` that reads only requested allowlisted env keys.
 - Evaluate `provider.credential.resolve`, metadata `secret.lease.request`, and metadata `secret.lease.issue` before any env read.
+- Evaluate `git.credential.resolve` and `llm.credential.resolve` for purpose-specific credential checks.
+- Use Production Auth/RBAC v0 `AuthorizationService` where available so unauthorized actors are denied before env reads.
 - Route GitHub and OpenAI-compatible credentials through `SecurityControlService` when `*_SECRET_REF` config is present.
+- Route GitHub webhook secrets through `SecurityControlService` when `AICHESTRA_GITHUB_WEBHOOK_SECRET_REF` is present.
 - Keep legacy env fallback for compatibility when no SecretRef is configured.
 - Expose credential refs, resolve checks, audit, health, and dashboard status without returning values.
 - Keep Vault/cloud secret managers, BYOK, OAuth/device-code/WIF/IAM, credential cache reads, vendor CLIs, runner secret injection, and Local Agent secret forwarding out of scope.
 
-Recommended next step: Real Git Adapter v2 / webhook planning, or LLM Gateway v2 multi-provider routing.
+Recommended next step: Real Git Adapter v2, Production Auth/RBAC Planning v0, and LLM Gateway v2 have been completed. Continue with MCP Gateway v0, or GitHub App / production webhook hardening planning.
 
-## 14. MCP Gateway Planning
+## 14. Real Git Adapter v2
+
+Implemented with `docs/features/real-git-adapter/v2.md`, `docs/features/real-git-adapter/v2-plan.md`, `packages/adapters/src/git/github-webhooks.ts`, `packages/git-adapter/src/webhooks.ts`, persistent webhook/sync repositories, API routes, policy rules, health/dashboard visibility, and tests.
 
 Goals:
 
-- Define MCP gateway boundary.
-- Keep MCP calls disabled by default.
-- Define audit, auth, and permission model.
+- Keep webhook handling disabled by default.
+- Verify GitHub webhook signatures through a safe interface before processing.
+- Process `ping`, selected `pull_request` actions, and safe branch metadata from `push`.
+- Store webhook event metadata, verification results, PR sync states, branch sync states, and webhook audit events durably.
+- Refresh changed files only through the existing gated `GitHubClient` boundary.
+- Update merge queue risk inputs non-destructively where branch lease mappings exist.
+- Keep automatic merge, rebase push, force push, branch deletion, GitHub App installation, GitLab, and Bitbucket out of scope.
 
-## 15. Phase 5 Enterprise Planning
+Recommended next step: Production Auth/RBAC Planning v0 and LLM Gateway v2 have been completed. Continue with MCP Gateway v0, or GitHub App / production webhook hardening planning.
+
+## 15. Production Auth/RBAC Planning v0
+
+Implemented with `docs/foundations/auth-rbac/v0.md`, `docs/foundations/auth-rbac/v0-plan.md`, `packages/auth`, policy subject updates, API routes, health/dashboard visibility, and deterministic tests.
+
+Goals:
+
+- Define provider-neutral principal, actor, team, role, permission, resource scope, role binding, service account, identity provider, auth context, request context, and auth audit models.
+- Keep `MockAuthProvider` as the default and mark it clearly as non-production auth.
+- Add disabled future OIDC, SAML, SCIM, and service-account provider placeholders without network calls.
+- Add `AuthorizationService` to bridge RBAC and Policy-as-code.
+- Map auth context into richer `PolicySubject` metadata.
+- Add `/auth/*` read-model endpoints and a gated authorization check endpoint.
+- Expose auth mode/current actor through health and dashboard without secrets or tokens.
+- Keep real SSO, OAuth login, SAML, OIDC, SCIM, production sessions, password login, and API-key issuance out of scope.
+
+Recommended next step: LLM Gateway v2 multi-provider routing has been completed. Continue with MCP Gateway v0, or GitHub App / production webhook hardening planning.
+
+## 16. LLM Gateway v2
+
+Implemented with `docs/features/llm-gateway/v2.md`, `docs/features/llm-gateway/v2-plan.md`, route/fallback/routing-decision repositories in `packages/llm-gateway/src/routing.ts`, provider skeletons, router integration in `LLMGatewayService`, policy/auth updates, API routes, health/dashboard visibility, and tests.
+
+Goals:
+
+- Keep `MockLLMProvider` as the default.
+- Add provider-aware route selection with capability and prompt-class matching.
+- Add bounded fallback policy that is disabled by default.
+- Preserve the v1 OpenAI-compatible remote path behind all explicit gates.
+- Add disabled skeleton routes for Anthropic, Gemini, Bedrock, Vertex, Azure, LiteLLM, and Local CLI provider kinds.
+- Keep local CLI routes as `local_agent_required`, not direct execution.
+- Record routing decisions and fallback attempts with sanitized audit and usage attribution.
+- Enforce Auth/RBAC, Policy-as-code, SecretRef, model allowlist, provider allowlist, and budget gates before provider calls.
+
+Recommended next step: MCP Gateway v0, or GitHub App / production webhook hardening planning.
+
+## 17. MCP Gateway v0
+
+Implemented with `docs/features/mcp-gateway/v0.md`, `docs/features/mcp-gateway/v0-plan.md`, `packages/mcp-gateway`, policy/auth updates, API routes, health/dashboard visibility, schema skeleton updates, and tests.
+
+Goals:
+
+- Define MCP server and tool catalog models.
+- Keep `MockMCPGateway` as the default.
+- Add disabled real MCP transport skeletons only.
+- Allow deterministic low-risk read-only mock tool invocation when Auth/RBAC and Policy permit.
+- Deny high-risk, critical, secret, network, write, deploy, real transport, and unknown tool paths by default.
+- Apply redaction to input/output/audit previews.
+- Expose `/mcp/*`, `/health`, and `/dashboard/mcp` visibility without secrets or raw output.
+
+Recommended next step: Production deployment readiness planning, or GitHub App / production webhook hardening planning.
+
+## 18. Phase 5 Enterprise Planning
 
 Goals:
 

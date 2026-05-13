@@ -1,0 +1,14 @@
+{
+  "name": "@aichestra/mcp-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aichestra/auth": "workspace:*",
+    "@aichestra/policy": "workspace:*",
+    "@aichestra/security": "workspace:*"
+  }
+}

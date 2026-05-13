@@ -1,92 +1,100 @@
 # SecretRef-backed Provider Credentials v1 Plan
 
+## Canonical Path
+
+`docs/README.md` places foundation/security architecture under `docs/foundations/`. The canonical path for this milestone is therefore `docs/foundations/secretref-provider-credentials/`, with this plan next to `v1.md`.
+
 ## Current Git Credential Handling
 
-Real Git Adapter v1 keeps `MockGitProvider` as the default. GitHub branch, pull request, and changed-file operations can run only when `AICHESTRA_GIT_PROVIDER=github`, remote Git gates, repo allowlist, branch prefix, token presence, and policy checks pass. The current GitHub token path is environment/config based through `AICHESTRA_GITHUB_TOKEN`; tokens are not stored or returned, but the credential is not yet modeled as a `SecretRef`/`SecretLease` resolution flow.
+Real Git Adapter v2 keeps `MockGitProvider` as the default. GitHub branch, pull request, changed-file refresh, webhook verification, and PR/branch sync are controlled exceptions behind explicit provider, remote-operation, repo allowlist, branch-prefix, webhook, signature, and policy gates. Preferred GitHub token configuration is `AICHESTRA_GITHUB_TOKEN_SECRET_REF`; legacy `AICHESTRA_GITHUB_TOKEN` remains a compatibility fallback when no SecretRef is configured. Merge, rebase, force push, branch deletion, and GitHub App installation remain out of scope.
 
 ## Current LLM Credential Handling
 
-LLM Gateway v1 keeps `MockLLMProvider` as the default. The only real provider path is OpenAI-compatible chat completion behind explicit gates, model allowlist/default model, budget, and policy checks. The current API key path is environment/config based through `AICHESTRA_LLM_API_KEY`; the key is not returned in health, API, audit, usage, or dashboard data, but the credential is not yet routed through `SecretRef`.
+LLM Gateway v1 keeps `MockLLMProvider` as the default. The only real provider path is OpenAI-compatible chat completion behind explicit remote LLM gates, base URL, model allowlist/default model, virtual-key budget, policy, and credential gates. Preferred API-key configuration is `AICHESTRA_LLM_API_KEY_SECRET_REF`; legacy `AICHESTRA_LLM_API_KEY` remains a compatibility fallback when no SecretRef is configured.
+
+## Current Webhook Secret Handling
+
+Real Git Adapter v2 supports GitHub webhook verification through `GitHubWebhookVerifier`. The preferred webhook secret path is `AICHESTRA_GITHUB_WEBHOOK_SECRET_REF` with `secretKind=github_webhook_secret` or `webhook_secret`; legacy `AICHESTRA_GITHUB_WEBHOOK_SECRET` remains a gated fallback. Webhooks are disabled unless `AICHESTRA_ENABLE_GITHUB_WEBHOOKS=true`, and unverified payloads are rejected by default.
 
 ## Current Secrets/Sandbox Models
 
-Secrets/Sandbox v0 in `packages/security` already defines metadata-only `SecretRef`, `SecretScope`, `SecretLease`, `SecretAccessDecision`, security audit events, redaction policies, and `SecurityControlService`. v0 deliberately does not retrieve secret values. Default policies deny `secret.read`, runner secret injection, credential cache access, and Local Agent secret forwarding.
+Secrets/Sandbox v0 already defines metadata-only `SecretRef`, `SecretScope`, `SecretLease`, `SecretAccessDecision`, security audit events, redaction policies, and `SecurityControlService`. SecretRef-backed Provider Credentials v1 extends this with env-backed provider credential resolution, metadata-only credential handles, no-secret DTOs, and explicit redaction.
 
 ## Current Enterprise Provider Credential Models
 
-Enterprise Provider Abstraction v0 defines `ProviderAuth` with API-key auth by env key or `secretRef`, plus `external_cli_session` for local CLI providers. `StaticCredentialManager` returns references only and never reads credential caches. Local CLI providers must continue to use `external_cli_session` with `credentialAccess=never_read_tokens`.
+Enterprise Provider Abstraction v0 models API-key auth as env key or `secretRef` references only. Local CLI providers use `external_cli_session` with `credentialAccess=never_read_tokens`, and credential-cache reads remain denied. Provider adapter skeletons do not perform real cloud API calls.
 
-## Gaps
+## Current Auth/RBAC And Policy Context
 
-- GitHub and OpenAI-compatible credentials are still env/config values at integration boundaries.
-- `SecretRef` can identify future provider credentials but lacks provider credential kind/env-key fields.
-- There is no controlled env-backed secret provider for explicit local integration environments.
-- Credential resolution does not yet produce a sanitized `CredentialHandle` and auditable `CredentialResolutionResult`.
-- Dashboard/health can show gate booleans, but not unified credential manager status.
+Production Auth/RBAC Planning v0 provides `Principal`, `Actor`, `Role`, `Permission`, `RoleBinding`, `ServiceAccount`, `AuthContext`, `RequestContextResolver`, `MockAuthProvider`, and `AuthorizationService`. Credential resolution must carry actor/principal metadata where available, deny unauthorized actors before any env read, then keep Policy-as-code authoritative for provider, Git, LLM, and lease decisions.
 
-## Proposed v1 Flow
+## Gaps Addressed In This Pass
 
-For v1, provider credential resolution becomes:
+- Route credential resolution through `AuthorizationService` when available.
+- Pass AuthContext-derived policy subjects to credential policy checks.
+- Add purpose-specific policy actions for `git.credential.resolve` and `llm.credential.resolve`.
+- Represent GitHub webhook secrets as explicit SecretRef-backed credential metadata.
+- Report webhook-secret configured status through health/dashboard security read models.
+- Extend redaction for webhook secret env dumps and generic token/secret/password env dumps.
+
+## Proposed Resolution Flow
 
 ```text
-Git / LLM / Enterprise Provider
-  -> SecurityControlService credential manager
-  -> active SecretRef metadata
-  -> metadata SecretLease
-  -> PolicyDecision
-  -> EnvSecretProvider, only when explicitly enabled
-  -> transient credential value inside adapter boundary only
-  -> audit/redaction
+Git / LLM / Webhook / Provider metadata
+  -> explicit AuthContext or mock system context
+  -> AuthorizationService provider.credential.resolve check
+  -> purpose-specific PolicyEngine check
+  -> provider.credential.resolve PolicyEngine check
+  -> metadata SecretLease request/issue policy checks
+  -> EnvSecretProvider single-key lookup
+  -> transient adapter-only raw value
+  -> sanitized audit/redaction and metadata-only DTOs
 ```
 
-`CredentialResolutionResult` and API DTOs never include raw secret values. A separate internal-only value result is used only by GitHub and OpenAI-compatible provider factories when a real integration gate is already configured.
+`CredentialResolutionResult` never includes raw values. `resolveCredentialForInternalUse` is the only adapter-boundary method that can carry a transient value.
 
-## Env Secret Provider Design
+## EnvSecretProvider Design
 
-`EnvSecretProvider` is disabled by default and requires:
+`EnvSecretProvider` remains disabled by default. It requires:
 
-- `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=true`
-- active `SecretRef` with `provider=env`
-- `envKey` on the SecretRef
-- optional `AICHESTRA_ALLOWED_SECRET_ENV_KEYS` allowlist containing the referenced key
+- `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=true`;
+- an active `SecretRef` with `provider=env`;
+- an `envKey` reference on that SecretRef;
+- optional `AICHESTRA_ALLOWED_SECRET_ENV_KEYS` containing that exact key.
 
-It reads exactly the requested env key, never enumerates the environment, and never writes values to audit/API/dashboard/health. Missing env keys, disabled provider, disabled/revoked refs, and non-allowlisted keys return deterministic statuses.
+It reads only the requested env key, never enumerates environment variables, and returns deterministic blocked/missing/denied results for disabled provider, missing env values, disabled/revoked refs, and non-allowlisted keys.
 
-Legacy `AICHESTRA_GITHUB_TOKEN` and `AICHESTRA_LLM_API_KEY` remain supported when no `*_SECRET_REF` is configured, but are documented as legacy env fallback. The preferred path is `AICHESTRA_GITHUB_TOKEN_SECRET_REF` and `AICHESTRA_LLM_API_KEY_SECRET_REF`.
+## AuthorizationService Integration
 
-## Policy Integration
+Credential resolution uses the API/request `AuthContext` when supplied, or an explicit mock system context for internal service operations. Viewers and developers cannot resolve provider credentials directly. Security/platform/system mock actors may pass RBAC only when PolicyEngine also allows the configured SecretRef flow. Authorization denials are audited before env access.
 
-Credential resolution evaluates `provider.credential.resolve` before any env read. v1 adds allow rules for env-backed SecretRef provider credentials when:
+## PolicyEngine Integration
 
-- the actor is system/service controlled;
-- the SecretRef is active;
-- env secret provider is enabled;
-- no credential cache access or stored credential material is involved.
+Policy checks cover:
 
-Metadata-only `secret.lease.request` and `secret.lease.issue` are allowed for provider credential resolution under the same explicit env-provider constraints. `secret.read` remains denied. Existing Git remote, LLM remote, model allowlist, and budget gates remain authoritative.
+- `provider.credential.resolve`;
+- `git.credential.resolve`;
+- `llm.credential.resolve`;
+- `secret.lease.request`;
+- `secret.lease.issue`;
+- `secret.read`;
+- `git.remote_operation`;
+- `git.webhook.verify`;
+- `llm.remote_completion`;
+- `provider.invoke`;
+- credential cache read/upload, runner secret injection, and Local Agent secret forwarding denials.
 
-## Audit and Redaction
+Policy denial blocks credential resolution before any env read, even if RBAC allows.
 
-Security audit records:
+## Audit And Redaction Requirements
 
-- `credential_secret_ref_created`
-- `credential_secret_ref_disabled`
-- `credential_secret_ref_revoked`
-- `credential_resolution_requested`
-- `credential_resolution_allowed`
-- `credential_resolution_denied`
-- `credential_resolution_missing`
-- `credential_resolution_revoked`
-- `credential_env_provider_disabled`
-- `credential_env_key_not_allowlisted`
-- `credential_cache_access_denied`
-- `credential_value_redacted`
+Audit events record credential ref lifecycle, authorization denial, policy denial, allow/missing/revoked outcomes, env provider disabled/non-allowlisted outcomes, metadata-only lease issue, and redaction. Audit metadata may include actor id, principal id, auth mode, task/run id, provider id, SecretRef id, purpose, policy decision id, authorization decision id, and sanitized status fields.
 
-Audit metadata is sanitized and includes only ids, provider kind, secret kind, env key references, policy ids, status, and safe config booleans. It never includes token values, API keys, bearer tokens, env var values, raw prompts, or credential cache contents.
+Audit, API, health, dashboard, and DTOs must never include raw secrets, GitHub tokens, webhook secrets, API keys, bearer tokens, env var values, credential-cache contents, raw prompts, or unredacted provider output.
 
-## API, Health, and Dashboard
+## API, Health, And Dashboard Changes
 
-Add credential endpoints under the existing security convention:
+Security credential endpoints remain:
 
 - `GET /security/credentials/refs`
 - `POST /security/credentials/refs`
@@ -94,15 +102,8 @@ Add credential endpoints under the existing security convention:
 - `POST /security/credentials/resolve/check`
 - `GET /security/credentials/audit`
 
-Health and dashboard expose credential manager kind, env secret provider enabled state, active SecretRef counts, GitHub credential status, LLM credential status, recent credential audit events, and blocked credential-cache examples. No values or env var contents are exposed.
+`resolve/check` returns status only and uses the resolved request actor instead of trusting a body actor override. Health/dashboard report credential manager kind, env secret provider enabled, active SecretRef count, GitHub token configured status, GitHub webhook secret configured status, LLM credential configured status, recent credential audit events, and blocked cache examples.
 
-## Out of Scope
+## Out Of Scope
 
-- Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, or any cloud secret backend.
-- BYOK.
-- OAuth, device-code, WIF, or IAM token exchange.
-- Credential cache reads or uploads.
-- Vendor CLI calls.
-- Runner/Local Agent secret injection.
-- MCP, Kubernetes, Temporal, or artifact registry integration.
-- Production auth/RBAC or production-ready secret management.
+Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, BYOK, OAuth, device-code, WIF, IAM, production rotation, production credential issuance, credential cache reads/uploads, vendor CLIs, runner secret injection, Local Agent secret forwarding, MCP, Kubernetes, Temporal, artifact registries, real SSO, production sessions, and production-ready secret management remain out of scope.

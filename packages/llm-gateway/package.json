@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@aichestra/adapters": "workspace:*",
+    "@aichestra/auth": "workspace:*",
     "@aichestra/core": "workspace:*",
     "@aichestra/policy": "workspace:*",
     "@aichestra/security": "workspace:*"

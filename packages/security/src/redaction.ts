@@ -31,6 +31,8 @@ export function applySecurityRedaction(input: string, policy: Pick<RedactionPoli
       .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|AICHESTRA_GITHUB|LLM|GITHUB|GOOGLE_APPLICATION)_API_KEY)\s*=\s*[^\s]+/gi, "$1=[redacted]")
       .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|AICHESTRA_GITHUB|LLM|GITHUB|GOOGLE_APPLICATION)_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
       .replace(/\b(AICHESTRA_GITHUB_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+      .replace(/\b(AICHESTRA_GITHUB_WEBHOOK_SECRET)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+      .replace(/\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD))\s*=\s*[^\s]+/gi, "$1=[redacted]")
       .replace(/GOOGLE_APPLICATION_CREDENTIALS\s*=\s*[^\s]+/gi, "GOOGLE_APPLICATION_CREDENTIALS=[redacted]");
   }
   if (policy.maskCredentialPaths) {

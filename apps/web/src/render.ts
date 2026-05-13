@@ -309,24 +309,45 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
         <div class="list">
           <div class="item"><strong>Provider</strong><span>${html(data.git.config.providerKind)} / remote Git ${data.git.config.remoteGitEnabled === true ? "enabled" : "disabled"} / branch create ${data.git.config.remoteBranchCreateEnabled === true ? "enabled" : "disabled"} / PR create ${data.git.config.remotePullRequestCreateEnabled === true ? "enabled" : "disabled"} / merge disabled</span></div>
           <div class="item"><strong>GitHub gates</strong><span>configured ${data.git.config.githubConfigured === true ? "yes" : "no"} / allowed repos ${html(data.git.config.githubAllowedRepoCount, "0")} / prefix ${html(data.git.config.githubAllowedBranchPrefix, "ai/")} / integration tests ${data.git.config.githubIntegrationTestsEnabled === true ? "enabled" : "skipped"}</span></div>
+          <div class="item"><strong>Webhook gates</strong><span>webhooks ${data.git.webhookConfig.webhooksEnabled === true ? "enabled" : "disabled"} / secret ${data.git.webhookConfig.webhookSecretConfigured === true ? "configured" : "missing"} / accept unverified ${data.git.webhookConfig.webhookAcceptUnverified === true ? "enabled" : "disabled"} / events ${html(data.git.webhookConfig.supportedWebhookEventCount, "0")}</span></div>
           <div class="item"><strong>Branches</strong><span>${html(data.git.branchRecords.map((branch) => branch.branchName), "none")}</span></div>
           <div class="item"><strong>Pull requests</strong><span>${html(data.git.pullRequests.map((pr) => pr.url ?? pr.externalId ?? pr.id), "none")}</span></div>
+          <div class="item"><strong>Webhook events</strong><span>${html(data.git.webhookEvents.map((event) => `${text(event.eventType)}:${text(event.status)}`), "none")}</span></div>
+          <div class="item"><strong>PR sync</strong><span>${html(data.git.pullRequestSyncStates.map((state) => `${text(state.repoRef)}#${text(state.pullRequestNumber)}:${text(state.state)}`), "none")}</span></div>
+          <div class="item"><strong>Branch sync</strong><span>${html(data.git.branchSyncStates.map((state) => `${text(state.branchName)}:${text(state.exists)}`), "none")}</span></div>
           <div class="item"><strong>Changed files</strong><span>${html(data.git.changedFiles.map((file) => `${text(file.path)}:${text(file.status)}`), "none")}</span></div>
+          <div class="item"><strong>Changed-file refresh</strong><span>${html(data.git.changedFilesRefreshStatus.lastResult, "none")} / ${html(data.git.changedFilesRefreshStatus.lastReason, "no recent refresh")}</span></div>
           <div class="item"><strong>Merge queue linkage</strong><span>${html(data.git.mergeQueueLinkage.map((entry) => `${text(entry.pullRequestId)}:${text(entry.recommendation)}`), "none")}</span></div>
           <div class="item"><strong>Git audit</strong><span>${html(data.git.auditEvents.map((event) => event.action), "none")}</span></div>
           <div class="item"><strong>Remote Git audit</strong><span>${html(data.git.remoteAuditEvents.map((event) => event.action), "none")}</span></div>
+          <div class="item"><strong>Webhook audit</strong><span>${html(data.git.webhookAuditEvents.map((event) => `${text(event.eventType)}:${text(event.result)}`), "none")}</span></div>
           <div class="item"><strong>Remote blocked example</strong><span>${html(data.git.blockedExamples.map((example) => example.reason), "none")}</span></div>
         </div>
         <h2>LLM Gateway</h2>
         <div class="list">
           <div class="item"><strong>Provider</strong><span>${html(data.llm.config.providerKind)} / remote LLM ${data.llm.config.remoteLlmEnabled === true ? "enabled" : "disabled"} / remote completion ${data.llm.config.remoteCompletionEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Routing</strong><span>${html(data.llm.routing.routingMode ?? data.llm.config.routingMode ?? "mock_only")} / fallback ${data.llm.routing.fallbackEnabled === true || data.llm.config.fallbackEnabled === true ? "enabled" : "disabled"} / max attempts ${html(data.llm.routing.maxFallbackAttempts ?? data.llm.config.maxFallbackAttempts ?? "0")}</span></div>
+          <div class="item"><strong>Routes</strong><span>${html(data.llm.routes.map((route) => `${text(route.id)}:${text(route.enabled)}`), "none")}</span></div>
+          <div class="item"><strong>Provider health</strong><span>${html(data.llm.providerHealth.map((provider) => `${text(provider.providerKind)}:${text(provider.status)}`), "none")}</span></div>
           <div class="item"><strong>Remote gates</strong><span>base URL ${data.llm.config.baseUrlConfigured === true ? "configured" : "missing"} / API key ${data.llm.config.apiKeyConfigured === true ? "configured" : "missing"} / allowed models ${html(data.llm.config.allowedModelCount, "0")} / integration tests ${data.llm.config.integrationTestsEnabled === true ? "enabled" : "skipped"}</span></div>
           <div class="item"><strong>Model catalog</strong><span>${html(data.llm.models.map((model) => `${text(model.id)}:${text(model.status)}`), "none")}</span></div>
           <div class="item"><strong>Virtual model keys</strong><span>${html(data.llm.virtualKeys.map((key) => `${text(key.id)}:${text(key.status)}:storesProviderSecret=false`), "none")}</span></div>
           <div class="item"><strong>Budget policy</strong><span>${html(data.llm.budget.budgetDecision ?? "budget checks enabled")} / selected ${html(data.llm.budget.selectedModel, "openai-compatible/default")} / API key not exposed</span></div>
           <div class="item"><strong>Recent LLM usage</strong><span>${html(data.llm.usageEvents.map((event) => `${text(event.model)}:${text(event.costUsd)}`), "none")}</span></div>
           <div class="item"><strong>LLM audit</strong><span>${html(data.llm.auditEvents.map((event) => event.eventType), "none")}</span></div>
+          <div class="item"><strong>Routing decisions</strong><span>${html(data.llm.routingDecisions.map((decision) => `${text(decision.decision)}:${text(decision.reason)}`), "none")}</span></div>
           <div class="item"><strong>Remote LLM blocked example</strong><span>${html(data.llm.blockedExamples.map((example) => example.reason), "remote LLM blocked")}</span></div>
+        </div>
+        <h2>MCP Gateway</h2>
+        <div class="list">
+          <div class="item"><strong>Gateway</strong><span>${html(data.mcp.config.gatewayKind)} / real transport ${data.mcp.config.realTransportEnabled === true ? "enabled" : "disabled"} / external calls ${data.mcp.config.externalCallsEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Servers</strong><span>${html(data.mcp.servers.map((server) => `${text(server.id)}:${text(server.status)}`), "none")}</span></div>
+          <div class="item"><strong>Tools</strong><span>${html(data.mcp.tools.map((tool) => `${text(tool.id)}:${text(tool.riskLevel)}:${text(tool.status)}`), "none")}</span></div>
+          <div class="item"><strong>Risk summary</strong><span>low ${html(data.mcp.riskSummary.low, "0")} / high ${html(data.mcp.riskSummary.high, "0")} / critical ${html(data.mcp.riskSummary.critical, "0")} / enabled high-critical ${html(data.mcp.riskSummary.highCriticalEnabled, "0")}</span></div>
+          <div class="item"><strong>Recent invocations</strong><span>${html(data.mcp.invocations.map((invocation) => `${text(invocation.toolId)}:${text(invocation.status)}`), "none")}</span></div>
+          <div class="item"><strong>MCP audit</strong><span>${html(data.mcp.auditEvents.map((event) => `${text(event.eventType)}:${text(event.result)}`), "none")}</span></div>
+          <div class="item"><strong>Blocked examples</strong><span>${html(data.mcp.blockedExamples.map((example) => `${text(example.operation)}:${text(example.reason)}`), "none")}</span></div>
+          <div class="item"><strong>LLM and Runner</strong><span>LLM auto tool execution ${data.mcp.integration.llmAutoToolExecution === true ? "enabled" : "disabled"} / runner direct tool execution ${data.mcp.integration.runnerDirectToolExecution === true ? "enabled" : "disabled"}</span></div>
         </div>
         <h2>Agent Runner</h2>
         <div class="list">
@@ -346,6 +367,16 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Recent policy decisions</strong><span>${html(data.policy.auditEntries.map((entry) => `${text(entry.action)}:${text(entry.decision)}`), "none")}</span></div>
           <div class="item"><strong>Blocked operation examples</strong><span>${html(data.policy.blockedExamples.map((example) => `${text(example.action)}:${text(example.reason)}:${text(example.matchedRuleIds)}`), "none")}</span></div>
           <div class="item"><strong>Policy audit</strong><span>${html(data.policy.auditEntries.map((entry) => `${text(entry.action)}:${text(entry.decision)}`), "none")}</span></div>
+        </div>
+        <h2>Auth/RBAC</h2>
+        <div class="list">
+          <div class="item"><strong>Auth mode</strong><span>${html(data.auth.config.authMode)} / provider ${html(data.auth.config.providerKind)} / production auth ${data.auth.config.productionAuthEnabled === true ? "enabled" : "disabled"} / mock actor ${data.auth.config.mockActorEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Current actor</strong><span>${html((data.auth.currentActor.actor as DashboardJsonObject | undefined)?.displayName)} / roles ${html(data.auth.currentActor.roles)} / teams ${html(data.auth.currentActor.teams)}</span></div>
+          <div class="item"><strong>Role catalog</strong><span>${data.auth.roles.length} roles / ${data.auth.permissions.length} permissions / ${data.auth.roleBindings.length} binding(s)</span></div>
+          <div class="item"><strong>Service accounts</strong><span>${html(data.auth.serviceAccounts.map((account) => `${text(account.name)}:${text(account.status)}`), "none")}</span></div>
+          <div class="item"><strong>Authorization examples</strong><span>${html(data.auth.authorizationExamples.map((example) => `${text(example.action)}:${text(example.allowed)}:${text(example.reason)}`), "none")}</span></div>
+          <div class="item"><strong>Auth audit</strong><span>${html(data.auth.auditEvents.map((event) => `${text(event.eventType)}:${text(event.result)}`), "none")}</span></div>
+          <div class="item"><strong>Auth warning</strong><span>${html(data.auth.warning)}</span></div>
         </div>
         <h2>Secrets and Sandbox</h2>
         <div class="list">

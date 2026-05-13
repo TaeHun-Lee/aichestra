@@ -1,4 +1,9 @@
 import { createId } from "@aichestra/core";
+import type {
+  AuthContext,
+  AuthorizationDecision,
+  AuthorizationServiceInterface
+} from "@aichestra/auth";
 import {
   PolicyService,
   createPolicyContext,
@@ -39,6 +44,7 @@ import type {
 export type SecurityControlServiceInput = {
   repositories?: SecurityRepositories;
   policyService?: PolicyService;
+  authorizationService?: AuthorizationServiceInterface;
   envSecretProvider?: EnvSecretProvider;
   env?: Record<string, string | undefined>;
 };
@@ -46,11 +52,13 @@ export type SecurityControlServiceInput = {
 export class SecurityControlService implements SecretManager {
   private readonly repositories: SecurityRepositories;
   private readonly policyService: PolicyService;
+  private readonly authorizationService?: AuthorizationServiceInterface;
   private readonly envSecretProvider: EnvSecretProvider;
 
   constructor(input: SecurityControlServiceInput = {}) {
     this.repositories = input.repositories ?? createInMemorySecurityRepositories();
     this.policyService = input.policyService ?? new PolicyService();
+    this.authorizationService = input.authorizationService;
     this.envSecretProvider = input.envSecretProvider ?? createEnvSecretProviderFromEnv(input.env);
   }
 
@@ -70,6 +78,7 @@ export class SecurityControlService implements SecretManager {
       allowedSecretEnvKeyCount: envSecretProvider.allowedEnvKeyCount,
       activeSecretRefCount: activeSecretRefs.length,
       githubCredentialConfigured: this.credentialConfiguredFor("github_token"),
+      githubWebhookSecretConfigured: this.credentialConfiguredFor("github_webhook_secret") || this.credentialConfiguredFor("webhook_secret"),
       llmCredentialConfigured: this.credentialConfiguredFor("llm_api_key"),
       sandboxSupportStatus: "model_only",
       defaultSandboxProfile: defaultSandbox?.id ?? "none",
@@ -633,6 +642,9 @@ export class SecurityControlService implements SecretManager {
     const createdAt = new Date();
     const resolutionId = createId("credres");
     const providerKind = providerKindForCredentialRequest(request);
+    const authContext = this.resolveCredentialAuthContext(request);
+    const actorId = authContext?.actor.id ?? request.actorId;
+    const principalId = authContext?.principal.id ?? request.principalId;
     const secretRef = this.repositories.secretRefs.getSecretRef(request.secretRefId);
     this.recordAudit({
       targetKind: "secret",
@@ -641,12 +653,14 @@ export class SecurityControlService implements SecretManager {
       result: "allowed",
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
+      principalId,
       metadata: {
         resolutionId,
         purpose: request.purpose,
         providerId: request.providerId,
         providerKind,
+        authMode: authContext?.authMode,
         secretRefExists: Boolean(secretRef)
       }
     });
@@ -658,7 +672,7 @@ export class SecurityControlService implements SecretManager {
         status: "missing",
         blockedReason: "secret_ref_missing",
         createdAt
-      }, "credential_resolution_missing");
+      }, "credential_resolution_missing", undefined, authContext);
     }
 
     if (secretRef.status === "disabled") {
@@ -668,7 +682,7 @@ export class SecurityControlService implements SecretManager {
         status: "denied",
         blockedReason: "secret_ref_disabled",
         createdAt
-      }, "credential_resolution_denied", secretRef);
+      }, "credential_resolution_denied", secretRef, authContext);
     }
 
     if (secretRef.status === "revoked") {
@@ -678,7 +692,7 @@ export class SecurityControlService implements SecretManager {
         status: "denied",
         blockedReason: "secret_ref_revoked",
         createdAt
-      }, "credential_resolution_revoked", secretRef);
+      }, "credential_resolution_revoked", secretRef, authContext);
     }
 
     const validation = this.validateSecretRef(secretRef);
@@ -689,17 +703,63 @@ export class SecurityControlService implements SecretManager {
         status: "denied",
         blockedReason: validation.errors[0] ?? "secret_ref_invalid",
         createdAt
-      }, "credential_resolution_denied", secretRef);
+      }, "credential_resolution_denied", secretRef, authContext);
     }
 
     const environment = this.credentialPolicyEnvironment(request, secretRef);
+    const authorizationDecision = this.evaluateCredentialAuthorization(request, authContext, secretRef, providerKind, environment);
+    if (authorizationDecision && !authorizationDecision.allowed) {
+      return this.finishCredentialResolution(request, {
+        id: resolutionId,
+        allowed: false,
+        status: "denied",
+        blockedReason: `authorization_denied:${authorizationDecision.reason}`,
+        policyDecisionId: authorizationDecision.policyDecision?.id,
+        authorizationDecisionId: authorizationDecision.auditEvent?.id,
+        createdAt
+      }, authorizationDecision.reason.startsWith("policy_denied:") ? "credential_resolution_policy_denied" : "credential_resolution_authorization_denied", secretRef, authContext);
+    }
+
+    const purposePolicyAction = credentialPolicyActionForPurpose(request);
+    const purposePolicy = purposePolicyAction
+      ? this.evaluatePolicy({
+        action: purposePolicyAction,
+        resourceKind: "provider_credential",
+        resourceId: secretRef.id,
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId,
+        authContext,
+        environment,
+        metadata: {
+          purpose: request.purpose,
+          providerId: request.providerId,
+          providerKind,
+          credentialSource: "secret_ref",
+          secretKind: secretRef.secretKind
+        }
+      })
+      : undefined;
+    if (purposePolicy && !purposePolicy.allowed) {
+      return this.finishCredentialResolution(request, {
+        id: resolutionId,
+        allowed: false,
+        status: "denied",
+        blockedReason: purposePolicy.reason,
+        policyDecisionId: purposePolicy.id,
+        authorizationDecisionId: authorizationDecision?.auditEvent?.id,
+        createdAt
+      }, "credential_resolution_policy_denied", secretRef, authContext);
+    }
+
     const credentialPolicy = this.evaluatePolicy({
       action: "provider.credential.resolve",
       resourceKind: "provider_credential",
       resourceId: secretRef.id,
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
+      authContext,
       environment,
       metadata: {
         purpose: request.purpose,
@@ -716,8 +776,9 @@ export class SecurityControlService implements SecretManager {
         status: "denied",
         blockedReason: credentialPolicy.reason,
         policyDecisionId: credentialPolicy.id,
+        authorizationDecisionId: authorizationDecision?.auditEvent?.id,
         createdAt
-      }, "credential_resolution_denied", secretRef);
+      }, "credential_resolution_policy_denied", secretRef, authContext);
     }
 
     const leaseRequestPolicy = this.evaluatePolicy({
@@ -726,7 +787,8 @@ export class SecurityControlService implements SecretManager {
       resourceId: secretRef.id,
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
+      authContext,
       environment,
       metadata: {
         purpose: request.purpose,
@@ -742,8 +804,9 @@ export class SecurityControlService implements SecretManager {
         status: "denied",
         blockedReason: leaseRequestPolicy.reason,
         policyDecisionId: leaseRequestPolicy.id,
+        authorizationDecisionId: authorizationDecision?.auditEvent?.id,
         createdAt
-      }, "credential_resolution_denied", secretRef);
+      }, "credential_resolution_policy_denied", secretRef, authContext);
     }
 
     const leaseIssuePolicy = this.evaluatePolicy({
@@ -752,7 +815,8 @@ export class SecurityControlService implements SecretManager {
       resourceId: secretRef.id,
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
+      authContext,
       environment,
       metadata: {
         purpose: request.purpose,
@@ -768,8 +832,9 @@ export class SecurityControlService implements SecretManager {
         status: "denied",
         blockedReason: leaseIssuePolicy.reason,
         policyDecisionId: leaseIssuePolicy.id,
+        authorizationDecisionId: authorizationDecision?.auditEvent?.id,
         createdAt
-      }, "credential_resolution_denied", secretRef);
+      }, "credential_resolution_policy_denied", secretRef, authContext);
     }
 
     const envResult = this.envSecretProvider.resolve(secretRef);
@@ -787,8 +852,9 @@ export class SecurityControlService implements SecretManager {
         status: envResult.status,
         blockedReason: envResult.reason ?? "credential_resolution_failed",
         policyDecisionId: leaseIssuePolicy.id,
+        authorizationDecisionId: authorizationDecision?.auditEvent?.id,
         createdAt
-      }, eventType, secretRef);
+      }, eventType, secretRef, authContext);
     }
 
     const scope = this.repositories.secretScopes.getSecretScope(secretRef.scope);
@@ -799,7 +865,7 @@ export class SecurityControlService implements SecretManager {
       scopeId: secretRef.scope,
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
       status: "issued",
       issuedAt: createdAt,
       expiresAt: new Date(createdAt.getTime() + ttlSeconds * 1000),
@@ -813,7 +879,7 @@ export class SecurityControlService implements SecretManager {
       scopeId: secretRef.scope,
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
       policyDecisionId: credentialPolicy.id
     });
 
@@ -840,7 +906,8 @@ export class SecurityControlService implements SecretManager {
       result: "allowed",
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
+      principalId,
       metadata: {
         resolutionId,
         handleId: handle.id,
@@ -849,7 +916,10 @@ export class SecurityControlService implements SecretManager {
         providerId: request.providerId,
         providerKind,
         secretKind: secretRef.secretKind,
+        authMode: authContext?.authMode,
+        authorizationDecisionId: authorizationDecision?.auditEvent?.id,
         policyDecisionId: credentialPolicy.id,
+        purposePolicyDecisionId: purposePolicy?.id,
         leasePolicyDecisionId: leaseIssuePolicy.id
       }
     });
@@ -860,7 +930,8 @@ export class SecurityControlService implements SecretManager {
       result: "redacted",
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
+      principalId,
       metadata: {
         resolutionId,
         handleId: handle.id,
@@ -873,6 +944,7 @@ export class SecurityControlService implements SecretManager {
       status: "resolved",
       credentialHandle: handle,
       policyDecisionId: credentialPolicy.id,
+      authorizationDecisionId: authorizationDecision?.auditEvent?.id,
       auditEventId: audit.id,
       createdAt,
       value: includeValue ? envResult.value : undefined
@@ -883,8 +955,11 @@ export class SecurityControlService implements SecretManager {
     request: CredentialResolutionRequest,
     result: InternalCredentialResolutionResult,
     eventType: SecurityAuditEvent["eventType"],
-    secretRef?: SecretRef
+    secretRef?: SecretRef,
+    authContext?: AuthContext
   ): InternalCredentialResolutionResult {
+    const actorId = authContext?.actor.id ?? request.actorId;
+    const principalId = authContext?.principal.id ?? request.principalId;
     const audit = this.recordAudit({
       targetKind: "secret",
       targetId: secretRef?.id ?? request.secretRefId,
@@ -893,14 +968,17 @@ export class SecurityControlService implements SecretManager {
       reason: result.blockedReason,
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId,
+      actorId,
+      principalId,
       metadata: {
         resolutionId: result.id,
         purpose: request.purpose,
         providerId: request.providerId,
         providerKind: providerKindForCredentialRequest(request),
         secretKind: secretRef?.secretKind,
+        authMode: authContext?.authMode,
         policyDecisionId: result.policyDecisionId,
+        authorizationDecisionId: result.authorizationDecisionId,
         envKeyConfigured: Boolean(secretRef?.envKey)
       }
     });
@@ -925,16 +1003,19 @@ export class SecurityControlService implements SecretManager {
     taskId?: string;
     taskRunId?: string;
     actorId?: string;
+    authContext?: AuthContext;
     runnerKind?: string;
     environment?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
   }): PolicyDecision {
     return this.policyService.evaluate({
-      subject: createPolicySubject({
-        actorId: input.actorId ?? "mock-security-actor",
-        actorKind: "service",
-        roles: ["system"]
-      }),
+      subject: input.authContext && this.authorizationService
+        ? this.authorizationService.toPolicySubject(input.authContext)
+        : createPolicySubject({
+          actorId: input.actorId ?? "mock-security-actor",
+          actorKind: "service",
+          roles: ["system"]
+        }),
       action: input.action,
       resource: createPolicyResource({
         resourceKind: input.resourceKind,
@@ -950,6 +1031,57 @@ export class SecurityControlService implements SecretManager {
           source: "security_control_service"
         }
       })
+    });
+  }
+
+  private resolveCredentialAuthContext(request: CredentialResolutionRequest): AuthContext | undefined {
+    if (!this.authorizationService) return request.authContext;
+    if (request.authContext) return request.authContext;
+    return this.authorizationService.getAuthContext({
+      actorId: request.actorId ?? "mock-admin",
+      source: request.actorId ? "api" : "system",
+      metadata: {
+        credentialResolution: true,
+        purpose: request.purpose,
+        providerId: request.providerId,
+        principalId: request.principalId
+      }
+    });
+  }
+
+  private evaluateCredentialAuthorization(
+    request: CredentialResolutionRequest,
+    authContext: AuthContext | undefined,
+    secretRef: SecretRef,
+    providerKind: string,
+    environment: Record<string, unknown>
+  ): AuthorizationDecision | undefined {
+    if (!this.authorizationService || !authContext) return undefined;
+    return this.authorizationService.check({
+      authContext,
+      action: "provider.credential.resolve",
+      resource: {
+        resourceKind: "provider_credential",
+        resourceId: secretRef.id,
+        metadata: {
+          purpose: request.purpose,
+          providerId: request.providerId,
+          providerKind,
+          secretKind: secretRef.secretKind,
+          envKeyConfigured: Boolean(secretRef.envKey)
+        }
+      },
+      policyContext: {
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        providerKind,
+        environment,
+        metadata: {
+          source: "security_control_service",
+          credentialResolution: true,
+          purpose: request.purpose
+        }
+      }
     });
   }
 
@@ -1050,6 +1182,7 @@ function isSecretProviderKind(value: unknown): value is SecretRef["provider"] {
 function isSecretKind(value: unknown): value is SecretRef["secretKind"] {
   return value === "mock_metadata" ||
     value === "github_token" ||
+    value === "github_webhook_secret" ||
     value === "llm_api_key" ||
     value === "provider_api_key" ||
     value === "webhook_secret" ||
@@ -1069,14 +1202,24 @@ function providerKindForCredentialRequest(request: CredentialResolutionRequest):
   const explicit = typeof request.policyContext?.providerKind === "string" ? request.policyContext.providerKind : undefined;
   if (explicit) return explicit;
   if (request.purpose === "github_api_call") return "github";
+  if (request.purpose === "github_webhook_verification" || request.purpose === "webhook_verification_future") return "github";
   if (request.purpose === "llm_api_call") return "openai_compatible";
   return request.providerId ?? "provider";
+}
+
+function credentialPolicyActionForPurpose(request: CredentialResolutionRequest): PolicyAction | undefined {
+  if (request.purpose === "github_api_call" || request.purpose === "github_webhook_verification" || request.purpose === "webhook_verification_future") {
+    return "git.credential.resolve";
+  }
+  if (request.purpose === "llm_api_call") return "llm.credential.resolve";
+  return undefined;
 }
 
 function looksLikeRawSecret(value: string): boolean {
   return /\bsk-[A-Za-z0-9_-]{8,}\b/.test(value) ||
     /\bghp_[A-Za-z0-9_]{8,}\b/.test(value) ||
     /\bgithub_pat_[A-Za-z0-9_]{8,}\b/.test(value) ||
+    /\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*[^\s]+/i.test(value) ||
     /Bearer\s+[A-Za-z0-9._~+/=-]+/i.test(value);
 }
 

@@ -16,6 +16,13 @@ import type { LLMProviderRuntimeConfig, VirtualModelKey } from "@aichestra/llm-g
 function remoteConfig(input: Partial<LLMProviderRuntimeConfig> = {}): LLMProviderRuntimeConfig {
   return {
     providerKind: "openai_compatible",
+    routingMode: "single_provider",
+    fallbackEnabled: false,
+    maxFallbackAttempts: 0,
+    allowedProviderKinds: [],
+    allowedProviderIds: [],
+    deniedProviderIds: [],
+    deniedModels: [],
     remoteLlmEnabled: true,
     remoteCompletionEnabled: true,
     openAICompatibleConfigured: true,
@@ -33,7 +40,7 @@ function remoteConfig(input: Partial<LLMProviderRuntimeConfig> = {}): LLMProvide
     allowedSecretEnvKeyCount: 0,
     integrationTestsEnabled: false,
     ...input
-  };
+  } as LLMProviderRuntimeConfig;
 }
 
 function remoteVirtualKey(): VirtualModelKey {

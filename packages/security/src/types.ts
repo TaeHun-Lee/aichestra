@@ -1,3 +1,4 @@
+import type { AuthContext } from "@aichestra/auth";
 import type { PolicyDecision } from "@aichestra/policy";
 
 export type SecretProviderKind =
@@ -14,6 +15,7 @@ export type SecretRefStatus = "active" | "disabled" | "revoked";
 export type SecretKind =
   | "mock_metadata"
   | "github_token"
+  | "github_webhook_secret"
   | "llm_api_key"
   | "provider_api_key"
   | "webhook_secret"
@@ -113,6 +115,8 @@ export type SecretAuditEventType =
   | "secret_lease_revoked"
   | "secret_access_blocked"
   | "credential_resolution_requested"
+  | "credential_resolution_authorization_denied"
+  | "credential_resolution_policy_denied"
   | "credential_resolution_allowed"
   | "credential_resolution_denied"
   | "credential_resolution_missing"
@@ -124,6 +128,7 @@ export type SecretAuditEventType =
 
 export type CredentialPurpose =
   | "github_api_call"
+  | "github_webhook_verification"
   | "llm_api_call"
   | "provider_api_call"
   | "webhook_verification_future";
@@ -146,6 +151,8 @@ export type CredentialResolutionRequest = {
   secretRefId: string;
   purpose: CredentialPurpose;
   actorId?: string;
+  principalId?: string;
+  authContext?: AuthContext;
   taskId?: string;
   taskRunId?: string;
   providerId?: string;
@@ -159,6 +166,7 @@ export type CredentialResolutionResult = {
   credentialHandle?: CredentialHandle;
   blockedReason?: string;
   policyDecisionId?: string;
+  authorizationDecisionId?: string;
   auditEventId?: string;
   createdAt: Date;
 };
@@ -308,6 +316,7 @@ export type SecurityAuditEvent = {
   id: string;
   eventType: SecurityAuditEventType;
   actorId?: string;
+  principalId?: string;
   taskId?: string;
   taskRunId?: string;
   targetId?: string;

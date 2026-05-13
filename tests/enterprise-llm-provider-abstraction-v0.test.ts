@@ -192,7 +192,7 @@ test("provider output parsers normalize raw/json/jsonl/ndjson and redact sensiti
   const malformed = parseProviderOutput({ mode: "json", stdout: "{bad", exitCode: 0 });
   const jsonl = parseProviderOutput({ mode: "jsonl", stdout: "{\"type\":\"token\"}\n{\"type\":\"final\"}", stderr: "progress only", exitCode: 0 });
   const failedExit = parseProviderOutput({ mode: "ndjson", stdout: "{\"type\":\"final\"}", exitCode: 2 });
-  const redacted = redactSecretText("OPENAI_API_KEY=sk-secret ~/.codex/auth.json ~/.claude/key application_default_credentials.json");
+  const redacted = redactSecretText("OPENAI_API_KEY=sk-secret AICHESTRA_GITHUB_WEBHOOK_SECRET=webhook-secret-value ~/.codex/auth.json ~/.claude/key application_default_credentials.json");
 
   assert.equal(raw.ok, true);
   assert.equal(raw.redactionApplied, true);
@@ -204,6 +204,7 @@ test("provider output parsers normalize raw/json/jsonl/ndjson and redact sensiti
   assert.equal(jsonl.normalizedEvents.length, 3);
   assert.equal(failedExit.ok, false);
   assert.equal(redacted.includes("sk-secret"), false);
+  assert.equal(redacted.includes("webhook-secret-value"), false);
   assert.equal(redacted.includes("auth.json"), false);
   assert.equal(redacted.includes(".claude"), false);
   assert.equal(redacted.includes("application_default_credentials"), false);

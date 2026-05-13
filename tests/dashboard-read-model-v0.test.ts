@@ -90,6 +90,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const llm = await getJson(port, "/dashboard/llm") as { llm: { models: unknown[]; blockedExamples: unknown[] } };
     const agents = await getJson(port, "/dashboard/agents") as { agents: { config: { localCommandExecutionEnabled: boolean }; blockedExamples: unknown[] } };
     const policy = await getJson(port, "/dashboard/policy") as { policy: { rules: unknown[]; blockedExamples: unknown[] } };
+    const auth = await getJson(port, "/dashboard/auth") as { auth: { config: { authMode: string; productionAuthEnabled: boolean }; warning: string; actors: unknown[] } };
     const providers = await getJson(port, "/dashboard/providers") as { providers: { catalog: unknown[]; blockedExamples: unknown[] } };
     const security = await getJson(port, "/dashboard/security") as { security: { secretRefs: unknown[]; blockedExamples: unknown[] } };
     const localAgents = await getJson(port, "/dashboard/local-agents") as { localAgents: { config: { realTransportEnabled: boolean; vendorCliExecutionEnabled: boolean }; blockedExamples: unknown[] } };
@@ -108,6 +109,10 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(agents.agents.blockedExamples.length > 0, true);
     assert.equal(policy.policy.rules.length > 0, true);
     assert.equal(policy.policy.blockedExamples.length > 0, true);
+    assert.equal(auth.auth.config.authMode, "mock");
+    assert.equal(auth.auth.config.productionAuthEnabled, false);
+    assert.equal(auth.auth.actors.length > 0, true);
+    assert.equal(auth.auth.warning.includes("not production authentication"), true);
     assert.equal(providers.providers.catalog.length > 0, true);
     assert.equal(providers.providers.blockedExamples.length > 0, true);
     assert.equal(security.security.secretRefs.length > 0, true);
@@ -117,7 +122,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(localAgents.localAgents.blockedExamples.length > 0, true);
     assert.equal(audit.audit.auditGroups.length > 0, true);
     assert.equal(audit.audit.summary.noSecretsExposed, true);
-    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, llm, agents, policy, providers, security, localAgents, audit }), false);
+    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, llm, agents, policy, auth, providers, security, localAgents, audit }), false);
   });
 });
 
@@ -150,6 +155,7 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
     ["/dashboard/llm", { llm: demo.llm }],
     ["/dashboard/agents", { agents: demo.agents }],
     ["/dashboard/policy", { policy: demo.policy }],
+    ["/dashboard/auth", { auth: demo.auth }],
     ["/dashboard/providers", { providers: demo.providers }],
     ["/dashboard/security", { security: demo.security }],
     ["/dashboard/local-agents", { localAgents: demo.localAgents }],
@@ -195,6 +201,7 @@ test("dashboard renderer consumes read models and preserves static demo fallback
   assert.equal(html.includes("demo"), true);
   assert.equal(html.includes("Git Adapter"), true);
   assert.equal(html.includes("LLM Gateway"), true);
+  assert.equal(html.includes("Auth/RBAC"), true);
   assert.equal(html.includes("Local Agent Protocol"), true);
   assert.equal(html.includes("credential cache paths redacted"), true);
   assert.equal(html.includes("sk-dashboard-secret"), false);

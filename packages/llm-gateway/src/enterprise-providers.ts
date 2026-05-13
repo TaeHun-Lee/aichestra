@@ -1153,6 +1153,8 @@ export function redactSecretText(text: string): string {
     .replace(/\b(AIza[0-9A-Za-z_-]{8,})\b/g, "[redacted-api-key]")
     .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|AICHESTRA_GITHUB|LLM|GITHUB|GOOGLE_APPLICATION)_API_KEY)\s*=\s*[^\s]+/gi, "$1=[redacted]")
     .replace(/\b(AICHESTRA_GITHUB_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+    .replace(/\b(AICHESTRA_GITHUB_WEBHOOK_SECRET)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+    .replace(/\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD))\s*=\s*[^\s]+/gi, "$1=[redacted]")
     .replace(/GOOGLE_APPLICATION_CREDENTIALS\s*=\s*[^\s]+/gi, "GOOGLE_APPLICATION_CREDENTIALS=[redacted]")
     .replace(/~\/\.codex\/auth\.json/gi, "[redacted-credential-cache]")
     .replace(/~\/\.claude[^\s]*/gi, "[redacted-credential-cache]")

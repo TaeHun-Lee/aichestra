@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { createApiServer } from "@aichestra/api";
+import { AuthorizationService, InMemoryAuthRepository, MockAuthProvider } from "@aichestra/auth";
 import { createSeededStore } from "@aichestra/db";
-import { createGitProviderFromEnv } from "@aichestra/git-adapter";
+import { createGitHubWebhookRuntimeFromEnv, createGitProviderFromEnv } from "@aichestra/git-adapter";
 import {
   InMemoryVirtualModelKeyRepository,
   LLMGatewayService,
@@ -13,6 +14,7 @@ import {
   type VirtualModelKey
 } from "@aichestra/llm-gateway";
 import { ProviderCatalogService, StaticCredentialManager, validateProviderCatalogEntry } from "@aichestra/llm-gateway";
+import { PolicyService } from "@aichestra/policy";
 import { EnvSecretProvider, SecurityControlService, credentialResolutionResultToDto, secretRefToDto } from "@aichestra/security";
 import type { CredentialResolutionRequest, InternalCredentialResolutionResult, SecretKind, SecretRef } from "@aichestra/security";
 
@@ -39,6 +41,15 @@ function createEnvSecretRef(service: SecurityControlService, input: { id: string
   });
 }
 
+function createAuthorizationService(policyService = new PolicyService()): AuthorizationService {
+  const repository = new InMemoryAuthRepository();
+  return new AuthorizationService({
+    repository,
+    provider: new MockAuthProvider({ repository }),
+    policyService
+  });
+}
+
 function resolveForGit(security: SecurityControlService) {
   return (request: { secretRefId: string; purpose: "github_api_call"; providerId: string; policyContext: Record<string, unknown> }) => {
     const resolved = security.resolveCredentialForInternalUse(request);
@@ -56,8 +67,10 @@ function noSecretValue(value: unknown): boolean {
   const text = JSON.stringify(value);
   return !text.includes("ghp_secretrefprovidercredential") &&
     !text.includes("sk-secretref-provider-credential") &&
+    !text.includes("webhook-secret-value") &&
     !text.includes("AICHESTRA_GITHUB_TOKEN=ghp_") &&
-    !text.includes("AICHESTRA_LLM_API_KEY=sk-");
+    !text.includes("AICHESTRA_LLM_API_KEY=sk-") &&
+    !text.includes("AICHESTRA_GITHUB_WEBHOOK_SECRET=webhook-secret");
 }
 
 function remoteVirtualKey(): VirtualModelKey {
@@ -107,15 +120,15 @@ async function getJson(port: number, path: string) {
   return requestJson(port, "GET", path);
 }
 
-async function postJson(port: number, path: string, body: unknown) {
-  return requestJson(port, "POST", path, body);
+async function postJson(port: number, path: string, body: unknown, headers: Record<string, string> = {}) {
+  return requestJson(port, "POST", path, body, headers);
 }
 
 async function patchJson(port: number, path: string, body: unknown) {
   return requestJson(port, "PATCH", path, body);
 }
 
-async function requestJson(port: number, method: string, path: string, body?: unknown): Promise<{ statusCode: number; body: unknown }> {
+async function requestJson(port: number, method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ statusCode: number; body: unknown }> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve, reject) => {
     const request = http.request({
@@ -123,7 +136,7 @@ async function requestJson(port: number, method: string, path: string, body?: un
       port,
       path,
       method,
-      headers: payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload) } : undefined
+      headers: payload ? { "content-type": "application/json", "content-length": Buffer.byteLength(payload), ...headers } : headers
     }, (response) => {
       let text = "";
       response.setEncoding("utf8");
@@ -239,6 +252,50 @@ test("CredentialManager resolves env-backed SecretRefs internally without exposi
   assert.equal(security.listSecretAccessDecisions().some((decision) => decision.allowed), true);
 });
 
+test("CredentialManager checks Auth/RBAC and policy before reading env-backed credential values", () => {
+  const guardedEnv: Record<string, string | undefined> = {
+    AICHESTRA_ENABLE_ENV_SECRET_PROVIDER: "true",
+    AICHESTRA_ALLOWED_SECRET_ENV_KEYS: "AICHESTRA_LLM_API_KEY"
+  };
+  Object.defineProperty(guardedEnv, "AICHESTRA_LLM_API_KEY", {
+    get() {
+      throw new Error("env_secret_was_read_before_auth_allow");
+    }
+  });
+  const policyService = new PolicyService();
+  const authorizationService = createAuthorizationService(policyService);
+  const security = new SecurityControlService({ env: guardedEnv, policyService, authorizationService });
+  createEnvSecretRef(security, {
+    id: "secretref_auth_guarded_llm_v1",
+    secretKind: "llm_api_key",
+    envKey: "AICHESTRA_LLM_API_KEY"
+  });
+  const viewer = authorizationService.getAuthContext({ actorId: "user_demo_viewer", source: "test" });
+
+  const denied = security.resolveCredential({
+    secretRefId: "secretref_auth_guarded_llm_v1",
+    purpose: "llm_api_call",
+    actorId: viewer.actor.id,
+    principalId: viewer.principal.id,
+    authContext: viewer,
+    providerId: "openai_compatible",
+    policyContext: {
+      providerKind: "openai_compatible",
+      remoteLlmEnabled: true,
+      remoteCompletionEnabled: true,
+      credentialsConfigured: true
+    }
+  });
+
+  assert.equal(denied.allowed, false);
+  assert.equal(denied.status, "denied");
+  assert.match(denied.blockedReason ?? "", /authorization_denied/);
+  assert.equal(Boolean(denied.authorizationDecisionId), true);
+  assert.equal(security.listAuditEvents({ eventType: "credential_resolution_authorization_denied" }).length, 1);
+  assert.equal(authorizationService.listAuditEvents({ eventType: "authorization_denied" }).some((event) => event.action === "provider.credential.resolve"), true);
+  assert.equal(noSecretValue({ denied, securityAudit: security.listAuditEvents(), authAudit: authorizationService.listAuditEvents() }), true);
+});
+
 test("CredentialManager blocks disabled, revoked, missing, non-allowlisted, and policy-denied credential refs", () => {
   const security = new SecurityControlService({ env: envWithSecrets({ AICHESTRA_ALLOWED_SECRET_ENV_KEYS: "AICHESTRA_GITHUB_TOKEN" }) });
   createEnvSecretRef(security, { id: "secretref_disabled_v1", secretKind: "github_token", envKey: "AICHESTRA_GITHUB_TOKEN", status: "disabled" });
@@ -311,6 +368,71 @@ test("Real Git Adapter v1 can resolve GitHub credentials through SecretRef witho
   const revoked = createGitProviderFromEnv(env, { credentialResolver: resolveForGit(security) });
   assert.equal(revoked.config.githubCredentialStatus, "denied");
   assert.equal(revoked.config.githubCredentialReason, "secret_ref_revoked");
+});
+
+test("Real Git Adapter v2 can resolve GitHub webhook secrets through SecretRef without exposing value", () => {
+  const env = envWithSecrets({
+    AICHESTRA_ALLOWED_SECRET_ENV_KEYS: "AICHESTRA_GITHUB_WEBHOOK_SECRET",
+    AICHESTRA_GITHUB_WEBHOOK_SECRET: "webhook-secret-value",
+    AICHESTRA_ENABLE_GITHUB_WEBHOOKS: "true",
+    AICHESTRA_GITHUB_WEBHOOK_SECRET_REF: "secretref_github_webhook_v1",
+    AICHESTRA_GITHUB_WEBHOOK_ALLOWED_REPOS: "aichestra/demo-backend"
+  });
+  const security = new SecurityControlService({ env });
+  createEnvSecretRef(security, {
+    id: "secretref_github_webhook_v1",
+    secretKind: "github_webhook_secret",
+    envKey: "AICHESTRA_GITHUB_WEBHOOK_SECRET"
+  });
+
+  const runtime = createGitHubWebhookRuntimeFromEnv(env, {
+    secretResolver: (request) => {
+      const resolved = security.resolveCredentialForInternalUse(request);
+      return {
+        ok: resolved.allowed,
+        status: resolved.status,
+        value: resolved.value,
+        reason: resolved.blockedReason,
+        credentialHandleId: resolved.credentialHandle?.id
+      };
+    }
+  });
+  assert.equal(runtime.config.webhookSecretSource, "secret_ref");
+  assert.equal(runtime.config.webhookSecretStatus, "resolved");
+  assert.equal(runtime.verifier.getVerifierKind(), "hmac-sha256");
+  assert.equal(noSecretValue(runtime.config), true);
+  assert.equal(noSecretValue(security.listAuditEvents()), true);
+
+  const missing = createGitHubWebhookRuntimeFromEnv({ ...env, AICHESTRA_GITHUB_WEBHOOK_SECRET_REF: "secretref_missing_webhook_v1" }, {
+    secretResolver: (request) => {
+      const resolved = security.resolveCredentialForInternalUse(request);
+      return {
+        ok: resolved.allowed,
+        status: resolved.status,
+        value: resolved.value,
+        reason: resolved.blockedReason,
+        credentialHandleId: resolved.credentialHandle?.id
+      };
+    }
+  });
+  assert.equal(missing.config.webhookSecretStatus, "missing");
+  assert.equal(missing.config.webhookSecretReason, "secret_ref_missing");
+
+  security.updateSecretRefStatus("secretref_github_webhook_v1", "revoked");
+  const revoked = createGitHubWebhookRuntimeFromEnv(env, {
+    secretResolver: (request) => {
+      const resolved = security.resolveCredentialForInternalUse(request);
+      return {
+        ok: resolved.allowed,
+        status: resolved.status,
+        value: resolved.value,
+        reason: resolved.blockedReason,
+        credentialHandleId: resolved.credentialHandle?.id
+      };
+    }
+  });
+  assert.equal(revoked.config.webhookSecretStatus, "denied");
+  assert.equal(revoked.config.webhookSecretReason, "secret_ref_revoked");
 });
 
 test("LLM Gateway v1 resolves OpenAI-compatible API key through SecretRef and keeps usage/audit redacted", async () => {
@@ -453,6 +575,21 @@ test("Security credential API, health, and dashboard expose status only and neve
     });
     assert.equal(check.statusCode, 200);
     assert.equal(noSecretValue(check.body), true);
+    const viewerDenied = await postJson(port, "/security/credentials/resolve/check", {
+      secretRefId: "secretref_api_llm_v1",
+      purpose: "llm_api_call",
+      providerId: "openai_compatible",
+      policyContext: {
+        providerKind: "openai_compatible",
+        remoteLlmEnabled: true,
+        remoteCompletionEnabled: true,
+        credentialsConfigured: true
+      }
+    }, { "x-aichestra-actor-id": "user_demo_viewer" });
+    assert.equal(viewerDenied.statusCode, 200);
+    assert.equal((viewerDenied.body as { result: { allowed: boolean } }).result.allowed, false);
+    assert.match((viewerDenied.body as { result: { blockedReason: string } }).result.blockedReason, /authorization_denied/);
+    assert.equal(noSecretValue(viewerDenied.body), true);
 
     const status = await patchJson(port, "/security/credentials/refs/secretref_api_llm_v1/status", { status: "disabled" });
     assert.equal(status.statusCode, 200);

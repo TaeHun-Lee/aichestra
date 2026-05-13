@@ -1,10 +1,24 @@
-export type PolicyActorKind = "user" | "team" | "system" | "service";
+export type PolicyActorKind =
+  | "user"
+  | "team"
+  | "system"
+  | "service"
+  | "human_user"
+  | "service_account"
+  | "local_agent"
+  | "external_integration"
+  | "anonymous_mock";
 
 export type PolicySubject = {
   actorId: string;
+  principalId?: string;
   actorKind: PolicyActorKind;
   roles: string[];
   teams?: string[];
+  authMode?: string;
+  serviceAccountId?: string;
+  isMockActor?: boolean;
+  metadata?: Record<string, unknown>;
 };
 
 export type PolicyResourceKind =
@@ -16,6 +30,8 @@ export type PolicyResourceKind =
   | "git_operation"
   | "llm_model"
   | "llm_provider"
+  | "llm_route"
+  | "llm_fallback_policy"
   | "virtual_model_key"
   | "runner"
   | "command"
@@ -36,8 +52,11 @@ export type PolicyResourceKind =
   | "sandbox_session"
   | "network_egress_policy"
   | "redaction_policy"
+  | "mcp_server"
   | "mcp_tool"
-  | "secret_scope";
+  | "secret_scope"
+  | "dashboard"
+  | "auth";
 
 export type PolicyResource = {
   resourceKind: PolicyResourceKind;
@@ -50,6 +69,13 @@ export type PolicyAction =
   | "task.run"
   | "git.branch.create"
   | "git.pull_request.create"
+  | "git.webhook.receive"
+  | "git.webhook.verify"
+  | "git.webhook.process"
+  | "git.pull_request.sync"
+  | "git.branch.sync"
+  | "git.changed_files.read"
+  | "git.credential.resolve"
   | "git.remote_operation"
   | "git.merge"
   | "git.rebase"
@@ -57,6 +83,9 @@ export type PolicyAction =
   | "llm.completion"
   | "llm.remote_completion"
   | "llm.model.use"
+  | "llm.credential.resolve"
+  | "llm.route.select"
+  | "llm.fallback"
   | "runner.execute"
   | "runner.command.execute"
   | "runner.local_execution"
@@ -99,12 +128,26 @@ export type PolicyAction =
   | "secret.lease.request"
   | "secret.lease.issue"
   | "secret.lease.revoke"
+  | "dashboard.read"
+  | "auth.read"
+  | "auth.authorize.check"
+  | "auth.admin"
   | "sandbox.profile.use"
   | "sandbox.session.create"
   | "network.egress"
   | "runner.secret.inject"
   | "local_agent.secret.forward"
   | "audit.secret.view"
+  | "mcp.server.list"
+  | "mcp.tool.list"
+  | "mcp.tool.invoke"
+  | "mcp.tool.invoke.low_risk"
+  | "mcp.tool.invoke.high_risk"
+  | "mcp.tool.invoke.critical"
+  | "mcp.tool.secret.resolve"
+  | "mcp.tool.network_access"
+  | "mcp.tool.write"
+  | "mcp.tool.deploy"
   | "mcp.tool.call"
   | "secret.read";
 
@@ -220,6 +263,13 @@ const policyActions = new Set<PolicyAction>([
   "task.run",
   "git.branch.create",
   "git.pull_request.create",
+  "git.webhook.receive",
+  "git.webhook.verify",
+  "git.webhook.process",
+  "git.pull_request.sync",
+  "git.branch.sync",
+  "git.changed_files.read",
+  "git.credential.resolve",
   "git.remote_operation",
   "git.merge",
   "git.rebase",
@@ -227,6 +277,9 @@ const policyActions = new Set<PolicyAction>([
   "llm.completion",
   "llm.remote_completion",
   "llm.model.use",
+  "llm.credential.resolve",
+  "llm.route.select",
+  "llm.fallback",
   "runner.execute",
   "runner.command.execute",
   "runner.local_execution",
@@ -269,12 +322,26 @@ const policyActions = new Set<PolicyAction>([
   "secret.lease.request",
   "secret.lease.issue",
   "secret.lease.revoke",
+  "dashboard.read",
+  "auth.read",
+  "auth.authorize.check",
+  "auth.admin",
   "sandbox.profile.use",
   "sandbox.session.create",
   "network.egress",
   "runner.secret.inject",
   "local_agent.secret.forward",
   "audit.secret.view",
+  "mcp.server.list",
+  "mcp.tool.list",
+  "mcp.tool.invoke",
+  "mcp.tool.invoke.low_risk",
+  "mcp.tool.invoke.high_risk",
+  "mcp.tool.invoke.critical",
+  "mcp.tool.secret.resolve",
+  "mcp.tool.network_access",
+  "mcp.tool.write",
+  "mcp.tool.deploy",
   "mcp.tool.call",
   "secret.read"
 ]);
@@ -288,6 +355,8 @@ const policyResourceKinds = new Set<PolicyResourceKind>([
   "git_operation",
   "llm_model",
   "llm_provider",
+  "llm_route",
+  "llm_fallback_policy",
   "virtual_model_key",
   "runner",
   "command",
@@ -308,8 +377,11 @@ const policyResourceKinds = new Set<PolicyResourceKind>([
   "sandbox_session",
   "network_egress_policy",
   "redaction_policy",
+  "mcp_server",
   "mcp_tool",
-  "secret_scope"
+  "secret_scope",
+  "dashboard",
+  "auth"
 ]);
 
 export function isPolicyAction(value: unknown): value is PolicyAction {
@@ -322,15 +394,25 @@ export function isPolicyResourceKind(value: unknown): value is PolicyResourceKin
 
 export function createPolicySubject(input: {
   actorId?: string;
+  principalId?: string;
   actorKind?: PolicyActorKind;
   roles?: string[];
   teams?: string[];
+  authMode?: string;
+  serviceAccountId?: string;
+  isMockActor?: boolean;
+  metadata?: Record<string, unknown>;
 } = {}): PolicySubject {
   return {
     actorId: input.actorId ?? "mock-policy-actor",
+    principalId: input.principalId,
     actorKind: input.actorKind ?? "system",
     roles: input.roles ?? ["system"],
-    teams: input.teams
+    teams: input.teams,
+    authMode: input.authMode,
+    serviceAccountId: input.serviceAccountId,
+    isMockActor: input.isMockActor,
+    metadata: input.metadata
   };
 }
 

@@ -50,6 +50,7 @@ export function credentialResolutionResultToDto(result: CredentialResolutionResu
     credentialHandle: result.credentialHandle ? credentialHandleToDto(result.credentialHandle) : undefined,
     blockedReason: result.blockedReason,
     policyDecisionId: result.policyDecisionId,
+    authorizationDecisionId: result.authorizationDecisionId,
     auditEventId: result.auditEventId,
     createdAt: result.createdAt.toISOString(),
     containsSecretMaterial: false

@@ -1,7 +1,9 @@
+import type { AuthorizationService } from "@aichestra/auth";
 import type { InMemoryAichestraStore } from "@aichestra/db";
-import type { GitIntegrationService, GitProviderRuntimeConfig } from "@aichestra/git-adapter";
+import type { GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
 import type { ImprovementServices } from "@aichestra/improvement";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
+import type { MCPGateway } from "@aichestra/mcp-gateway";
 import type { PolicyService } from "@aichestra/policy";
 import type { RegistryService } from "@aichestra/registry";
 import type { AgentRunnerService } from "@aichestra/runner";
@@ -10,6 +12,7 @@ import {
   sanitizeDashboardArray,
   sanitizeDashboardObject,
   type AgentRunnerReadModel,
+  type AuthReadModel,
   type AuditSummaryReadModel,
   type ConflictManagerReadModel,
   type DashboardJsonObject,
@@ -20,6 +23,7 @@ import {
   type GitIntegrationReadModel,
   type LLMGatewayReadModel,
   type LocalAgentReadModel,
+  type MCPGatewayReadModel,
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
@@ -30,14 +34,18 @@ export type DashboardReadModelContext = {
   store: InMemoryAichestraStore;
   gitIntegrationService: GitIntegrationService;
   gitProviderConfig: GitProviderRuntimeConfig;
+  gitWebhookReceiverService: GitWebhookReceiverService;
+  gitWebhookConfig: GitHubWebhookRuntimeConfig;
   llmGatewayService: LLMGatewayService;
   agentRunnerService: AgentRunnerService;
   registryService: RegistryService;
   improvementServices: ImprovementServices;
   policyService: PolicyService;
+  authorizationService: AuthorizationService;
   providerAbstractionService: ProviderAbstractionService;
   securityService: SecurityControlService;
   localAgentProtocolService: LocalAgentProtocolService;
+  mcpGatewayService: MCPGateway;
 };
 
 function last<T>(items: T[]): T | undefined {
@@ -123,6 +131,12 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
   const branchRecords = context.store.listBranchLeases();
   const pullRequests = context.gitIntegrationService.listPullRequests();
   const auditEvents = context.gitIntegrationService.listGitAuditEvents();
+  const webhookConfig = context.gitWebhookReceiverService.getConfig();
+  const webhookEvents = context.gitWebhookReceiverService.listEvents();
+  const webhookAuditEvents = context.gitWebhookReceiverService.listAuditEvents();
+  const pullRequestSyncStates = context.gitWebhookReceiverService.listPullRequestSyncStates();
+  const branchSyncStates = context.gitWebhookReceiverService.listBranchSyncStates();
+  const lastChangedFilesAudit = webhookAuditEvents.find((event) => event.eventType.startsWith("github_changed_files_refresh_"));
   const changedFiles = branchRecords.flatMap((lease) =>
     lease.files.map((file) => ({
       path: file,
@@ -137,11 +151,31 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
 
   return {
     config: sanitizeDashboardObject(context.gitIntegrationService.getConfig()),
+    webhookConfig: sanitizeDashboardObject({
+      webhooksEnabled: webhookConfig.webhooksEnabled,
+      webhookSecretConfigured: webhookConfig.webhookSecretConfigured,
+      webhookSecretSource: webhookConfig.webhookSecretSource,
+      webhookSecretStatus: webhookConfig.webhookSecretStatus,
+      webhookAcceptUnverified: webhookConfig.webhookAcceptUnverified,
+      webhookAllowedRepoCount: webhookConfig.webhookAllowedRepoCount,
+      webhookIntegrationTestsEnabled: webhookConfig.webhookIntegrationTestsEnabled,
+      supportedWebhookEventCount: webhookConfig.supportedWebhookEvents.length
+    }),
     providers: sanitizeDashboardArray(context.gitIntegrationService.listProviders()),
     repos: sanitizeDashboardArray(repos),
     branchRecords: sanitizeDashboardArray(branchRecords),
     pullRequests: sanitizeDashboardArray(pullRequests),
+    webhookEvents: sanitizeDashboardArray(webhookEvents.slice(0, 20)),
+    webhookAuditEvents: sanitizeDashboardArray(webhookAuditEvents.slice(0, 20)),
+    pullRequestSyncStates: sanitizeDashboardArray(pullRequestSyncStates),
+    branchSyncStates: sanitizeDashboardArray(branchSyncStates),
     changedFiles: sanitizeDashboardArray(changedFiles),
+    changedFilesRefreshStatus: sanitizeDashboardObject({
+      lastResult: lastChangedFilesAudit?.result ?? "none",
+      lastReason: lastChangedFilesAudit?.reason ?? null,
+      lastEventType: lastChangedFilesAudit?.eventType ?? null,
+      refreshAuditEvents: webhookAuditEvents.filter((event) => event.eventType.startsWith("github_changed_files_refresh_")).length
+    }),
     mergeQueueLinkage: sanitizeDashboardArray(mergeQueue.map((entry) => ({
       taskRunId: entry.taskRunId,
       mergeQueueEntryId: entry.id,
@@ -166,6 +200,10 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       {
         operation: "github_rebase",
         reason: "rebase_unsupported"
+      },
+      {
+        operation: "github_webhook_unverified",
+        reason: webhookConfig.webhooksEnabled ? "signature_verification_required" : "github_webhooks_disabled"
       }
     ]),
     safety: sanitizeDashboardObject({
@@ -178,7 +216,15 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       githubCredentialStatus: context.gitProviderConfig.githubCredentialStatus ?? (context.gitProviderConfig.githubConfigured ? "resolved" : "missing"),
       githubAllowedRepoCount: context.gitProviderConfig.githubAllowedRepoCount ?? context.gitProviderConfig.githubAllowedRepos?.length ?? 0,
       githubAllowedBranchPrefix: context.gitProviderConfig.githubAllowedBranchPrefix ?? "ai/",
-      tokenExposed: false
+      githubWebhooksEnabled: webhookConfig.webhooksEnabled,
+      githubWebhookSecretConfigured: webhookConfig.webhookSecretConfigured,
+      githubWebhookAcceptUnverified: webhookConfig.webhookAcceptUnverified,
+      automaticMergeEnabled: false,
+      rebasePushEnabled: false,
+      forcePushEnabled: false,
+      branchDeletionEnabled: false,
+      tokenExposed: false,
+      webhookSecretExposed: false
     })
   };
 }
@@ -236,6 +282,12 @@ function buildLlm(context: DashboardReadModelContext): LLMGatewayReadModel {
   return {
     config: sanitizeDashboardObject(config),
     providers: sanitizeDashboardArray(context.llmGatewayService.listProviders()),
+    routes: sanitizeDashboardArray(context.llmGatewayService.listRoutes()),
+    routing: sanitizeDashboardObject(context.llmGatewayService.getRoutingConfig()),
+    providerHealth: sanitizeDashboardArray(context.llmGatewayService.listProviderHealth()),
+    fallbackPolicies: sanitizeDashboardArray(context.llmGatewayService.listFallbackPolicies()),
+    routingDecisions: sanitizeDashboardArray(context.llmGatewayService.listRoutingDecisions()),
+    fallbackAttempts: sanitizeDashboardArray(context.llmGatewayService.listRoutingDecisions().filter((decision) => typeof decision.metadata.fallback_attempt === "number" && decision.metadata.fallback_attempt > 0)),
     models: sanitizeDashboardArray(context.llmGatewayService.listModels()),
     virtualKeys: sanitizeDashboardArray(context.llmGatewayService.listVirtualKeys()),
     usageEvents: sanitizeDashboardArray(context.llmGatewayService.listUsageEvents()),
@@ -252,6 +304,10 @@ function buildLlm(context: DashboardReadModelContext): LLMGatewayReadModel {
       {
         operation: "provider_api_key_exposure",
         reason: "provider_credentials_never_returned"
+      },
+      {
+        operation: "local_cli_route",
+        reason: "local_agent_required_not_direct_execution"
       }
     ]),
     budget: sanitizeDashboardObject({
@@ -314,6 +370,60 @@ function buildPolicy(context: DashboardReadModelContext): PolicyReadModel {
   };
 }
 
+function buildAuth(context: DashboardReadModelContext): AuthReadModel {
+  const currentContext = context.authorizationService.getAuthContext({
+    source: "dashboard",
+    metadata: { readModel: true }
+  });
+  const dashboardDecision = context.authorizationService.hasPermission(currentContext, "dashboard.read", {
+    resourceKind: "dashboard",
+    resourceId: "dashboard_api_read_model",
+    metadata: { readOnly: true }
+  });
+  const mergeDecision = context.authorizationService.hasPermission(currentContext, "git.merge", {
+    resourceKind: "git_operation",
+    resourceId: "merge_future",
+    metadata: { destructiveOperation: true }
+  });
+
+  return {
+    config: sanitizeDashboardObject(context.authorizationService.getConfig()),
+    currentActor: sanitizeDashboardObject({
+      actor: currentContext.actor,
+      principal: currentContext.principal,
+      authMode: currentContext.authMode,
+      authenticated: currentContext.authenticated,
+      roles: currentContext.roles.map((role) => role.name),
+      teams: currentContext.teams.map((team) => team.name),
+      isMockActor: currentContext.metadata.isMockActor === true,
+      productionAuthEnabled: false
+    }),
+    principals: sanitizeDashboardArray(context.authorizationService.listPrincipals()),
+    actors: sanitizeDashboardArray(context.authorizationService.listActors()),
+    teams: sanitizeDashboardArray(context.authorizationService.listTeams()),
+    roles: sanitizeDashboardArray(context.authorizationService.listRoles()),
+    permissions: sanitizeDashboardArray(context.authorizationService.listPermissions()),
+    roleBindings: sanitizeDashboardArray(context.authorizationService.listRoleBindings()),
+    serviceAccounts: sanitizeDashboardArray(context.authorizationService.listServiceAccounts()),
+    identityProviders: sanitizeDashboardArray(context.authorizationService.listIdentityProviders()),
+    auditEvents: sanitizeDashboardArray(context.authorizationService.listAuditEvents().slice(0, 20)),
+    authorizationExamples: sanitizeDashboardArray([
+      {
+        action: "dashboard.read",
+        allowed: dashboardDecision.allowed,
+        reason: dashboardDecision.reason
+      },
+      {
+        action: "git.merge",
+        allowed: mergeDecision.allowed,
+        reason: mergeDecision.reason,
+        policyDecisionId: mergeDecision.policyDecision?.id
+      }
+    ]),
+    warning: "Mock auth is visible for planning only and is not production authentication."
+  };
+}
+
 function buildProviders(context: DashboardReadModelContext): EnterpriseProviderReadModel {
   const config = context.providerAbstractionService.getConfig();
   return {
@@ -355,6 +465,7 @@ function buildSecurity(context: DashboardReadModelContext): SecurityReadModel {
       credentialManagerKind: context.securityService.getConfig().credentialManagerKind,
       envSecretProviderEnabled: context.securityService.getConfig().envSecretProviderEnabled,
       github: context.securityService.getConfig().githubCredentialConfigured ? "configured" : "missing",
+      githubWebhookSecret: context.securityService.getConfig().githubWebhookSecretConfigured ? "configured" : "missing",
       llm: context.securityService.getConfig().llmCredentialConfigured ? "configured" : "missing",
       rawValuesExposed: false
     }),
@@ -411,6 +522,48 @@ function buildLocalAgents(context: DashboardReadModelContext): LocalAgentReadMod
   };
 }
 
+function buildMcp(context: DashboardReadModelContext): MCPGatewayReadModel {
+  const servers = context.mcpGatewayService.listServers();
+  const tools = servers.items.flatMap((server) => context.mcpGatewayService.listTools(server.id).items);
+  const invocations = context.mcpGatewayService.listInvocations();
+  const auditEvents = context.mcpGatewayService.listAuditEvents();
+  const activeTools = tools.filter((tool) => tool.status === "active");
+  return {
+    config: sanitizeDashboardObject(context.mcpGatewayService.getConfig()),
+    servers: sanitizeDashboardArray(servers.items),
+    tools: sanitizeDashboardArray(tools),
+    riskSummary: sanitizeDashboardObject({
+      low: tools.filter((tool) => tool.riskLevel === "low").length,
+      medium: tools.filter((tool) => tool.riskLevel === "medium").length,
+      high: tools.filter((tool) => tool.riskLevel === "high").length,
+      critical: tools.filter((tool) => tool.riskLevel === "critical").length,
+      active: activeTools.length,
+      disabled: tools.filter((tool) => tool.status === "disabled").length,
+      highCriticalEnabled: activeTools.filter((tool) => tool.riskLevel === "high" || tool.riskLevel === "critical").length
+    }),
+    invocations: sanitizeDashboardArray(invocations.slice(0, 20)),
+    auditEvents: sanitizeDashboardArray(auditEvents.slice(0, 20)),
+    blockedExamples: sanitizeDashboardArray([
+      { operation: "mcp.real_transport", reason: "real_mcp_transport_disabled" },
+      { operation: "mcp.tool.invoke.high_risk", reason: "high_risk_tool_denied_by_default" },
+      { operation: "mcp.tool.invoke.critical", reason: "critical_tool_denied_by_default" },
+      { operation: "mcp.tool.secret.resolve", reason: "secret_forwarding_disabled_v0" },
+      { operation: "mcp.tool.network_access", reason: "network_access_denied_by_default" },
+      { operation: "mcp.tool.write", reason: "write_tools_disabled_v0" },
+      { operation: "mcp.tool.deploy", reason: "deploy_tools_disabled_v0" }
+    ]),
+    integration: sanitizeDashboardObject({
+      llmAutoToolExecution: false,
+      runnerDirectToolExecution: false,
+      localAgentMcpTransport: "future_placeholder_disabled",
+      mockGatewayDefault: context.mcpGatewayService.getGatewayKind() === "mock",
+      rawOutputStored: false,
+      secretsExposed: false,
+      tokensExposed: false
+    })
+  };
+}
+
 function auditGroup(source: string, events: unknown[]): DashboardJsonObject {
   return sanitizeDashboardObject({
     source,
@@ -427,7 +580,9 @@ function buildAudit(context: DashboardReadModelContext): AuditSummaryReadModel {
     auditGroup("llm", context.llmGatewayService.listAuditEvents()),
     auditGroup("agent_runner", context.agentRunnerService.listAuditEvents()),
     auditGroup("policy", context.policyService.listAuditEntries()),
+    auditGroup("auth", context.authorizationService.listAuditEvents()),
     auditGroup("security", context.securityService.listAuditEvents()),
+    auditGroup("mcp", context.mcpGatewayService.listAuditEvents()),
     auditGroup("enterprise_provider", context.providerAbstractionService.listAuditEvents()),
     auditGroup("local_agent_protocol", context.localAgentProtocolService.listAuditEvents()),
     auditGroup("governance", context.improvementServices.governance.listAuditEvents())
@@ -454,9 +609,11 @@ function buildOverview(
   llm: LLMGatewayReadModel,
   agents: AgentRunnerReadModel,
   policy: PolicyReadModel,
+  auth: AuthReadModel,
   providers: EnterpriseProviderReadModel,
   security: SecurityReadModel,
   localAgents: LocalAgentReadModel,
+  mcp: MCPGatewayReadModel,
   audit: AuditSummaryReadModel
 ): DashboardOverviewReadModel {
   const totalTasks = tasks.tasks.length;
@@ -484,9 +641,13 @@ function buildOverview(
       llmUsageEvents: llm.usageEvents.length,
       agentRuns: agents.runs.length,
       policyRules: policy.rules.length,
+      authRoles: auth.roles.length,
+      authActors: auth.actors.length,
       providerCatalogEntries: providers.catalog.length,
       securityAuditEvents: security.auditEvents.length,
       localAgents: localAgents.registrations.length,
+      mcpServers: mcp.servers.length,
+      mcpTools: mcp.tools.length,
       pendingConsentRequests: localAgents.consentQueue.length,
       auditEvents: audit.summary.totalEvents ?? 0
     }),
@@ -498,9 +659,11 @@ function buildOverview(
       llm: { status: "available", count: llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
       agents: { status: "available", count: agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: policy.rules.length, notes: [] },
+      auth: { status: "available", count: auth.actors.length, notes: ["Mock auth is not production authentication."] },
       providers: { status: "available", count: providers.catalog.length, notes: ["Provider adapters remain skeleton/mock-first."] },
       security: { status: "available", count: security.auditEvents.length, notes: ["Secrets are metadata-only."] },
       localAgents: { status: "available", count: localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
+      mcp: { status: "available", count: mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
       audit: { status: "available", count: typeof audit.summary.totalEvents === "number" ? audit.summary.totalEvents : 0, notes: [] }
     },
     safety: {
@@ -516,6 +679,7 @@ function buildOverview(
       vendorCliExecutionEnabled: false,
       credentialCacheAccessAllowed: false,
       productionSecretInjection: false,
+      mcpRealTransportEnabled: false,
       noSecretsExposed: true
     },
     warnings: unique([
@@ -533,11 +697,13 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const llm = buildLlm(context);
   const agents = buildAgents(context);
   const policy = buildPolicy(context);
+  const auth = buildAuth(context);
   const providers = buildProviders(context);
   const security = buildSecurity(context);
   const localAgents = buildLocalAgents(context);
+  const mcp = buildMcp(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, conflicts, registry, llm, agents, policy, providers, security, localAgents, audit);
+  const overview = buildOverview(source, tasks, git, conflicts, registry, llm, agents, policy, auth, providers, security, localAgents, mcp, audit);
 
   return {
     overview,
@@ -548,9 +714,11 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     llm,
     agents,
     policy,
+    auth,
     providers,
     security,
     localAgents,
+    mcp,
     audit
   };
 }

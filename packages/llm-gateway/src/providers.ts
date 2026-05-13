@@ -290,13 +290,115 @@ export class OpenAICompatibleLLMProvider implements LLMProvider {
   }
 }
 
+type SkeletonProviderInput = {
+  providerKind: LLMProviderKind;
+  reason?: string;
+  localAgentRequired?: boolean;
+};
+
+class DisabledSkeletonLLMProvider implements LLMProvider {
+  private readonly providerKind: LLMProviderKind;
+  private readonly reason: string;
+  private readonly localAgentRequired: boolean;
+
+  constructor(input: SkeletonProviderInput) {
+    this.providerKind = input.providerKind;
+    this.reason = input.reason ?? "provider_not_implemented";
+    this.localAgentRequired = input.localAgentRequired ?? false;
+  }
+
+  getProviderKind(): LLMProviderKind {
+    return this.providerKind;
+  }
+
+  async validateConnection(): Promise<LLMProviderValidation> {
+    return { ok: false, providerKind: this.providerKind, reason: this.reason };
+  }
+
+  async listModels(): Promise<LLMModel[]> {
+    return seedLlmModels().filter((model) => model.providerKind === this.providerKind);
+  }
+
+  async estimateUsage(request: LLMCompletionRequest, model: LLMModel) {
+    const inputTokens = estimatePromptTokens(`${request.systemInstructions ?? ""}\n${request.prompt}`);
+    const outputTokens = Math.min(request.maxTokens ?? 96, 96);
+    return {
+      inputTokens,
+      outputTokens,
+      estimatedCostUsd: estimateCompletionCost(model, inputTokens, outputTokens)
+    };
+  }
+
+  async createCompletion(_request: LLMCompletionRequest, _model: LLMModel): Promise<LLMProviderCompletionResult> {
+    return {
+      ok: false,
+      reason: this.localAgentRequired ? "local_agent_required" : this.reason
+    };
+  }
+}
+
+export class AnthropicCompatibleLLMProviderSkeleton extends DisabledSkeletonLLMProvider {
+  constructor() {
+    super({ providerKind: "anthropic_compatible", reason: "anthropic_compatible_provider_not_implemented" });
+  }
+}
+
+export class GeminiCompatibleLLMProviderSkeleton extends DisabledSkeletonLLMProvider {
+  constructor() {
+    super({ providerKind: "gemini_compatible", reason: "gemini_compatible_provider_not_implemented" });
+  }
+}
+
+export class BedrockCompatibleLLMProviderSkeleton extends DisabledSkeletonLLMProvider {
+  constructor() {
+    super({ providerKind: "bedrock_compatible", reason: "bedrock_compatible_provider_not_implemented" });
+  }
+}
+
+export class VertexCompatibleLLMProviderSkeleton extends DisabledSkeletonLLMProvider {
+  constructor() {
+    super({ providerKind: "vertex_compatible", reason: "vertex_compatible_provider_not_implemented" });
+  }
+}
+
+export class AzureCompatibleLLMProviderSkeleton extends DisabledSkeletonLLMProvider {
+  constructor() {
+    super({ providerKind: "azure_compatible", reason: "azure_compatible_provider_not_implemented" });
+  }
+}
+
+export class LiteLLMCompatibleLLMProviderSkeleton extends DisabledSkeletonLLMProvider {
+  constructor() {
+    super({ providerKind: "litellm_compatible", reason: "litellm_compatible_provider_not_implemented" });
+  }
+}
+
+export class LocalCliLLMProviderBridgeSkeleton extends DisabledSkeletonLLMProvider {
+  constructor() {
+    super({ providerKind: "local_cli", reason: "local_agent_required", localAgentRequired: true });
+  }
+}
+
 export function createLlmProviderConfigFromEnv(env: Record<string, string | undefined> = process.env): LLMProviderRuntimeConfig {
   const providerKind = env.AICHESTRA_LLM_PROVIDER === "openai_compatible" ? "openai_compatible" : "mock";
   const allowedModels = parseCsv(env.AICHESTRA_LLM_ALLOWED_MODELS);
+  const routingMode = isRoutingMode(env.AICHESTRA_LLM_ROUTING_MODE)
+    ? env.AICHESTRA_LLM_ROUTING_MODE
+    : providerKind === "openai_compatible"
+      ? "single_provider"
+      : "mock_only";
+  const allowedProviderKinds = parseCsv(env.AICHESTRA_ALLOWED_LLM_PROVIDER_KINDS).filter(isSupportedProviderKind);
   const apiKeySecretRef = env.AICHESTRA_LLM_API_KEY_SECRET_REF;
   const apiKeyConfigured = Boolean(env.AICHESTRA_LLM_API_KEY || apiKeySecretRef);
   return {
     providerKind,
+    routingMode,
+    fallbackEnabled: env.AICHESTRA_ENABLE_LLM_FALLBACK === "true",
+    maxFallbackAttempts: parseNonNegativeInt(env.AICHESTRA_LLM_MAX_FALLBACK_ATTEMPTS),
+    allowedProviderKinds,
+    allowedProviderIds: parseCsv(env.AICHESTRA_ALLOWED_LLM_PROVIDER_IDS),
+    deniedProviderIds: parseCsv(env.AICHESTRA_DENIED_LLM_PROVIDER_IDS),
+    deniedModels: parseCsv(env.AICHESTRA_DENIED_LLM_MODELS),
     remoteLlmEnabled: env.AICHESTRA_ENABLE_REMOTE_LLM === "true",
     remoteCompletionEnabled: env.AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION === "true",
     openAICompatibleConfigured: apiKeyConfigured,
@@ -444,6 +546,132 @@ export function seedLlmModels(): LLMModel[] {
       metadata: { remoteProvider: "openai_compatible", remoteModelFromConfig: true },
       createdAt: now,
       updatedAt: now
+    },
+    {
+      id: "anthropic-compatible/skeleton",
+      providerKind: "anthropic_compatible",
+      displayName: "Anthropic-compatible Skeleton",
+      contextWindow: 200000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0.000004,
+      outputTokenCostUsd: 0.000012,
+      status: "disabled",
+      metadata: { skeleton: true, providerId: "anthropic-api-key", capabilities: ["completion", "code_generation", "code_review"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "gemini-compatible/skeleton",
+      providerKind: "gemini_compatible",
+      displayName: "Gemini-compatible Skeleton",
+      contextWindow: 1000000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0.000002,
+      outputTokenCostUsd: 0.000006,
+      status: "disabled",
+      metadata: { skeleton: true, providerId: "gemini-api-key", capabilities: ["completion", "summarization", "json_output"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "bedrock-compatible/skeleton",
+      providerKind: "bedrock_compatible",
+      displayName: "Bedrock-compatible Skeleton",
+      contextWindow: 200000,
+      supportsTools: false,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0.000004,
+      outputTokenCostUsd: 0.000012,
+      status: "disabled",
+      metadata: { skeleton: true, providerId: "bedrock-anthropic-cloud", capabilities: ["completion", "cloud_iam"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "vertex-compatible/skeleton",
+      providerKind: "vertex_compatible",
+      displayName: "Vertex-compatible Skeleton",
+      contextWindow: 1000000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0.000002,
+      outputTokenCostUsd: 0.000006,
+      status: "disabled",
+      metadata: { skeleton: true, providerId: "vertex-gemini-cloud", capabilities: ["completion", "cloud_iam"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "azure-compatible/skeleton",
+      providerKind: "azure_compatible",
+      displayName: "Azure-compatible Skeleton",
+      contextWindow: 128000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0.000003,
+      outputTokenCostUsd: 0.000006,
+      status: "disabled",
+      metadata: { skeleton: true, providerId: "azure-foundry-cloud", capabilities: ["completion", "cloud_iam"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "litellm-compatible/skeleton",
+      providerKind: "litellm_compatible",
+      displayName: "LiteLLM-compatible Skeleton",
+      contextWindow: 128000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0.000003,
+      outputTokenCostUsd: 0.000006,
+      status: "disabled",
+      metadata: { skeleton: true, providerId: "litellm-compatible-skeleton", capabilities: ["completion"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "claude-code/local",
+      providerKind: "local_cli",
+      displayName: "Claude Code Local CLI",
+      contextWindow: 200000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0,
+      outputTokenCostUsd: 0,
+      status: "active",
+      metadata: { localAgentRequired: true, providerId: "claude-code-local", capabilities: ["local_cli", "code_generation"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "codex-cli/local",
+      providerKind: "local_cli",
+      displayName: "Codex CLI Local",
+      contextWindow: 128000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0,
+      outputTokenCostUsd: 0,
+      status: "active",
+      metadata: { localAgentRequired: true, providerId: "codex-cli-local", capabilities: ["local_cli", "code_generation"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "gemini-cli/local",
+      providerKind: "local_cli",
+      displayName: "Gemini CLI Local",
+      contextWindow: 1000000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0,
+      outputTokenCostUsd: 0,
+      status: "active",
+      metadata: { localAgentRequired: true, providerId: "gemini-cli-local", capabilities: ["local_cli", "summarization"] },
+      createdAt: now,
+      updatedAt: now
     }
   ];
 }
@@ -453,6 +681,29 @@ function parseCsv(value: string | undefined): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseNonNegativeInt(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? "0", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function isRoutingMode(value: unknown): value is LLMProviderRuntimeConfig["routingMode"] {
+  return value === "mock_only" || value === "single_provider" || value === "multi_provider";
+}
+
+function isSupportedProviderKind(value: string): value is LLMProviderKind {
+  return value === "mock" ||
+    value === "openai_compatible" ||
+    value === "anthropic_compatible" ||
+    value === "gemini_compatible" ||
+    value === "bedrock_compatible" ||
+    value === "vertex_compatible" ||
+    value === "azure_compatible" ||
+    value === "litellm_compatible" ||
+    value === "local_cli" ||
+    value === "local" ||
+    value === "custom";
 }
 
 function resolveLlmCredential(
@@ -561,6 +812,8 @@ function redactLlmText(text: string): string {
     .replace(/\b(AIza[0-9A-Za-z_-]{8,})\b/g, "[redacted-api-key]")
     .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|LLM|GITHUB|GOOGLE_APPLICATION)_API_KEY)\s*=\s*[^\s]+/gi, "$1=[redacted]")
     .replace(/\b((?:OPENAI|ANTHROPIC|AICHESTRA_LLM|LLM|GITHUB|GOOGLE_APPLICATION)_TOKEN)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+    .replace(/\b(AICHESTRA_GITHUB_WEBHOOK_SECRET)\s*=\s*[^\s]+/gi, "$1=[redacted]")
+    .replace(/\b([A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD))\s*=\s*[^\s]+/gi, "$1=[redacted]")
     .replace(/GOOGLE_APPLICATION_CREDENTIALS\s*=\s*[^\s]+/gi, "GOOGLE_APPLICATION_CREDENTIALS=[redacted]")
     .replace(/~[\\/]\.codex[\\/]auth\.json/gi, "[redacted-credential-cache]")
     .replace(/~[\\/]\.claude[^\s]*/gi, "[redacted-credential-cache]")
