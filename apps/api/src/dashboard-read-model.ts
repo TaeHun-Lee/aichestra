@@ -735,7 +735,13 @@ function buildStagingExecution(context: DashboardReadModelContext): StagingDeplo
       requiredRoleCount: summary.requiredSignoffCount,
       pendingRoleCount: summary.pendingSignoffCount,
       approvedRoleCount: summary.approvedSignoffCount,
+      conditionalRoleCount: summary.conditionalSignoffCount,
+      rejectedRoleCount: summary.rejectedSignoffCount,
+      missingRequiredRoleCount: summary.missingRequiredSignoffCount,
       actualDeploymentBlocked: summary.actualDeploymentBlocked,
+      evidenceChecklistStatus: summary.metadata.signoffEvidenceChecklistStatus ?? "present_pending_review",
+      decisionPolicyStatus: summary.metadata.signoffDecisionPolicyStatus ?? "evaluated_pending_required_signoffs",
+      approvalAuditRequired: summary.metadata.approvalAuditRequired ?? true,
       docs: "docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md",
       evidenceChecklistDocs: "docs/roadmaps/staging-deployment-execution/signoff-evidence-checklist-v0.md",
       decisionPolicyDocs: "docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md"

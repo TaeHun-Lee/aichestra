@@ -1,5 +1,6 @@
 # Aichestra
 
+
 Aichestra is an AgentOps control plane for coordinating LLM usage, AI coding agents, Git branches, PRs, skills, harnesses, instruction artifacts, usage ledgers, and audit logs.
 
 This repository is an MVP scaffold. It is intentionally mock-first: default runtime code does not call real LLM providers, Git hosting APIs, MCP gateways, secret stores, or production databases. Real Git Adapter v2 and LLM Gateway v2 are controlled exceptions that remain disabled unless every explicit integration gate is configured.

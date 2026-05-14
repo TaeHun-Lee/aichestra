@@ -209,6 +209,7 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
         <a href="/">Dashboard</a>
         <a href="/tasks">Tasks</a>
         <a href="/registries">Registries</a>
+        <a href="/staging/signoffs">Staging Signoffs</a>
       </nav>
     </div>
   </header>
@@ -500,7 +501,7 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
         <h2>Staging Deployment Execution Plan</h2>
         <div class="list">
           <div class="item"><strong>Status</strong><span>${html(data.stagingExecution.summary.status, "v0_implemented")} / plan ${html(data.stagingExecution.summary.planStatus, "ready_for_signoff")} / go/no-go ${html(data.stagingExecution.summary.goNoGoStatus, "not_ready")} / deployed ${data.stagingExecution.summary.stagingDeployed === true ? "true" : "false"} / production ready ${data.stagingExecution.summary.productionReady === true ? "true" : "false"}</span></div>
-          <div class="item"><strong>Signoff pack</strong><span>available ${data.stagingExecution.signoffPack.available === true ? "true" : "false"} / status ${html(data.stagingExecution.signoffPack.status, "pending")} / pending roles ${html(data.stagingExecution.signoffPack.pendingRoleCount, "6")} / approved roles ${html(data.stagingExecution.signoffPack.approvedRoleCount, "0")} / deployment blocked ${data.stagingExecution.signoffPack.actualDeploymentBlocked === true ? "true" : "false"}</span></div>
+          <div class="item"><strong>Signoff pack</strong><span>available ${data.stagingExecution.signoffPack.available === true ? "true" : "false"} / status ${html(data.stagingExecution.signoffPack.status, "pending")} / pending roles ${html(data.stagingExecution.signoffPack.pendingRoleCount, "6")} / approved roles ${html(data.stagingExecution.signoffPack.approvedRoleCount, "0")} / rejected roles ${html(data.stagingExecution.signoffPack.rejectedRoleCount, "0")} / deployment blocked ${data.stagingExecution.signoffPack.actualDeploymentBlocked === true ? "true" : "false"}</span></div>
           <div class="item"><strong>Step sequence</strong><span>${html(data.stagingExecution.steps.map((step) => `${text(step.order)}:${text(step.phase)}:${text(step.status)}:${text(step.automationLevel)}`), "none")}</span></div>
           <div class="item"><strong>Required gates</strong><span>${html(data.stagingExecution.requiredGates.map((gate) => `${text(gate.id)}:${text(gate.status)}:${text(gate.severity)}`), "none")}</span></div>
           <div class="item"><strong>Go/no-go decision</strong><span>${html(data.stagingExecution.goNoGoDecision.status, "not_ready")} / pending approvals ${html(data.stagingExecution.pendingSignoffs.map((signoff) => `${text(signoff.role)}:${text(signoff.status)}`), "none")} / blockers ${html(data.stagingExecution.blockers.map((blocker) => `${text(blocker.id)}:${text(blocker.severity)}`), "none")}</span></div>

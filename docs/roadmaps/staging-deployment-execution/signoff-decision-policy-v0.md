@@ -47,6 +47,19 @@ The expected status while one or more required roles are pending is:
 - production ready: false
 - staging deployed: false
 
+## Current Collection Evaluation
+
+The 2026-05-14 collection run supplied no real human signoff evidence. Under this policy:
+
+- all six required roles remain `pending`,
+- accepted approval count is 0,
+- accepted rejection count is 0,
+- signoff status remains `pending`,
+- signoff decision is `not_ready`,
+- actual staging deployment blocked remains true.
+
+No approval, waiver, or rejection is inferred from missing evidence.
+
 ## Expiry Rule
 
 Suggested validity window: 7 calendar days from the latest required approval timestamp.
@@ -98,4 +111,3 @@ The approval audit must verify:
 - no-secret/no-env exposure remains pass,
 - staging remains not deployed before the explicit deployment task,
 - production ready remains false.
-

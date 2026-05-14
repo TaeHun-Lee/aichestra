@@ -405,6 +405,20 @@ export type StagingReleaseCandidateSignoffRole =
   | "release_manager";
 export type StagingReleaseCandidateSignoffStatus = "pending" | "approved_mock" | "waived" | "not_applicable";
 export type StagingHumanSignoffStatus = "pending" | "approved" | "conditionally_approved" | "rejected" | "waived";
+export type StagingHumanSignoffEvidence = {
+  role: StagingReleaseCandidateSignoffRole;
+  required: boolean;
+  status: StagingHumanSignoffStatus;
+  approverName?: string;
+  approverContact?: string;
+  signedAt?: string;
+  reviewedEvidence: string[];
+  conditions?: string[];
+  notes?: string;
+  signatureMethod?: string;
+  evidenceSource?: string;
+  metadata: Record<string, unknown>;
+};
 export type StagingReleaseNoteSection =
   | "summary"
   | "changed_areas"
@@ -486,6 +500,7 @@ export type StagingDeploymentRollbackPlanStatus = "planned" | "ready_for_review"
 
 export type StagingDeploymentExecutionOptions = {
   signoffStatuses?: Partial<Record<StagingReleaseCandidateSignoffRole, StagingReleaseCandidateSignoffStatus>>;
+  humanSignoffs?: Partial<Record<StagingReleaseCandidateSignoffRole, StagingHumanSignoffEvidence>>;
   validationCommandStatus?: "pass" | "fail" | "not_checked";
   failedValidationCommands?: string[];
   diffCheckStatus?: "pass" | "warning" | "fail" | "not_checked";
@@ -2246,6 +2261,9 @@ export type StagingDeploymentExecutionSummary = {
   requiredSignoffCount: number;
   pendingSignoffCount: number;
   approvedSignoffCount: number;
+  conditionalSignoffCount: number;
+  rejectedSignoffCount: number;
+  missingRequiredSignoffCount: number;
   signoffStatus: StagingHumanSignoffStatus;
   actualDeploymentBlocked: true;
   optionalIntegrationDecisionCount: number;

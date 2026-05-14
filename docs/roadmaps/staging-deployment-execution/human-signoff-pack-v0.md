@@ -116,9 +116,25 @@ Approvers must record:
 - signature method,
 - notes or rejection/hold reason.
 
+Approvers may enter this evidence through the local collection screen at `/staging/signoffs` on either the API server or the web dashboard server. The screen records explicit local evidence only; it does not provide production identity verification, deployment authorization, release creation, Git tag creation, or production readiness.
+
+## Signoff Collection Run - 2026-05-14
+
+- Submitted real human signoff evidence: none
+- Accepted approval evidence count: 0
+- Accepted conditional approval evidence count: 0
+- Accepted rejection evidence count: 0
+- Pending required role count: 6
+- Invalid or incomplete evidence count: 0
+- Signoff decision policy result: `not_ready`
+- Actual staging deployment blocked: true
+- Approval audit required before execution: true
+
+This run used only the provided evidence set. Because no real approval evidence was supplied, every required role remains pending.
+
 ## Signoff Table
 
-No real approval evidence is currently present in the repository. All required roles default to `pending`.
+No real approval evidence was provided for this collection run. All required roles remain `pending`; no approval, conditional approval, rejection, waiver, or signature was inferred or generated.
 
 | Role | Required | Current status | Approver name | Approver contact | Date/time | Reviewed evidence | Conditions | Notes | Signature method |
 | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -167,4 +183,3 @@ That audit must confirm:
 - no-secret/no-env exposure remains pass,
 - staging remains not deployed until the explicitly approved deployment task,
 - production ready remains false.
-

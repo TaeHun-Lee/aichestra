@@ -42,7 +42,16 @@ This checklist lists the evidence each required signer must review before any re
 - Required roles count: 6
 - Pending roles count: 6
 - Approved roles count: 0
+- Conditional approval roles count: 0
+- Rejected roles count: 0
+- Missing required signoff count: 6
 - Signoff status: `pending`
+- Signoff collection decision: `not_ready`
+- Evidence checklist status: `present_pending_review`
+- Signoff decision policy status: `evaluated_pending_required_signoffs`
 - Actual staging deployment blocked: true
 - Approval recorded: false
+- Approval inferred or generated: false
+- Approval audit required before execution: true
 
+No real human signoff evidence was supplied for the 2026-05-14 collection run, so every required role remains pending.

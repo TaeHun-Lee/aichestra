@@ -1,11 +1,16 @@
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { renderDashboardHtml } from "./render.ts";
+import { createStagingSignoffRouteHandler } from "./staging-signoffs.ts";
 
 export function createWebServer() {
+  const handleStagingSignoffRoute = createStagingSignoffRouteHandler();
   return createServer((request, response) => {
     void (async () => {
     const url = new URL(request.url ?? "/", "http://localhost");
+    if (await handleStagingSignoffRoute(request, response, url)) {
+      return;
+    }
     if (url.pathname === "/" || url.pathname === "/tasks" || url.pathname === "/registries") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(await renderDashboardHtml());

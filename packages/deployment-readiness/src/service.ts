@@ -189,6 +189,7 @@ import type {
   StagingDeploymentGoNoGoDecision,
   StagingDeploymentRollbackPlan,
   StagingDeploymentStep,
+  StagingHumanSignoffEvidence,
   StagingHumanSignoffStatus,
   StagingDeploymentProfile,
   StagingDeploymentSummary,
@@ -306,6 +307,23 @@ export type DeploymentReadinessServiceInput = {
   now?: () => Date;
 };
 
+type StagingDeploymentExecutionSignoffCollection = {
+  requiredSignoffCount: number;
+  pendingApprovals: StagingReleaseCandidateSignoffRole[];
+  approvedApprovals: StagingReleaseCandidateSignoffRole[];
+  conditionalApprovals: StagingReleaseCandidateSignoffRole[];
+  rejectedApprovals: StagingReleaseCandidateSignoffRole[];
+  invalidEvidenceRoles: StagingReleaseCandidateSignoffRole[];
+  realHumanEvidenceProvidedCount: number;
+  approvedSignoffCount: number;
+  conditionalSignoffCount: number;
+  rejectedSignoffCount: number;
+  missingRequiredSignoffCount: number;
+  signoffStatus: StagingHumanSignoffStatus;
+  collectionMode: "real_evidence" | "mock_planning";
+  actualDeploymentBlocked: true;
+};
+
 export type GitHubWebhookDeliveryClassificationInput = {
   deliveryId: string;
   eventType: string;
@@ -338,6 +356,37 @@ function positiveNumber(value: string | undefined): number | undefined {
 
 function stringConfigured(value: string | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function nonEmptyText(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasExplicitHumanSignoffEvidence(record: StagingHumanSignoffEvidence): boolean {
+  if (record.status === "pending" || record.status === "waived") return false;
+  const hasRequiredFields = nonEmptyText(record.approverName) &&
+    nonEmptyText(record.signedAt) &&
+    nonEmptyText(record.signatureMethod) &&
+    Array.isArray(record.reviewedEvidence) &&
+    record.reviewedEvidence.some((item) => item.trim().length > 0);
+  if (!hasRequiredFields) return false;
+  if (record.status === "rejected") {
+    return nonEmptyText(record.notes);
+  }
+  if (record.status === "conditionally_approved") {
+    return Array.isArray(record.conditions) && record.conditions.some((condition) => condition.trim().length > 0);
+  }
+  return true;
+}
+
+function cleanText(value: string | undefined, maxLength = 1000): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, maxLength) : undefined;
+}
+
+function cleanTextArray(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function testSecretPathAllowedByPrefix(pathValue: string, prefix: string): boolean {
@@ -454,6 +503,7 @@ export class DeploymentReadinessService {
   private readonly stagingReleaseCandidateOptions: StagingReleaseCandidateOptions;
   private readonly stagingDeploymentExecutionPlan: StagingDeploymentExecutionPlan;
   private readonly stagingDeploymentExecutionOptions: StagingDeploymentExecutionOptions;
+  private readonly stagingHumanSignoffs: Partial<Record<StagingReleaseCandidateSignoffRole, StagingHumanSignoffEvidence>>;
   private readonly cicdPipelineProfiles: CICDPipelineProfile[];
   private readonly cicdJobDefinitions: CICDJobDefinition[];
   private readonly cicdIntegrationTestGates: CICDIntegrationTestGate[];
@@ -536,6 +586,7 @@ export class DeploymentReadinessService {
     this.stagingReleaseCandidateOptions = clone(input.stagingReleaseCandidateOptions ?? {});
     this.stagingDeploymentExecutionPlan = clone(input.stagingDeploymentExecutionPlan ?? defaultStagingDeploymentExecutionPlan);
     this.stagingDeploymentExecutionOptions = clone(input.stagingDeploymentExecutionOptions ?? {});
+    this.stagingHumanSignoffs = clone(this.stagingDeploymentExecutionOptions.humanSignoffs ?? {});
     this.cicdPipelineProfiles = clone(input.cicdPipelineProfiles ?? defaultCicdPipelineProfiles);
     this.cicdJobDefinitions = clone(input.cicdJobDefinitions ?? defaultCicdJobDefinitions);
     this.cicdIntegrationTestGates = clone(input.cicdIntegrationTestGates ?? defaultCicdIntegrationTestGates);
@@ -2497,8 +2548,9 @@ export class DeploymentReadinessService {
 
   getStagingDeploymentExecutionPlan(): StagingDeploymentExecutionPlan {
     const gates = this.listStagingDeploymentExecutionGates();
-    const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
-    const requiredSignoffCount = this.stagingDeploymentExecutionPlan.requiredSignoffs.length;
+    const signoffCollection = this.getStagingDeploymentExecutionSignoffCollection();
+    const pendingApprovals = signoffCollection.pendingApprovals;
+    const requiredSignoffCount = signoffCollection.requiredSignoffCount;
     const criticalFail = gates.some((gate) => gate.status === "fail" && gate.severity === "critical");
     const status: StagingDeploymentExecutionPlanStatus = criticalFail
       ? "blocked"
@@ -2522,15 +2574,19 @@ export class DeploymentReadinessService {
         signoffDecisionPolicyDocs: "docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md",
         requiredSignoffCount,
         pendingApprovalCount: pendingApprovals.length,
-        approvedSignoffCount: 0,
-        signoffStatus: "pending",
-        actualDeploymentBlocked: true
+        approvedSignoffCount: signoffCollection.approvedSignoffCount,
+        conditionalSignoffCount: signoffCollection.conditionalSignoffCount,
+        rejectedSignoffCount: signoffCollection.rejectedSignoffCount,
+        missingRequiredSignoffCount: signoffCollection.missingRequiredSignoffCount,
+        signoffStatus: signoffCollection.signoffStatus,
+        actualDeploymentBlocked: signoffCollection.actualDeploymentBlocked
       }
     });
   }
 
   listStagingDeploymentExecutionSteps(): StagingDeploymentStep[] {
-    const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
+    const signoffCollection = this.getStagingDeploymentExecutionSignoffCollection();
+    const pendingApprovals = signoffCollection.pendingApprovals;
     const step = (
       order: number,
       phase: StagingDeploymentStep["phase"],
@@ -2596,7 +2652,8 @@ export class DeploymentReadinessService {
     const database = this.getDatabaseOperationsSummary();
     const dryRun = this.getStagingDeploymentDryRunSummary();
     const rcAuditStatus = "staging_rc_pass_with_warnings";
-    const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
+    const signoffCollection = this.getStagingDeploymentExecutionSignoffCollection();
+    const pendingApprovals = signoffCollection.pendingApprovals;
     const validationStatus = options.validationCommandStatus ?? "pass";
     const diffStatus = options.diffCheckStatus ?? "pass";
     const safeScanStatus = options.safeIntegrationScanStatus ?? "pass";
@@ -2653,7 +2710,15 @@ export class DeploymentReadinessService {
       gate("staging_execution_no_release_tag_deploy_side_effects", "environment", "No release, tag, deployment, or external call executed", sideEffectDetected ? "fail" : "pass", "critical", true, "This execution plan must remain planning-only until an explicit future deployment task.", ["AGENTS.md"], "Remove side effects and rerun audit.", { deploymentExecuted: Boolean(options.deploymentExecuted), releaseCreated: Boolean(options.releaseCreated), gitTagCreated: Boolean(options.gitTagCreated), externalCallsExecuted: Boolean(options.externalCallsExecuted) }),
       gate("staging_execution_no_ready_overclaim", "environment", "No staging/production overclaim", overclaimDetected ? "fail" : "pass", "critical", true, "Docs and read models must not claim staging is deployed or production is ready.", ["docs/roadmaps/production-deployment-readiness/checklist-v0.md"], "Remove staging-deployed or production-ready overclaims.", { productionReadyClaimed: Boolean(options.productionReadyClaimed), stagingDeployedClaimed: Boolean(options.stagingDeployedClaimed) }),
       gate("staging_execution_rc_audit_accepted", "signoff", "Staging RC audit rerun accepted", "warning", "medium", true, "The latest audit returned staging_rc_pass_with_warnings, not staging_rc_pass.", ["docs/audits/2026-05-14-staging-release-candidate-audit-v0-rerun.md"], "Treat warnings as accepted limitations and collect real signoffs before deployment.", { rcAuditStatus, runtimeRcStatus: this.getStagingReleaseCandidateSummary().overallStatus }),
-      gate("staging_execution_human_signoff_collected", "signoff", "Human signoffs collected", pendingApprovals.length > 0 ? "fail" : "pass", "high", true, "Real human signoffs are required before actual staging deployment execution.", ["docs/roadmaps/staging-release-candidate/signoff-readiness-v0.md"], "Collect required signoffs; do not fake approval.", { pendingApprovals }),
+      gate("staging_execution_human_signoff_collected", "signoff", "Human signoffs collected", pendingApprovals.length > 0 || signoffCollection.rejectedSignoffCount > 0 ? "fail" : "pass", "high", true, "Real human signoffs are required before actual staging deployment execution.", ["docs/roadmaps/staging-release-candidate/signoff-readiness-v0.md"], "Collect required signoffs; do not fake approval.", {
+        pendingApprovals,
+        approvedApprovals: signoffCollection.approvedApprovals,
+        conditionalApprovals: signoffCollection.conditionalApprovals,
+        rejectedApprovals: signoffCollection.rejectedApprovals,
+        invalidEvidenceRoles: signoffCollection.invalidEvidenceRoles,
+        collectionMode: signoffCollection.collectionMode,
+        actualDeploymentBlocked: signoffCollection.actualDeploymentBlocked
+      }),
       gate("staging_execution_release_notes_present", "environment", "Release notes present", options.releaseNotesPresent === false ? "fail" : "pass", "high", true, "Release notes draft/evidence must be present before staging execution.", ["docs/roadmaps/staging-release-candidate/release-notes-draft-v0.md"], "Complete release notes before execution.", { releaseArtifactCreated: false }),
       gate("staging_execution_rollback_plan_present", "rollback", "Rollback plan present", options.rollbackPlanPresent === false ? "fail" : "pass", "high", true, "Rollback plan and manual verification must be present before staging execution.", ["docs/roadmaps/staging-release-candidate/rollback-evidence-v0.md"], "Complete rollback plan before execution.", { rollbackExecuted: false }),
       gate("staging_execution_config_freeze_planned", "environment", "Config/environment gate freeze planned", "warning", "medium", true, "Config freeze is a manual pre-deployment activity and has not been executed by this plan.", ["docs/reference/environment-gate-matrix.md"], "Record final non-secret config gates before deployment execution.", { envValuesReturned: false }),
@@ -2676,7 +2741,8 @@ export class DeploymentReadinessService {
 
   getStagingDeploymentGoNoGoDecision(): StagingDeploymentGoNoGoDecision {
     const gates = this.listStagingDeploymentExecutionGates();
-    const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
+    const signoffCollection = this.getStagingDeploymentExecutionSignoffCollection();
+    const pendingApprovals = signoffCollection.pendingApprovals;
     const blockers = gates.filter((gate) => gate.required && gate.status === "fail").map((gate) => gate.id);
     const criticalBlockers = gates.filter((gate) => gate.status === "fail" && gate.severity === "critical").map((gate) => gate.id);
     const notChecked = gates.filter((gate) => gate.required && gate.status === "not_checked").map((gate) => gate.id);
@@ -2685,7 +2751,7 @@ export class DeploymentReadinessService {
     // failures are no_go; pending real signoff or unchecked required gates keep
     // the execution plan not_ready; optional skipped integrations produce
     // go_with_warnings only after required approvals are complete.
-    const status: StagingDeploymentGoNoGoDecision["status"] = criticalBlockers.length > 0
+    const status: StagingDeploymentGoNoGoDecision["status"] = signoffCollection.rejectedSignoffCount > 0 || criticalBlockers.length > 0
       ? "no_go"
       : pendingApprovals.length > 0 || blockers.length > 0 || notChecked.length > 0
         ? "not_ready"
@@ -2695,7 +2761,9 @@ export class DeploymentReadinessService {
     return clone({
       id: "staging_deployment_execution_go_no_go_v0",
       status,
-      reason: status === "no_go"
+      reason: signoffCollection.rejectedSignoffCount > 0
+        ? "A required human signoff was rejected."
+        : status === "no_go"
         ? "Critical staging execution blocker is open."
         : status === "not_ready"
           ? "Required human signoffs or required gates are still pending before any staging deployment execution."
@@ -2717,11 +2785,14 @@ export class DeploymentReadinessService {
         stagingDeployed: false,
         signoffPackAvailable: true,
         signoffPackDocs: "docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md",
-        requiredSignoffCount: this.stagingDeploymentExecutionPlan.requiredSignoffs.length,
+        requiredSignoffCount: signoffCollection.requiredSignoffCount,
         pendingSignoffCount: pendingApprovals.length,
-        approvedSignoffCount: 0,
-        signoffStatus: "pending",
-        actualDeploymentBlocked: true,
+        approvedSignoffCount: signoffCollection.approvedSignoffCount,
+        conditionalSignoffCount: signoffCollection.conditionalSignoffCount,
+        rejectedSignoffCount: signoffCollection.rejectedSignoffCount,
+        missingRequiredSignoffCount: signoffCollection.missingRequiredSignoffCount,
+        signoffStatus: signoffCollection.signoffStatus,
+        actualDeploymentBlocked: signoffCollection.actualDeploymentBlocked,
         secretValuesReturned: false,
         envValuesReturned: false
       }
@@ -2815,13 +2886,13 @@ export class DeploymentReadinessService {
     const steps = this.listStagingDeploymentExecutionSteps();
     const decision = this.getStagingDeploymentGoNoGoDecision();
     const rollback = this.getStagingDeploymentRollbackPlan();
+    const signoffCollection = this.getStagingDeploymentExecutionSignoffCollection();
     const warnings = gates.filter((gate) => gate.status === "warning" || gate.status === "skipped");
     const blockers = gates.filter((gate) => gate.required && (gate.status === "fail" || gate.status === "not_checked"));
-    const requiredSignoffCount = plan.requiredSignoffs.length;
+    const requiredSignoffCount = signoffCollection.requiredSignoffCount;
     const pendingSignoffCount = decision.pendingApprovals.length;
-    // approved_mock is not real human evidence, so this pack keeps real approvals at zero.
-    const approvedSignoffCount = 0;
-    const signoffStatus: StagingHumanSignoffStatus = "pending";
+    const approvedSignoffCount = signoffCollection.approvedSignoffCount;
+    const signoffStatus = signoffCollection.signoffStatus;
     return clone({
       generatedAt: decision.generatedAt,
       status: "v0_implemented",
@@ -2847,8 +2918,11 @@ export class DeploymentReadinessService {
       requiredSignoffCount,
       pendingSignoffCount,
       approvedSignoffCount,
+      conditionalSignoffCount: signoffCollection.conditionalSignoffCount,
+      rejectedSignoffCount: signoffCollection.rejectedSignoffCount,
+      missingRequiredSignoffCount: signoffCollection.missingRequiredSignoffCount,
       signoffStatus,
-      actualDeploymentBlocked: true,
+      actualDeploymentBlocked: signoffCollection.actualDeploymentBlocked,
       optionalIntegrationDecisionCount: gates.filter((gate) => !gate.required && ["github_app", "webhook", "llm", "vault", "mcp"].includes(gate.category)).length,
       rollbackStepCount: rollback.rollbackSteps.length,
       noSecretsExposed: !this.stagingDeploymentExecutionOptions.secretsExposed,
@@ -2871,8 +2945,19 @@ export class DeploymentReadinessService {
         requiredSignoffCount,
         pendingSignoffCount,
         approvedSignoffCount,
+        conditionalSignoffCount: signoffCollection.conditionalSignoffCount,
+        rejectedSignoffCount: signoffCollection.rejectedSignoffCount,
+        missingRequiredSignoffCount: signoffCollection.missingRequiredSignoffCount,
+        realHumanEvidenceProvidedCount: signoffCollection.realHumanEvidenceProvidedCount,
+        invalidSignoffEvidenceRoles: signoffCollection.invalidEvidenceRoles,
+        rejectedApprovals: signoffCollection.rejectedApprovals,
+        conditionalApprovals: signoffCollection.conditionalApprovals,
+        signoffCollectionMode: signoffCollection.collectionMode,
+        signoffEvidenceChecklistStatus: "present_pending_review",
+        signoffDecisionPolicyStatus: signoffCollection.rejectedSignoffCount > 0 ? "evaluated_no_go_rejected" : pendingSignoffCount > 0 ? "evaluated_pending_required_signoffs" : "evaluated_required_signoffs_collected",
+        approvalAuditRequired: true,
         signoffStatus,
-        actualDeploymentBlocked: true,
+        actualDeploymentBlocked: signoffCollection.actualDeploymentBlocked,
         secretValuesReturned: false,
         envValuesReturned: false,
         recommendedNextActions: [
@@ -2882,6 +2967,51 @@ export class DeploymentReadinessService {
         ]
       }
     });
+  }
+
+  listStagingHumanSignoffEvidence(): StagingHumanSignoffEvidence[] {
+    return clone(this.stagingDeploymentExecutionPlan.requiredSignoffs
+      .map((role) => this.stagingHumanSignoffs[role])
+      .filter((evidence): evidence is StagingHumanSignoffEvidence => evidence !== undefined));
+  }
+
+  recordStagingHumanSignoffEvidence(input: StagingHumanSignoffEvidence): StagingHumanSignoffEvidence {
+    const role = input.role;
+    if (!this.stagingDeploymentExecutionPlan.requiredSignoffs.includes(role)) {
+      throw new Error(`Unsupported staging signoff role: ${String(role)}`);
+    }
+    if (input.status !== "approved" && input.status !== "rejected" && input.status !== "conditionally_approved") {
+      throw new Error("Staging signoff status must be approved, rejected, or conditionally_approved.");
+    }
+    const evidence: StagingHumanSignoffEvidence = {
+      role,
+      required: true,
+      status: input.status,
+      approverName: cleanText(input.approverName, 200),
+      approverContact: cleanText(input.approverContact, 200),
+      signedAt: cleanText(input.signedAt, 80) ?? this.now().toISOString(),
+      reviewedEvidence: cleanTextArray(input.reviewedEvidence),
+      conditions: cleanTextArray(input.conditions ?? []),
+      notes: cleanText(input.notes, 2000),
+      signatureMethod: cleanText(input.signatureMethod, 120),
+      evidenceSource: cleanText(input.evidenceSource, 300) ?? "staging_signoff_collection_ui",
+      metadata: {
+        ...(input.metadata ?? {}),
+        localOnly: true,
+        identityVerified: false,
+        productionAuthImplemented: false,
+        submittedVia: input.metadata.submittedVia ?? "staging_signoff_collection_ui",
+        noDeploymentAuthorization: true,
+        approvalAuditRequired: true,
+        secretValuesStored: false,
+        envValuesStored: false
+      }
+    };
+    if (!hasExplicitHumanSignoffEvidence(evidence)) {
+      throw new Error("Staging signoff evidence is incomplete. Approver name, timestamp, signature method, reviewed evidence, and rejection reason or conditional terms when applicable are required.");
+    }
+    this.stagingHumanSignoffs[role] = evidence;
+    return clone(evidence);
   }
 
   listCicdPipelineProfiles(): CICDPipelineProfile[] {
@@ -4036,10 +4166,70 @@ export class DeploymentReadinessService {
     ]);
   }
 
-  private getStagingDeploymentExecutionPendingApprovals(): StagingReleaseCandidateSignoffRole[] {
-    return this.stagingDeploymentExecutionPlan.requiredSignoffs.filter((role) =>
-      (this.stagingDeploymentExecutionOptions.signoffStatuses?.[role] ?? "pending") === "pending"
-    );
+  private getStagingDeploymentExecutionSignoffCollection(): StagingDeploymentExecutionSignoffCollection {
+    const requiredSignoffs = this.stagingDeploymentExecutionPlan.requiredSignoffs;
+    const humanSignoffs = this.stagingHumanSignoffs;
+    const hasRealEvidenceInput = Object.keys(humanSignoffs).length > 0;
+    const pendingApprovals: StagingReleaseCandidateSignoffRole[] = [];
+    const approvedApprovals: StagingReleaseCandidateSignoffRole[] = [];
+    const conditionalApprovals: StagingReleaseCandidateSignoffRole[] = [];
+    const rejectedApprovals: StagingReleaseCandidateSignoffRole[] = [];
+    const invalidEvidenceRoles: StagingReleaseCandidateSignoffRole[] = [];
+
+    for (const role of requiredSignoffs) {
+      const evidence = humanSignoffs[role];
+      if (hasRealEvidenceInput) {
+        if (evidence === undefined || evidence.role !== role || evidence.required !== true || !hasExplicitHumanSignoffEvidence(evidence)) {
+          pendingApprovals.push(role);
+          if (evidence !== undefined && evidence.status !== "pending") invalidEvidenceRoles.push(role);
+          continue;
+        }
+        if (evidence.status === "approved") {
+          approvedApprovals.push(role);
+          continue;
+        }
+        if (evidence.status === "rejected") {
+          rejectedApprovals.push(role);
+          continue;
+        }
+        if (evidence.status === "conditionally_approved") {
+          conditionalApprovals.push(role);
+          pendingApprovals.push(role);
+          continue;
+        }
+        pendingApprovals.push(role);
+        continue;
+      }
+
+      if ((this.stagingDeploymentExecutionOptions.signoffStatuses?.[role] ?? "pending") === "pending") {
+        pendingApprovals.push(role);
+      }
+    }
+
+    const signoffStatus: StagingHumanSignoffStatus = rejectedApprovals.length > 0
+      ? "rejected"
+      : hasRealEvidenceInput && approvedApprovals.length === requiredSignoffs.length
+        ? "approved"
+        : conditionalApprovals.length > 0
+          ? "conditionally_approved"
+          : "pending";
+
+    return {
+      requiredSignoffCount: requiredSignoffs.length,
+      pendingApprovals,
+      approvedApprovals,
+      conditionalApprovals,
+      rejectedApprovals,
+      invalidEvidenceRoles,
+      realHumanEvidenceProvidedCount: Object.values(humanSignoffs).filter((evidence) => evidence !== undefined && hasExplicitHumanSignoffEvidence(evidence)).length,
+      approvedSignoffCount: hasRealEvidenceInput ? approvedApprovals.length : 0,
+      conditionalSignoffCount: hasRealEvidenceInput ? conditionalApprovals.length : 0,
+      rejectedSignoffCount: hasRealEvidenceInput ? rejectedApprovals.length : 0,
+      missingRequiredSignoffCount: pendingApprovals.length,
+      signoffStatus: hasRealEvidenceInput ? signoffStatus : "pending",
+      collectionMode: hasRealEvidenceInput ? "real_evidence" : "mock_planning",
+      actualDeploymentBlocked: true
+    };
   }
 
   private stagingDryRunRecommendedNextActions(

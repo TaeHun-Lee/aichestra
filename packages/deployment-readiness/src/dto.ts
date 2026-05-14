@@ -86,6 +86,7 @@ import type {
   StagingDeploymentGoNoGoDecision,
   StagingDeploymentRollbackPlan,
   StagingDeploymentStep,
+  StagingHumanSignoffEvidence,
   StagingDeploymentProfile,
   StagingDeploymentSummary,
   StagingReleaseCandidateBlocker,
@@ -510,6 +511,10 @@ export function stagingDeploymentRollbackPlanToDto(plan: StagingDeploymentRollba
 
 export function stagingDeploymentExecutionSummaryToDto(summary: StagingDeploymentExecutionSummary) {
   return sanitize(summary);
+}
+
+export function stagingHumanSignoffEvidenceToDto(evidence: StagingHumanSignoffEvidence) {
+  return sanitize(evidence);
 }
 
 export function cicdPipelineProfileToDto(profile: CICDPipelineProfile) {

@@ -4,8 +4,9 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { createApiServer } from "@aichestra/api";
 import { createSeededStore } from "@aichestra/db";
-import { createDeploymentReadinessService } from "@aichestra/deployment-readiness";
+import { createDeploymentReadinessService, type StagingHumanSignoffEvidence, type StagingReleaseCandidateSignoffRole } from "@aichestra/deployment-readiness";
 import { DemoDashboardDataProvider } from "../apps/web/lib/dashboard-data-provider.ts";
+import { createWebServer } from "../apps/web/src/main.ts";
 import { renderDashboardHtml } from "../apps/web/src/render.ts";
 
 const fixedNow = new Date("2026-05-14T00:00:00.000Z");
@@ -35,8 +36,26 @@ function getJson(port: number, path: string): Promise<{ statusCode: number; body
   });
 }
 
-function postJson(port: number, path: string): Promise<{ statusCode: number; body: Record<string, unknown> }> {
+function getText(port: number, path: string): Promise<{ statusCode: number; body: string; contentType: string }> {
   return new Promise((resolve, reject) => {
+    const request = http.get({ host: "127.0.0.1", port, path }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      response.on("end", () => {
+        resolve({
+          statusCode: response.statusCode ?? 0,
+          body: Buffer.concat(chunks).toString("utf8"),
+          contentType: String(response.headers["content-type"] ?? "")
+        });
+      });
+    });
+    request.on("error", reject);
+  });
+}
+
+function postJson(port: number, path: string, body: Record<string, unknown> = {}): Promise<{ statusCode: number; body: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
     const request = http.request({
       host: "127.0.0.1",
       port,
@@ -44,7 +63,7 @@ function postJson(port: number, path: string): Promise<{ statusCode: number; bod
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "content-length": "2"
+        "content-length": Buffer.byteLength(payload).toString()
       }
     }, (response) => {
       const chunks: Buffer[] = [];
@@ -61,7 +80,7 @@ function postJson(port: number, path: string): Promise<{ statusCode: number; bod
       });
     });
     request.on("error", reject);
-    request.end("{}");
+    request.end(payload);
   });
 }
 
@@ -82,6 +101,39 @@ async function withApiServer(run: (port: number) => Promise<void>, envPatch: Rec
       else process.env[key] = value;
     }
   }
+}
+
+async function withWebServer(run: (port: number) => Promise<void>): Promise<void> {
+  const server = createWebServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await run((server.address() as AddressInfo).port);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
+function humanSignoff(
+  role: StagingReleaseCandidateSignoffRole,
+  status: StagingHumanSignoffEvidence["status"],
+  patch: Partial<StagingHumanSignoffEvidence> = {}
+): StagingHumanSignoffEvidence {
+  return {
+    role,
+    required: true,
+    status,
+    approverName: `${role} reviewer`,
+    signedAt: "2026-05-14T00:00:00Z",
+    reviewedEvidence: [
+      "docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md",
+      "docs/roadmaps/staging-deployment-execution/signoff-evidence-checklist-v0.md",
+      "docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md"
+    ],
+    signatureMethod: "recorded_human_evidence",
+    evidenceSource: "test fixture explicit evidence",
+    metadata: { fixture: true },
+    ...patch
+  };
 }
 
 test("staging execution models expose plan, steps, gates, go/no-go, rollback, and summary safely", () => {
@@ -225,6 +277,161 @@ test("staging execution can reach go_with_warnings only after required mock sign
   assert.equal(summary.productionReady, false);
   assert.equal(summary.stagingDeployed, false);
   assert.equal(hasSecretOrEnvValue({ plan, steps, decision, summary }), false);
+});
+
+test("staging signoff collection counts only explicit human evidence and keeps missing roles pending", () => {
+  const service = createDeploymentReadinessService({
+    stagingDeploymentExecutionOptions: {
+      humanSignoffs: {
+        engineering_owner: humanSignoff("engineering_owner", "approved"),
+        security_reviewer: humanSignoff("security_reviewer", "rejected", { notes: "Security review rejected this staging execution." }),
+        qa_reviewer: humanSignoff("qa_reviewer", "approved", { signedAt: undefined })
+      }
+    },
+    now: () => fixedNow
+  });
+
+  const gates = service.listStagingDeploymentExecutionGates();
+  const decision = service.getStagingDeploymentGoNoGoDecision();
+  const summary = service.getStagingDeploymentExecutionSummary();
+  const signoffGate = gates.find((gate) => gate.id === "staging_execution_human_signoff_collected");
+
+  assert.equal(decision.status, "no_go");
+  assert.equal(decision.reason, "A required human signoff was rejected.");
+  assert.equal(decision.pendingApprovals.length, 4);
+  assert.equal(summary.approvedSignoffCount, 1);
+  assert.equal(summary.rejectedSignoffCount, 1);
+  assert.equal(summary.pendingSignoffCount, 4);
+  assert.equal(summary.missingRequiredSignoffCount, 4);
+  assert.equal(summary.signoffStatus, "rejected");
+  assert.equal(summary.actualDeploymentBlocked, true);
+  assert.deepEqual((summary.metadata.invalidSignoffEvidenceRoles as string[]), ["qa_reviewer"]);
+  assert.equal(signoffGate?.status, "fail");
+  assert.equal(hasSecretOrEnvValue({ gates, decision, summary }), false);
+});
+
+test("complete real human signoff evidence updates counts without executing deployment", () => {
+  const roles: StagingReleaseCandidateSignoffRole[] = [
+    "engineering_owner",
+    "platform_owner",
+    "security_reviewer",
+    "product_owner",
+    "qa_reviewer",
+    "release_manager"
+  ];
+  const service = createDeploymentReadinessService({
+    stagingDeploymentExecutionOptions: {
+      humanSignoffs: Object.fromEntries(roles.map((role) => [role, humanSignoff(role, "approved")])) as Partial<Record<StagingReleaseCandidateSignoffRole, StagingHumanSignoffEvidence>>
+    },
+    now: () => fixedNow
+  });
+
+  const decision = service.getStagingDeploymentGoNoGoDecision();
+  const summary = service.getStagingDeploymentExecutionSummary();
+
+  assert.equal(decision.pendingApprovals.length, 0);
+  assert.equal(decision.status, "go_with_warnings");
+  assert.equal(summary.approvedSignoffCount, 6);
+  assert.equal(summary.pendingSignoffCount, 0);
+  assert.equal(summary.rejectedSignoffCount, 0);
+  assert.equal(summary.signoffStatus, "approved");
+  assert.equal(summary.actualDeploymentBlocked, true);
+  assert.equal(summary.metadata.approvalAuditRequired, true);
+  assert.equal(summary.deploymentExecuted, false);
+  assert.equal(summary.stagingDeployed, false);
+  assert.equal(summary.productionReady, false);
+  assert.equal(hasSecretOrEnvValue({ decision, summary }), false);
+});
+
+test("staging signoff collection page records explicit approvals and rejections safely", async () => {
+  await withApiServer(async (port) => {
+    const page = await getText(port, "/staging/signoffs");
+    assert.equal(page.statusCode, 200);
+    assert.equal(page.contentType.includes("text/html"), true);
+    assert.equal(page.body.includes("Staging Human Signoff Collection"), true);
+    assert.equal(page.body.includes("Record Signoff"), true);
+    assert.equal(page.body.includes("actualDeploymentBlocked=true"), true);
+
+    const incomplete = await postJson(port, "/staging/signoffs/evidence", {
+      role: "platform_owner",
+      status: "approved",
+      signatureMethod: "typed_name",
+      reviewedEvidence: ["docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md"]
+    });
+    assert.equal(incomplete.statusCode, 400);
+    assert.equal(incomplete.body.error, "invalid_staging_signoff_evidence");
+
+    const approval = await postJson(port, "/staging/signoffs/evidence", {
+      role: "engineering_owner",
+      status: "approved",
+      approverName: "Engineering Owner",
+      signatureMethod: "typed_name",
+      reviewedEvidence: ["docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md"],
+      notes: "Reviewed staging signoff pack."
+    });
+    assert.equal(approval.statusCode, 201);
+    assert.equal((approval.body.summary as Record<string, unknown>).approvedSignoffCount, 1);
+    assert.equal((approval.body.summary as Record<string, unknown>).pendingSignoffCount, 5);
+    assert.equal((approval.body.summary as Record<string, unknown>).actualDeploymentBlocked, true);
+    assert.equal((approval.body.decision as Record<string, unknown>).status, "not_ready");
+
+    const rejection = await postJson(port, "/staging/signoffs/evidence", {
+      role: "security_reviewer",
+      status: "rejected",
+      approverName: "Security Reviewer",
+      signatureMethod: "ticket_comment",
+      reviewedEvidence: ["docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md"],
+      notes: "Rejected until the approval audit is rerun."
+    });
+    assert.equal(rejection.statusCode, 201);
+    assert.equal((rejection.body.summary as Record<string, unknown>).approvedSignoffCount, 1);
+    assert.equal((rejection.body.summary as Record<string, unknown>).rejectedSignoffCount, 1);
+    assert.equal((rejection.body.summary as Record<string, unknown>).signoffStatus, "rejected");
+    assert.equal((rejection.body.decision as Record<string, unknown>).status, "no_go");
+    assert.equal((rejection.body.summary as Record<string, unknown>).actualDeploymentBlocked, true);
+
+    const evidence = await getJson(port, "/staging/signoffs/evidence");
+    assert.equal(evidence.statusCode, 200);
+    assert.equal((evidence.body.evidence as unknown[]).length, 2);
+    assert.equal(((evidence.body.summary as Record<string, unknown>).approvedSignoffCount), 1);
+    assert.equal(((evidence.body.summary as Record<string, unknown>).rejectedSignoffCount), 1);
+
+    const summary = await getJson(port, "/readiness/staging-execution/summary");
+    assert.equal((summary.body.summary as Record<string, unknown>).approvedSignoffCount, 1);
+    assert.equal((summary.body.summary as Record<string, unknown>).rejectedSignoffCount, 1);
+    assert.equal((summary.body.summary as Record<string, unknown>).actualDeploymentBlocked, true);
+    assert.equal(hasSecretOrEnvValue({ page, incomplete, approval, rejection, evidence, summary }), false);
+  });
+});
+
+test("web server exposes staging signoff collection on the dashboard port", async () => {
+  await withWebServer(async (port) => {
+    const page = await getText(port, "/staging/signoffs");
+    assert.equal(page.statusCode, 200);
+    assert.equal(page.contentType.includes("text/html"), true);
+    assert.equal(page.body.includes("Staging Human Signoff Collection"), true);
+    assert.equal(page.body.includes("Record Signoff"), true);
+    assert.equal(page.body.includes("actualDeploymentBlocked=true"), true);
+
+    const approval = await postJson(port, "/staging/signoffs/evidence", {
+      role: "engineering_owner",
+      status: "approved",
+      approverName: "Engineering Owner",
+      signatureMethod: "typed_name",
+      reviewedEvidence: ["docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md"],
+      notes: "Reviewed through the web dashboard signoff page."
+    });
+    assert.equal(approval.statusCode, 201);
+    assert.equal((approval.body.summary as Record<string, unknown>).approvedSignoffCount, 1);
+    assert.equal((approval.body.summary as Record<string, unknown>).pendingSignoffCount, 5);
+    assert.equal((approval.body.summary as Record<string, unknown>).actualDeploymentBlocked, true);
+
+    const evidence = await getJson(port, "/staging/signoffs/evidence");
+    assert.equal(evidence.statusCode, 200);
+    assert.equal((evidence.body.evidence as unknown[]).length, 1);
+    assert.equal((evidence.body.decision as Record<string, unknown>).status, "not_ready");
+    assert.equal(hasSecretOrEnvValue({ page, approval, evidence }), false);
+  });
 });
 
 test("staging execution APIs, dashboard panel, and health metadata are read-only and sanitized", async () => {
