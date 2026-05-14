@@ -513,6 +513,8 @@ curl http://localhost:3000/dashboard/auth-production
 
 Auth readiness responses are read-only and expose no tokens, cookies, session ids, passwords, raw identity assertions, IdP client secrets, or provider credentials. They mark production auth as disabled and production readiness as false.
 
+Production Auth/RBAC Implementation Plan v1 is recorded under `docs/roadmaps/auth-rbac-production/`. It adds provider selection, session/token boundary, security/audit requirements, implementation phases, and blocker/risk planning for future Phase 5 work. It remains planning only and does not enable real auth or issue credentials.
+
 SecretRef-backed Provider Credentials v1 adds metadata-only provider credential resolution for controlled GitHub, GitHub webhook, and OpenAI-compatible paths. The env provider is disabled by default and reads only the requested allowlisted env key referenced by an active `SecretRef` after Auth/RBAC and Policy checks:
 
 ```bash
@@ -886,7 +888,7 @@ Deferred:
 ## Next Steps
 
 1. Collect real human signoffs using Staging Human Signoff Pack v0, then run Staging Deployment Approval Audit v0 before any staging deployment execution.
-2. Harden production auth/RBAC implementation with real IdP adapters, tenant scoping, durable auth repositories, and session/service-account design before any production login work.
+2. Run Production Auth/RBAC Boundary Inventory Audit v1, then harden production auth/RBAC implementation with real IdP adapters, tenant scoping, durable auth repositories, and session/service-account design before any production login work.
 3. Harden audit retention/export with durable common audit storage, legal hold, tenant scoping, and secure export checkpoints before any production SIEM integration.
 4. Harden Local Agent Protocol persistence and consent UX before any real daemon or local CLI work.
 5. Harden LLM Gateway v2 with persistent route/model catalog/audit repositories and production secret backend planning before broader provider calls.
