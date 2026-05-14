@@ -189,6 +189,7 @@ import type {
   StagingDeploymentGoNoGoDecision,
   StagingDeploymentRollbackPlan,
   StagingDeploymentStep,
+  StagingHumanSignoffStatus,
   StagingDeploymentProfile,
   StagingDeploymentSummary,
   StagingReleaseCandidateBlocker,
@@ -2497,6 +2498,7 @@ export class DeploymentReadinessService {
   getStagingDeploymentExecutionPlan(): StagingDeploymentExecutionPlan {
     const gates = this.listStagingDeploymentExecutionGates();
     const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
+    const requiredSignoffCount = this.stagingDeploymentExecutionPlan.requiredSignoffs.length;
     const criticalFail = gates.some((gate) => gate.status === "fail" && gate.severity === "critical");
     const status: StagingDeploymentExecutionPlanStatus = criticalFail
       ? "blocked"
@@ -2514,7 +2516,15 @@ export class DeploymentReadinessService {
         noGitTagCreation: true,
         noExternalCalls: true,
         noIntegrationTestsExecuted: true,
-        pendingApprovalCount: pendingApprovals.length
+        signoffPackAvailable: true,
+        signoffPackDocs: "docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md",
+        signoffEvidenceChecklistDocs: "docs/roadmaps/staging-deployment-execution/signoff-evidence-checklist-v0.md",
+        signoffDecisionPolicyDocs: "docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md",
+        requiredSignoffCount,
+        pendingApprovalCount: pendingApprovals.length,
+        approvedSignoffCount: 0,
+        signoffStatus: "pending",
+        actualDeploymentBlocked: true
       }
     });
   }
@@ -2705,6 +2715,13 @@ export class DeploymentReadinessService {
         externalCallsExecuted: false,
         productionReady: false,
         stagingDeployed: false,
+        signoffPackAvailable: true,
+        signoffPackDocs: "docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md",
+        requiredSignoffCount: this.stagingDeploymentExecutionPlan.requiredSignoffs.length,
+        pendingSignoffCount: pendingApprovals.length,
+        approvedSignoffCount: 0,
+        signoffStatus: "pending",
+        actualDeploymentBlocked: true,
         secretValuesReturned: false,
         envValuesReturned: false
       }
@@ -2800,6 +2817,11 @@ export class DeploymentReadinessService {
     const rollback = this.getStagingDeploymentRollbackPlan();
     const warnings = gates.filter((gate) => gate.status === "warning" || gate.status === "skipped");
     const blockers = gates.filter((gate) => gate.required && (gate.status === "fail" || gate.status === "not_checked"));
+    const requiredSignoffCount = plan.requiredSignoffs.length;
+    const pendingSignoffCount = decision.pendingApprovals.length;
+    // approved_mock is not real human evidence, so this pack keeps real approvals at zero.
+    const approvedSignoffCount = 0;
+    const signoffStatus: StagingHumanSignoffStatus = "pending";
     return clone({
       generatedAt: decision.generatedAt,
       status: "v0_implemented",
@@ -2821,7 +2843,12 @@ export class DeploymentReadinessService {
       warningCount: warnings.length,
       stepCount: steps.length,
       readyStepCount: steps.filter((step) => step.status === "ready").length,
-      pendingSignoffCount: decision.pendingApprovals.length,
+      signoffPackAvailable: true,
+      requiredSignoffCount,
+      pendingSignoffCount,
+      approvedSignoffCount,
+      signoffStatus,
+      actualDeploymentBlocked: true,
       optionalIntegrationDecisionCount: gates.filter((gate) => !gate.required && ["github_app", "webhook", "llm", "vault", "mcp"].includes(gate.category)).length,
       rollbackStepCount: rollback.rollbackSteps.length,
       noSecretsExposed: !this.stagingDeploymentExecutionOptions.secretsExposed,
@@ -2837,6 +2864,15 @@ export class DeploymentReadinessService {
         deploymentExecuted: false,
         externalCallsEnabled: false,
         remoteIntegrationTestsExecuted: false,
+        signoffPackAvailable: true,
+        signoffPackDocs: "docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md",
+        signoffEvidenceChecklistDocs: "docs/roadmaps/staging-deployment-execution/signoff-evidence-checklist-v0.md",
+        signoffDecisionPolicyDocs: "docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md",
+        requiredSignoffCount,
+        pendingSignoffCount,
+        approvedSignoffCount,
+        signoffStatus,
+        actualDeploymentBlocked: true,
         secretValuesReturned: false,
         envValuesReturned: false,
         recommendedNextActions: [

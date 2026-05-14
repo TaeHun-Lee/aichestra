@@ -228,3 +228,9 @@ real Auth/RBAC and tenant isolation, production secret backend rollout and rotat
 
 Recommended next task:
 collect and record real human signoffs before any staging deployment execution, or run a future Staging Deployment Execution Approval Audit after signoffs are recorded.
+
+## 11. Post-audit Signoff Collection Reference
+
+Follow-up readiness documentation now exists at `docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md`, with supporting evidence checklist and decision policy documents in the same folder.
+
+This reference does not change the audit decision or conclusions above. The signoff pack remains pending, no approval is recorded, actual staging deployment remains blocked, staging deployed remains false, and production ready remains false.

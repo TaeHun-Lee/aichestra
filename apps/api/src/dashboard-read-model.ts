@@ -729,6 +729,17 @@ function buildStagingExecution(context: DashboardReadModelContext): StagingDeplo
     blockers: sanitizeDashboardArray(gates.filter((gate) => gate.required && (gate.status === "fail" || gate.status === "not_checked"))),
     warnings: sanitizeDashboardArray(gates.filter((gate) => gate.status === "warning" || gate.status === "skipped")),
     goNoGoDecision: sanitizeDashboardObject(decision),
+    signoffPack: sanitizeDashboardObject({
+      available: summary.signoffPackAvailable,
+      status: summary.signoffStatus,
+      requiredRoleCount: summary.requiredSignoffCount,
+      pendingRoleCount: summary.pendingSignoffCount,
+      approvedRoleCount: summary.approvedSignoffCount,
+      actualDeploymentBlocked: summary.actualDeploymentBlocked,
+      docs: "docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md",
+      evidenceChecklistDocs: "docs/roadmaps/staging-deployment-execution/signoff-evidence-checklist-v0.md",
+      decisionPolicyDocs: "docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md"
+    }),
     pendingSignoffs: sanitizeDashboardArray(decision.pendingApprovals.map((role) => ({ role, status: "pending" }))),
     optionalIntegrationDecisions: sanitizeDashboardArray(gates.filter((gate) => !gate.required && ["github_app", "webhook", "llm", "vault", "mcp"].includes(gate.category))),
     rollbackPlan: sanitizeDashboardObject(rollback),

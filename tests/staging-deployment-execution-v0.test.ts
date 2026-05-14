@@ -124,6 +124,12 @@ test("staging execution models expose plan, steps, gates, go/no-go, rollback, an
   assert.equal(summary.gitTagCreated, false);
   assert.equal(summary.externalCallsEnabled, false);
   assert.equal(summary.remoteIntegrationTestsExecuted, false);
+  assert.equal(summary.signoffPackAvailable, true);
+  assert.equal(summary.requiredSignoffCount, 6);
+  assert.equal(summary.pendingSignoffCount, 6);
+  assert.equal(summary.approvedSignoffCount, 0);
+  assert.equal(summary.signoffStatus, "pending");
+  assert.equal(summary.actualDeploymentBlocked, true);
   assert.equal(summary.noSecretsExposed, true);
   assert.equal(summary.envValuesExposed, false);
   assert.equal(hasSecretOrEnvValue({ plan, steps, gates, decision, rollback, summary }), false);
@@ -210,6 +216,11 @@ test("staging execution can reach go_with_warnings only after required mock sign
   assert.equal(decision.blockers.length, 0);
   assert.equal(decision.status, "go_with_warnings");
   assert.equal(summary.pendingSignoffCount, 0);
+  assert.equal(summary.signoffPackAvailable, true);
+  assert.equal(summary.requiredSignoffCount, 6);
+  assert.equal(summary.approvedSignoffCount, 0);
+  assert.equal(summary.signoffStatus, "pending");
+  assert.equal(summary.actualDeploymentBlocked, true);
   assert.equal(summary.goNoGoStatus, "go_with_warnings");
   assert.equal(summary.productionReady, false);
   assert.equal(summary.stagingDeployed, false);
@@ -240,6 +251,12 @@ test("staging execution APIs, dashboard panel, and health metadata are read-only
     assert.equal(((rollback.body.rollback as Record<string, unknown>).rollbackSteps as unknown[]).length, 10);
     assert.equal(summary.statusCode, 200);
     assert.equal((summary.body.summary as Record<string, unknown>).status, "v0_implemented");
+    assert.equal((summary.body.summary as Record<string, unknown>).signoffPackAvailable, true);
+    assert.equal((summary.body.summary as Record<string, unknown>).requiredSignoffCount, 6);
+    assert.equal((summary.body.summary as Record<string, unknown>).pendingSignoffCount, 6);
+    assert.equal((summary.body.summary as Record<string, unknown>).approvedSignoffCount, 0);
+    assert.equal((summary.body.summary as Record<string, unknown>).signoffStatus, "pending");
+    assert.equal((summary.body.summary as Record<string, unknown>).actualDeploymentBlocked, true);
     assert.equal((summary.body.summary as Record<string, unknown>).deploymentExecuted, false);
     assert.equal((summary.body.summary as Record<string, unknown>).externalCallsEnabled, false);
     assert.equal(health.statusCode, 200);
@@ -249,8 +266,17 @@ test("staging execution APIs, dashboard panel, and health metadata are read-only
     assert.equal((health.body.stagingExecution as Record<string, unknown>).releaseCreated, false);
     assert.equal((health.body.stagingExecution as Record<string, unknown>).gitTagCreated, false);
     assert.equal((health.body.stagingExecution as Record<string, unknown>).externalCallsEnabled, false);
+    assert.equal((health.body.stagingExecution as Record<string, unknown>).signoffPackAvailable, true);
+    assert.equal((health.body.stagingExecution as Record<string, unknown>).requiredSignoffCount, 6);
+    assert.equal((health.body.stagingExecution as Record<string, unknown>).pendingSignoffCount, 6);
+    assert.equal((health.body.stagingExecution as Record<string, unknown>).approvedSignoffCount, 0);
+    assert.equal((health.body.stagingExecution as Record<string, unknown>).signoffStatus, "pending");
+    assert.equal((health.body.stagingExecution as Record<string, unknown>).actualDeploymentBlocked, true);
     assert.equal((health.body.stagingExecution as Record<string, unknown>).noSecretsExposed, true);
     assert.equal(dashboard.statusCode, 200);
+    assert.equal(((dashboard.body.stagingExecution as Record<string, unknown>).signoffPack as Record<string, unknown>).status, "pending");
+    assert.equal(((dashboard.body.stagingExecution as Record<string, unknown>).signoffPack as Record<string, unknown>).approvedRoleCount, 0);
+    assert.equal(((dashboard.body.stagingExecution as Record<string, unknown>).signoffPack as Record<string, unknown>).actualDeploymentBlocked, true);
     assert.equal((dashboard.body.stagingExecution as Record<string, unknown>).noSecretStatus instanceof Object, true);
     assert.equal(writeAttempt.statusCode, 405);
     assert.equal(hasSecretOrEnvValue({ plan, steps, gates, decision, rollback, summary, health, dashboard }), false);
@@ -271,6 +297,8 @@ test("staging execution dashboard HTML renders planning status without secrets o
   const html = await renderDashboardHtml(new DemoDashboardDataProvider());
 
   assert.equal(html.includes("Staging Deployment Execution Plan"), true);
+  assert.equal(html.includes("Signoff pack"), true);
+  assert.equal(html.includes("approved roles 0"), true);
   assert.equal(html.includes("Step sequence"), true);
   assert.equal(html.includes("Go/no-go decision"), true);
   assert.equal(html.includes("Optional integration decisions"), true);

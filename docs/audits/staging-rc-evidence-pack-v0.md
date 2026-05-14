@@ -85,6 +85,7 @@ Skipped optional profiles are acceptable for Staging RC v0 only when explicitly 
 ## Signoff Readiness Evidence
 
 - Signoff readiness: `docs/roadmaps/staging-release-candidate/signoff-readiness-v0.md`
+- Follow-up signoff collection pack: `docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md`
 - Status: planning-ready, pending real signoffs.
 - Real human approval was not faked.
 - Pending real signoffs block `staging_rc_pass`.

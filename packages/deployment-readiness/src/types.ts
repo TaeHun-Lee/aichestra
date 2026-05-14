@@ -404,6 +404,7 @@ export type StagingReleaseCandidateSignoffRole =
   | "qa_reviewer"
   | "release_manager";
 export type StagingReleaseCandidateSignoffStatus = "pending" | "approved_mock" | "waived" | "not_applicable";
+export type StagingHumanSignoffStatus = "pending" | "approved" | "conditionally_approved" | "rejected" | "waived";
 export type StagingReleaseNoteSection =
   | "summary"
   | "changed_areas"
@@ -2241,7 +2242,12 @@ export type StagingDeploymentExecutionSummary = {
   warningCount: number;
   stepCount: number;
   readyStepCount: number;
+  signoffPackAvailable: true;
+  requiredSignoffCount: number;
   pendingSignoffCount: number;
+  approvedSignoffCount: number;
+  signoffStatus: StagingHumanSignoffStatus;
+  actualDeploymentBlocked: true;
   optionalIntegrationDecisionCount: number;
   rollbackStepCount: number;
   noSecretsExposed: boolean;

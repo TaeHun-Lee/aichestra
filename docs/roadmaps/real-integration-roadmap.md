@@ -37,7 +37,8 @@
 33. Vault-backed Secret Backend v1 - implemented
 34. Vault Integration-Test Profile v1 - implemented
 35. Staging Deployment Execution Plan v0 - implemented
-36. Phase 5 enterprise planning
+36. Staging Human Signoff Pack v0 - implemented
+37. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -563,9 +564,23 @@ Goals:
 - Expose go/no-go and rollback readiness while keeping pending real signoffs as `not_ready`.
 - Keep runtime safe: no release creation, no Git tag creation, no GitHub release, no deployment, no CI job execution, no remote integration-test execution, no provider calls, no resource mutation, no secrets, no env values, no staging-deployed claim, and no production-ready claim.
 
-Recommended next step: Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+Recommended next step: Collect real human signoffs using Staging Human Signoff Pack v0, then run Staging Deployment Approval Audit v0 before any staging deployment execution.
 
-## 36. Phase 5 Enterprise Planning
+## 36. Staging Human Signoff Pack v0
+
+Implemented with `docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md`, `docs/roadmaps/staging-deployment-execution/signoff-evidence-checklist-v0.md`, and `docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md`.
+
+Goals:
+
+- Provide a documentation/readiness surface for collecting real human signoffs before actual staging deployment execution.
+- Keep all required roles pending by default: `engineering_owner`, `platform_owner`, `security_reviewer`, `product_owner`, `qa_reviewer`, and `release_manager`.
+- Require review of the Staging Go/No-Go Audit, Staging RC Audit rerun, Staging RC Evidence Pack, release notes draft, rollback evidence, staging execution plan, safe integration summary, no-secret/no-env result, validation results, skipped optional test rationale, known limitations, and production blockers.
+- Define conditional approval, rejection/hold, expiry, reviewed scope, and revalidation rules without implementing identity, durable approval storage, deployment execution, releases, tags, GitHub releases, or provider calls.
+- Keep actual staging deployment blocked until real signoffs are recorded and a future Staging Deployment Approval Audit accepts the evidence.
+
+Recommended next step: Collect real human signoffs using the signoff pack, then run Staging Deployment Approval Audit v0 before any staging deployment execution.
+
+## 37. Phase 5 Enterprise Planning
 
 Goals:
 

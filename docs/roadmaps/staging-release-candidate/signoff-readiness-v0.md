@@ -4,6 +4,8 @@ Status: `planning_ready_pending_real_signoff`
 
 This document records signoff readiness evidence for Staging RC Evidence Pack v0. It does not create real human approval, production identity, sessions, tokens, or durable approval workflow.
 
+For actual staging deployment execution, use `docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md` and its evidence checklist/policy documents. That pack is the current collection surface for real human signoffs and defaults every required role to `pending`.
+
 ## Signoff Policy
 
 - Real human approval is not faked.
@@ -37,3 +39,5 @@ Signoff readiness evidence does not implement production Auth/RBAC, identity-pro
 ## Deployment Guardrail
 
 No actual staging deployment should proceed from this document alone. Before any staging deployment attempt, real accountable signoff must be collected and recorded by the project process in effect at that time.
+
+Current deployment signoff pack status: `pending_real_human_signoff`. Required roles remain pending, no approval is recorded, and actual staging deployment remains blocked.

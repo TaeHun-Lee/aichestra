@@ -48,6 +48,8 @@ The plan defines a manual sequence for future controlled staging deployment afte
 
 Required roles are `engineering_owner`, `platform_owner`, `security_reviewer`, `product_owner`, `qa_reviewer`, and `release_manager`. This task does not fake real approval. Pending signoffs keep the execution plan `ready_for_signoff` and go/no-go `not_ready`.
 
+Staging Human Signoff Pack v0 now provides the collection surface, evidence checklist, and decision policy for those roles. It remains pending until real human approval evidence is recorded.
+
 ## Pre-deployment Checks
 
 Required gates include `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, `git diff --check`, safe integration scan, no-secret/no-env exposure, no release/tag/deployment side effects, no staging/production overclaim, release notes present, rollback plan present, and accepted RC warnings.

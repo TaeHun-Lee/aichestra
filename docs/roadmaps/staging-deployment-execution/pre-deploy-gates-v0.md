@@ -13,7 +13,7 @@ Required pre-deployment gates:
 - Safe integration scan pass.
 - No-secret/no-env exposure pass.
 - Staging RC decision is `staging_rc_pass` or an accepted `staging_rc_pass_with_warnings`.
-- Human signoffs collected from all required roles.
+- Human signoffs collected from all required roles using `human-signoff-pack-v0.md`, `signoff-evidence-checklist-v0.md`, and `signoff-decision-policy-v0.md`.
 - Release notes present.
 - Rollback plan present.
 - Optional integration skips accepted and documented.

@@ -356,6 +356,7 @@ export type StagingDeploymentExecutionReadModel = {
   blockers: DashboardJsonObject[];
   warnings: DashboardJsonObject[];
   goNoGoDecision: DashboardJsonObject;
+  signoffPack: DashboardJsonObject;
   pendingSignoffs: DashboardJsonObject[];
   optionalIntegrationDecisions: DashboardJsonObject[];
   rollbackPlan: DashboardJsonObject;

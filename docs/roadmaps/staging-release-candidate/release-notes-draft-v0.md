@@ -80,7 +80,7 @@ Live GitHub, LLM, MCP, and auth integrations remain gated.
 - Staging deployment execution: not implemented and not attempted.
 - Production deployment: not implemented and not ready.
 - Optional live provider validation: skipped by default and remains gated.
-- Signoffs: planning-ready evidence exists, but real human signoffs are still required before actual staging deployment.
+- Signoffs: planning-ready evidence exists, Staging Human Signoff Pack v0 is available for collection, but real human signoffs are still required before actual staging deployment.
 
 ## Migration Notes
 
@@ -113,6 +113,6 @@ The evidence pack task does not change API or dashboard runtime behavior.
 
 ## Follow-ups
 
-- Recommended next task: Vault Integration-Test Profile v1 is implemented; next is Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+- Recommended next task: collect real human signoffs using Staging Human Signoff Pack v0, then run Staging Deployment Approval Audit v0 before any staging deployment execution.
 - Non-blocking follow-ups: resolve pnpm Node engine warning mismatch, add durable CI evidence ingestion later, and add richer dashboard/API contract references.
 - Production blockers to keep visible: production Auth/RBAC, real secret backend, production DB operations, durable observability/export/retention, policy bundle runtime, tenant isolation, live GitHub App/webhook/LLM validation, real MCP transport, and production deployment controls.

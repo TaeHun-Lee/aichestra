@@ -130,7 +130,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const staging = await getJson(port, "/dashboard/staging") as { staging: { summary: { productionReady: boolean; stagingDeployed: boolean; remoteMergeForbidden: boolean; remoteMcpForbidden: boolean; vendorCliForbidden: boolean }; integrationGates: unknown[]; promotionCriteria: unknown[]; rollbackCriteria: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const stagingDryRun = await getJson(port, "/dashboard/staging-dry-run") as { stagingDryRun: { summary: { productionReady: boolean; stagingDeployed: boolean; deploymentExecuted: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean }; sources: unknown[]; requiredChecks: unknown[]; blockers: unknown[]; criticalBlockers: unknown[]; skippedIntegrationProfiles: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const stagingReleaseCandidate = await getJson(port, "/dashboard/staging-rc") as { stagingReleaseCandidate: { summary: { productionReady: boolean; stagingDeployed: boolean; releaseCreated: boolean; gitTagCreated: boolean; githubReleaseCreated: boolean; deploymentExecuted: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean }; requiredGates: unknown[]; blockers: unknown[]; signoffs: unknown[]; releaseNoteRequirements: unknown[]; rollbackChecklist: unknown[]; skippedTests: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
-    const stagingExecution = await getJson(port, "/dashboard/staging-execution") as { stagingExecution: { summary: { productionReady: boolean; stagingDeployed: boolean; deploymentExecuted: boolean; releaseCreated: boolean; gitTagCreated: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean; goNoGoStatus: string }; steps: unknown[]; requiredGates: unknown[]; blockers: unknown[]; pendingSignoffs: unknown[]; optionalIntegrationDecisions: unknown[]; rollbackSteps: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
+    const stagingExecution = await getJson(port, "/dashboard/staging-execution") as { stagingExecution: { summary: { productionReady: boolean; stagingDeployed: boolean; deploymentExecuted: boolean; releaseCreated: boolean; gitTagCreated: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean; goNoGoStatus: string; signoffPackAvailable: boolean; requiredSignoffCount: number; pendingSignoffCount: number; approvedSignoffCount: number; signoffStatus: string; actualDeploymentBlocked: boolean }; steps: unknown[]; requiredGates: unknown[]; blockers: unknown[]; signoffPack: { available: boolean; status: string; requiredRoleCount: number; pendingRoleCount: number; approvedRoleCount: number; actualDeploymentBlocked: boolean }; pendingSignoffs: unknown[]; optionalIntegrationDecisions: unknown[]; rollbackSteps: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const cicd = await getJson(port, "/dashboard/ci-cd") as { cicd: { summary: { productionReady: boolean; stagingDeployed: boolean; activeWorkflowCreated: boolean; remoteIntegrationTestsEnabledByDefault: boolean; externalCallsEnabledByDefault: boolean }; jobs: unknown[]; integrationGates: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const observability = await getJson(port, "/dashboard/observability") as { observability: { config: { externalBackendEnabled: boolean }; sourceCoverage: unknown[]; noSecretStatus: { noSecretsExposed: boolean } } };
     const audit = await getJson(port, "/dashboard/audit") as { audit: { auditGroups: unknown[]; summary: { noSecretsExposed: boolean } } };
@@ -296,6 +296,18 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(stagingExecution.stagingExecution.summary.externalCallsEnabled, false);
     assert.equal(stagingExecution.stagingExecution.summary.remoteIntegrationTestsExecuted, false);
     assert.equal(stagingExecution.stagingExecution.summary.goNoGoStatus, "not_ready");
+    assert.equal(stagingExecution.stagingExecution.summary.signoffPackAvailable, true);
+    assert.equal(stagingExecution.stagingExecution.summary.requiredSignoffCount, 6);
+    assert.equal(stagingExecution.stagingExecution.summary.pendingSignoffCount, 6);
+    assert.equal(stagingExecution.stagingExecution.summary.approvedSignoffCount, 0);
+    assert.equal(stagingExecution.stagingExecution.summary.signoffStatus, "pending");
+    assert.equal(stagingExecution.stagingExecution.summary.actualDeploymentBlocked, true);
+    assert.equal(stagingExecution.stagingExecution.signoffPack.available, true);
+    assert.equal(stagingExecution.stagingExecution.signoffPack.status, "pending");
+    assert.equal(stagingExecution.stagingExecution.signoffPack.requiredRoleCount, 6);
+    assert.equal(stagingExecution.stagingExecution.signoffPack.pendingRoleCount, 6);
+    assert.equal(stagingExecution.stagingExecution.signoffPack.approvedRoleCount, 0);
+    assert.equal(stagingExecution.stagingExecution.signoffPack.actualDeploymentBlocked, true);
     assert.equal(stagingExecution.stagingExecution.steps.length > 0, true);
     assert.equal(stagingExecution.stagingExecution.requiredGates.length > 0, true);
     assert.equal(stagingExecution.stagingExecution.blockers.length > 0, true);
