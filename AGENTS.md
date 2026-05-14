@@ -47,6 +47,7 @@ Do not implement real external API calls in the default MVP scaffold. Use explic
 - Avoid hidden global state.
 - Do not store secrets in source code.
 - Do not call OpenAI, Anthropic, GitHub, or other external APIs in default tests. Optional real GitHub integration tests may run only when every explicit Real Git Adapter v1/v2 gate is configured. Optional real remote LLM tests may run only when every explicit LLM Gateway v1/v2 gate is configured.
+- For signoff, audit, readiness, approval, execution-request, and release-candidate workflows, classify reviewed target scope, evidence scope, execution scope, and governance/policy scope before deciding whether a new diff requires reapproval. Evidence-only audit/readiness/request documents generated after target freeze do not automatically change the approved target, but any blocker, rejection, hold, expired validity, validation failure, no-secret/no-env failure, unsafe integration finding, target change, execution-action change, or governance-policy change must keep execution blocked until reviewed under the relevant policy.
 - All generated code must pass lint, typecheck, test, and build.
 - `POST /tasks/:id/run` must reject active queued/running TaskRuns with `409 Conflict`; completed or failed tasks may create a new TaskRun attempt.
 - Conflict Manager v1 must remain mock/local-only: deterministic file-overlap scoring, active lease tracking, mock merge queue status, and local dry-run simulation behind `MergeSimulator`.

@@ -279,7 +279,7 @@ curl http://localhost:3000/readiness/staging-execution/summary
 curl http://localhost:3000/dashboard/staging-execution
 ```
 
-The signoff pack documents are under `docs/roadmaps/staging-deployment-execution/`: `human-signoff-pack-v0.md`, `signoff-evidence-checklist-v0.md`, and `signoff-decision-policy-v0.md`.
+The signoff pack documents are under `docs/roadmaps/staging-deployment-execution/`: `human-signoff-pack-v0.md`, `signoff-evidence-checklist-v0.md`, `signoff-decision-policy-v0.md`, and `scope-separation-policy-v0.md`. The scope separation policy distinguishes reviewed target scope from audit/readiness/request evidence so later evidence-only documents do not automatically change an approved deployment candidate, while still allowing evidence findings to hold execution.
 
 The default go/no-go status remains `not_ready` because real human signoffs are still pending before actual staging deployment. The signoff pack status is pending, approved real signoff count is zero, actual deployment remains blocked, staging remains not deployed, and production remains not ready.
 

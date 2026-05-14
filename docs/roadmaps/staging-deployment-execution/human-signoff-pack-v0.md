@@ -63,7 +63,7 @@ Signers must explicitly accept these staging limitations or reject/hold signoff:
 - Mock/planning auth remains accepted only as a staging limitation.
 - Vault-backed Secret Backend v1 is gated and non-default; production secret backend rollout is not complete.
 - Durable observability export, production retention enforcement, production DB operations, production policy bundle runtime, live GitHub App/webhook validation, live LLM validation, live Vault validation, and real MCP transport remain future or production-blocking work.
-- The current signoff pack applies only to the reviewed commit/diff scope and expires under the validity window below.
+- The current signoff pack applies only to the reviewed target scope classified under `docs/roadmaps/staging-deployment-execution/scope-separation-policy-v0.md` and expires under the validity window below.
 
 ## Production Blockers
 
@@ -104,6 +104,7 @@ Each approver must review the Signoff Evidence Checklist v0 before approving:
 - `docs/roadmaps/staging-release-candidate/rollback-evidence-v0.md`
 - `docs/roadmaps/staging-deployment-execution/v0.md`
 - `docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md`
+- `docs/roadmaps/staging-deployment-execution/scope-separation-policy-v0.md`
 
 Approvers must record:
 
@@ -164,8 +165,10 @@ No real approval evidence was provided for this collection run. All required rol
 
 - Suggested validity window: 7 calendar days from the latest required approval timestamp.
 - The release manager may choose a shorter window for higher-risk changes.
-- Signoff applies only to the current reviewed commit/diff scope and evidence set.
-- Any code, configuration, dependency, migration, readiness model, safety gate, or relevant documentation change after signoff requires revalidation by affected roles.
+- Signoff applies only to the current reviewed target scope and evidence set.
+- Any code, configuration, dependency, migration, readiness model, safety gate, execution action, governance rule, or target documentation change after signoff requires revalidation by affected roles.
+- Audit, readiness, runbook, execution-request, or post-approval documents generated after target freeze are evidence scope by default when recorded under `scope-separation-policy-v0.md`; they do not by themselves change the reviewed target scope unless they materially change the target, execution action, governance rule, safety gate, or accepted condition.
+- Evidence-only documents can still keep deployment blocked if they introduce blockers, stale scope, expired validity, validation failure, no-secret/no-env failure, rejection, hold, or scope mismatch.
 - If the Go/No-Go audit or validation evidence is older than the validity window at deployment time, rerun the approval audit before deployment.
 
 ## Next Audit Requirement

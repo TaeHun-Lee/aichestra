@@ -34,6 +34,12 @@ Manual staging execution must remain blocked until a responsible operator suppli
 | Staging deployed | false |
 | Production ready | false |
 
+## Scope Separation
+
+This runbook follows `docs/roadmaps/staging-deployment-execution/scope-separation-policy-v0.md`.
+
+The approved deployment candidate is the target scope. Approval audits, readiness reports, this runbook, execution-request documents, and future post-execution evidence are evidence scope unless explicitly promoted to target scope. Evidence-only documents generated after target freeze do not automatically change the approved candidate commit, but they can keep execution blocked if they report blockers, stale scope, expired validity, validation failure, no-secret/no-env failure, or unsafe integration findings.
+
 ## Deployment Command Discovery
 
 Current identifiable commands:

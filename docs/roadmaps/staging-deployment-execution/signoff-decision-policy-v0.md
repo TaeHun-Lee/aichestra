@@ -70,9 +70,26 @@ Expired signoff must be revalidated before actual staging deployment execution.
 
 ## Scope Rule
 
-Signoff applies only to the current reviewed commit/diff scope and evidence set.
+Signoff applies only to the current reviewed target scope and evidence set.
 
-If code, configuration, dependencies, migrations, readiness models, safety gates, release notes, rollback evidence, signoff evidence, or relevant docs change after signoff, affected roles must revalidate before actual staging deployment execution.
+If code, configuration, dependencies, migrations, readiness models, safety gates, execution actions, governance rules, or target documents change after signoff, affected roles must revalidate before actual staging deployment execution. Evidence-only audit, readiness, runbook, execution-request, or post-approval documents follow the Scope Separation Rule below.
+
+## Scope Separation Rule
+
+Scope classification must follow `docs/roadmaps/staging-deployment-execution/scope-separation-policy-v0.md`.
+
+Every signoff or approval audit must distinguish:
+
+- reviewed target scope,
+- evidence scope,
+- execution scope,
+- governance/policy scope.
+
+Audit reports, readiness reports, runbooks, execution-request templates, and post-approval evidence documents generated after a target is frozen are evidence scope by default. They do not automatically change the reviewed target scope when the target is separately recorded by commit SHA, explicit diff scope, document hash, artifact digest, or command record.
+
+Evidence-only documents can still change the decision state. Any evidence-only document that reports a blocker, rejection, hold, expired validity, validation failure, no-secret/no-env failure, unsafe integration finding, or scope mismatch keeps actual staging deployment blocked until remediated and re-audited.
+
+If the document itself is the object being approved, it is target scope. If an execution command, deployment target, rollback action, smoke target, operator, role matrix, validity window, waiver rule, or safety gate changes, treat it as execution or governance scope and require the corresponding confirmation or revalidation.
 
 ## No Production Deployment Rule
 
