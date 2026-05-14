@@ -27,9 +27,15 @@ import {
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
+  type SecretBackendDecisionReadModel,
   type SecretBackendMigrationReadModel,
+  type StagingDeploymentDryRunReadModel,
+  type StagingDeploymentExecutionReadModel,
   type StagingDeploymentReadModel,
-  type TaskRunSummaryReadModel
+  type StagingReleaseCandidateReadModel,
+  type TaskRunSummaryReadModel,
+  type VaultIntegrationTestReadModel,
+  type VaultSecretBackendReadModel
 } from "@aichestra/shared";
 
 export type DashboardDataProvider = {
@@ -125,9 +131,26 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       secretBackendReadinessBlockers: sections.secretBackend.blockers.length,
       secretBackendOptions: sections.secretBackend.backendOptions.length,
       secretRotationPlans: sections.secretBackend.rotationPlans.length,
+      secretBackendDecisionCriteria: sections.secretBackendDecision.criteria.length,
+      secretBackendDecisionRisks: sections.secretBackendDecision.risks.length,
+      vaultSecretBackendChecks: sections.vaultSecretBackend.checks.length,
+      vaultSecretBackendAuditEvents: sections.vaultSecretBackend.auditEvents.length,
+      vaultIntegrationMissingGates: numeric(sections.vaultIntegration.summary.missingGateCount),
+      vaultIntegrationUnsafeGates: numeric(sections.vaultIntegration.summary.unsafeGateCount),
+      vaultIntegrationTestCases: sections.vaultIntegration.testCases.length,
       stagingReadinessBlockers: sections.staging.blockers.length,
       stagingIntegrationGates: sections.staging.integrationGates.length,
       stagingPromotionCriteria: sections.staging.promotionCriteria.length,
+      stagingDryRunBlockers: sections.stagingDryRun.blockers.length,
+      stagingDryRunCriticalBlockers: sections.stagingDryRun.criticalBlockers.length,
+      stagingDryRunSkippedIntegrations: sections.stagingDryRun.skippedIntegrationProfiles.length,
+      stagingRcBlockers: sections.stagingReleaseCandidate.blockers.length,
+      stagingRcCriticalBlockers: sections.stagingReleaseCandidate.criticalBlockers.length,
+      stagingRcPendingSignoffs: sections.stagingReleaseCandidate.pendingSignoffs.length,
+      stagingRcSkippedTests: sections.stagingReleaseCandidate.skippedTests.length,
+      stagingExecutionBlockers: sections.stagingExecution.blockers.length,
+      stagingExecutionPendingSignoffs: sections.stagingExecution.pendingSignoffs.length,
+      stagingExecutionGoNoGoStatus: sections.stagingExecution.goNoGoDecision.status ?? "not_ready",
       cicdReadinessBlockers: sections.cicd.blockers.length,
       cicdJobs: sections.cicd.jobs.length,
       cicdIntegrationGates: sections.cicd.integrationGates.length,
@@ -158,7 +181,13 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       readiness: { status: "available", count: sections.readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       database: { status: "available", count: sections.database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
       secretBackend: { status: "available", count: sections.secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
+      secretBackendDecision: { status: "available", count: sections.secretBackendDecision.risks.length, notes: ["Production Secret Backend Option Decision v0 selects Vault for v1 planning only; no backend is contacted and no secret values are read."] },
+      vaultSecretBackend: { status: "available", count: sections.vaultSecretBackend.checks.length, notes: ["Vault Secret Backend v1 is gated and non-default; dashboard data is metadata-only and does not read Vault."] },
+      vaultIntegration: { status: "available", count: sections.vaultIntegration.testCases.length, notes: ["Vault Integration-Test Profile v1 is skipped by default and never exposes tokens, secret values, raw paths, or env values."] },
       staging: { status: "available", count: sections.staging.blockers.length, notes: ["Staging Deployment Profile v0 is non-production/readiness-only; no deployment, production traffic, or external provider call is enabled."] },
+      stagingDryRun: { status: "available", count: sections.stagingDryRun.blockers.length, notes: ["Staging Deployment Dry-run Profile v0 aggregates readiness only; it does not deploy, call providers, or run integration tests."] },
+      stagingReleaseCandidate: { status: "available", count: sections.stagingReleaseCandidate.blockers.length, notes: ["Staging Release Candidate Checklist v0 is read-only; it does not create releases, tags, GitHub releases, deployments, or run integration tests."] },
+      stagingExecution: { status: "available", count: sections.stagingExecution.blockers.length, notes: ["Staging Deployment Execution Plan v0 is planning-only; it does not deploy, create releases or tags, call providers, or run integration tests."] },
       cicd: { status: "available", count: sections.cicd.blockers.length, notes: ["Staging CI/CD Pipeline Planning v0 is read-only; no active workflow, deployment, or default remote integration test is enabled."] },
       observability: { status: "available", count: numeric(sections.observability.auditSummary.totalEvents), notes: ["Observability v0 is in-memory/read-only and has no external exporter."] },
       audit: { status: "available", count: numeric(sections.audit.summary.totalEvents), notes: [] }
@@ -1199,6 +1228,278 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     })
   };
 
+  const secretBackendDecision: SecretBackendDecisionReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v0_implemented",
+      planningOnly: true,
+      decisionStatus: "accepted_mock",
+      recommendedBackend: "vault",
+      secondChoiceBackend: "aws_secrets_manager_future",
+      implementationReady: true,
+      productionSecretBackendImplemented: false,
+      envFallbackProductionAllowed: false,
+      externalCallsEnabled: false,
+      secretReadsAttempted: false,
+      secretRotationsAttempted: false,
+      secretMigrationsAttempted: false,
+      productionCredentialsIssued: false,
+      credentialCachesRead: false,
+      criterionCount: 20,
+      scoreCount: 8,
+      implementationScopeCount: 1,
+      riskCount: 15,
+      criticalRiskCount: 4,
+      providerMappingCount: 7,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    decision: sanitizeDashboardObject({
+      id: "production_secret_backend_option_decision_v0",
+      recommendedBackend: "vault",
+      secondChoiceBackend: "aws_secrets_manager_future",
+      decisionStatus: "accepted_mock",
+      implementationScopeRef: "docs/roadmaps/production-secret-backend-option-decision/implementation-scope-v1.md"
+    }),
+    criteria: sanitizeDashboardArray([
+      { id: "security_posture", weight: 10 },
+      { id: "secretref_compatibility", weight: 10 },
+      { id: "lease_ttl_support", weight: 9 },
+      { id: "audit_capability", weight: 9 }
+    ]),
+    scores: sanitizeDashboardArray([
+      { id: "score_vault_security_posture", backendKind: "vault", criterionId: "security_posture", score: 5, weightedScore: 50 },
+      { id: "score_aws_security_posture", backendKind: "aws_secrets_manager_future", criterionId: "security_posture", score: 4, weightedScore: 40 },
+      { id: "score_env_production_suitability", backendKind: "env", criterionId: "security_posture", score: 1, weightedScore: 10 }
+    ]),
+    implementationScopes: sanitizeDashboardArray([
+      { id: "vault_secret_backend_implementation_scope_v1", backendKind: "vault", version: "v1", status: "v1_implemented" }
+    ]),
+    providerMappings: sanitizeDashboardArray([
+      { id: "secret_backend_provider_mapping_vault", providerValue: "vault", productionStatus: "v1_implemented_gated" },
+      { id: "secret_backend_provider_mapping_env", providerValue: "env", productionStatus: "local_integration_only" },
+      { id: "secret_backend_provider_mapping_mock", providerValue: "mock", productionStatus: "test_only" }
+    ]),
+    risks: sanitizeDashboardArray([
+      { id: "secret_decision_risk_env_fallback_production", severity: "critical", status: "open" },
+      { id: "secret_decision_risk_overbroad_iam", severity: "critical", status: "open" },
+      { id: "secret_decision_risk_backend_outage", severity: "high", status: "open" }
+    ]),
+    backendScoreSummary: sanitizeDashboardArray([
+      { backendKind: "vault", weightedScore: 120, scoreCount: 3 },
+      { backendKind: "aws_secrets_manager_future", weightedScore: 40, scoreCount: 1 },
+      { backendKind: "env", weightedScore: 10, scoreCount: 1 }
+    ]),
+    envFallbackWarning: sanitizeDashboardObject({
+      productionAllowed: false,
+      recommendedAsProductionDefault: false,
+      policy: "env fallback remains local/integration only and must not be production primary storage"
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      externalCallsEnabled: false,
+      secretReadsAttempted: false,
+      secretRotationsAttempted: false,
+      secretMigrationsAttempted: false,
+      productionCredentialsIssued: false,
+      credentialCachesRead: false,
+      productionSecretBackendImplemented: false
+    })
+  };
+
+  const vaultSecretBackend: VaultSecretBackendReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "disabled",
+      provider: "vault",
+      selectedProvider: "mock",
+      vaultProviderEnabled: false,
+      vaultAddressConfigured: false,
+      vaultNamespaceConfigured: false,
+      vaultAuthMethod: "token",
+      vaultAllowedPathPrefixCount: 0,
+      vaultIntegrationTestsEnabled: false,
+      vaultClientKind: "disabled",
+      liveUsageReady: false,
+      checkCount: 6,
+      failingCheckCount: 0,
+      productionSecretBackendImplemented: false,
+      envFallbackProductionAllowed: false,
+      noSecretsExposed: true,
+      noEnvValuesExposed: true,
+      containsSecretMaterial: false
+    }),
+    config: sanitizeDashboardObject({
+      selectedProvider: "mock",
+      vaultProviderEnabled: false,
+      vaultAddressConfigured: false,
+      vaultNamespaceConfigured: false,
+      vaultAuthMethod: "token",
+      vaultTokenConfigured: false,
+      vaultAllowedPathPrefixCount: 0,
+      vaultIntegrationTestsEnabled: false,
+      liveUsageReady: false,
+      configStatus: "disabled",
+      productionSecretBackendImplemented: false,
+      envFallbackProductionAllowed: false
+    }),
+    health: sanitizeDashboardObject({
+      clientKind: "disabled",
+      status: "disabled",
+      configStatus: "disabled",
+      liveCallAttempted: false,
+      containsSecretMaterial: false
+    }),
+    checks: sanitizeDashboardArray([
+      { id: "vault_provider_non_default", category: "config", status: "pass", severity: "low" },
+      { id: "vault_enable_gate", category: "config", status: "skipped", severity: "medium" },
+      { id: "vault_default_tests_skip_live", category: "tests", status: "pass", severity: "medium" }
+    ]),
+    auditEvents: sanitizeDashboardArray([]),
+    secretRefExamples: sanitizeDashboardArray([]),
+    blockedExamples: sanitizeDashboardArray([
+      { operation: "vault.default_runtime_call", reason: "vault_provider_disabled_by_default" },
+      { operation: "vault.token_exposure", reason: "vault_token_never_returned" }
+    ]),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      noEnvValuesExposed: true,
+      vaultTokenExposed: false,
+      vaultSecretValueExposed: false,
+      credentialCachesRead: false,
+      liveVaultCallAttemptedByDashboard: false,
+      productionSecretBackendImplemented: false
+    })
+  };
+
+  const vaultIntegration: VaultIntegrationTestReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      planningOnly: true,
+      productionReady: false,
+      profileStatus: "disabled",
+      backendKind: "vault",
+      liveTestsEnabled: false,
+      canRunLiveTests: false,
+      defaultLiveTestsSkipped: true,
+      requiredGateCount: 10,
+      configuredGateCount: 0,
+      missingGateCount: 10,
+      unsafeGateCount: 0,
+      vaultBackendSelected: false,
+      vaultProviderEnabled: false,
+      vaultAddressConfigured: false,
+      vaultNamespaceConfigured: false,
+      vaultAuthMethod: "token",
+      vaultAuthMethodConfigured: false,
+      vaultTokenConfigured: false,
+      vaultKvMountConfigured: false,
+      pathAllowlistConfigured: false,
+      pathAllowlistPrefixCount: 0,
+      testSecretPathConfigured: false,
+      testSecretKeyConfigured: false,
+      testSecretPathAllowlisted: false,
+      testSecretPathLooksTestOnly: false,
+      credentialSource: "none",
+      envFallbackUsed: false,
+      testCaseCount: 8,
+      gatedLiveTestCaseCount: 2,
+      mockTestCaseCount: 6,
+      noWrite: true,
+      noDelete: true,
+      noRotate: true,
+      noBroadList: true,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      vaultTokenExposed: false,
+      vaultAddressValueExposed: false,
+      vaultSecretValueExposed: false,
+      vaultCallsInDefaultTests: false
+    }),
+    profile: sanitizeDashboardObject({
+      id: "vault_integration_test_profile_v1",
+      name: "Vault Integration-Test Profile v1",
+      status: "disabled",
+      backendKind: "vault",
+      allowedOperations: ["config_validation", "secretref_validation", "path_allowlist", "kv_v2_read_status_only", "credential_resolution_status_only"],
+      forbiddenOperations: ["write", "delete", "rotate", "broad_list", "production_secret_path", "raw_secret_return", "vault_token_return", "env_value_return"]
+    }),
+    testCases: sanitizeDashboardArray([
+      { id: "vault_it_config_validation", category: "config_validation", enabledByDefault: true, requiresLiveVault: false, status: "active_mock" },
+      { id: "vault_it_secretref_validation", category: "secretref_validation", enabledByDefault: true, requiresLiveVault: false, status: "active_mock" },
+      { id: "vault_it_path_allowlist", category: "path_allowlist", enabledByDefault: true, requiresLiveVault: false, status: "active_mock" },
+      { id: "vault_it_kv_v2_read_gated", category: "kv_v2_read", enabledByDefault: false, requiresLiveVault: true, status: "gated_live" },
+      { id: "vault_it_credential_resolution_gated", category: "credential_resolution", enabledByDefault: false, requiresLiveVault: true, status: "gated_live" },
+      { id: "vault_it_auth_policy_gate", category: "auth_policy_gate", enabledByDefault: true, requiresLiveVault: false, status: "active_mock" },
+      { id: "vault_it_audit_redaction", category: "audit_redaction", enabledByDefault: true, requiresLiveVault: false, status: "active_mock" },
+      { id: "vault_it_no_secret_exposure", category: "no_secret_exposure", enabledByDefault: true, requiresLiveVault: false, status: "active_mock" }
+    ]),
+    gatedLiveTestCases: sanitizeDashboardArray([
+      { id: "vault_it_kv_v2_read_gated", category: "kv_v2_read" },
+      { id: "vault_it_credential_resolution_gated", category: "credential_resolution" }
+    ]),
+    mockTestCases: sanitizeDashboardArray([
+      { id: "vault_it_config_validation", category: "config_validation" },
+      { id: "vault_it_secretref_validation", category: "secretref_validation" },
+      { id: "vault_it_path_allowlist", category: "path_allowlist" },
+      { id: "vault_it_auth_policy_gate", category: "auth_policy_gate" },
+      { id: "vault_it_audit_redaction", category: "audit_redaction" },
+      { id: "vault_it_no_secret_exposure", category: "no_secret_exposure" }
+    ]),
+    safetyChecks: sanitizeDashboardArray([
+      { id: "vault_it_env_gates_missing_skip", category: "env_gates", status: "warning", severity: "high" },
+      { id: "vault_it_vault_address_boolean_only", category: "vault_address", status: "warning", severity: "medium" },
+      { id: "vault_it_token_presence_boolean_only", category: "token_presence", status: "warning", severity: "critical" },
+      { id: "vault_it_path_allowlist_required", category: "path_allowlist", status: "warning", severity: "critical" },
+      { id: "vault_it_test_path_required", category: "test_secret_path", status: "warning", severity: "critical" },
+      { id: "vault_it_no_write", category: "no_write", status: "pass", severity: "critical" },
+      { id: "vault_it_no_delete", category: "no_delete", status: "pass", severity: "critical" },
+      { id: "vault_it_no_rotate", category: "no_rotate", status: "pass", severity: "critical" },
+      { id: "vault_it_no_broad_list", category: "no_broad_list", status: "pass", severity: "critical" },
+      { id: "vault_it_no_secret_exposure", category: "no_secret_exposure", status: "pass", severity: "critical" }
+    ]),
+    blockers: sanitizeDashboardArray([]),
+    warnings: sanitizeDashboardArray([
+      { id: "vault_it_env_gates_missing_skip", severity: "high" },
+      { id: "vault_it_path_allowlist_required", severity: "critical" },
+      { id: "vault_it_test_path_required", severity: "critical" }
+    ]),
+    gateStatus: sanitizeDashboardObject({
+      requiredGateCount: 10,
+      configuredGateCount: 0,
+      missingGateCount: 10,
+      unsafeGateCount: 0,
+      vaultBackendSelected: false,
+      vaultProviderEnabled: false,
+      vaultAddressConfigured: false,
+      vaultNamespaceConfigured: false,
+      vaultAuthMethod: "token",
+      vaultTokenConfigured: false,
+      pathAllowlistPrefixCount: 0,
+      testSecretPathConfigured: false,
+      testSecretKeyConfigured: false,
+      testSecretPathAllowlisted: false,
+      testSecretPathLooksTestOnly: false,
+      rawAddressReturned: false,
+      rawPathReturned: false
+    }),
+    operationPolicy: sanitizeDashboardObject({
+      noWrite: true,
+      noDelete: true,
+      noRotate: true,
+      noBroadList: true,
+      cleanupRequired: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      vaultTokenExposed: false,
+      vaultAddressExposed: false,
+      vaultSecretValueExposed: false,
+      vaultCallsInDefaultTests: false,
+      credentialCachesRead: false
+    })
+  };
+
   const staging: StagingDeploymentReadModel = {
     summary: sanitizeDashboardObject({
       status: "v0_implemented",
@@ -1287,6 +1588,381 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       deploymentExecuted: false,
       externalCallsEnabled: false,
       productionTrafficAllowed: false,
+      stagingDeployed: false
+    })
+  };
+
+  const stagingDryRun: StagingDeploymentDryRunReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v0_implemented",
+      planningOnly: true,
+      dryRunMode: "read_only",
+      overallStatus: "blocked",
+      profileStatus: "blocked",
+      productionReady: false,
+      stagingDeployed: false,
+      deploymentExecuted: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      validationCommandsExecuted: false,
+      sourceCount: 17,
+      requiredSourceCount: 15,
+      optionalSourceCount: 2,
+      checkCount: 20,
+      requiredCheckCount: 14,
+      blockerCount: 5,
+      criticalBlockerCount: 2,
+      warningCount: 8,
+      skippedIntegrationProfileCount: 2,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      productionReadyClaimed: false,
+      stagingDeploymentClaimed: false
+    }),
+    profile: sanitizeDashboardObject({
+      id: "staging_dry_run_profile_v0",
+      name: "Staging Deployment Dry-run Profile v0",
+      status: "blocked",
+      dryRunMode: "read_only",
+      requiredReadinessSources: ["staging_profile", "ci_cd", "postgres", "secret_backend", "auth_rbac", "policy_bundle", "observability", "dashboard"],
+      optionalReadinessSources: ["github_integration_tests", "llm_integration_tests"],
+      blockedCapabilities: ["deployment_execution", "external_provider_calls", "remote_merge", "force_push", "branch_deletion", "vendor_cli_execution", "secret_or_env_value_exposure"]
+    }),
+    sources: sanitizeDashboardArray([
+      { id: "staging_dry_run_source_staging_profile", sourceKind: "staging_profile", status: "fail", severity: "critical", summary: "Staging profile exists with rollout blockers." },
+      { id: "staging_dry_run_source_postgres", sourceKind: "postgres", status: "fail", severity: "high", summary: "Postgres is required for staging validation." },
+      { id: "staging_dry_run_source_secret_backend", sourceKind: "secret_backend", status: "warning", severity: "critical", summary: "Real secret backend is not implemented." },
+      { id: "staging_dry_run_source_github_integration_tests", sourceKind: "github_integration_tests", status: "skipped", severity: "medium", summary: "GitHub live profile is skipped by default." },
+      { id: "staging_dry_run_source_llm_integration_tests", sourceKind: "llm_integration_tests", status: "skipped", severity: "medium", summary: "LLM live profile is skipped by default." },
+      { id: "staging_dry_run_source_dashboard", sourceKind: "dashboard", status: "pass", severity: "low", summary: "Dashboard read model is available." }
+    ]),
+    requiredSources: sanitizeDashboardArray([
+      { id: "staging_dry_run_source_staging_profile", sourceKind: "staging_profile", status: "fail", severity: "critical" },
+      { id: "staging_dry_run_source_postgres", sourceKind: "postgres", status: "fail", severity: "high" },
+      { id: "staging_dry_run_source_secret_backend", sourceKind: "secret_backend", status: "warning", severity: "critical" },
+      { id: "staging_dry_run_source_dashboard", sourceKind: "dashboard", status: "pass", severity: "low" }
+    ]),
+    optionalSources: sanitizeDashboardArray([
+      { id: "staging_dry_run_source_github_integration_tests", sourceKind: "github_integration_tests", status: "skipped", severity: "medium" },
+      { id: "staging_dry_run_source_llm_integration_tests", sourceKind: "llm_integration_tests", status: "skipped", severity: "medium" }
+    ]),
+    checks: sanitizeDashboardArray([
+      { id: "dry_run_no_deployment_execution", category: "environment", status: "pass", severity: "critical", requiredForStaging: true },
+      { id: "dry_run_no_external_calls", category: "environment", status: "pass", severity: "critical", requiredForStaging: true },
+      { id: "dry_run_no_secret_or_env_exposure", category: "security", status: "pass", severity: "critical", requiredForStaging: true },
+      { id: "dry_run_remote_merge_forbidden", category: "git", status: "pass", severity: "critical", requiredForStaging: true },
+      { id: "dry_run_postgres_staging_required", category: "storage", status: "fail", severity: "high", requiredForStaging: true },
+      { id: "dry_run_github_live_profile_classified", category: "github_app", status: "skipped", severity: "medium", requiredForStaging: false },
+      { id: "dry_run_llm_live_profile_classified", category: "llm", status: "skipped", severity: "medium", requiredForStaging: false }
+    ]),
+    requiredChecks: sanitizeDashboardArray([
+      { id: "dry_run_no_deployment_execution", status: "pass", severity: "critical" },
+      { id: "dry_run_no_external_calls", status: "pass", severity: "critical" },
+      { id: "dry_run_no_secret_or_env_exposure", status: "pass", severity: "critical" },
+      { id: "dry_run_postgres_staging_required", status: "fail", severity: "high" }
+    ]),
+    blockers: sanitizeDashboardArray([
+      { id: "blocker_dry_run_postgres_staging_required", severity: "high", blockingLevel: "blocks_staging_deployment" },
+      { id: "blocker_missing_secret_backend", severity: "critical", blockingLevel: "blocks_staging_deployment" },
+      { id: "blocker_mock_auth_production", severity: "critical", blockingLevel: "blocks_production_only" },
+      { id: "blocker_observability_backend_missing", severity: "high", blockingLevel: "blocks_staging_deployment" }
+    ]),
+    criticalBlockers: sanitizeDashboardArray([
+      { id: "blocker_missing_secret_backend", severity: "critical", blockingLevel: "blocks_staging_deployment" },
+      { id: "blocker_mock_auth_production", severity: "critical", blockingLevel: "blocks_production_only" }
+    ]),
+    warnings: sanitizeDashboardArray([
+      { id: "staging_dry_run_source_github_integration_tests", status: "skipped", severity: "medium" },
+      { id: "staging_dry_run_source_llm_integration_tests", status: "skipped", severity: "medium" }
+    ]),
+    skippedIntegrationProfiles: sanitizeDashboardArray([
+      { id: "github_app_integration_test_profile_v1", status: "skipped", skippedByDefault: true },
+      { id: "llm_gateway_integration_test_profile_v1", status: "skipped", skippedByDefault: true }
+    ]),
+    integrationProfiles: sanitizeDashboardArray([
+      { id: "github_app_integration_test_profile_v1", status: "skipped", requiredForStaging: false, skippedByDefault: true },
+      { id: "llm_gateway_integration_test_profile_v1", status: "skipped", requiredForStaging: false, skippedByDefault: true }
+    ]),
+    recommendedNextActions: [
+      "Keep the dry-run read-only and do not mark staging as deployed.",
+      "Choose a real secret backend or document a controlled non-production fallback decision.",
+      "Configure Postgres readiness before staging validation."
+    ],
+    promotionGuidance: [
+      "Do not mark staging as deployed from this report.",
+      "Resolve staging dry-run and staging deployment blockers before validation."
+    ],
+    rollbackGuidance: [
+      "No rollback action is executed by this read-only profile.",
+      "If future validation exposes secrets, revoke credentials out of band and block the dry-run."
+    ],
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      deploymentExecuted: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      validationCommandsExecuted: false,
+      productionReady: false,
+      stagingDeployed: false
+    })
+  };
+
+  const stagingReleaseCandidate: StagingReleaseCandidateReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v0_implemented",
+      planningOnly: true,
+      overallStatus: "not_ready",
+      checklistStatus: "not_ready",
+      productionReady: false,
+      stagingDeployed: false,
+      releaseCreated: false,
+      gitTagCreated: false,
+      githubReleaseCreated: false,
+      deploymentExecuted: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      gateCount: 24,
+      requiredGateCount: 13,
+      blockerCount: 12,
+      criticalBlockerCount: 0,
+      signoffCount: 6,
+      requiredSignoffCount: 6,
+      pendingSignoffCount: 6,
+      releaseNoteRequirementCount: 10,
+      missingReleaseNoteRequirementCount: 10,
+      rollbackItemCount: 9,
+      missingRollbackItemCount: 0,
+      skippedTestCount: 3,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      productionReadyClaimed: false,
+      stagingDeploymentClaimed: false
+    }),
+    checklist: sanitizeDashboardObject({
+      id: "staging_release_candidate_checklist_v0",
+      name: "Staging Release Candidate Checklist v0",
+      status: "not_ready",
+      requiredValidationGates: ["pnpm lint", "pnpm typecheck", "pnpm test", "pnpm build", "git diff --check", "safe integration compliance scan"],
+      optionalIntegrationProfiles: ["optional_postgres_contracts", "github_app_integration_test_profile_v1", "llm_gateway_integration_test_profile_v1", "mcp_real_transport_future", "external_auth_future"],
+      allowedSkippedTests: ["optional_postgres_contracts_when_test_database_url_absent", "github_app_live_tests_when_gates_absent", "llm_live_tests_when_gates_absent", "mcp_live_tests_until_real_transport_future", "external_auth_tests_until_production_auth_future"],
+      requiredSignoffs: ["engineering_owner", "platform_owner", "security_reviewer", "product_owner", "qa_reviewer", "release_manager"]
+    }),
+    gates: sanitizeDashboardArray([
+      { id: "staging_rc_pnpm_lint", category: "validation", status: "not_checked", required: true, severity: "high" },
+      { id: "staging_rc_pnpm_typecheck", category: "validation", status: "not_checked", required: true, severity: "high" },
+      { id: "staging_rc_pnpm_test", category: "validation", status: "not_checked", required: true, severity: "high" },
+      { id: "staging_rc_pnpm_build", category: "validation", status: "not_checked", required: true, severity: "high" },
+      { id: "staging_rc_git_diff_check", category: "validation", status: "not_checked", required: true, severity: "high" },
+      { id: "staging_rc_safe_integration_scan", category: "security", status: "not_checked", required: true, severity: "high" },
+      { id: "staging_rc_github_integration_profile_documented", category: "git_integration", status: "skipped", required: false, severity: "medium" },
+      { id: "staging_rc_llm_integration_profile_documented", category: "llm_integration", status: "skipped", required: false, severity: "medium" },
+      { id: "staging_rc_optional_postgres_profile_documented", category: "db", status: "skipped", required: false, severity: "medium" },
+      { id: "staging_rc_no_secret_or_env_exposure", category: "security", status: "pass", required: true, severity: "critical" },
+      { id: "staging_rc_no_release_or_deployment_execution", category: "security", status: "pass", required: true, severity: "critical" },
+      { id: "staging_rc_no_ready_overclaim", category: "docs", status: "pass", required: true, severity: "critical" },
+      { id: "staging_rc_dashboard_readiness", category: "dashboard", status: "pass", required: true, severity: "low" }
+    ]),
+    requiredGates: sanitizeDashboardArray([
+      { id: "staging_rc_pnpm_lint", status: "not_checked", severity: "high" },
+      { id: "staging_rc_pnpm_typecheck", status: "not_checked", severity: "high" },
+      { id: "staging_rc_pnpm_test", status: "not_checked", severity: "high" },
+      { id: "staging_rc_pnpm_build", status: "not_checked", severity: "high" },
+      { id: "staging_rc_git_diff_check", status: "not_checked", severity: "high" },
+      { id: "staging_rc_safe_integration_scan", status: "not_checked", severity: "high" },
+      { id: "staging_rc_no_secret_or_env_exposure", status: "pass", severity: "critical" },
+      { id: "staging_rc_no_release_or_deployment_execution", status: "pass", severity: "critical" },
+      { id: "staging_rc_no_ready_overclaim", status: "pass", severity: "critical" }
+    ]),
+    blockers: sanitizeDashboardArray([
+      { id: "blocker_staging_rc_pnpm_lint_not_checked", category: "validation", severity: "high", blockingLevel: "blocks_release_candidate", status: "open" },
+      { id: "blocker_staging_rc_pnpm_typecheck_not_checked", category: "validation", severity: "high", blockingLevel: "blocks_release_candidate", status: "open" },
+      { id: "blocker_staging_rc_pnpm_test_not_checked", category: "validation", severity: "high", blockingLevel: "blocks_release_candidate", status: "open" },
+      { id: "blocker_staging_rc_pnpm_build_not_checked", category: "validation", severity: "high", blockingLevel: "blocks_release_candidate", status: "open" },
+      { id: "blocker_staging_rc_git_diff_check_not_checked", category: "validation", severity: "high", blockingLevel: "blocks_release_candidate", status: "open" },
+      { id: "blocker_staging_rc_production_auth_missing", category: "auth", severity: "medium", blockingLevel: "blocks_production_only", status: "accepted" },
+      { id: "blocker_staging_rc_real_secret_backend_missing", category: "secrets", severity: "medium", blockingLevel: "blocks_production_only", status: "accepted" }
+    ]),
+    criticalBlockers: [],
+    signoffs: sanitizeDashboardArray([
+      { id: "staging_rc_signoff_engineering_owner", role: "engineering_owner", required: true, status: "pending" },
+      { id: "staging_rc_signoff_platform_owner", role: "platform_owner", required: true, status: "pending" },
+      { id: "staging_rc_signoff_security_reviewer", role: "security_reviewer", required: true, status: "pending" },
+      { id: "staging_rc_signoff_product_owner", role: "product_owner", required: true, status: "pending" },
+      { id: "staging_rc_signoff_qa_reviewer", role: "qa_reviewer", required: true, status: "pending" },
+      { id: "staging_rc_signoff_release_manager", role: "release_manager", required: true, status: "pending" }
+    ]),
+    pendingSignoffs: sanitizeDashboardArray([
+      { id: "staging_rc_signoff_engineering_owner", role: "engineering_owner", status: "pending" },
+      { id: "staging_rc_signoff_platform_owner", role: "platform_owner", status: "pending" },
+      { id: "staging_rc_signoff_security_reviewer", role: "security_reviewer", status: "pending" },
+      { id: "staging_rc_signoff_product_owner", role: "product_owner", status: "pending" },
+      { id: "staging_rc_signoff_qa_reviewer", role: "qa_reviewer", status: "pending" },
+      { id: "staging_rc_signoff_release_manager", role: "release_manager", status: "pending" }
+    ]),
+    releaseNoteRequirements: sanitizeDashboardArray([
+      "summary",
+      "changed_areas",
+      "validation",
+      "skipped_tests",
+      "known_limitations",
+      "safety_gates",
+      "migration_notes",
+      "dashboard_readiness",
+      "rollback_notes",
+      "follow_ups"
+    ].map((section) => ({ id: `staging_rc_release_note_${section}`, section, required: true, status: "missing" }))),
+    missingReleaseNoteRequirements: sanitizeDashboardArray([
+      "summary",
+      "changed_areas",
+      "validation",
+      "skipped_tests",
+      "known_limitations",
+      "safety_gates",
+      "migration_notes",
+      "dashboard_readiness",
+      "rollback_notes",
+      "follow_ups"
+    ].map((section) => ({ id: `staging_rc_release_note_${section}`, section, status: "missing" }))),
+    rollbackChecklist: sanitizeDashboardArray([
+      "code_revert",
+      "database",
+      "config",
+      "feature_flags",
+      "git_integration",
+      "llm_integration",
+      "secrets",
+      "observability",
+      "dashboard"
+    ].map((category) => ({ id: `staging_rc_rollback_${category}`, category, required: true, status: "planned" }))),
+    missingRollbackItems: [],
+    skippedTests: [
+      "staging_rc_optional_postgres_profile_documented",
+      "staging_rc_github_integration_profile_documented",
+      "staging_rc_llm_integration_profile_documented"
+    ],
+    recommendedNextActions: [
+      "Do not create a release, Git tag, GitHub release, or deployment from this checklist.",
+      "Run required local validation commands and record their status before staging RC designation.",
+      "Document skipped optional integration tests and why their gates were not configured."
+    ],
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      releaseCreated: false,
+      gitTagCreated: false,
+      githubReleaseCreated: false,
+      deploymentExecuted: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      productionReady: false,
+      stagingDeployed: false
+    })
+  };
+
+  const stagingExecution: StagingDeploymentExecutionReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v0_implemented",
+      planningOnly: true,
+      planStatus: "ready_for_signoff",
+      goNoGoStatus: "not_ready",
+      productionReady: false,
+      stagingDeployed: false,
+      deploymentExecuted: false,
+      releaseCreated: false,
+      gitTagCreated: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      gateCount: 26,
+      requiredGateCount: 19,
+      blockerCount: 1,
+      criticalBlockerCount: 0,
+      warningCount: 11,
+      stepCount: 20,
+      readyStepCount: 6,
+      pendingSignoffCount: 6,
+      rollbackStepCount: 10,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      productionReadyClaimed: false,
+      stagingDeployedClaimed: false
+    }),
+    plan: sanitizeDashboardObject({
+      id: "staging_deployment_execution_plan_v0",
+      name: "Staging Deployment Execution Plan v0",
+      status: "ready_for_signoff",
+      requiredSignoffs: ["engineering_owner", "platform_owner", "security_reviewer", "product_owner", "qa_reviewer", "release_manager"]
+    }),
+    steps: sanitizeDashboardArray([
+      { id: "staging_execution_step_01_confirm_worktree_or_diff_scope", order: 1, phase: "pre_deploy", status: "ready", automationLevel: "manual" },
+      { id: "staging_execution_step_05_collect_human_signoffs", order: 5, phase: "approval", status: "blocked", automationLevel: "manual" },
+      { id: "staging_execution_step_18_future_deployment_execution_placeholder", order: 18, phase: "deployment_placeholder", status: "future", automationLevel: "scripted_future" }
+    ]),
+    gates: sanitizeDashboardArray([
+      { id: "staging_execution_pnpm_lint", category: "validation", status: "pass", severity: "high", required: true },
+      { id: "staging_execution_human_signoff_collected", category: "signoff", status: "fail", severity: "high", required: true },
+      { id: "staging_execution_github_app_decision", category: "github_app", status: "skipped", severity: "medium", required: false },
+      { id: "staging_execution_llm_decision", category: "llm", status: "skipped", severity: "medium", required: false },
+      { id: "staging_execution_vault_decision", category: "vault", status: "skipped", severity: "medium", required: false },
+      { id: "staging_execution_no_release_tag_deploy_side_effects", category: "environment", status: "pass", severity: "critical", required: true }
+    ]),
+    requiredGates: sanitizeDashboardArray([
+      { id: "staging_execution_pnpm_lint", status: "pass", severity: "high" },
+      { id: "staging_execution_human_signoff_collected", status: "fail", severity: "high" },
+      { id: "staging_execution_no_release_tag_deploy_side_effects", status: "pass", severity: "critical" }
+    ]),
+    blockers: sanitizeDashboardArray([
+      { id: "staging_execution_human_signoff_collected", category: "signoff", status: "fail", severity: "high" }
+    ]),
+    warnings: sanitizeDashboardArray([
+      { id: "staging_execution_rc_audit_accepted", category: "signoff", status: "warning", severity: "medium" },
+      { id: "staging_execution_github_app_decision", category: "github_app", status: "skipped", severity: "medium" },
+      { id: "staging_execution_llm_decision", category: "llm", status: "skipped", severity: "medium" },
+      { id: "staging_execution_vault_decision", category: "vault", status: "skipped", severity: "medium" }
+    ]),
+    goNoGoDecision: sanitizeDashboardObject({
+      id: "staging_deployment_execution_go_no_go_v0",
+      status: "not_ready",
+      pendingApprovals: ["engineering_owner", "platform_owner", "security_reviewer", "product_owner", "qa_reviewer", "release_manager"],
+      blockers: ["staging_execution_human_signoff_collected"]
+    }),
+    pendingSignoffs: sanitizeDashboardArray([
+      "engineering_owner",
+      "platform_owner",
+      "security_reviewer",
+      "product_owner",
+      "qa_reviewer",
+      "release_manager"
+    ].map((role) => ({ role, status: "pending" }))),
+    optionalIntegrationDecisions: sanitizeDashboardArray([
+      { id: "staging_execution_github_app_decision", category: "github_app", status: "skipped" },
+      { id: "staging_execution_llm_decision", category: "llm", status: "skipped" },
+      { id: "staging_execution_vault_decision", category: "vault", status: "skipped" },
+      { id: "staging_execution_mcp_policy", category: "mcp", status: "not_applicable" }
+    ]),
+    rollbackPlan: sanitizeDashboardObject({
+      id: "staging_deployment_execution_rollback_plan_v0",
+      status: "ready_for_review",
+      rollbackExecuted: false
+    }),
+    rollbackSteps: sanitizeDashboardArray([
+      { id: "staging_execution_rollback_code", name: "Code rollback", status: "planned" },
+      { id: "staging_execution_rollback_config", name: "Config rollback", status: "planned" },
+      { id: "staging_execution_rollback_manual_verification", name: "Manual verification", status: "planned" }
+    ]),
+    recommendedNextActions: [
+      "Collect real human signoffs before any staging deployment execution.",
+      "Keep staging deployed false and production ready false until future execution/audit work."
+    ],
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      deploymentExecuted: false,
+      releaseCreated: false,
+      gitTagCreated: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      productionReady: false,
       stagingDeployed: false
     })
   };
@@ -1548,7 +2224,13 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     readiness,
     database,
     secretBackend,
+    secretBackendDecision,
+    vaultSecretBackend,
+    vaultIntegration,
     staging,
+    stagingDryRun,
+    stagingReleaseCandidate,
+    stagingExecution,
     cicd,
     observability,
     audit
@@ -1597,6 +2279,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         registryResponse,
         llmResponse,
         llmIntegrationResponse,
+        vaultIntegrationResponse,
         agentsResponse,
         policyResponse,
         policyBundlesResponse,
@@ -1609,7 +2292,12 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         readinessResponse,
         databaseResponse,
         secretBackendResponse,
+        secretBackendDecisionResponse,
+        vaultSecretBackendResponse,
         stagingResponse,
+        stagingDryRunResponse,
+        stagingReleaseCandidateResponse,
+        stagingExecutionResponse,
         cicdResponse,
         observabilityResponse,
         auditResponse
@@ -1637,7 +2325,13 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         readiness: objectValue((readinessResponse as Record<string, unknown>).readiness) as unknown as DeploymentReadinessReadModel,
         database: objectValue((databaseResponse as Record<string, unknown>).database) as unknown as DatabaseOperationsReadModel,
         secretBackend: objectValue((secretBackendResponse as Record<string, unknown>).secretBackend) as unknown as SecretBackendMigrationReadModel,
+        secretBackendDecision: objectValue((secretBackendDecisionResponse as Record<string, unknown>).secretBackendDecision) as unknown as SecretBackendDecisionReadModel,
+        vaultSecretBackend: objectValue((vaultSecretBackendResponse as Record<string, unknown>).vaultSecretBackend) as unknown as VaultSecretBackendReadModel,
+        vaultIntegration: objectValue((vaultIntegrationResponse as Record<string, unknown>).vaultIntegration) as unknown as VaultIntegrationTestReadModel,
         staging: objectValue((stagingResponse as Record<string, unknown>).staging) as unknown as StagingDeploymentReadModel,
+        stagingDryRun: objectValue((stagingDryRunResponse as Record<string, unknown>).stagingDryRun) as unknown as StagingDeploymentDryRunReadModel,
+        stagingReleaseCandidate: objectValue((stagingReleaseCandidateResponse as Record<string, unknown>).stagingReleaseCandidate) as unknown as StagingReleaseCandidateReadModel,
+        stagingExecution: objectValue((stagingExecutionResponse as Record<string, unknown>).stagingExecution) as unknown as StagingDeploymentExecutionReadModel,
         cicd: objectValue((cicdResponse as Record<string, unknown>).cicd) as unknown as CICDPipelineReadModel,
         observability: objectValue((observabilityResponse as Record<string, unknown>).observability) as unknown as ObservabilityReadModel,
         audit: objectValue((auditResponse as Record<string, unknown>).audit) as unknown as AuditSummaryReadModel

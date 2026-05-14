@@ -274,6 +274,30 @@ export type SecretBackendMigrationReadModel = {
   noSecretStatus: DashboardJsonObject;
 };
 
+export type SecretBackendDecisionReadModel = {
+  summary: DashboardJsonObject;
+  decision: DashboardJsonObject;
+  criteria: DashboardJsonObject[];
+  scores: DashboardJsonObject[];
+  implementationScopes: DashboardJsonObject[];
+  providerMappings: DashboardJsonObject[];
+  risks: DashboardJsonObject[];
+  backendScoreSummary: DashboardJsonObject[];
+  envFallbackWarning: DashboardJsonObject;
+  noSecretStatus: DashboardJsonObject;
+};
+
+export type VaultSecretBackendReadModel = {
+  summary: DashboardJsonObject;
+  config: DashboardJsonObject;
+  health: DashboardJsonObject;
+  checks: DashboardJsonObject[];
+  auditEvents: DashboardJsonObject[];
+  secretRefExamples: DashboardJsonObject[];
+  blockedExamples: DashboardJsonObject[];
+  noSecretStatus: DashboardJsonObject;
+};
+
 export type StagingDeploymentReadModel = {
   summary: DashboardJsonObject;
   profile: DashboardJsonObject;
@@ -283,6 +307,60 @@ export type StagingDeploymentReadModel = {
   rollbackCriteria: DashboardJsonObject[];
   blockers: DashboardJsonObject[];
   warnings: DashboardJsonObject[];
+  noSecretStatus: DashboardJsonObject;
+};
+
+export type StagingDeploymentDryRunReadModel = {
+  summary: DashboardJsonObject;
+  profile: DashboardJsonObject;
+  sources: DashboardJsonObject[];
+  requiredSources: DashboardJsonObject[];
+  optionalSources: DashboardJsonObject[];
+  checks: DashboardJsonObject[];
+  requiredChecks: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  criticalBlockers: DashboardJsonObject[];
+  warnings: DashboardJsonObject[];
+  skippedIntegrationProfiles: DashboardJsonObject[];
+  integrationProfiles: DashboardJsonObject[];
+  recommendedNextActions: string[];
+  promotionGuidance: string[];
+  rollbackGuidance: string[];
+  noSecretStatus: DashboardJsonObject;
+};
+
+export type StagingReleaseCandidateReadModel = {
+  summary: DashboardJsonObject;
+  checklist: DashboardJsonObject;
+  gates: DashboardJsonObject[];
+  requiredGates: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  criticalBlockers: DashboardJsonObject[];
+  signoffs: DashboardJsonObject[];
+  pendingSignoffs: DashboardJsonObject[];
+  releaseNoteRequirements: DashboardJsonObject[];
+  missingReleaseNoteRequirements: DashboardJsonObject[];
+  rollbackChecklist: DashboardJsonObject[];
+  missingRollbackItems: DashboardJsonObject[];
+  skippedTests: string[];
+  recommendedNextActions: string[];
+  noSecretStatus: DashboardJsonObject;
+};
+
+export type StagingDeploymentExecutionReadModel = {
+  summary: DashboardJsonObject;
+  plan: DashboardJsonObject;
+  steps: DashboardJsonObject[];
+  gates: DashboardJsonObject[];
+  requiredGates: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  warnings: DashboardJsonObject[];
+  goNoGoDecision: DashboardJsonObject;
+  pendingSignoffs: DashboardJsonObject[];
+  optionalIntegrationDecisions: DashboardJsonObject[];
+  rollbackPlan: DashboardJsonObject;
+  rollbackSteps: DashboardJsonObject[];
+  recommendedNextActions: string[];
   noSecretStatus: DashboardJsonObject;
 };
 
@@ -354,6 +432,20 @@ export type LLMIntegrationTestReadModel = {
   noSecretStatus: DashboardJsonObject;
 };
 
+export type VaultIntegrationTestReadModel = {
+  summary: DashboardJsonObject;
+  profile: DashboardJsonObject;
+  testCases: DashboardJsonObject[];
+  gatedLiveTestCases: DashboardJsonObject[];
+  mockTestCases: DashboardJsonObject[];
+  safetyChecks: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  warnings: DashboardJsonObject[];
+  gateStatus: DashboardJsonObject;
+  operationPolicy: DashboardJsonObject;
+  noSecretStatus: DashboardJsonObject;
+};
+
 export type ObservabilityReadModel = {
   config: DashboardJsonObject;
   auditSummary: DashboardJsonObject;
@@ -388,6 +480,7 @@ export type DashboardReadModels = {
   registry: RegistryReadModel;
   llm: LLMGatewayReadModel;
   llmIntegration: LLMIntegrationTestReadModel;
+  vaultIntegration: VaultIntegrationTestReadModel;
   agents: AgentRunnerReadModel;
   policy: PolicyReadModel;
   policyBundles: PolicyBundleReadinessReadModel;
@@ -400,7 +493,12 @@ export type DashboardReadModels = {
   readiness: DeploymentReadinessReadModel;
   database: DatabaseOperationsReadModel;
   secretBackend: SecretBackendMigrationReadModel;
+  secretBackendDecision: SecretBackendDecisionReadModel;
+  vaultSecretBackend: VaultSecretBackendReadModel;
   staging: StagingDeploymentReadModel;
+  stagingDryRun: StagingDeploymentDryRunReadModel;
+  stagingReleaseCandidate: StagingReleaseCandidateReadModel;
+  stagingExecution: StagingDeploymentExecutionReadModel;
   cicd: CICDPipelineReadModel;
   observability: ObservabilityReadModel;
   audit: AuditSummaryReadModel;
@@ -416,6 +514,7 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/registry",
   "/dashboard/llm",
   "/dashboard/llm-integration",
+  "/dashboard/vault-integration",
   "/dashboard/agents",
   "/dashboard/policy",
   "/dashboard/policy-bundles",
@@ -428,14 +527,19 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/readiness",
   "/dashboard/database",
   "/dashboard/secret-backend",
+  "/dashboard/secret-backend-decision",
+  "/dashboard/vault-secret-backend",
   "/dashboard/staging",
+  "/dashboard/staging-dry-run",
+  "/dashboard/staging-rc",
+  "/dashboard/staging-execution",
   "/dashboard/ci-cd",
   "/dashboard/observability",
   "/dashboard/audit"
 ] as const;
 
 const sensitiveKeyPattern = /^(token|accessToken|refreshToken|apiKey|api_key|authorization|password|rawSecret|secretValue|credentialValue|privateKey|private_key|databaseUrl|database_url|connectionString|postgresUrl|clientSecret|vaultToken|secretAccessKey|session|sessionId|cookie|assertion|idToken|samlAssertion)$/i;
-const tokenLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|postgres(?:ql)?:\/\/[^\s"']+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN|AICHESTRA_GITHUB_WEBHOOK_SECRET|GITHUB_APP_PRIVATE_KEY|PRIVATE_KEY|DATABASE_URL|AICHESTRA_DATABASE_URL|AICHESTRA_TEST_DATABASE_URL|SESSION_SECRET|JWT_SECRET|VAULT_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SECRET|GCP_SECRET|AZURE_KEY|AZURE_CLIENT_SECRET|OKTA_TOKEN|AUTH0_CLIENT_SECRET|ENTRA_CLIENT_SECRET|GOOGLE_WORKSPACE_TOKEN|SAML_ASSERTION|OIDC_ID_TOKEN|SCIM_TOKEN|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|SESSION|COOKIE))=)[^\s"']+/g;
+const tokenLikePattern = /(Bearer\s+)[A-Za-z0-9._~+/=-]+|sk-[A-Za-z0-9_-]{6,}|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|hvs\.[A-Za-z0-9_-]+|hvb\.[A-Za-z0-9_-]+|postgres(?:ql)?:\/\/[^\s"']+|((?:OPENAI_API_KEY|ANTHROPIC_API_KEY|AICHESTRA_LLM_API_KEY|LLM_API_KEY|GITHUB_TOKEN|AICHESTRA_GITHUB_TOKEN|AICHESTRA_GITHUB_WEBHOOK_SECRET|GITHUB_APP_PRIVATE_KEY|PRIVATE_KEY|DATABASE_URL|AICHESTRA_DATABASE_URL|AICHESTRA_TEST_DATABASE_URL|SESSION_SECRET|JWT_SECRET|VAULT_TOKEN|AICHESTRA_VAULT_TOKEN|AWS_SECRET_ACCESS_KEY|AWS_SECRET|GCP_SECRET|AZURE_KEY|AZURE_CLIENT_SECRET|OKTA_TOKEN|AUTH0_CLIENT_SECRET|ENTRA_CLIENT_SECRET|GOOGLE_WORKSPACE_TOKEN|SAML_ASSERTION|OIDC_ID_TOKEN|SCIM_TOKEN|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PRIVATE_KEY|SESSION|COOKIE))=)[^\s"']+/g;
 const credentialCachePattern = /~\/\.codex\/auth\.json|~\/\.claude[^\s"']*|Google credential cache/gi;
 
 export function sanitizeDashboardValue(value: unknown): DashboardJsonValue {

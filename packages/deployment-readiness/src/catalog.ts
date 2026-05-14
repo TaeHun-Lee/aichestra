@@ -26,6 +26,9 @@ import type {
   LLMIntegrationTestCase,
   LLMIntegrationTestProfile,
   LLMIntegrationTestSafetyCheck,
+  VaultIntegrationTestCase,
+  VaultIntegrationTestProfile,
+  VaultIntegrationTestSafetyCheck,
   GitHubAppInstallation,
   GitHubAppPermissionMatrixEntry,
   GitHubAppProductionRisk,
@@ -45,13 +48,22 @@ import type {
   PolicyEngineOption,
   ProductionRisk,
   ReadinessCheck,
+  SecretBackendDecisionCriterion,
+  SecretBackendDecisionRisk,
+  SecretBackendDecisionScore,
+  SecretBackendImplementationScope,
   SecretBackendMigrationPhase,
   SecretBackendOption,
+  SecretBackendOptionDecision,
+  SecretBackendProviderMapping,
   SecretBackendReadinessCheck,
   SecretBackendRisk,
   ServiceAccountPlan,
   TenantBoundaryPlan,
   StagingDeploymentProfile,
+  StagingDeploymentDryRunProfile,
+  StagingDeploymentExecutionPlan,
+  StagingReleaseCandidateChecklist,
   StagingIntegrationGate,
   StagingPromotionCriterion,
   StagingReadinessCheck,
@@ -2147,6 +2159,322 @@ export const defaultSecretBackendRisks: SecretBackendRisk[] = [
   }
 ];
 
+// Decision v0 is intentionally seeded readiness data. It records the selected
+// backend path without constructing a backend client or reading values.
+export const defaultSecretBackendOptionDecision: SecretBackendOptionDecision = {
+  id: "production_secret_backend_option_decision_v0",
+  recommendedBackend: "vault",
+  secondChoiceBackend: "aws_secrets_manager_future",
+  decisionStatus: "accepted_mock",
+  rationale: [
+    "Vault is the best first implementation path for Aichestra because the repository has not selected a cloud target and Vault gives the strongest cloud-neutral lease, revocation, namespace, and audit model.",
+    "Vault-backed Secret Backend v1 implements the selected provider as a gated, non-default SecretRef boundary without making production secrets ready.",
+    "A Vault-backed adapter can prove the production SecretRef contract without coupling Aichestra to one cloud provider first.",
+    "AWS Secrets Manager is the second choice if the first production deployment is explicitly AWS-first."
+  ],
+  assumptions: [
+    "The first v1 implementation remains behind SecretRef, Auth/RBAC, Policy, and redaction boundaries.",
+    "Production Auth/RBAC, service identities, and policy bundle runtime are still separate production blockers.",
+    "EnvSecretProvider remains local/integration fallback only and is not a production default."
+  ],
+  risks: [
+    "Vault adds operational complexity and requires owner assignment before production.",
+    "Backend outage must fail closed without leaking secret values.",
+    "Overbroad backend policy or tenant mapping mistakes could expose wrong-team credentials unless production Auth/RBAC and policy checks are enforced."
+  ],
+  implementationScopeRef: "docs/roadmaps/production-secret-backend-option-decision/implementation-scope-v1.md",
+  createdAt: new Date("2026-05-14T00:00:00.000Z"),
+  metadata: {
+    docs: "docs/roadmaps/production-secret-backend-option-decision/recommendation-v0.md",
+    selectedBackendImplemented: true,
+    vaultSecretBackendV1Implemented: true,
+    realVaultIntegrationImplemented: true,
+    realCloudSecretManagerIntegrationImplemented: false,
+    productionSecretsReady: false
+  }
+};
+
+export const defaultSecretBackendDecisionCriteria: SecretBackendDecisionCriterion[] = [
+  { id: "security_posture", name: "Security posture", weight: 10, description: "Strength of isolation, access control, revocation, and safe failure behavior.", metadata: { required: true } },
+  { id: "secretref_compatibility", name: "SecretRef compatibility", weight: 10, description: "Ability to keep stable SecretRef ids while storing backend reference/version metadata only.", metadata: { required: true } },
+  { id: "lease_ttl_support", name: "Lease and TTL support", weight: 9, description: "Backend-native support for short-lived access, leases, renewal policy, and revocation.", metadata: { required: true } },
+  { id: "rotation_support", name: "Rotation support", weight: 8, description: "Manual and future scheduled/provider-managed rotation support.", metadata: { required: true } },
+  { id: "versioning_support", name: "Versioning support", weight: 7, description: "Secret version metadata and rollback support without exposing values.", metadata: { required: true } },
+  { id: "audit_capability", name: "Audit capability", weight: 9, description: "Backend audit detail and correlation with Aichestra actor/request/task/provider metadata.", metadata: { required: true } },
+  { id: "iam_rbac_integration", name: "IAM/RBAC integration", weight: 9, description: "Ability to align backend identity with Aichestra Auth/RBAC and policy decisions.", metadata: { required: true } },
+  { id: "tenant_team_project_scoping", name: "Tenant/team/project scoping", weight: 8, description: "Supports per-tenant/team/project namespaces, policies, or equivalent isolation.", metadata: { required: true } },
+  { id: "environment_usability", name: "Local/integration/staging/production usability", weight: 6, description: "Works across local mock, integration, staging validation, and production.", metadata: { required: true } },
+  { id: "operational_complexity", name: "Operational complexity", weight: 6, description: "Operational burden, HA ownership, backup/restore, and on-call requirements.", metadata: { lowerComplexityScoresHigher: true } },
+  { id: "deployment_complexity", name: "Deployment complexity", weight: 5, description: "Complexity of deploying and configuring the backend safely.", metadata: { lowerComplexityScoresHigher: true } },
+  { id: "vendor_lock_in", name: "Cloud/vendor lock-in", weight: 5, description: "Portability across self-hosted and cloud deployments.", metadata: { lowerLockInScoresHigher: true } },
+  { id: "self_hosted_support", name: "Self-hosted support", weight: 7, description: "Suitability for self-hosted or cloud-neutral production deployments.", metadata: { required: false } },
+  { id: "cost", name: "Cost", weight: 4, description: "Expected service and operational cost profile.", metadata: { required: false } },
+  { id: "backup_restore", name: "Backup and restore implications", weight: 6, description: "Recoverability without secret exposure or metadata corruption.", metadata: { required: true } },
+  { id: "incident_response", name: "Incident response support", weight: 7, description: "Emergency revoke, disable, audit, rotate, and recovery support.", metadata: { required: true } },
+  { id: "break_glass", name: "Break-glass support", weight: 5, description: "Audited emergency access compatibility without weakening default gates.", metadata: { future: true } },
+  { id: "developer_experience", name: "Developer experience", weight: 4, description: "Ease of local development and operator diagnostics without values.", metadata: { required: false } },
+  { id: "testability", name: "Testability", weight: 6, description: "Supports deterministic unit/contract tests and skipped-by-default live tests.", metadata: { required: true } },
+  { id: "future_extension_compatibility", name: "Future BYOK/OAuth/WIF/IAM/MCP/Local Agent compatibility", weight: 7, description: "Future compatibility with enterprise credential patterns without reading caches or exposing values.", metadata: { required: false } }
+];
+
+export const defaultSecretBackendDecisionScores: SecretBackendDecisionScore[] = [
+  {
+    id: "score_vault_security_posture",
+    backendKind: "vault",
+    criterionId: "security_posture",
+    score: 5,
+    weightedScore: 50,
+    rationale: "Vault has strong policy, namespace, lease, revoke, and audit semantics when operated correctly.",
+    metadata: { implemented: true, productionReady: false }
+  },
+  {
+    id: "score_vault_lease_ttl_support",
+    backendKind: "vault",
+    criterionId: "lease_ttl_support",
+    score: 5,
+    weightedScore: 45,
+    rationale: "Vault is the strongest option for backend-native leases and TTLs.",
+    metadata: { implemented: true, productionReady: false }
+  },
+  {
+    id: "score_vault_vendor_lock_in",
+    backendKind: "vault",
+    criterionId: "vendor_lock_in",
+    score: 5,
+    weightedScore: 25,
+    rationale: "Vault keeps the first adapter cloud-neutral while deployment target remains undecided.",
+    metadata: { implemented: true, productionReady: false }
+  },
+  {
+    id: "score_aws_security_posture",
+    backendKind: "aws_secrets_manager_future",
+    criterionId: "security_posture",
+    score: 4,
+    weightedScore: 40,
+    rationale: "AWS Secrets Manager is strong for AWS-native deployments but ties the first implementation to AWS IAM and operations.",
+    metadata: { implemented: false }
+  },
+  {
+    id: "score_gcp_security_posture",
+    backendKind: "gcp_secret_manager_future",
+    criterionId: "security_posture",
+    score: 4,
+    weightedScore: 40,
+    rationale: "GCP Secret Manager is strong for GCP-native deployments but lacks Vault-style lease semantics.",
+    metadata: { implemented: false }
+  },
+  {
+    id: "score_azure_security_posture",
+    backendKind: "azure_key_vault_future",
+    criterionId: "security_posture",
+    score: 4,
+    weightedScore: 40,
+    rationale: "Azure Key Vault is strong for Azure/Entra deployments but should follow an Azure target decision.",
+    metadata: { implemented: false }
+  },
+  {
+    id: "score_env_production_suitability",
+    backendKind: "env",
+    criterionId: "security_posture",
+    score: 1,
+    weightedScore: 10,
+    rationale: "Env fallback lacks backend-native audit, rotation, versioning, HA, lease, and IAM controls; it is not production-suitable.",
+    metadata: { productionDefaultAllowed: false }
+  },
+  {
+    id: "score_mock_testability",
+    backendKind: "mock",
+    criterionId: "testability",
+    score: 5,
+    weightedScore: 30,
+    rationale: "Mock provider is excellent for deterministic tests but must remain test-only.",
+    metadata: { productionDefaultAllowed: false }
+  }
+];
+
+export const defaultSecretBackendImplementationScopes: SecretBackendImplementationScope[] = [
+  {
+    id: "vault_secret_backend_implementation_scope_v1",
+    backendKind: "vault",
+    version: "v1",
+    status: "v1_implemented",
+    includedCapabilities: [
+      "Vault-backed SecretRef provider class behind SecurityControlService",
+      "metadata-only backend reference and version fields",
+      "read-only config validation and health status",
+      "CredentialManager and TokenResolver integration through existing Auth/RBAC and Policy gates",
+      "manual rotation metadata and revoked/disabled fail-closed behavior",
+      "API/dashboard/health no-secret/no-env contract tests",
+      "skipped-by-default Vault integration-test skeleton behind explicit gates"
+    ],
+    excludedCapabilities: [
+      "automatic secret migration",
+      "scheduled rotation jobs",
+      "BYOK",
+      "OAuth/device-code/WIF/IAM token exchange",
+      "provider credential cache reads",
+      "Local CLI credential reads",
+      "Local Agent secret forwarding",
+      "production credential issuance"
+    ],
+    requiredConfig: [
+      "AICHESTRA_SECRET_BACKEND_PROVIDER=vault",
+      "AICHESTRA_VAULT_ADDR configured as status only",
+      "AICHESTRA_VAULT_NAMESPACE optional status only",
+      "AICHESTRA_VAULT_AUTH_METHOD future explicit value",
+      "AICHESTRA_SECRET_BACKEND_INTEGRATION_TESTS=false by default"
+    ],
+    requiredTests: [
+      "unit tests for provider config validation",
+      "contract tests with mock Vault client",
+      "no-secret API/dashboard/health tests",
+      "permission denied and policy denied tests",
+      "missing/revoked secret tests",
+      "skipped live integration test skeleton"
+    ],
+    metadata: {
+      docs: "docs/roadmaps/production-secret-backend-option-decision/implementation-scope-v1.md",
+      dependencyDecision: "isolated_gated_http_client_boundary_without_new_dependency",
+      externalCallsInDefaultTests: false,
+      selectedBackendImplemented: true,
+      productionSecretBackendReady: false
+    }
+  }
+];
+
+export const defaultSecretBackendProviderMappings: SecretBackendProviderMapping[] = [
+  {
+    id: "secret_backend_provider_mapping_mock",
+    providerValue: "mock",
+    currentStatus: "implemented as metadata/mock behavior",
+    productionStatus: "test_only",
+    providerIdentifier: "mock",
+    requiredConfig: [],
+    allowedProfiles: ["local", "integration"],
+    forbiddenProfiles: ["staging", "production"],
+    requiredAuthRbac: ["mock actor allowed only for local/test metadata"],
+    requiredPolicy: ["secret.read remains denied"],
+    auditRequirements: ["metadata-only mock lease and resolution audit"],
+    healthDashboardExposure: ["kind/status/counts only"],
+    testStrategy: ["deterministic unit tests"],
+    metadata: { productionDefaultAllowed: false }
+  },
+  {
+    id: "secret_backend_provider_mapping_env",
+    providerValue: "env",
+    currentStatus: "implemented as explicit allowlisted EnvSecretProvider",
+    productionStatus: "local_integration_only",
+    providerIdentifier: "env",
+    requiredConfig: ["AICHESTRA_ENABLE_ENV_SECRET_PROVIDER", "AICHESTRA_ALLOWED_SECRET_ENV_KEYS"],
+    allowedProfiles: ["local", "integration"],
+    forbiddenProfiles: ["production"],
+    requiredAuthRbac: ["AuthorizationService allow before env read"],
+    requiredPolicy: ["provider.credential.resolve", "secret.lease.request", "secret.lease.issue"],
+    auditRequirements: ["legacy fallback warning and credential resolution metadata only"],
+    healthDashboardExposure: ["enabled boolean and allowlisted env key count only"],
+    testStrategy: ["fake env values in tests; assert values never appear"],
+    metadata: { productionDefaultAllowed: false, stagingAllowedOnlyAsWarning: true }
+  },
+  {
+    id: "secret_backend_provider_mapping_vault",
+    providerValue: "vault",
+    currentStatus: "v1 implemented as gated non-default SecretRef provider",
+    productionStatus: "v1_implemented_gated",
+    providerIdentifier: "vault",
+    requiredConfig: ["AICHESTRA_SECRET_BACKEND_PROVIDER=vault", "AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER=true", "AICHESTRA_VAULT_ADDR", "AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES", "gated Vault token auth for integration tests only"],
+    allowedProfiles: ["integration", "staging", "production"],
+    forbiddenProfiles: [],
+    requiredAuthRbac: ["security_admin setup", "service account resolve for narrow purposes", "tenant/team/project scope checks"],
+    requiredPolicy: ["deny disabled/revoked refs", "deny env fallback in production", "deny broad secret.read"],
+    auditRequirements: ["Aichestra audit correlation plus Vault audit event reference metadata"],
+    healthDashboardExposure: ["provider kind, configured booleans, readiness status, no values"],
+    testStrategy: ["mock client contract tests and skipped live tests behind explicit gates"],
+    metadata: { selectedForV1: true, implemented: true, productionReady: false }
+  },
+  {
+    id: "secret_backend_provider_mapping_aws",
+    providerValue: "aws_secrets_manager_future",
+    currentStatus: "future placeholder only",
+    productionStatus: "deferred",
+    providerIdentifier: "aws_secrets_manager_future",
+    requiredConfig: ["future AWS region/status", "future IAM role/status"],
+    allowedProfiles: ["integration", "staging", "production"],
+    forbiddenProfiles: [],
+    requiredAuthRbac: ["service account identity mapped to IAM role"],
+    requiredPolicy: ["purpose-scoped credential resolve checks"],
+    auditRequirements: ["Aichestra audit plus CloudTrail correlation metadata"],
+    healthDashboardExposure: ["provider kind and configured booleans only"],
+    testStrategy: ["future mock AWS client contract tests; skipped live tests"],
+    metadata: { secondChoiceIfAwsFirst: true, implemented: false }
+  },
+  {
+    id: "secret_backend_provider_mapping_gcp",
+    providerValue: "gcp_secret_manager_future",
+    currentStatus: "future placeholder only",
+    productionStatus: "deferred",
+    providerIdentifier: "gcp_secret_manager_future",
+    requiredConfig: ["future project/status", "future workload identity/status"],
+    allowedProfiles: ["integration", "staging", "production"],
+    forbiddenProfiles: [],
+    requiredAuthRbac: ["service account identity mapped to project scope"],
+    requiredPolicy: ["purpose-scoped credential resolve checks"],
+    auditRequirements: ["Aichestra audit plus Cloud Audit Logs correlation metadata"],
+    healthDashboardExposure: ["provider kind and configured booleans only"],
+    testStrategy: ["future mock GCP client contract tests; skipped live tests"],
+    metadata: { implemented: false }
+  },
+  {
+    id: "secret_backend_provider_mapping_azure",
+    providerValue: "azure_key_vault_future",
+    currentStatus: "future placeholder only",
+    productionStatus: "deferred",
+    providerIdentifier: "azure_key_vault_future",
+    requiredConfig: ["future vault uri/status", "future managed identity/status"],
+    allowedProfiles: ["integration", "staging", "production"],
+    forbiddenProfiles: [],
+    requiredAuthRbac: ["service account identity mapped to tenant/scope"],
+    requiredPolicy: ["purpose-scoped credential resolve checks"],
+    auditRequirements: ["Aichestra audit plus Azure diagnostics correlation metadata"],
+    healthDashboardExposure: ["provider kind and configured booleans only"],
+    testStrategy: ["future mock Azure client contract tests; skipped live tests"],
+    metadata: { implemented: false }
+  },
+  {
+    id: "secret_backend_provider_mapping_custom",
+    providerValue: "custom_future",
+    currentStatus: "future custom adapter only",
+    productionStatus: "future",
+    providerIdentifier: "custom_future",
+    requiredConfig: ["future enterprise backend endpoint/status", "future adapter id/status"],
+    allowedProfiles: ["integration", "staging", "production"],
+    forbiddenProfiles: [],
+    requiredAuthRbac: ["enterprise-defined service identity and tenant mapping"],
+    requiredPolicy: ["contract-specific policy checks"],
+    auditRequirements: ["must meet common audit envelope and backend audit correlation"],
+    healthDashboardExposure: ["provider kind and contract status only"],
+    testStrategy: ["future adapter contract tests"],
+    metadata: { implemented: false }
+  }
+];
+
+export const defaultSecretBackendDecisionRisks: SecretBackendDecisionRisk[] = [
+  { id: "secret_decision_risk_accidental_exposure", category: "secret_exposure", title: "Accidental secret exposure", severity: "critical", likelihood: "medium", impact: "Raw credentials could leak through API, dashboard, logs, audit, or test output.", mitigation: "Keep DTO sanitization, no-secret tests, redaction, and metadata-only audit mandatory.", ownerPlaceholder: "security_owner", status: "open", metadata: { noSecretTestsRequired: true } },
+  { id: "secret_decision_risk_wrong_tenant_access", category: "tenant_access", title: "Wrong tenant or team secret access", severity: "critical", likelihood: "medium", impact: "A service could resolve credentials outside its tenant/team/project scope.", mitigation: "Require production Auth/RBAC, scoped service accounts, backend namespace/policy mapping, and policy checks.", ownerPlaceholder: "identity_platform_owner", status: "open", metadata: { requiresProductionAuth: true } },
+  { id: "secret_decision_risk_env_fallback_production", category: "env_fallback", title: "Env fallback used in production", severity: "critical", likelihood: "medium", impact: "Production could bypass backend audit, rotation, and revocation.", mitigation: "Block env fallback for production and prefer backend-backed SecretRefs.", ownerPlaceholder: "platform_owner", status: "open", metadata: { productionBlocker: true } },
+  { id: "secret_decision_risk_stale_credential", category: "rotation", title: "Stale credential remains active", severity: "high", likelihood: "medium", impact: "Provider access may continue beyond expected validity or ownership.", mitigation: "Add stale version checks, manual rotation runbooks, and future rotation jobs.", ownerPlaceholder: "security_owner", status: "open", metadata: { rotationJobsImplemented: false } },
+  { id: "secret_decision_risk_failed_rotation", category: "rotation", title: "Failed rotation breaks provider access", severity: "high", likelihood: "medium", impact: "GitHub, webhook, LLM, or provider operations may fail.", mitigation: "Use staged rotation, validation checks, and rollback to disabled/mock gates.", ownerPlaceholder: "integrations_owner", status: "open", metadata: { failClosedRequired: true } },
+  { id: "secret_decision_risk_backend_outage", category: "backend_outage", title: "Backend outage", severity: "high", likelihood: "medium", impact: "Credential resolution fails for live integrations.", mitigation: "Design HA, timeout, retry budget, fail-closed behavior, and operator alerting.", ownerPlaceholder: "platform_ops_owner", status: "open", metadata: { externalBackendImplemented: false } },
+  { id: "secret_decision_risk_audit_gap", category: "audit", title: "Audit correlation gap", severity: "high", likelihood: "medium", impact: "Incident response cannot correlate backend access with Aichestra actors and requests.", mitigation: "Correlate request id, actor, service account, task, provider, SecretRef id, and backend audit reference.", ownerPlaceholder: "observability_owner", status: "open", metadata: { externalAuditExportImplemented: false } },
+  { id: "secret_decision_risk_missing_break_glass", category: "break_glass", title: "Missing break-glass process", severity: "high", likelihood: "medium", impact: "Emergency access may be improvised or unaudited.", mitigation: "Define explicit break-glass workflow before production backend rollout.", ownerPlaceholder: "security_owner", status: "open", metadata: { breakGlassImplemented: false } },
+  { id: "secret_decision_risk_overbroad_iam", category: "iam", title: "Overbroad backend IAM", severity: "critical", likelihood: "medium", impact: "Service accounts could read too many credentials.", mitigation: "Use least-privilege backend policies, review service account scopes, and deny broad secret.read.", ownerPlaceholder: "platform_security_owner", status: "open", metadata: { leastPrivilegeRequired: true } },
+  { id: "secret_decision_risk_credential_cache_misuse", category: "credential_cache", title: "Provider credential cache misuse", severity: "critical", likelihood: "low", impact: "Provider-owned user credentials could be read or uploaded.", mitigation: "Keep credential cache reads denied and covered by tests.", ownerPlaceholder: "security_owner", status: "open", metadata: { credentialCachesRead: false } },
+  { id: "secret_decision_risk_local_agent_forwarding", category: "local_agent", title: "Local Agent secret forwarding", severity: "high", likelihood: "medium", impact: "Secrets could be forwarded to user machines or vendor CLIs.", mitigation: "Keep Local Agent secret forwarding denied until explicit future design.", ownerPlaceholder: "local_agent_owner", status: "open", metadata: { localAgentSecretForwardingEnabled: false } },
+  { id: "secret_decision_risk_test_secret_leakage", category: "testing", title: "Test secret leakage", severity: "high", likelihood: "medium", impact: "Live integration tests could expose non-production secret material.", mitigation: "Use skipped-by-default live tests, safe namespaces, fake fixtures, and output redaction.", ownerPlaceholder: "qa_owner", status: "open", metadata: { liveTestsSkippedByDefault: true } },
+  { id: "secret_decision_risk_dashboard_health_leak", category: "dashboard_health", title: "Dashboard or health leak", severity: "critical", likelihood: "low", impact: "Readiness surfaces could leak backend paths, env values, or credential values.", mitigation: "Expose booleans/counts/status only and keep no-secret dashboard tests.", ownerPlaceholder: "dashboard_owner", status: "open", metadata: { healthValuesExposed: false } },
+  { id: "secret_decision_risk_backup_restore_refs", category: "backup_restore", title: "Backup/restore contains sensitive references", severity: "medium", likelihood: "medium", impact: "Backups may reveal sensitive naming or stale SecretRef mappings.", mitigation: "Use opaque ids, review metadata, and keep secret values exclusively in backend backups.", ownerPlaceholder: "db_owner", status: "open", metadata: { rawSecretsInDbBackups: false } },
+  { id: "secret_decision_risk_incident_response_gap", category: "incident_response", title: "Incident response gap", severity: "high", likelihood: "medium", impact: "Operators may not have a tested response for leak, outage, or compromised service account.", mitigation: "Add incident runbook, drills, escalation, audit review, and communication steps.", ownerPlaceholder: "security_owner", status: "open", metadata: { drillCompleted: false } }
+];
+
 export const defaultSecretRotationPlans: SecretRotationPlan[] = [
   {
     id: "rotation_github_token",
@@ -3733,6 +4061,273 @@ export const defaultStagingDeploymentProfile: StagingDeploymentProfile = {
     stagingDeployed: false,
     deploymentArtifactsCreated: false,
     profileContractDocs: "docs/roadmaps/staging-deployment-profile/profile-contract-v0.md"
+  }
+};
+
+export const defaultStagingDeploymentDryRunProfile: StagingDeploymentDryRunProfile = {
+  id: "staging_dry_run_profile_v0",
+  name: "Staging Deployment Dry-run Profile v0",
+  status: "ready_to_evaluate",
+  description: "Read-only dry-run profile that aggregates staging readiness sources before any staging deployment validation attempt.",
+  requiredReadinessSources: [
+    "staging_profile",
+    "ci_cd",
+    "postgres",
+    "github_app",
+    "llm_gateway",
+    "mcp_gateway",
+    "auth_rbac",
+    "secret_backend",
+    "secretref_credentials",
+    "policy_bundle",
+    "observability",
+    "dashboard",
+    "local_agent",
+    "runner",
+    "git"
+  ],
+  optionalReadinessSources: ["github_integration_tests", "llm_integration_tests"],
+  blockedCapabilities: [
+    "deployment_execution",
+    "production_traffic",
+    "external_provider_calls",
+    "remote_integration_test_execution",
+    "remote_merge",
+    "force_push",
+    "branch_deletion",
+    "vendor_cli_execution",
+    "real_mcp_transport_without_policy_secret_sandbox_readiness",
+    "secret_or_env_value_exposure",
+    "credential_cache_reads"
+  ],
+  allowedCapabilities: [
+    "read_only_readiness_aggregation",
+    "sanitized_counts_statuses_and_booleans",
+    "deterministic_blocker_classification",
+    "dashboard_and_api_read_models",
+    "promotion_and_rollback_guidance"
+  ],
+  dryRunMode: "read_only",
+  metadata: {
+    docs: "docs/roadmaps/staging-deployment-dry-run/v0.md",
+    planDocs: "docs/roadmaps/staging-deployment-dry-run/v0-plan.md",
+    reportFormatDocs: "docs/roadmaps/staging-deployment-dry-run/report-format-v0.md",
+    blockerTaxonomyDocs: "docs/roadmaps/staging-deployment-dry-run/blocker-taxonomy-v0.md",
+    deploymentImplemented: false,
+    integrationTestsExecutedByDryRun: false,
+    externalCallsEnabled: false,
+    secretsReturned: false,
+    envValuesReturned: false
+  }
+};
+
+export const defaultStagingReleaseCandidateChecklist: StagingReleaseCandidateChecklist = {
+  id: "staging_release_candidate_checklist_v0",
+  name: "Staging Release Candidate Checklist v0",
+  status: "ready_to_evaluate",
+  description: "Read-only checklist that defines whether a commit or branch can be called a staging release candidate without creating a release or deploying anything.",
+  requiredValidationGates: [
+    "pnpm lint",
+    "pnpm typecheck",
+    "pnpm test",
+    "pnpm build",
+    "git diff --check",
+    "safe integration scan",
+    "no-secret/no-env exposure scan",
+    "docs update check",
+    "dashboard/readiness no-secret check"
+  ],
+  optionalIntegrationProfiles: [
+    "optional_postgres_repository_contracts",
+    "optional_remote_git_integration",
+    "github_app_integration_test_profile_v1",
+    "github_webhook_integration",
+    "llm_gateway_integration_test_profile_v1",
+    "future_remote_mcp_profile",
+    "future_external_auth_profile"
+  ],
+  allowedSkippedTests: [
+    "postgres_contract_skipped_without_AICHESTRA_TEST_DATABASE_URL",
+    "remote_git_skipped_without_all_explicit_gates",
+    "github_app_integration_skipped_without_all_explicit_gates",
+    "github_webhook_integration_skipped_without_all_explicit_gates",
+    "llm_integration_skipped_without_all_explicit_gates",
+    "remote_mcp_future_blocked_by_default",
+    "external_auth_future_blocked_by_default"
+  ],
+  blockerPolicy: [
+    "critical_blocker_blocks_release_candidate",
+    "validation_failure_blocks_release_candidate",
+    "secret_or_env_exposure_blocks_release_candidate",
+    "remote_merge_force_push_branch_delete_blocks_release_candidate",
+    "release_or_deployment_execution_blocks_release_candidate",
+    "production_ready_or_staging_deployed_overclaim_blocks_release_candidate"
+  ],
+  requiredSignoffs: [
+    "engineering_owner",
+    "platform_owner",
+    "security_reviewer",
+    "product_owner",
+    "qa_reviewer",
+    "release_manager"
+  ],
+  requiredReleaseNotes: [
+    "summary",
+    "changed_areas",
+    "validation",
+    "skipped_tests",
+    "known_limitations",
+    "safety_gates",
+    "migration_notes",
+    "dashboard_readiness",
+    "rollback_notes",
+    "follow_ups"
+  ],
+  rollbackChecklist: [
+    "code_revert",
+    "database",
+    "config",
+    "feature_flags",
+    "git_integration",
+    "llm_integration",
+    "secrets",
+    "observability",
+    "dashboard"
+  ],
+  knownLimitations: [
+    "No staging deployment execution exists.",
+    "No release is created by this checklist.",
+    "No Git tag or GitHub release is created.",
+    "Production auth remains planning-only.",
+    "Real secret backend remains planning-only.",
+    "External observability backend and audit export remain future work.",
+    "Optional GitHub and LLM live integration profiles are skipped by default."
+  ],
+  metadata: {
+    docs: "docs/roadmaps/staging-release-candidate/v0.md",
+    planDocs: "docs/roadmaps/staging-release-candidate/v0-plan.md",
+    reportFormatDocs: "docs/roadmaps/staging-release-candidate/report-format-v0.md",
+    releaseNotesTemplateDocs: "docs/roadmaps/staging-release-candidate/release-notes-template-v0.md",
+    rollbackChecklistDocs: "docs/roadmaps/staging-release-candidate/rollback-checklist-v0.md",
+    releaseCreated: false,
+    deploymentExecuted: false,
+    gitTagCreated: false,
+    githubReleaseCreated: false,
+    externalCallsEnabled: false,
+    secretsReturned: false,
+    envValuesReturned: false
+  }
+};
+
+export const defaultStagingDeploymentExecutionPlan: StagingDeploymentExecutionPlan = {
+  id: "staging_deployment_execution_plan_v0",
+  name: "Staging Deployment Execution Plan v0",
+  status: "ready_for_signoff",
+  description: "Read-only, non-deploying execution plan for a future controlled staging deployment validation after human signoff.",
+  requiredSignoffs: [
+    "engineering_owner",
+    "platform_owner",
+    "security_reviewer",
+    "product_owner",
+    "qa_reviewer",
+    "release_manager"
+  ],
+  requiredPreDeployChecks: [
+    "pnpm lint",
+    "pnpm typecheck",
+    "pnpm test",
+    "pnpm build",
+    "git diff --check",
+    "safe integration scan",
+    "no-secret/no-env exposure scan",
+    "staging RC pass or pass_with_warnings",
+    "human signoff collected",
+    "release notes present",
+    "rollback plan present"
+  ],
+  optionalIntegrationChecks: [
+    "optional_postgres_repository_contracts",
+    "github_app_integration_test_profile_v1",
+    "github_webhook_integration",
+    "llm_gateway_integration_test_profile_v1",
+    "vault_integration_test_profile_v1",
+    "future_mcp_integration",
+    "future_external_auth_integration",
+    "future_vendor_cli_integration"
+  ],
+  deploymentSteps: [
+    "confirm_worktree_or_diff_scope",
+    "confirm_node_volta_baseline",
+    "run_required_validation",
+    "confirm_staging_rc_decision",
+    "collect_human_signoffs",
+    "freeze_config_environment_gates",
+    "decide_optional_live_integration_tests",
+    "confirm_postgres_staging_db_decision",
+    "confirm_secret_backend_vault_decision",
+    "confirm_github_app_integration_decision",
+    "confirm_llm_integration_decision",
+    "confirm_mcp_mock_future_policy",
+    "confirm_auth_rbac_staging_approval",
+    "confirm_dashboard_readiness_surfaces",
+    "confirm_observability_audit_readiness",
+    "confirm_rollback_plan",
+    "final_go_no_go_decision",
+    "future_deployment_execution_placeholder",
+    "post_deployment_smoke_test_placeholder",
+    "post_deployment_review_placeholder"
+  ],
+  postDeployChecks: [
+    "GET /health",
+    "GET /dashboard/overview",
+    "GET /dashboard/staging",
+    "GET /dashboard/staging-dry-run",
+    "GET /dashboard/staging-rc",
+    "GET /dashboard/observability",
+    "GET /readiness/deployment/summary",
+    "GET /readiness/staging-dry-run/summary",
+    "GET /readiness/staging-rc/summary",
+    "GET /observability/audit/summary",
+    "no-secret/no-env smoke check"
+  ],
+  rollbackSteps: [
+    "code_rollback",
+    "config_rollback",
+    "environment_gate_rollback",
+    "database_migration_rollback_decision",
+    "github_integration_gate_rollback",
+    "llm_integration_gate_rollback",
+    "vault_secretref_gate_rollback",
+    "dashboard_readiness_rollback",
+    "observability_audit_review",
+    "manual_verification"
+  ],
+  goNoGoCriteria: [
+    "no critical blockers",
+    "required validation gates pass",
+    "no secret or env value exposure",
+    "staging RC accepted as pass or pass_with_warnings",
+    "all required human signoffs collected",
+    "release notes and rollback plan present",
+    "optional integration decisions documented",
+    "deployment remains unexecuted until an explicit future task"
+  ],
+  metadata: {
+    docs: "docs/roadmaps/staging-deployment-execution/v0.md",
+    planDocs: "docs/roadmaps/staging-deployment-execution/v0-plan.md",
+    executionSequenceDocs: "docs/roadmaps/staging-deployment-execution/execution-sequence-v0.md",
+    preDeployGatesDocs: "docs/roadmaps/staging-deployment-execution/pre-deploy-gates-v0.md",
+    liveIntegrationDecisionDocs: "docs/roadmaps/staging-deployment-execution/live-integration-decision-v0.md",
+    postDeploySmokeDocs: "docs/roadmaps/staging-deployment-execution/post-deploy-smoke-checks-v0.md",
+    rollbackPlanDocs: "docs/roadmaps/staging-deployment-execution/rollback-plan-v0.md",
+    deploymentExecuted: false,
+    releaseCreated: false,
+    gitTagCreated: false,
+    externalCallsEnabled: false,
+    secretsReturned: false,
+    envValuesReturned: false,
+    productionReady: false,
+    stagingDeployed: false
   }
 };
 
@@ -5477,5 +6072,325 @@ export const defaultLLMIntegrationTestSafetyChecks: LLMIntegrationTestSafetyChec
     remediation: "Keep AICHESTRA_ENABLE_LLM_FALLBACK=false and AICHESTRA_LLM_MAX_FALLBACK_ATTEMPTS=0 for this profile.",
     evidence: ["docs/features/llm-gateway/v2.md"],
     metadata: { fallbackEnabledByDefault: false, maxFallbackAttempts: 0 }
+  }
+];
+
+export const defaultVaultIntegrationTestProfile: VaultIntegrationTestProfile = {
+  id: "vault_integration_test_profile_v1",
+  name: "Vault integration-test profile v1",
+  status: "ready_if_configured",
+  backendKind: "vault",
+  requiredEnvVars: [
+    "AICHESTRA_VAULT_INTEGRATION_TESTS",
+    "AICHESTRA_SECRET_BACKEND_PROVIDER",
+    "AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER",
+    "AICHESTRA_VAULT_ADDR",
+    "AICHESTRA_VAULT_AUTH_METHOD",
+    "AICHESTRA_VAULT_TOKEN",
+    "AICHESTRA_VAULT_KV_MOUNT",
+    "AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES",
+    "AICHESTRA_TEST_VAULT_SECRET_PATH",
+    "AICHESTRA_TEST_VAULT_SECRET_KEY"
+  ],
+  requiredSecretRefs: ["vault_test_secretref_metadata"],
+  requiredPathAllowlist: ["AICHESTRA_TEST_VAULT_SECRET_PATH must be under AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES"],
+  allowedOperations: [
+    "config_validation",
+    "secretref_validation_status_only",
+    "path_allowlist_validation",
+    "one_kv_v2_read_from_allowlisted_test_path_when_gated",
+    "credential_handle_resolution_status_only",
+    "auth_policy_gate_validation",
+    "audit_redaction_validation",
+    "no_secret_exposure_validation"
+  ],
+  forbiddenOperations: [
+    "vault_write",
+    "vault_delete",
+    "vault_rotate",
+    "vault_broad_list",
+    "production_path_access",
+    "secret_value_return",
+    "vault_token_return",
+    "env_value_return",
+    "credential_cache_read",
+    "production_vault_rollout"
+  ],
+  testSecretPattern: "provider=vault, metadata.vaultMount=<AICHESTRA_VAULT_KV_MOUNT>, metadata.vaultPath=<AICHESTRA_TEST_VAULT_SECRET_PATH>, metadata.vaultKey=<AICHESTRA_TEST_VAULT_SECRET_KEY>, dataShape=single_key",
+  auditRequirements: [
+    "vault_integration_test_skipped_when_gates_missing",
+    "vault_config_validated_metadata_only",
+    "vault_path_allowlist_checked",
+    "vault_secret_resolution_requested_metadata_only",
+    "vault_secret_resolution_allowed_or_missing_metadata_only",
+    "vault_secret_value_redacted"
+  ],
+  metadata: {
+    docs: "docs/roadmaps/vault-integration-test-profile/v1.md",
+    liveTestsEnabledByDefault: false,
+    kvVersion: "v2",
+    noWrite: true,
+    noDelete: true,
+    noRotate: true,
+    noBroadList: true,
+    noSecretsReturned: true,
+    noVaultCallsInDefaultTests: true
+  }
+};
+
+export const defaultVaultIntegrationTestCases: VaultIntegrationTestCase[] = [
+  {
+    id: "vault_it_config_validation",
+    profileId: "vault_integration_test_profile_v1",
+    name: "Validate Vault integration gates",
+    category: "config_validation",
+    enabledByDefault: true,
+    requiresLiveVault: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["none"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { validatesBooleansAndCountsOnly: true, envValuesReturned: false }
+  },
+  {
+    id: "vault_it_secretref_validation",
+    profileId: "vault_integration_test_profile_v1",
+    name: "Validate provider=vault SecretRef metadata shape",
+    category: "secretref_validation",
+    enabledByDefault: true,
+    requiresLiveVault: false,
+    requiredEnvVars: ["AICHESTRA_VAULT_KV_MOUNT", "AICHESTRA_TEST_VAULT_SECRET_PATH", "AICHESTRA_TEST_VAULT_SECRET_KEY"],
+    expectedSideEffects: ["none"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { secretValueReturned: false, secretRefMetadataOnly: true }
+  },
+  {
+    id: "vault_it_path_allowlist",
+    profileId: "vault_integration_test_profile_v1",
+    name: "Validate test Vault path allowlist",
+    category: "path_allowlist",
+    enabledByDefault: true,
+    requiresLiveVault: false,
+    requiredEnvVars: ["AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES", "AICHESTRA_TEST_VAULT_SECRET_PATH"],
+    expectedSideEffects: ["none"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { pathValuesReturned: false, allowlistCountOnly: true }
+  },
+  {
+    id: "vault_it_kv_v2_read_gated",
+    profileId: "vault_integration_test_profile_v1",
+    name: "Read one KV v2 test secret only when every gate passes",
+    category: "kv_v2_read",
+    enabledByDefault: false,
+    requiresLiveVault: true,
+    requiredEnvVars: [
+      "AICHESTRA_VAULT_INTEGRATION_TESTS",
+      "AICHESTRA_SECRET_BACKEND_PROVIDER",
+      "AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER",
+      "AICHESTRA_VAULT_ADDR",
+      "AICHESTRA_VAULT_AUTH_METHOD",
+      "AICHESTRA_VAULT_TOKEN",
+      "AICHESTRA_VAULT_KV_MOUNT",
+      "AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES",
+      "AICHESTRA_TEST_VAULT_SECRET_PATH",
+      "AICHESTRA_TEST_VAULT_SECRET_KEY"
+    ],
+    expectedSideEffects: ["single_allowlisted_read_status_only"],
+    cleanupRequired: false,
+    status: "gated_live",
+    metadata: { liveVaultSkippedByDefault: true, writeAllowed: false, broadListAllowed: false }
+  },
+  {
+    id: "vault_it_credential_resolution_gated",
+    profileId: "vault_integration_test_profile_v1",
+    name: "Resolve a CredentialHandle through a Vault-backed SecretRef when gated",
+    category: "credential_resolution",
+    enabledByDefault: false,
+    requiresLiveVault: true,
+    requiredEnvVars: [
+      "AICHESTRA_VAULT_INTEGRATION_TESTS",
+      "AICHESTRA_SECRET_BACKEND_PROVIDER",
+      "AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER",
+      "AICHESTRA_TEST_VAULT_SECRET_PATH",
+      "AICHESTRA_TEST_VAULT_SECRET_KEY"
+    ],
+    expectedSideEffects: ["metadata_only_credential_handle"],
+    cleanupRequired: false,
+    status: "gated_live",
+    metadata: { credentialValueReturned: false, leaseMetadataOnly: true }
+  },
+  {
+    id: "vault_it_auth_policy_gate",
+    profileId: "vault_integration_test_profile_v1",
+    name: "Verify Auth/RBAC and Policy gates before Vault reads",
+    category: "auth_policy_gate",
+    enabledByDefault: true,
+    requiresLiveVault: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["none"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { authBypassAllowed: false, policyBypassAllowed: false }
+  },
+  {
+    id: "vault_it_audit_redaction",
+    profileId: "vault_integration_test_profile_v1",
+    name: "Verify Vault audit metadata and redaction",
+    category: "audit_redaction",
+    enabledByDefault: true,
+    requiresLiveVault: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["sanitized_audit_metadata"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { vaultTokenStored: false, vaultSecretValueStored: false, envValuesStored: false }
+  },
+  {
+    id: "vault_it_no_secret_exposure",
+    profileId: "vault_integration_test_profile_v1",
+    name: "Verify public results contain no Vault secret material",
+    category: "no_secret_exposure",
+    enabledByDefault: true,
+    requiresLiveVault: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["none"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { vaultTokenExposed: false, vaultSecretValueExposed: false, envValuesExposed: false }
+  }
+];
+
+export const defaultVaultIntegrationTestSafetyChecks: VaultIntegrationTestSafetyCheck[] = [
+  {
+    id: "vault_it_env_gates_missing_skip",
+    category: "env_gates",
+    status: "warning",
+    severity: "high",
+    description: "Live Vault integration tests must skip unless every required gate is configured.",
+    remediation: "Set every documented Vault integration-test gate only in a reviewed non-production profile.",
+    evidence: ["docs/roadmaps/vault-integration-test-profile/v1.md"],
+    metadata: { missingGatesSkipNotFail: true }
+  },
+  {
+    id: "vault_it_address_configured",
+    category: "vault_address",
+    status: "warning",
+    severity: "high",
+    description: "Live tests require a Vault address, but readiness surfaces must expose only configured true/false.",
+    remediation: "Configure AICHESTRA_VAULT_ADDR for live tests; never return the value in API/health/dashboard.",
+    evidence: ["docs/foundations/vault-secret-backend/v1.md"],
+    metadata: { addressValueReturned: false }
+  },
+  {
+    id: "vault_it_token_auth_only",
+    category: "auth_method",
+    status: "warning",
+    severity: "high",
+    description: "v1 live tests support token auth only; AppRole and cloud identity remain future.",
+    remediation: "Set AICHESTRA_VAULT_AUTH_METHOD=token for live tests.",
+    evidence: ["docs/foundations/vault-secret-backend/v1.md"],
+    metadata: { approleProductionRolloutImplemented: false }
+  },
+  {
+    id: "vault_it_token_configured_hidden",
+    category: "token_presence",
+    status: "warning",
+    severity: "critical",
+    description: "Live tests require a Vault token, and the token must never be returned.",
+    remediation: "Configure AICHESTRA_VAULT_TOKEN only in a test environment and rely on no-secret assertions.",
+    evidence: ["docs/foundations/vault-secret-backend/v1.md"],
+    metadata: { tokenValueReturned: false }
+  },
+  {
+    id: "vault_it_path_allowlist_required",
+    category: "path_allowlist",
+    status: "warning",
+    severity: "critical",
+    description: "The configured test path must be under an explicit allowed path prefix.",
+    remediation: "Set AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES to include only non-production test prefixes.",
+    evidence: ["docs/roadmaps/vault-integration-test-profile/v1.md"],
+    metadata: { pathValuesReturned: false, broadListingAllowed: false }
+  },
+  {
+    id: "vault_it_test_path_nonproduction",
+    category: "test_secret_path",
+    status: "warning",
+    severity: "critical",
+    description: "The test secret path must be clearly non-production and test-only.",
+    remediation: "Use a path containing test, tests, integration, sandbox, nonprod, or ci.",
+    evidence: ["docs/roadmaps/vault-integration-test-profile/v1.md"],
+    metadata: { rawPathReturned: false }
+  },
+  {
+    id: "vault_it_no_write",
+    category: "no_write",
+    status: "pass",
+    severity: "critical",
+    description: "The profile must not write Vault secrets.",
+    remediation: "Keep live tests read-only and do not add write endpoints.",
+    evidence: ["AGENTS.md"],
+    metadata: { writeAllowed: false }
+  },
+  {
+    id: "vault_it_no_delete",
+    category: "no_delete",
+    status: "pass",
+    severity: "critical",
+    description: "The profile must not delete Vault secrets or metadata.",
+    remediation: "Keep cleanup as no-op; do not add destructive Vault calls.",
+    evidence: ["AGENTS.md"],
+    metadata: { deleteAllowed: false }
+  },
+  {
+    id: "vault_it_no_rotate",
+    category: "no_rotate",
+    status: "pass",
+    severity: "critical",
+    description: "The profile must not rotate Vault secrets.",
+    remediation: "Leave rotation as future planning only.",
+    evidence: ["AGENTS.md"],
+    metadata: { rotateAllowed: false }
+  },
+  {
+    id: "vault_it_no_broad_list",
+    category: "no_broad_list",
+    status: "pass",
+    severity: "critical",
+    description: "The profile must not list broad Vault paths.",
+    remediation: "Read only the explicitly configured test path/key.",
+    evidence: ["docs/foundations/vault-secret-backend/v1.md"],
+    metadata: { broadListAllowed: false }
+  },
+  {
+    id: "vault_it_redaction_required",
+    category: "redaction",
+    status: "pass",
+    severity: "critical",
+    description: "Vault tokens, env dumps, secret values, and credential cache paths must be redacted.",
+    remediation: "Keep redaction and no-secret tests with the profile.",
+    evidence: ["docs/foundations/observability-audit-retention/v0.md"],
+    metadata: { vaultTokenStored: false, vaultSecretValueStored: false }
+  },
+  {
+    id: "vault_it_audit_metadata_only",
+    category: "audit",
+    status: "pass",
+    severity: "high",
+    description: "Audit entries must record sanitized Vault metadata only.",
+    remediation: "Do not store Vault tokens, secret values, env values, or raw path lists in audit.",
+    evidence: ["docs/foundations/vault-secret-backend/v1.md"],
+    metadata: { rawSecretStored: false, externalAuditExportEnabled: false }
+  },
+  {
+    id: "vault_it_no_secret_exposure",
+    category: "no_secret_exposure",
+    status: "pass",
+    severity: "critical",
+    description: "Readiness, API, health, dashboard, tests, and audit must not expose Vault secret material.",
+    remediation: "Expose booleans, counts, statuses, and sanitized identifiers only.",
+    evidence: ["docs/features/dashboard/v0.md"],
+    metadata: { vaultTokenExposed: false, vaultSecretValueExposed: false, envValuesExposed: false }
   }
 ];

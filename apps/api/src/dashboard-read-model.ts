@@ -38,9 +38,15 @@ import {
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
+  type SecretBackendDecisionReadModel,
   type SecretBackendMigrationReadModel,
+  type StagingDeploymentDryRunReadModel,
+  type StagingDeploymentExecutionReadModel,
   type StagingDeploymentReadModel,
-  type TaskRunSummaryReadModel
+  type StagingReleaseCandidateReadModel,
+  type TaskRunSummaryReadModel,
+  type VaultIntegrationTestReadModel,
+  type VaultSecretBackendReadModel
 } from "@aichestra/shared";
 
 export type DashboardReadModelContext = {
@@ -454,6 +460,154 @@ function buildSecretBackend(context: DashboardReadModelContext): SecretBackendMi
   };
 }
 
+function buildSecretBackendDecision(context: DashboardReadModelContext): SecretBackendDecisionReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getSecretBackendOptionDecisionSummary();
+  const decision = readiness.getSecretBackendOptionDecision();
+  const scores = readiness.listSecretBackendDecisionScores();
+  const scoreTotals = new Map<string, { backendKind: string; weightedScore: number; scoreCount: number }>();
+  for (const score of scores) {
+    const current = scoreTotals.get(score.backendKind) ?? { backendKind: score.backendKind, weightedScore: 0, scoreCount: 0 };
+    current.weightedScore += score.weightedScore;
+    current.scoreCount += 1;
+    scoreTotals.set(score.backendKind, current);
+  }
+
+  return {
+    summary: sanitizeDashboardObject(summary),
+    decision: sanitizeDashboardObject(decision),
+    criteria: sanitizeDashboardArray(readiness.listSecretBackendDecisionCriteria()),
+    scores: sanitizeDashboardArray(scores),
+    implementationScopes: sanitizeDashboardArray(readiness.listSecretBackendImplementationScopes()),
+    providerMappings: sanitizeDashboardArray(readiness.listSecretBackendProviderMappings()),
+    risks: sanitizeDashboardArray(readiness.listSecretBackendDecisionRisks()),
+    backendScoreSummary: sanitizeDashboardArray([...scoreTotals.values()].sort((left, right) => right.weightedScore - left.weightedScore)),
+    envFallbackWarning: sanitizeDashboardObject({
+      productionAllowed: summary.envFallbackProductionAllowed,
+      recommendedAsProductionDefault: false,
+      policy: "env fallback remains local/integration only and must not be production primary storage"
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      externalCallsEnabled: summary.externalCallsEnabled,
+      secretReadsAttempted: summary.secretReadsAttempted,
+      secretRotationsAttempted: summary.secretRotationsAttempted,
+      secretMigrationsAttempted: summary.secretMigrationsAttempted,
+      productionCredentialsIssued: summary.productionCredentialsIssued,
+      credentialCachesRead: summary.credentialCachesRead,
+      productionSecretBackendImplemented: summary.productionSecretBackendImplemented
+    })
+  };
+}
+
+function buildVaultSecretBackend(context: DashboardReadModelContext): VaultSecretBackendReadModel {
+  const summary = context.securityService.getVaultSummary();
+  const config = context.securityService.getVaultConfig();
+  const health = context.securityService.getVaultHealth();
+  const checks = context.securityService.listVaultReadinessChecks();
+  const vaultAuditEvents = context.securityService.listAuditEvents({ targetKind: "secret" })
+    .filter((event) => event.eventType.startsWith("vault_"));
+  const vaultRefs = context.securityService.listSecretRefs().filter((secretRef) => secretRef.provider === "vault");
+  return {
+    summary: sanitizeDashboardObject(summary),
+    config: sanitizeDashboardObject({
+      selectedProvider: config.selectedProvider,
+      vaultProviderEnabled: config.vaultProviderEnabled,
+      vaultAddressConfigured: config.vaultAddressConfigured,
+      vaultNamespaceConfigured: config.vaultNamespaceConfigured,
+      vaultAuthMethod: config.vaultAuthMethod,
+      vaultTokenConfigured: config.vaultTokenConfigured,
+      vaultAllowedPathPrefixCount: config.vaultAllowedPathPrefixCount,
+      vaultIntegrationTestsEnabled: config.vaultIntegrationTestsEnabled,
+      liveUsageReady: config.liveUsageReady,
+      configStatus: config.configStatus,
+      productionSecretBackendImplemented: false,
+      envFallbackProductionAllowed: false
+    }),
+    health: sanitizeDashboardObject(health),
+    checks: sanitizeDashboardArray(checks),
+    auditEvents: sanitizeDashboardArray(vaultAuditEvents),
+    secretRefExamples: sanitizeDashboardArray(vaultRefs.map((secretRef) => ({
+      id: secretRef.id,
+      secretKind: secretRef.secretKind,
+      status: secretRef.status,
+      vaultMountConfigured: Boolean(secretRef.metadata.vaultMount),
+      vaultPathConfigured: Boolean(secretRef.metadata.vaultPath),
+      vaultKeyConfigured: Boolean(secretRef.metadata.vaultKey),
+      containsSecretMaterial: false
+    }))),
+    blockedExamples: sanitizeDashboardArray([
+      { operation: "vault.default_runtime_call", reason: "vault_provider_disabled_by_default" },
+      { operation: "vault.path_not_allowlisted", reason: "vault_path_not_allowlisted_blocks_before_client_read" },
+      { operation: "vault.token_exposure", reason: "vault_token_never_returned" },
+      { operation: "secret.read", reason: "secret_read_denied_by_policy" }
+    ]),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      noEnvValuesExposed: true,
+      vaultTokenExposed: false,
+      vaultSecretValueExposed: false,
+      credentialCachesRead: false,
+      liveVaultCallAttemptedByDashboard: false,
+      productionSecretBackendImplemented: false
+    })
+  };
+}
+
+function buildVaultIntegration(context: DashboardReadModelContext): VaultIntegrationTestReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getVaultIntegrationTestReadinessSummary();
+  const safetyChecks = readiness.listVaultIntegrationTestSafetyChecks();
+  const testCases = readiness.listVaultIntegrationTestCases();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profile: sanitizeDashboardObject(readiness.getVaultIntegrationTestProfile()),
+    testCases: sanitizeDashboardArray(testCases),
+    gatedLiveTestCases: sanitizeDashboardArray(testCases.filter((testCase) => testCase.requiresLiveVault)),
+    mockTestCases: sanitizeDashboardArray(testCases.filter((testCase) => !testCase.requiresLiveVault)),
+    safetyChecks: sanitizeDashboardArray(safetyChecks),
+    blockers: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "fail")),
+    warnings: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "warning")),
+    gateStatus: sanitizeDashboardObject({
+      configuredGateCount: summary.configuredGateCount,
+      missingGateCount: summary.missingGateCount,
+      unsafeGateCount: summary.unsafeGateCount,
+      vaultBackendSelected: summary.vaultBackendSelected,
+      vaultProviderEnabled: summary.vaultProviderEnabled,
+      vaultAddressConfigured: summary.vaultAddressConfigured,
+      vaultNamespaceConfigured: summary.vaultNamespaceConfigured,
+      vaultAuthMethod: summary.vaultAuthMethod,
+      vaultTokenConfigured: summary.vaultTokenConfigured,
+      vaultKvMountConfigured: summary.vaultKvMountConfigured,
+      pathAllowlistPrefixCount: summary.pathAllowlistPrefixCount,
+      testSecretPathConfigured: summary.testSecretPathConfigured,
+      testSecretKeyConfigured: summary.testSecretKeyConfigured,
+      testSecretPathAllowlisted: summary.testSecretPathAllowlisted,
+      testSecretPathLooksTestOnly: summary.testSecretPathLooksTestOnly,
+      envValuesReturned: false,
+      rawPathReturned: false
+    }),
+    operationPolicy: sanitizeDashboardObject({
+      noWrite: summary.noWrite,
+      noDelete: summary.noDelete,
+      noRotate: summary.noRotate,
+      noBroadList: summary.noBroadList,
+      cleanupRequired: false,
+      liveVaultCallInDashboard: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      vaultTokenExposed: summary.vaultTokenExposed,
+      vaultAddressExposed: summary.vaultAddressExposed,
+      vaultSecretValueExposed: summary.vaultSecretValueExposed,
+      vaultCallsInDefaultTests: summary.vaultCallsInDefaultTests,
+      credentialCachesRead: false
+    })
+  };
+}
+
 function buildStaging(context: DashboardReadModelContext): StagingDeploymentReadModel {
   const readiness = context.deploymentReadinessService;
   const summary = readiness.getStagingDeploymentSummary();
@@ -473,6 +627,122 @@ function buildStaging(context: DashboardReadModelContext): StagingDeploymentRead
       deploymentExecuted: summary.deploymentExecuted,
       externalCallsEnabled: summary.externalCallsEnabled,
       productionTrafficAllowed: summary.productionTrafficAllowed,
+      stagingDeployed: summary.stagingDeployed
+    })
+  };
+}
+
+function buildStagingDryRun(context: DashboardReadModelContext): StagingDeploymentDryRunReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getStagingDeploymentDryRunSummary();
+  const report = readiness.generateStagingDeploymentDryRunReport();
+  const sources = readiness.listStagingDeploymentDryRunSources();
+  const checks = readiness.listStagingDeploymentDryRunChecks();
+  const blockers = readiness.listStagingDeploymentDryRunBlockers();
+  const requiredSourceKinds = new Set(report.profile.requiredReadinessSources);
+  const optionalSourceKinds = new Set(report.profile.optionalReadinessSources);
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profile: sanitizeDashboardObject(report.profile),
+    sources: sanitizeDashboardArray(sources),
+    requiredSources: sanitizeDashboardArray(sources.filter((source) => requiredSourceKinds.has(source.sourceKind))),
+    optionalSources: sanitizeDashboardArray(sources.filter((source) => optionalSourceKinds.has(source.sourceKind))),
+    checks: sanitizeDashboardArray(checks),
+    requiredChecks: sanitizeDashboardArray(checks.filter((check) => check.requiredForStaging)),
+    blockers: sanitizeDashboardArray(blockers),
+    criticalBlockers: sanitizeDashboardArray(blockers.filter((blocker) => blocker.severity === "critical" && blocker.status === "open")),
+    warnings: sanitizeDashboardArray([
+      ...sources.filter((source) => source.status === "warning" || source.status === "skipped"),
+      ...checks.filter((check) => check.status === "warning" || check.status === "skipped" || check.status === "not_checked")
+    ]),
+    skippedIntegrationProfiles: sanitizeDashboardArray(report.integrationProfiles.filter((profile) => profile.status === "skipped")),
+    integrationProfiles: sanitizeDashboardArray(report.integrationProfiles),
+    recommendedNextActions: report.recommendedNextActions,
+    promotionGuidance: report.promotionGuidance,
+    rollbackGuidance: report.rollbackGuidance,
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      deploymentExecuted: summary.deploymentExecuted,
+      externalCallsEnabled: summary.externalCallsEnabled,
+      remoteIntegrationTestsExecuted: summary.remoteIntegrationTestsExecuted,
+      validationCommandsExecuted: summary.validationCommandsExecuted,
+      productionReady: summary.productionReady,
+      stagingDeployed: summary.stagingDeployed
+    })
+  };
+}
+
+function buildStagingReleaseCandidate(context: DashboardReadModelContext): StagingReleaseCandidateReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getStagingReleaseCandidateSummary();
+  const report = readiness.generateStagingReleaseCandidateReport();
+  const gates = readiness.listStagingReleaseCandidateGates();
+  const blockers = readiness.listStagingReleaseCandidateBlockers();
+  const signoffs = readiness.listStagingReleaseCandidateSignoffs();
+  const releaseNoteRequirements = readiness.listStagingReleaseNoteRequirements();
+  const rollbackChecklist = readiness.listStagingRollbackChecklist();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    checklist: sanitizeDashboardObject(report.checklist),
+    gates: sanitizeDashboardArray(gates),
+    requiredGates: sanitizeDashboardArray(gates.filter((gate) => gate.required)),
+    blockers: sanitizeDashboardArray(blockers),
+    criticalBlockers: sanitizeDashboardArray(blockers.filter((blocker) => blocker.status === "open" && blocker.severity === "critical")),
+    signoffs: sanitizeDashboardArray(signoffs),
+    pendingSignoffs: sanitizeDashboardArray(signoffs.filter((signoff) => signoff.required && signoff.status === "pending")),
+    releaseNoteRequirements: sanitizeDashboardArray(releaseNoteRequirements),
+    missingReleaseNoteRequirements: sanitizeDashboardArray(releaseNoteRequirements.filter((requirement) => requirement.required && requirement.status === "missing")),
+    rollbackChecklist: sanitizeDashboardArray(rollbackChecklist),
+    missingRollbackItems: sanitizeDashboardArray(rollbackChecklist.filter((item) => item.required && item.status === "missing")),
+    skippedTests: report.skippedTests,
+    recommendedNextActions: report.recommendedNextActions,
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      releaseCreated: summary.releaseCreated,
+      gitTagCreated: summary.gitTagCreated,
+      githubReleaseCreated: summary.githubReleaseCreated,
+      deploymentExecuted: summary.deploymentExecuted,
+      externalCallsEnabled: summary.externalCallsEnabled,
+      remoteIntegrationTestsExecuted: summary.remoteIntegrationTestsExecuted,
+      productionReady: summary.productionReady,
+      stagingDeployed: summary.stagingDeployed
+    })
+  };
+}
+
+function buildStagingExecution(context: DashboardReadModelContext): StagingDeploymentExecutionReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getStagingDeploymentExecutionSummary();
+  const plan = readiness.getStagingDeploymentExecutionPlan();
+  const steps = readiness.listStagingDeploymentExecutionSteps();
+  const gates = readiness.listStagingDeploymentExecutionGates();
+  const decision = readiness.getStagingDeploymentGoNoGoDecision();
+  const rollback = readiness.getStagingDeploymentRollbackPlan();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    plan: sanitizeDashboardObject(plan),
+    steps: sanitizeDashboardArray(steps),
+    gates: sanitizeDashboardArray(gates),
+    requiredGates: sanitizeDashboardArray(gates.filter((gate) => gate.required)),
+    blockers: sanitizeDashboardArray(gates.filter((gate) => gate.required && (gate.status === "fail" || gate.status === "not_checked"))),
+    warnings: sanitizeDashboardArray(gates.filter((gate) => gate.status === "warning" || gate.status === "skipped")),
+    goNoGoDecision: sanitizeDashboardObject(decision),
+    pendingSignoffs: sanitizeDashboardArray(decision.pendingApprovals.map((role) => ({ role, status: "pending" }))),
+    optionalIntegrationDecisions: sanitizeDashboardArray(gates.filter((gate) => !gate.required && ["github_app", "webhook", "llm", "vault", "mcp"].includes(gate.category))),
+    rollbackPlan: sanitizeDashboardObject(rollback),
+    rollbackSteps: sanitizeDashboardArray(rollback.rollbackSteps),
+    recommendedNextActions: Array.isArray(summary.metadata.recommendedNextActions) ? summary.metadata.recommendedNextActions.map(String) : [],
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      deploymentExecuted: summary.deploymentExecuted,
+      releaseCreated: summary.releaseCreated,
+      gitTagCreated: summary.gitTagCreated,
+      externalCallsEnabled: summary.externalCallsEnabled,
+      remoteIntegrationTestsExecuted: summary.remoteIntegrationTestsExecuted,
+      productionReady: summary.productionReady,
       stagingDeployed: summary.stagingDeployed
     })
   };
@@ -1036,6 +1306,7 @@ function buildOverview(
   registry: RegistryReadModel,
   llm: LLMGatewayReadModel,
   llmIntegration: LLMIntegrationTestReadModel,
+  vaultIntegration: VaultIntegrationTestReadModel,
   agents: AgentRunnerReadModel,
   policy: PolicyReadModel,
   policyBundles: PolicyBundleReadinessReadModel,
@@ -1048,7 +1319,12 @@ function buildOverview(
   readiness: DeploymentReadinessReadModel,
   database: DatabaseOperationsReadModel,
   secretBackend: SecretBackendMigrationReadModel,
+  secretBackendDecision: SecretBackendDecisionReadModel,
+  vaultSecretBackend: VaultSecretBackendReadModel,
   staging: StagingDeploymentReadModel,
+  stagingDryRun: StagingDeploymentDryRunReadModel,
+  stagingReleaseCandidate: StagingReleaseCandidateReadModel,
+  stagingExecution: StagingDeploymentExecutionReadModel,
   cicd: CICDPipelineReadModel,
   observability: ObservabilityReadModel,
   audit: AuditSummaryReadModel
@@ -1085,6 +1361,9 @@ function buildOverview(
       llmIntegrationMissingGates: llmIntegration.summary.missingGateCount ?? 0,
       llmIntegrationUnsafeGates: llmIntegration.summary.unsafeGateCount ?? 0,
       llmIntegrationTestCases: llmIntegration.testCases.length,
+      vaultIntegrationMissingGates: vaultIntegration.summary.missingGateCount ?? 0,
+      vaultIntegrationUnsafeGates: vaultIntegration.summary.unsafeGateCount ?? 0,
+      vaultIntegrationTestCases: vaultIntegration.testCases.length,
       agentRuns: agents.runs.length,
       policyRules: policy.rules.length,
       policyBundleReadinessBlockers: policyBundles.blockers.length,
@@ -1108,9 +1387,23 @@ function buildOverview(
       secretBackendReadinessBlockers: secretBackend.blockers.length,
       secretBackendOptions: secretBackend.backendOptions.length,
       secretRotationPlans: secretBackend.rotationPlans.length,
+      secretBackendDecisionCriteria: secretBackendDecision.criteria.length,
+      secretBackendDecisionRisks: secretBackendDecision.risks.length,
+      vaultSecretBackendChecks: vaultSecretBackend.checks.length,
+      vaultSecretBackendAuditEvents: vaultSecretBackend.auditEvents.length,
       stagingReadinessBlockers: staging.blockers.length,
       stagingIntegrationGates: staging.integrationGates.length,
       stagingPromotionCriteria: staging.promotionCriteria.length,
+      stagingDryRunBlockers: stagingDryRun.blockers.length,
+      stagingDryRunCriticalBlockers: stagingDryRun.criticalBlockers.length,
+      stagingDryRunSkippedIntegrations: stagingDryRun.skippedIntegrationProfiles.length,
+      stagingRcBlockers: stagingReleaseCandidate.blockers.length,
+      stagingRcCriticalBlockers: stagingReleaseCandidate.criticalBlockers.length,
+      stagingRcPendingSignoffs: stagingReleaseCandidate.pendingSignoffs.length,
+      stagingRcSkippedTests: stagingReleaseCandidate.skippedTests.length,
+      stagingExecutionBlockers: stagingExecution.blockers.length,
+      stagingExecutionPendingSignoffs: stagingExecution.pendingSignoffs.length,
+      stagingExecutionGoNoGoStatus: stagingExecution.goNoGoDecision.status ?? "not_ready",
       cicdReadinessBlockers: cicd.blockers.length,
       cicdJobs: cicd.jobs.length,
       cicdIntegrationGates: cicd.integrationGates.length,
@@ -1129,6 +1422,7 @@ function buildOverview(
       registry: { status: "available", count: registry.skills.length + registry.harnesses.length + registry.instructions.length, notes: [] },
       llm: { status: "available", count: llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
       llmIntegration: { status: "available", count: llmIntegration.testCases.length, notes: ["LLM Gateway integration-test profile v1 is skipped by default and never exposes API keys, env values, or raw provider responses."] },
+      vaultIntegration: { status: "available", count: vaultIntegration.testCases.length, notes: ["Vault integration-test profile v1 is skipped by default and never exposes Vault tokens, env values, secret paths, or secret values."] },
       agents: { status: "available", count: agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: policy.rules.length, notes: [] },
       policyBundles: { status: "available", count: policyBundles.blockers.length, notes: ["Policy Bundle / OPA-Cedar v0 is planning-only; StaticPolicyEngine remains the runtime and no external policy engine is enabled."] },
@@ -1141,7 +1435,12 @@ function buildOverview(
       readiness: { status: "available", count: readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       database: { status: "available", count: database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
       secretBackend: { status: "available", count: secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
+      secretBackendDecision: { status: "available", count: secretBackendDecision.risks.length, notes: ["Production Secret Backend Option Decision v0 selects Vault for v1 planning only; no backend is contacted and no secret values are read."] },
+      vaultSecretBackend: { status: "available", count: vaultSecretBackend.checks.length, notes: ["Vault Secret Backend v1 is gated and non-default; dashboard data is metadata-only and does not read Vault."] },
       staging: { status: "available", count: staging.blockers.length, notes: ["Staging Deployment Profile v0 is non-production/readiness-only; no deployment, production traffic, or external provider call is enabled."] },
+      stagingDryRun: { status: "available", count: stagingDryRun.blockers.length, notes: ["Staging Deployment Dry-run Profile v0 aggregates readiness only; it does not deploy, call providers, or run integration tests."] },
+      stagingReleaseCandidate: { status: "available", count: stagingReleaseCandidate.blockers.length, notes: ["Staging Release Candidate Checklist v0 is read-only; it does not create releases, tags, GitHub releases, deployments, or run integration tests."] },
+      stagingExecution: { status: "available", count: stagingExecution.blockers.length, notes: ["Staging Deployment Execution Plan v0 is planning-only; it does not deploy, create releases or tags, call providers, or run integration tests."] },
       cicd: { status: "available", count: cicd.blockers.length, notes: ["Staging CI/CD Pipeline Planning v0 is read-only; it does not create active workflows, deploy, or enable remote integration tests by default."] },
       observability: { status: "available", count: typeof observability.auditSummary.totalEvents === "number" ? observability.auditSummary.totalEvents : 0, notes: ["Observability v0 is in-memory/read-only and has no external exporter."] },
       audit: { status: "available", count: typeof audit.summary.totalEvents === "number" ? audit.summary.totalEvents : 0, notes: [] }
@@ -1178,6 +1477,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const registry = buildRegistry(context);
   const llm = buildLlm(context);
   const llmIntegration = buildLlmIntegration(context);
+  const vaultIntegration = buildVaultIntegration(context);
   const agents = buildAgents(context);
   const policy = buildPolicy(context);
   const policyBundles = buildPolicyBundles(context);
@@ -1190,11 +1490,16 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const readiness = buildReadiness(context);
   const database = buildDatabase(context);
   const secretBackend = buildSecretBackend(context);
+  const secretBackendDecision = buildSecretBackendDecision(context);
+  const vaultSecretBackend = buildVaultSecretBackend(context);
   const staging = buildStaging(context);
+  const stagingDryRun = buildStagingDryRun(context);
+  const stagingReleaseCandidate = buildStagingReleaseCandidate(context);
+  const stagingExecution = buildStagingExecution(context);
   const cicd = buildCicd(context);
   const observability = buildObservability(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, mcp, readiness, database, secretBackend, staging, cicd, observability, audit);
+  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, mcp, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
 
   return {
     overview,
@@ -1206,6 +1511,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     registry,
     llm,
     llmIntegration,
+    vaultIntegration,
     agents,
     policy,
     policyBundles,
@@ -1218,7 +1524,12 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     readiness,
     database,
     secretBackend,
+    secretBackendDecision,
+    vaultSecretBackend,
     staging,
+    stagingDryRun,
+    stagingReleaseCandidate,
+    stagingExecution,
     cicd,
     observability,
     audit

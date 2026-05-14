@@ -1,12 +1,13 @@
 # Secret Backend Options v0
 
-Status: planning/readiness only. No real backend integration is implemented.
+Status: planning/readiness with Vault v1 gated boundary implemented. No backend is the default production secret backend.
 
 ## Recommendation
 
-The default production path is environment-dependent because the repository does not yet select a hosting platform, production identity provider, or operations owner. Use:
+Production Secret Backend Implementation Option Decision v0 selected Vault as the first concrete implementation path. Vault-backed Secret Backend v1 promotes the runtime provider value to `vault` behind explicit gates. AWS Secrets Manager remains the second choice if the first production deployment is explicitly AWS-first.
 
-- Vault when the organization already operates Vault or needs dynamic leases and strong revocation semantics.
+Earlier environment-dependent guidance still applies to future follow-up backends:
+
 - AWS Secrets Manager for AWS-native deployments.
 - GCP Secret Manager for GCP-native deployments.
 - Azure Key Vault for Azure-native deployments.
@@ -27,7 +28,7 @@ Operational requirements:
 - HA Vault deployment, audit devices, backup/restore drills, service identity, break-glass process, and policy promotion.
 
 Auth/IAM model:
-- Future service identity or workload auth. This task does not implement token exchange or Vault auth.
+- v1 supports gated token-auth client configuration for optional integration testing only. Production service identity, AppRole/workload identity, and token exchange remain future work.
 
 Audit capability:
 - Strong backend audit, but Aichestra must correlate actor, request, task, provider, and SecretRef metadata.
@@ -39,19 +40,20 @@ Lease/TTL support:
 - Strong backend-native lease semantics.
 
 Local development story:
-- Mock provider by default; optional local Vault fixture would be a future gated integration test.
+- Disabled provider by default; deterministic `MockVaultClient` in tests; optional live Vault test skeleton is skipped unless every explicit gate is configured.
 
 Integration complexity:
 - High.
 
 Recommended use cases:
 - Enterprise deployments with existing Vault operations, dynamic credential needs, or strict revocation requirements.
+- First Aichestra production-grade backend implementation path because the hosting cloud is not selected and Vault best exercises lease/revocation-oriented SecretRef behavior.
 
 Production suitability:
 - High when already operated well.
 
 Risks:
-- Backend outage, policy sprawl, audit misconfiguration, and operational knowledge gaps.
+- Backend outage, policy sprawl, audit misconfiguration, accidental env fallback in production, and operational knowledge gaps.
 
 ## AWS Secrets Manager
 
@@ -247,3 +249,7 @@ Production suitability:
 
 Risks:
 - Production leakage, stale credentials, and weak revocation.
+
+## Related decision
+
+See `docs/roadmaps/production-secret-backend-option-decision/` for the v0 decision criteria, backend evaluation, Vault-first recommendation, v1 implementation scope, migration plan, test strategy, and risk register. See `docs/foundations/vault-secret-backend/v1.md` for the gated Vault implementation boundary and `docs/roadmaps/vault-integration-test-profile/v1.md` for the skipped-by-default optional live KV v2 profile. Vault v1 still does not mark secrets production-ready.

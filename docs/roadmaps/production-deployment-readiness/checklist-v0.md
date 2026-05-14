@@ -16,7 +16,11 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 ## Secrets
 
 - Secret Backend Migration Planning v0 read-only models, docs, APIs, health metadata, and dashboard panel implemented.
-- SecretRef source migration from env provider to Vault or cloud secret manager remains future.
+- Production Secret Backend Implementation Option Decision v0 selects Vault as the first implementation path and AWS Secrets Manager as the second choice for AWS-first deployments.
+- Vault-backed Secret Backend v1 implements a gated, non-default `provider: vault` boundary with mock/default tests and skipped live-test gates.
+- Vault Integration-Test Profile v1 implements skipped-by-default readiness for optional live KV v2 validation against an allowlisted test-only path.
+- SecretRef source migration from env provider to production Vault remains future.
+- The selected backend is not implemented or production-ready.
 - Secret rotation workflow planned; production jobs are not implemented.
 - Lease TTL strategy defined as planning metadata; backend enforcement remains future.
 - Legacy env fallback modeled as rejected in production profile; live production enforcement remains future.
@@ -111,7 +115,7 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 - `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `git diff --check` required.
 - Node/Volta version aligned with `package.json` engines.
 - Optional Postgres test profile added to CI.
-- Optional GitHub/LLM/MCP integration profiles remain gated.
+- Optional GitHub/LLM/Vault/MCP integration profiles remain gated.
 - Secret scanning required.
 - Dependency scanning required.
 - Container build and artifact provenance planned.
@@ -122,13 +126,18 @@ This checklist is not a deployment approval. It defines the minimum work needed 
 ## Staging
 
 - Staging Deployment Profile v0 read-only models, docs, APIs, health metadata, and dashboard panel implemented.
+- Staging Deployment Dry-run Profile v0 read-only aggregation, blocker taxonomy, report format, APIs, health metadata, and dashboard panel implemented.
+- Staging Release Candidate Checklist v0 read-only criteria, validation gate, skipped integration, blocker, signoff, release-note, rollback, report, API, health metadata, and dashboard panel implemented.
+- Staging Deployment Execution Plan v0 read-only sequence, pre-deploy gate, optional live integration decision, go/no-go, rollback, API, health metadata, and dashboard panel implemented.
 - Staging remains non-production and is not deployed.
+- Dry-run report must not deploy anything, execute CI jobs, run remote integration tests, call external providers, mutate resources, expose secrets/env values, or mark staging/production ready.
+- RC checklist report must not create releases, Git tags, GitHub releases, deployments, CI jobs, remote integration runs, external provider calls, resources, secrets/env values, or staging/production-ready claims.
 - Postgres is required or strongly recommended for meaningful staging validation.
 - Dashboard uses API-backed read models and exposes no secrets or env values.
 - Mock actor warning and env fallback warning remain visible.
 - Remote merge, rebase push, force push, branch deletion, remote MCP transport, and vendor CLI execution remain forbidden.
-- GitHub App, GitHub webhook, remote Git, and LLM Gateway integration-test validation require explicit integration gates and non-production data. LLM Gateway integration-test profile v1 is implemented as skipped-by-default readiness data for the OpenAI-compatible path and is not production LLM readiness.
-- Real production auth, real secret backend, policy bundle runtime, external observability export, backup/restore drills, active staging CI/CD execution, and staging deployment remain future work.
+- GitHub App, GitHub webhook, remote Git, LLM Gateway, and Vault integration-test validation require explicit integration gates and non-production data. LLM Gateway integration-test profile v1 and Vault Integration-Test Profile v1 are implemented as skipped-by-default readiness data and are not production LLM or production secret backend readiness.
+- Real production auth, production Vault rollout, policy bundle runtime, external observability export, backup/restore drills, active staging CI/CD execution, human signoff collection, and staging deployment remain future work.
 - Promotion criteria and rollback criteria are documented in `docs/roadmaps/staging-deployment-profile/profile-contract-v0.md`.
 
 ## Security

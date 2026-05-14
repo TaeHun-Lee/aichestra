@@ -13,12 +13,12 @@ Design and work-order source documents live under `docs/briefs/`; the canonical 
 - `packages/improvement`: Phase 4 Preparation, Auto-improvement v0, and Governance v1 models, repository interfaces, in-memory repositories, DTOs, deterministic clustering, candidates, draft proposals, draft registry changes, readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, and auto-improvement safety policies.
 - `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, gated OpenAI-compatible HTTP provider path, LLM Gateway v2 route/fallback/routing-decision read models, disabled provider skeletons, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 catalog/auth/credential/token/adapter/local-agent boundary skeletons, and Local Agent Protocol v1 mock channels/fixture daemon/compatibility/streaming models.
 - `packages/mcp-gateway`: MCP Gateway v0 server/tool catalog models, deterministic `MockMCPGateway`, disabled real MCP transport skeleton, invocation/audit repositories, DTOs, and Auth/RBAC, Policy, Security redaction, and Secrets/Sandbox integration.
-- `packages/deployment-readiness`: Production Deployment Readiness Planning v0 read-only deployment profiles, readiness checks, production risks, GitHub App / Production Webhook Hardening Planning v0 models, Persistent DB Production Operations v1 readiness models, Secret Backend Migration Planning v0 readiness models, Production Auth/RBAC v1 planning readiness models, Policy Bundle / OPA-Cedar Planning v0 readiness models, Staging Deployment Profile v0 readiness models, Staging CI/CD Pipeline Planning v0 readiness models, GitHub App integration-test profile v1 readiness models, DTOs, and seeded planning summary models.
+- `packages/deployment-readiness`: Production Deployment Readiness Planning v0 read-only deployment profiles, readiness checks, production risks, GitHub App / Production Webhook Hardening Planning v0 models, Persistent DB Production Operations v1 readiness models, Secret Backend Migration Planning v0 readiness models, Production Secret Backend Implementation Option Decision v0 readiness/decision models, Production Auth/RBAC v1 planning readiness models, Policy Bundle / OPA-Cedar Planning v0 readiness models, Staging Deployment Profile v0 readiness models, Staging Deployment Dry-run Profile v0 readiness aggregation models, Staging Release Candidate Checklist v0 readiness models, Staging Deployment Execution Plan v0 readiness models, Staging CI/CD Pipeline Planning v0 readiness models, GitHub App integration-test profile v1 readiness models, LLM Gateway integration-test profile v1 readiness models, Vault Integration-Test Profile v1 readiness models, DTOs, and seeded planning summary models.
 - `packages/policy`: provider-neutral Policy-as-code Skeleton v0 models, static/mock policy engine, default restrictive rules, policy decision audit, DTOs, and policy service boundaries.
 - `packages/auth`: Production Auth/RBAC Planning v0 provider-neutral identity/RBAC models, deterministic MockAuthProvider, disabled future auth provider placeholders, AuthorizationService, request context helpers, and sanitized auth audit events.
 - `packages/registry`: Skill, Harness, and Instruction registry interfaces, repository boundaries, DTO mappers, audit logs, history, rollback, approval queue read models, local eval result attachment, checksum verification, mock RBAC, local package manifests, import/export, semver range resolution v0, package diffs, validation helpers, and deterministic resolver.
 - `packages/runner`: provider-neutral agent runner contracts, deterministic MockAgentRunner, disabled-by-default LocalAgentRunner, harness execution policy, instruction assembly, in-memory runner repositories, runner DTOs/services, and mock test runner contracts.
-- `packages/security`: Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, SecretRef-backed Provider Credentials v1 env provider, credential manager/handles/resolution audit, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, DTOs, and in-memory repositories.
+- `packages/security`: Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, SecretRef-backed Provider Credentials v1 env provider, Vault-backed Secret Backend v1 gated provider/client boundary, credential manager/handles/resolution audit, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, DTOs, and in-memory repositories.
 - `packages/observability`: Observability / Audit Retention v0 common audit envelope, retention/redaction classes, audit sanitizer, source normalization, read-only retention policies, metric snapshots, trace skeletons, and no-external-export observability read models.
 - `packages/adapters`: compatibility aggregate for shared adapter contracts and mocks.
 - `packages/db`: Postgres-oriented schema, storage provider abstraction, repository factory, in-memory repositories for mock-first runtime/tests, and opt-in Postgres repositories for the core durable slice.
@@ -234,6 +234,52 @@ curl http://localhost:3000/dashboard/staging
 
 Staging readiness responses expose booleans, counts, statuses, blockers, and warnings only. Remote merge, remote MCP, vendor CLI execution, production auth, real secret backend integration, policy bundle runtime, external observability export, and production traffic remain blocked.
 
+Staging Deployment Dry-run Profile v0 adds a read-only dry-run readiness aggregation surface that summarizes staging, CI/CD, DB operations, GitHub App integration tests, LLM integration tests, Secret Backend Migration, Auth/RBAC, Policy Bundle planning, Observability, MCP, Git, LLM, Local Agent, Runner, and Dashboard readiness. It does not deploy anything, run CI jobs, run remote integration tests, call providers, mutate resources, expose secrets/env values, or mark staging/production ready:
+
+```bash
+curl http://localhost:3000/readiness/staging-dry-run/profile
+curl http://localhost:3000/readiness/staging-dry-run/sources
+curl http://localhost:3000/readiness/staging-dry-run/checks
+curl http://localhost:3000/readiness/staging-dry-run/blockers
+curl http://localhost:3000/readiness/staging-dry-run/report
+curl http://localhost:3000/readiness/staging-dry-run/summary
+curl http://localhost:3000/dashboard/staging-dry-run
+```
+
+The dry-run report classifies blockers by severity and blocking level, classifies integration profiles as ready/gated/skipped/blocked/future, and returns promotion and rollback guidance. Current default status remains blocked/not ready because staging still lacks required rollout controls such as real secret backend readiness, production auth, durable observability, and default Postgres staging configuration.
+
+Staging Release Candidate Checklist v0 adds a read-only release-candidate readiness surface that defines staging RC criteria, required validation gates, allowed skipped optional integrations, blocker policy, signoff expectations, release-note requirements, rollback checklist, and recommended next actions. It aggregates existing staging dry-run and readiness surfaces without creating a release, Git tag, GitHub release, deployment, active workflow, remote integration run, external provider call, or secret/env exposure:
+
+```bash
+curl http://localhost:3000/readiness/staging-rc/checklist
+curl http://localhost:3000/readiness/staging-rc/gates
+curl http://localhost:3000/readiness/staging-rc/blockers
+curl http://localhost:3000/readiness/staging-rc/signoffs
+curl http://localhost:3000/readiness/staging-rc/release-notes
+curl http://localhost:3000/readiness/staging-rc/rollback
+curl http://localhost:3000/readiness/staging-rc/report
+curl http://localhost:3000/readiness/staging-rc/summary
+curl http://localhost:3000/dashboard/staging-rc
+```
+
+The RC checklist records required validation status and skipped optional test policy only. It does not execute validation commands itself. Current default status is not ready until validation evidence, signoffs, release notes, and accepted limitation documentation are complete. Staging remains not deployed and production remains not ready.
+
+Staging RC Evidence Pack v0 records the follow-up documentation from the Staging Release Candidate Audit v0: validation evidence, skipped optional test evidence, release-note draft, rollback evidence, and signoff readiness. It targets a future `staging_rc_pass_with_warnings` audit result only if planning-ready signoff evidence is accepted as a warning. It does not create a release, Git tag, GitHub release, deployment, remote integration run, provider call, real signoff, or production-ready claim.
+
+Staging Deployment Execution Plan v0 adds a read-only sequence for how Aichestra would prepare a controlled staging deployment after human signoff. It defines pre-deployment gates, optional live integration decisions, go/no-go metadata, rollback criteria, future smoke placeholders, safe `/health` metadata, and a dashboard panel. It does not deploy anything, create a release, create a Git tag, run deployment commands, run remote integration tests, call providers, or expose secrets/env values:
+
+```bash
+curl http://localhost:3000/readiness/staging-execution/plan
+curl http://localhost:3000/readiness/staging-execution/steps
+curl http://localhost:3000/readiness/staging-execution/gates
+curl http://localhost:3000/readiness/staging-execution/go-no-go
+curl http://localhost:3000/readiness/staging-execution/rollback
+curl http://localhost:3000/readiness/staging-execution/summary
+curl http://localhost:3000/dashboard/staging-execution
+```
+
+The default go/no-go status remains `not_ready` because real human signoffs are still pending before actual staging deployment. Staging remains not deployed and production remains not ready.
+
 Staging CI/CD Pipeline Planning v0 adds planning-only pipeline profiles, job matrix metadata, optional integration-test gates, secret/env safety rules, artifact/report policy, staging promotion criteria, cleanup/rollback policy, read-only CI/CD readiness APIs, safe `/health` metadata, and a dashboard panel. It does not create active workflows, deploy anything, call providers, run remote integrations by default, or expose secrets/env values:
 
 ```bash
@@ -345,6 +391,47 @@ curl http://localhost:3000/readiness/secrets/summary
 curl http://localhost:3000/dashboard/secret-backend
 ```
 
+Production Secret Backend Implementation Option Decision v0 selected `vault_future` as the first production-grade backend implementation path and `aws_secrets_manager_future` as the second choice for AWS-first deployments. That decision surface remains read-only metadata: it does not call Vault/cloud/custom backends, read or migrate secrets, or mark production secret backend readiness true:
+
+```bash
+curl http://localhost:3000/readiness/secret-backend-decision/decision
+curl http://localhost:3000/readiness/secret-backend-decision/criteria
+curl http://localhost:3000/readiness/secret-backend-decision/scores
+curl http://localhost:3000/readiness/secret-backend-decision/implementation-scope
+curl http://localhost:3000/readiness/secret-backend-decision/provider-mapping
+curl http://localhost:3000/readiness/secret-backend-decision/risks
+curl http://localhost:3000/readiness/secret-backend-decision/summary
+curl http://localhost:3000/dashboard/secret-backend-decision
+```
+
+Vault-backed Secret Backend v1 implements the selected `vault` SecretRef provider as a gated, non-default backend boundary. Default runtime/tests still do not connect to Vault. Vault health/readiness/API/dashboard surfaces expose booleans, counts, status, client kind, and sanitized audit only; they never expose Vault tokens, Vault address values, secret values, env values, or credential cache paths. Production Vault rollout, HA/unseal/storage operations, AppRole/workload identity, rotation, migration, and production readiness remain out of scope:
+
+```bash
+AICHESTRA_SECRET_BACKEND_PROVIDER=mock
+AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER=false
+AICHESTRA_VAULT_INTEGRATION_TESTS=false
+
+curl http://localhost:3000/readiness/secrets/vault/config
+curl http://localhost:3000/readiness/secrets/vault/checks
+curl http://localhost:3000/readiness/secrets/vault/summary
+curl http://localhost:3000/security/secrets/vault/config
+curl http://localhost:3000/security/secrets/vault/health
+curl http://localhost:3000/security/secrets/vault/audit
+curl http://localhost:3000/dashboard/vault-secret-backend
+```
+
+Vault Integration-Test Profile v1 adds a first-class skipped-by-default readiness surface for optional live Vault KV v2 smoke validation. Missing gates skip live tests; unsafe gates block readiness. The profile never writes, deletes, rotates, broadly lists, or mutates Vault secrets, and default runtime/tests do not call Vault:
+
+```bash
+AICHESTRA_VAULT_INTEGRATION_TESTS=false
+
+curl http://localhost:3000/readiness/vault-integration/profile
+curl http://localhost:3000/readiness/vault-integration/test-cases
+curl http://localhost:3000/readiness/vault-integration/safety-checks
+curl http://localhost:3000/readiness/vault-integration/summary
+curl http://localhost:3000/dashboard/vault-integration
+```
+
 Dashboard API-backed Read Model v0 exposes read-only dashboard DTOs without running workflows or provider calls:
 
 ```bash
@@ -366,7 +453,13 @@ curl http://localhost:3000/dashboard/mcp
 curl http://localhost:3000/dashboard/readiness
 curl http://localhost:3000/dashboard/database
 curl http://localhost:3000/dashboard/secret-backend
+curl http://localhost:3000/dashboard/secret-backend-decision
+curl http://localhost:3000/dashboard/vault-secret-backend
+curl http://localhost:3000/dashboard/vault-integration
 curl http://localhost:3000/dashboard/staging
+curl http://localhost:3000/dashboard/staging-dry-run
+curl http://localhost:3000/dashboard/staging-rc
+curl http://localhost:3000/dashboard/staging-execution
 curl http://localhost:3000/dashboard/ci-cd
 curl http://localhost:3000/dashboard/observability
 curl http://localhost:3000/dashboard/audit
@@ -695,7 +788,7 @@ pnpm build
 
 Optional Postgres repository contract tests are skipped unless `AICHESTRA_TEST_DATABASE_URL` is set.
 
-Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v1/v2 provider/catalog/routing/fallback/virtual-key/budget/usage/API/OpenAI-compatible mocked HTTP behavior, MCP Gateway v0 catalog/invocation/policy/auth/API/health/dashboard/no-secret behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Policy Bundle / OPA-Cedar Planning v0 readiness models/API/health/dashboard/no-dynamic-execution/no-secret behavior, Production Auth/RBAC Planning v0 domain/provider/authorization/API/health/dashboard/no-secret behavior, Production Auth/RBAC v1 Planning readiness models/API/health/dashboard/no-token/no-session behavior, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, Observability / Audit Retention v0 envelope/sanitizer/source-normalization/retention/API/dashboard/metric/trace/no-secret behavior, GitHub App / Production Webhook Hardening Planning v0 permission/event/replay/dead-letter/API/dashboard/no-secret behavior, GitHub App Controlled Implementation v1 config/token-provider/SecretRef/Auth/RBAC/Policy/API/health/dashboard/no-secret behavior, GitHub App integration-test profile v1 readiness models/API/health/dashboard/skipped-live-test/no-secret/no-env/no-destructive-git behavior, Persistent DB Production Operations v1 migration/index/retention/webhook/API/health/dashboard/no-DB-url behavior, Staging Deployment Profile v0 profile/gates/checks/promotion/rollback/API/health/dashboard/no-secret/no-env behavior, Staging CI/CD Pipeline Planning v0 profiles/jobs/integration-gates/checks/risks/API/health/dashboard/no-secret/no-env behavior, Dashboard API-backed Read Model v0 endpoints/provider/fallback/no-secret behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0/v1/v2 provider/service/API/webhook/sync behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
+Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v1/v2 provider/catalog/routing/fallback/virtual-key/budget/usage/API/OpenAI-compatible mocked HTTP behavior, MCP Gateway v0 catalog/invocation/policy/auth/API/health/dashboard/no-secret behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Policy Bundle / OPA-Cedar Planning v0 readiness models/API/health/dashboard/no-dynamic-execution/no-secret behavior, Production Auth/RBAC Planning v0 domain/provider/authorization/API/health/dashboard/no-secret behavior, Production Auth/RBAC v1 Planning readiness models/API/health/dashboard/no-token/no-session behavior, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, Vault-backed Secret Backend v1 config/SecretRef validation/mock client/provider/CredentialManager/API/health/dashboard/no-token/skipped-live-test behavior, Production Secret Backend Implementation Option Decision v0 decision/criteria/score/scope/provider-mapping/risk/API/health/dashboard/no-backend-call/no-secret/no-env behavior, Observability / Audit Retention v0 envelope/sanitizer/source-normalization/retention/API/dashboard/metric/trace/no-secret behavior, GitHub App / Production Webhook Hardening Planning v0 permission/event/replay/dead-letter/API/dashboard/no-secret behavior, GitHub App Controlled Implementation v1 config/token-provider/SecretRef/Auth/RBAC/Policy/API/health/dashboard/no-secret behavior, GitHub App integration-test profile v1 readiness models/API/health/dashboard/skipped-live-test/no-secret/no-env/no-destructive-git behavior, Persistent DB Production Operations v1 migration/index/retention/webhook/API/health/dashboard/no-DB-url behavior, Staging Deployment Profile v0 profile/gates/checks/promotion/rollback/API/health/dashboard/no-secret/no-env behavior, Staging Deployment Dry-run Profile v0 models/aggregation/API/health/dashboard/no-deployment/no-external-call/no-secret/no-env behavior, Staging Release Candidate Checklist v0 checklist/gate/blocker/signoff/release-note/rollback/report/API/health/dashboard/no-release/no-deployment/no-external-call/no-secret/no-env behavior, Staging Deployment Execution Plan v0 plan/step/gate/go-no-go/rollback/API/health/dashboard/no-release/no-deployment/no-external-call/no-secret/no-env behavior, Staging CI/CD Pipeline Planning v0 profiles/jobs/integration-gates/checks/risks/API/health/dashboard/no-secret/no-env behavior, Dashboard API-backed Read Model v0 endpoints/provider/fallback/no-secret behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0/v1/v2 provider/service/API/webhook/sync behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
 
 ## First Vertical Slice
 
@@ -743,10 +836,15 @@ Included:
 - Real Git Adapter v2 provider boundary, deterministic MockGitProvider default, LocalGitProvider fixture-safe changed-file inspection, gated GitHubGitProvider, GitHubClient boundary, controlled GitHub branch/PR/changed-file operations, disabled-by-default GitHub webhook receiver, verifier interface, PR/branch sync read models, GitIntegrationService, `/git/*` API visibility, health metadata, Git/webhook audit events, and dashboard visibility.
 - LLM Gateway v2 provider boundary, deterministic MockLLMProvider default, gated OpenAI-compatible HTTP provider path, route/fallback/routing-decision repositories, provider health read models, disabled provider skeletons, model catalog, virtual model keys, budget checks, usage ledger integration, `/llm/*` API visibility, health metadata, LLM audit events, and dashboard visibility.
 - SecretRef-backed Provider Credentials v1 metadata-only SecretRef credential model, explicit env secret provider, Auth/RBAC and Policy-backed credential manager/handle/resolution results, GitHub token/webhook and LLM credential integration, `/security/credentials/*` API visibility, health/dashboard status, credential audit, and redaction tests.
+- Vault-backed Secret Backend v1 gated `provider: vault` SecretRef support, disabled/mock/gated HTTP Vault client boundary, KV v2 metadata mapping, Auth/RBAC and Policy checks before Vault reads, path allowlist checks, metadata-only leases/handles/audit, `/readiness/secrets/vault/*`, `/security/secrets/vault/*`, `/dashboard/vault-secret-backend`, safe health metadata, deterministic mock tests, and skipped-by-default live Vault test skeleton without making Vault default or production-ready.
 - Local Agent Runner v1 provider boundary, deterministic MockAgentRunner default, disabled-by-default LocalAgentRunner, controlled fixture command execution boundary, workspace validation, harness policy gates, instruction assembly, `/agents/*` API visibility, health metadata, command result/workspace read models, runner audit events, and dashboard visibility.
 - Policy-as-code Skeleton v0 static policy engine, provider-neutral policy models, restrictive default rules, policy audit read model, `/policy/*` API visibility, health metadata, dashboard visibility, and Git/LLM/Runner/Registry service-boundary checks.
 - Policy Bundle / OPA-Cedar Planning v0 engine comparison, bundle schema, policy domain mapping, review workflow, test strategy, rollout/rollback, break-glass plan, `/readiness/policy-bundles/*`, `/dashboard/policy-bundles`, safe health metadata, and tests without OPA/Cedar/runtime bundle execution, external policy service calls, dynamic policy execution, or secrets.
+- Production Secret Backend Implementation Option Decision v0 decision criteria, backend evaluation, recommendation, SecretRef provider mapping, v1 implementation scope, env migration plan, test strategy, risk register, read-only `/readiness/secret-backend-decision/*`, `/dashboard/secret-backend-decision`, safe health metadata, and tests without Vault/cloud/custom backend calls, secret reads, secret migration, rotation, production credential issuance, env value exposure, credential cache reads, BYOK, OAuth, WIF, IAM, or production-ready claims.
 - Staging Deployment Profile v0 non-production profile contract, staging environment gate matrix, integration-test policy, risk register, read-only `/readiness/staging/*`, `/dashboard/staging`, safe health metadata, and tests without deployment, external provider calls, secrets, env values, remote MCP, vendor CLI execution, or production traffic.
+- Staging Deployment Dry-run Profile v0 read-only readiness aggregation, source/check/blocker/report/summary models, blocker taxonomy, report format, `/readiness/staging-dry-run/*`, `/dashboard/staging-dry-run`, safe health metadata, and tests without deployment, external provider calls, remote integration-test execution, secrets, env values, destructive Git, real MCP transport, vendor CLI execution, staging-deployed claims, or production-ready claims.
+- Staging Release Candidate Checklist v0 read-only RC criteria, validation gate, optional skipped integration, blocker, signoff, release-note, rollback, report, and summary models, `/readiness/staging-rc/*`, `/dashboard/staging-rc`, safe health metadata, and tests without release creation, Git tag creation, GitHub release creation, deployment, external provider calls, remote integration-test execution, secrets, env values, destructive Git, real MCP transport, vendor CLI execution, staging-deployed claims, or production-ready claims.
+- Staging Deployment Execution Plan v0 read-only staging execution sequence, pre-deploy gate, optional integration decision, go/no-go, rollback, and summary models, `/readiness/staging-execution/*`, `/dashboard/staging-execution`, safe health metadata, and tests without release creation, Git tag creation, deployment, external provider calls, remote integration-test execution, secrets, env values, destructive Git, real MCP transport, vendor CLI execution, staging-deployed claims, or production-ready claims.
 - Staging CI/CD Pipeline Planning v0 job matrix, optional integration-test gate policy, secret/env safety, artifact/report policy, staging promotion criteria, cleanup/rollback planning, read-only `/readiness/ci-cd/*`, `/dashboard/ci-cd`, safe health metadata, and tests without active workflows, deployment, default remote integrations, secrets, or env values.
 - Enterprise LLM Provider Abstraction v0 provider kind/auth models, provider catalog skeletons, CredentialManager/TokenResolver interfaces, blocked ProviderAdapter skeletons, Local CLI provider contract, Aichestra Local Agent boundary models, parser/redaction utilities, `/providers/*` API visibility, health metadata, provider audit events, dashboard visibility, and policy hooks.
 - Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, `/security/*` API visibility, health metadata, dashboard visibility, and runner sandbox-session policy hooks.
@@ -770,7 +868,7 @@ Deferred:
 - Real staging deployment, staging infrastructure manifests, staging CI/CD pipeline execution, or production traffic.
 - Active CI workflow creation, live deployment jobs, default remote integration tests, unredacted CI artifact uploads, and automated remote cleanup jobs.
 - Real enterprise LLM provider API calls, OAuth/device-code/WIF/IAM token exchange, vendor credential cache access, Aichestra Local Agent daemon or real transport, vendor CLI execution, and PTY terminal automation.
-- Real Vault/cloud secret manager integration, production secret rotation jobs, production secret injection, container/VM sandboxing, OS-level network egress enforcement, and Local Agent secret forwarding.
+- Production Vault rollout, Vault HA/unseal/storage operations, production secret rotation jobs, destructive secret migration, cloud secret manager integration, production secret injection, container/VM sandboxing, OS-level network egress enforcement, and Local Agent secret forwarding.
 - Signed artifacts, full package signing, artifact provenance/SBOM, and real artifact registry integration.
 - Production auto-improvement, real proposal generation, draft registry change apply workflow, real eval execution, real canary execution, and automatic registry mutation.
 
@@ -784,7 +882,7 @@ Deferred:
 
 ## Next Steps
 
-1. Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+1. Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 2. Harden production auth/RBAC implementation with real IdP adapters, tenant scoping, durable auth repositories, and session/service-account design before any production login work.
 3. Harden audit retention/export with durable common audit storage, legal hold, tenant scoping, and secure export checkpoints before any production SIEM integration.
 4. Harden Local Agent Protocol persistence and consent UX before any real daemon or local CLI work.

@@ -12,7 +12,9 @@ import type {
   SecretLease,
   SecretRef,
   SecretScope,
-  SecurityAuditEvent
+  SecurityAuditEvent,
+  VaultClientHealth,
+  VaultSecretProviderConfig
 } from "./types.ts";
 
 export function secretRefToDto(secretRef: SecretRef) {
@@ -122,6 +124,45 @@ export function securityAuditEventToDto(event: SecurityAuditEvent) {
     ...event,
     createdAt: event.createdAt.toISOString(),
     metadata: sanitizeDtoMetadata(event.metadata)
+  };
+}
+
+export function vaultSecretProviderConfigToDto(config: VaultSecretProviderConfig) {
+  return {
+    selectedProvider: config.selectedProvider,
+    vaultProviderEnabled: config.vaultProviderEnabled,
+    vaultAddressConfigured: config.vaultAddressConfigured,
+    vaultNamespaceConfigured: config.vaultNamespaceConfigured,
+    vaultKvMountConfigured: Boolean(config.vaultKvMount),
+    vaultAuthMethod: config.vaultAuthMethod,
+    vaultTokenConfigured: config.vaultTokenConfigured,
+    vaultTokenSecretRefConfigured: config.vaultTokenSecretRefConfigured,
+    vaultAllowedPathPrefixCount: config.vaultAllowedPathPrefixCount,
+    vaultIntegrationTestsEnabled: config.vaultIntegrationTestsEnabled,
+    requestTimeoutMs: config.requestTimeoutMs,
+    liveUsageReady: config.liveUsageReady,
+    configStatus: config.configStatus,
+    missingConfigCount: config.missingConfig.length,
+    productionSecretBackendImplemented: config.productionSecretBackendImplemented,
+    envFallbackProductionAllowed: config.envFallbackProductionAllowed,
+    containsSecretMaterial: false
+  };
+}
+
+export function vaultClientHealthToDto(health: VaultClientHealth) {
+  return {
+    clientKind: health.clientKind,
+    status: health.status,
+    configStatus: health.configStatus,
+    vaultProviderEnabled: health.vaultProviderEnabled,
+    vaultAddressConfigured: health.vaultAddressConfigured,
+    vaultNamespaceConfigured: health.vaultNamespaceConfigured,
+    vaultAuthMethod: health.vaultAuthMethod,
+    allowedPathPrefixCount: health.allowedPathPrefixCount,
+    integrationTestsEnabled: health.integrationTestsEnabled,
+    liveCallAttempted: health.liveCallAttempted,
+    containsSecretMaterial: false,
+    sanitizedError: health.sanitizedError
   };
 }
 

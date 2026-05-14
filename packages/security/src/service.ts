@@ -15,7 +15,7 @@ import {
   createInMemorySecurityRepositories,
   type SecurityRepositories
 } from "./repository.ts";
-import { EnvSecretProvider, createEnvSecretProviderFromEnv } from "./credentials.ts";
+import { EnvSecretProvider, VaultSecretProvider, createEnvSecretProviderFromEnv, createVaultSecretProviderFromEnv, vaultMetadataFromSecretRef } from "./credentials.ts";
 import { redactWithPolicy } from "./redaction.ts";
 import type {
   CredentialHandle,
@@ -38,7 +38,9 @@ import type {
   SecretManagerKind,
   SecretRef,
   SecretRefValidationResult,
-  SecurityAuditEvent
+  SecurityAuditEvent,
+  VaultClientHealth,
+  VaultSecretProviderConfig
 } from "./types.ts";
 
 export type SecurityControlServiceInput = {
@@ -46,6 +48,7 @@ export type SecurityControlServiceInput = {
   policyService?: PolicyService;
   authorizationService?: AuthorizationServiceInterface;
   envSecretProvider?: EnvSecretProvider;
+  vaultSecretProvider?: VaultSecretProvider;
   env?: Record<string, string | undefined>;
 };
 
@@ -54,28 +57,48 @@ export class SecurityControlService implements SecretManager {
   private readonly policyService: PolicyService;
   private readonly authorizationService?: AuthorizationServiceInterface;
   private readonly envSecretProvider: EnvSecretProvider;
+  private readonly vaultSecretProvider: VaultSecretProvider;
 
   constructor(input: SecurityControlServiceInput = {}) {
     this.repositories = input.repositories ?? createInMemorySecurityRepositories();
     this.policyService = input.policyService ?? new PolicyService();
     this.authorizationService = input.authorizationService;
     this.envSecretProvider = input.envSecretProvider ?? createEnvSecretProviderFromEnv(input.env);
+    this.vaultSecretProvider = input.vaultSecretProvider ?? createVaultSecretProviderFromEnv(input.env);
   }
 
   getManagerKind(): SecretManagerKind {
-    return this.envSecretProvider.getConfig().enabled ? "mock_with_env_secret_provider" : "mock";
+    const envEnabled = this.envSecretProvider.getConfig().enabled;
+    const vaultEnabled = this.vaultSecretProvider.getConfig().vaultProviderEnabled;
+    if (envEnabled && vaultEnabled) return "mock_with_env_and_vault_secret_provider";
+    if (vaultEnabled) return "mock_with_vault_secret_provider";
+    return envEnabled ? "mock_with_env_secret_provider" : "mock";
   }
 
   getConfig() {
     const defaultSandbox = this.getDefaultSandboxProfile();
     const networkPolicy = this.repositories.networkEgressPolicies.listNetworkEgressPolicies().find((item) => item.status === "active");
     const envSecretProvider = this.envSecretProvider.getConfig();
+    const vaultSecretProvider = this.vaultSecretProvider.getConfig();
     const activeSecretRefs = this.repositories.secretRefs.listSecretRefs().filter((item) => item.status === "active");
     return {
       secretManagerKind: this.getManagerKind(),
-      credentialManagerKind: "secretref_env_v1",
+      credentialManagerKind: vaultSecretProvider.selectedProvider === "vault" && vaultSecretProvider.vaultProviderEnabled ? "secretref_vault_v1" : "secretref_env_v1",
+      secretBackendProviderSelected: vaultSecretProvider.selectedProvider,
       envSecretProviderEnabled: envSecretProvider.enabled,
       allowedSecretEnvKeyCount: envSecretProvider.allowedEnvKeyCount,
+      vaultSecretProviderEnabled: vaultSecretProvider.vaultProviderEnabled,
+      vaultAddressConfigured: vaultSecretProvider.vaultAddressConfigured,
+      vaultNamespaceConfigured: vaultSecretProvider.vaultNamespaceConfigured,
+      vaultAuthMethod: vaultSecretProvider.vaultAuthMethod,
+      vaultAllowedPathPrefixCount: vaultSecretProvider.vaultAllowedPathPrefixCount,
+      vaultIntegrationTestsEnabled: vaultSecretProvider.vaultIntegrationTestsEnabled,
+      vaultClientKind: this.vaultSecretProvider.getClientKind(),
+      vaultConfigStatus: vaultSecretProvider.configStatus,
+      vaultLiveUsageReady: vaultSecretProvider.liveUsageReady,
+      vaultTokenConfigured: vaultSecretProvider.vaultTokenConfigured,
+      productionSecretBackendImplemented: false,
+      envFallbackProductionAllowed: false,
       activeSecretRefCount: activeSecretRefs.length,
       githubCredentialConfigured: this.credentialConfiguredFor("github_token"),
       githubAppPrivateKeyConfigured: this.credentialConfiguredFor("github_app_private_key"),
@@ -87,6 +110,113 @@ export class SecurityControlService implements SecretManager {
       redactionEnabled: this.repositories.redactionPolicies.listRedactionPolicies().some((item) => item.status === "active"),
       productionSecretInjection: false,
       productionSandboxRuntime: false
+    };
+  }
+
+  getVaultConfig(): VaultSecretProviderConfig {
+    return this.vaultSecretProvider.getConfig();
+  }
+
+  getVaultHealth(): VaultClientHealth {
+    return this.vaultSecretProvider.healthCheck();
+  }
+
+  listVaultReadinessChecks() {
+    const config = this.getVaultConfig();
+    return [
+      {
+        id: "vault_provider_non_default",
+        category: "config",
+        status: config.selectedProvider === "vault" ? "warning" : "pass",
+        severity: "low",
+        summary: "Vault is not the default backend unless explicitly selected.",
+        metadata: {
+          selectedProvider: config.selectedProvider,
+          containsSecretMaterial: false
+        }
+      },
+      {
+        id: "vault_enable_gate",
+        category: "config",
+        status: config.vaultProviderEnabled ? "pass" : "skipped",
+        severity: "medium",
+        summary: "Vault reads require AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER=true.",
+        metadata: {
+          enabled: config.vaultProviderEnabled,
+          containsSecretMaterial: false
+        }
+      },
+      {
+        id: "vault_address_configured",
+        category: "config",
+        status: config.vaultAddressConfigured ? "pass" : config.selectedProvider === "vault" ? "fail" : "skipped",
+        severity: "high",
+        summary: "Live Vault usage requires a configured address, but the address value is never returned.",
+        metadata: {
+          configured: config.vaultAddressConfigured,
+          containsSecretMaterial: false
+        }
+      },
+      {
+        id: "vault_auth_configured",
+        category: "auth",
+        status: config.vaultAuthMethod === "token" && config.vaultTokenConfigured ? "pass" : config.selectedProvider === "vault" ? "fail" : "skipped",
+        severity: "high",
+        summary: "Vault v1 supports gated token auth only; token values are hidden.",
+        metadata: {
+          authMethod: config.vaultAuthMethod,
+          tokenConfigured: config.vaultTokenConfigured,
+          containsSecretMaterial: false
+        }
+      },
+      {
+        id: "vault_path_allowlist",
+        category: "policy",
+        status: config.vaultAllowedPathPrefixCount > 0 ? "pass" : "warning",
+        severity: "medium",
+        summary: "Allowed path prefixes constrain Vault SecretRefs when configured.",
+        metadata: {
+          allowedPathPrefixCount: config.vaultAllowedPathPrefixCount,
+          containsSecretMaterial: false
+        }
+      },
+      {
+        id: "vault_default_tests_skip_live",
+        category: "tests",
+        status: config.vaultIntegrationTestsEnabled ? "warning" : "pass",
+        severity: "medium",
+        summary: "Live Vault integration tests are skipped unless every explicit gate is configured.",
+        metadata: {
+          integrationTestsEnabled: config.vaultIntegrationTestsEnabled,
+          containsSecretMaterial: false
+        }
+      }
+    ];
+  }
+
+  getVaultSummary() {
+    const config = this.getVaultConfig();
+    const checks = this.listVaultReadinessChecks();
+    const failing = checks.filter((check) => check.status === "fail");
+    return {
+      status: config.configStatus,
+      provider: "vault",
+      selectedProvider: config.selectedProvider,
+      vaultProviderEnabled: config.vaultProviderEnabled,
+      vaultAddressConfigured: config.vaultAddressConfigured,
+      vaultNamespaceConfigured: config.vaultNamespaceConfigured,
+      vaultAuthMethod: config.vaultAuthMethod,
+      vaultAllowedPathPrefixCount: config.vaultAllowedPathPrefixCount,
+      vaultIntegrationTestsEnabled: config.vaultIntegrationTestsEnabled,
+      vaultClientKind: this.vaultSecretProvider.getClientKind(),
+      liveUsageReady: config.liveUsageReady,
+      checkCount: checks.length,
+      failingCheckCount: failing.length,
+      productionSecretBackendImplemented: false,
+      envFallbackProductionAllowed: false,
+      noSecretsExposed: true,
+      noEnvValuesExposed: true,
+      containsSecretMaterial: false
     };
   }
 
@@ -146,6 +276,9 @@ export class SecurityControlService implements SecretManager {
     if (!isSecretKind(secretRef.secretKind)) errors.push("secret ref secretKind is invalid");
     if (!isSecretRefStatus(secretRef.status)) errors.push("secret ref status is invalid");
     if (secretRef.provider === "env" && !secretRef.envKey) errors.push("env secret ref requires envKey");
+    if (secretRef.provider === "vault") {
+      errors.push(...this.vaultSecretProvider.validateSecretRef(secretRef).errors);
+    }
     if (secretRef.envKey && !isSafeEnvKeyReference(secretRef.envKey)) errors.push("secret envKey must be a safe env var reference");
     if (hasRawSecretMaterial(secretRef.metadata)) errors.push("secret ref metadata must not contain raw secret material");
     if (looksLikeCredentialCachePath(secretRef.name) || looksLikeCredentialCachePath(secretRef.scope) || (secretRef.envKey !== undefined && looksLikeCredentialCachePath(secretRef.envKey))) {
@@ -838,24 +971,177 @@ export class SecurityControlService implements SecretManager {
       }, "credential_resolution_policy_denied", secretRef, authContext);
     }
 
-    const envResult = this.envSecretProvider.resolve(secretRef);
-    if (!envResult.ok || !envResult.value) {
-      const eventType = envResult.reason === "env_secret_provider_disabled"
-        ? "credential_env_provider_disabled"
-        : envResult.reason === "env_key_not_allowlisted"
-          ? "credential_env_key_not_allowlisted"
-          : envResult.status === "missing"
-            ? "credential_resolution_missing"
-            : "credential_resolution_denied";
+    let credentialValue: string | undefined;
+    let providerMetadata: Record<string, unknown> = {};
+    let leaseReason = "secret_provider_credential_handle_issued";
+    if (secretRef.provider === "env") {
+      const envResult = this.envSecretProvider.resolve(secretRef);
+      if (!envResult.ok || !envResult.value) {
+        const eventType = envResult.reason === "env_secret_provider_disabled"
+          ? "credential_env_provider_disabled"
+          : envResult.reason === "env_key_not_allowlisted"
+            ? "credential_env_key_not_allowlisted"
+            : envResult.status === "missing"
+              ? "credential_resolution_missing"
+              : "credential_resolution_denied";
+        return this.finishCredentialResolution(request, {
+          id: resolutionId,
+          allowed: false,
+          status: envResult.status,
+          blockedReason: envResult.reason ?? "credential_resolution_failed",
+          policyDecisionId: leaseIssuePolicy.id,
+          authorizationDecisionId: authorizationDecision?.auditEvent?.id,
+          createdAt
+        }, eventType, secretRef, authContext);
+      }
+      credentialValue = envResult.value;
+      providerMetadata = {
+        envKeyConfigured: Boolean(secretRef.envKey),
+        credentialProvider: "env"
+      };
+      leaseReason = "env_secret_provider_credential_handle_issued";
+    } else if (secretRef.provider === "vault") {
+      const vaultMetadata = vaultMetadataFromSecretRef(secretRef);
+      this.recordAudit({
+        targetKind: "secret",
+        targetId: secretRef.id,
+        eventType: "vault_secret_provider_selected",
+        result: "allowed",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId,
+        principalId,
+        metadata: {
+          resolutionId,
+          purpose: request.purpose,
+          providerId: request.providerId,
+          providerKind,
+          clientKind: this.vaultSecretProvider.getClientKind(),
+          selectedProvider: this.vaultSecretProvider.getConfig().selectedProvider,
+          containsSecretMaterial: false
+        }
+      });
+      const pathAllowed = this.vaultSecretProvider.isSecretRefPathAllowed(secretRef);
+      this.recordAudit({
+        targetKind: "secret",
+        targetId: secretRef.id,
+        eventType: "vault_path_allowlist_checked",
+        result: pathAllowed ? "allowed" : "blocked",
+        reason: pathAllowed ? "vault_path_allowlisted" : "vault_path_not_allowlisted",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId,
+        principalId,
+        metadata: {
+          resolutionId,
+          allowedPathPrefixCount: this.vaultSecretProvider.getConfig().vaultAllowedPathPrefixCount,
+          vaultMountConfigured: Boolean(vaultMetadata.vaultMount),
+          vaultPathConfigured: Boolean(vaultMetadata.vaultPath),
+          vaultKeyConfigured: Boolean(vaultMetadata.vaultKey),
+          containsSecretMaterial: false
+        }
+      });
+      if (!pathAllowed) {
+        return this.finishCredentialResolution(request, {
+          id: resolutionId,
+          allowed: false,
+          status: "denied",
+          blockedReason: "vault_path_not_allowlisted",
+          policyDecisionId: leaseIssuePolicy.id,
+          authorizationDecisionId: authorizationDecision?.auditEvent?.id,
+          createdAt
+        }, "vault_path_not_allowlisted", secretRef, authContext);
+      }
+      this.recordAudit({
+        targetKind: "secret",
+        targetId: secretRef.id,
+        eventType: "vault_secret_resolution_requested",
+        result: "allowed",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId,
+        principalId,
+        metadata: {
+          resolutionId,
+          purpose: request.purpose,
+          providerId: request.providerId,
+          providerKind,
+          secretKind: secretRef.secretKind,
+          clientKind: this.vaultSecretProvider.getClientKind(),
+          containsSecretMaterial: false
+        }
+      });
+      const vaultResult = this.vaultSecretProvider.resolveSecret(secretRef);
+      if (!vaultResult.ok || !vaultResult.value) {
+        const eventType: SecurityAuditEvent["eventType"] = vaultResult.status === "missing"
+          ? "vault_secret_resolution_missing"
+          : vaultResult.status === "unavailable"
+            ? "vault_secret_resolution_unavailable"
+            : "vault_secret_resolution_forbidden";
+        return this.finishCredentialResolution(request, {
+          id: resolutionId,
+          allowed: false,
+          status: vaultResult.status,
+          blockedReason: vaultResult.reason ?? "vault_secret_resolution_failed",
+          policyDecisionId: leaseIssuePolicy.id,
+          authorizationDecisionId: authorizationDecision?.auditEvent?.id,
+          createdAt
+        }, eventType, secretRef, authContext);
+      }
+      credentialValue = vaultResult.value;
+      providerMetadata = {
+        ...vaultResult.metadata,
+        credentialProvider: "vault",
+        vaultMountConfigured: Boolean(vaultMetadata.vaultMount),
+        vaultPathConfigured: Boolean(vaultMetadata.vaultPath),
+        vaultKeyConfigured: Boolean(vaultMetadata.vaultKey),
+        vaultVersionConfigured: vaultMetadata.vaultVersion !== undefined,
+        containsSecretMaterial: false
+      };
+      leaseReason = "vault_secret_provider_credential_handle_issued";
+      this.recordAudit({
+        targetKind: "secret",
+        targetId: secretRef.id,
+        eventType: "vault_secret_resolution_allowed",
+        result: "allowed",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId,
+        principalId,
+        metadata: {
+          resolutionId,
+          purpose: request.purpose,
+          providerId: request.providerId,
+          providerKind,
+          secretKind: secretRef.secretKind,
+          clientKind: this.vaultSecretProvider.getClientKind(),
+          containsSecretMaterial: false
+        }
+      });
+      this.recordAudit({
+        targetKind: "secret",
+        targetId: secretRef.id,
+        eventType: "vault_secret_value_redacted",
+        result: "redacted",
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId,
+        principalId,
+        metadata: {
+          resolutionId,
+          containsSecretMaterial: false
+        }
+      });
+    } else {
       return this.finishCredentialResolution(request, {
         id: resolutionId,
         allowed: false,
-        status: envResult.status,
-        blockedReason: envResult.reason ?? "credential_resolution_failed",
+        status: "unavailable",
+        blockedReason: "secret_provider_not_implemented",
         policyDecisionId: leaseIssuePolicy.id,
         authorizationDecisionId: authorizationDecision?.auditEvent?.id,
         createdAt
-      }, eventType, secretRef, authContext);
+      }, "credential_resolution_denied", secretRef, authContext);
     }
 
     const scope = this.repositories.secretScopes.getSecretScope(secretRef.scope);
@@ -870,7 +1156,7 @@ export class SecurityControlService implements SecretManager {
       status: "issued",
       issuedAt: createdAt,
       expiresAt: new Date(createdAt.getTime() + ttlSeconds * 1000),
-      reason: "env_secret_provider_credential_handle_issued"
+      reason: leaseReason
     });
     this.saveSecretAccessDecision({
       allowed: true,
@@ -896,7 +1182,7 @@ export class SecurityControlService implements SecretManager {
         providerId: request.providerId,
         providerKind,
         leaseId: lease.id,
-        envKeyConfigured: Boolean(secretRef.envKey),
+        ...providerMetadata,
         containsSecretMaterial: false
       }
     };
@@ -948,7 +1234,7 @@ export class SecurityControlService implements SecretManager {
       authorizationDecisionId: authorizationDecision?.auditEvent?.id,
       auditEventId: audit.id,
       createdAt,
-      value: includeValue ? envResult.value : undefined
+      value: includeValue ? credentialValue : undefined
     };
   }
 
@@ -961,6 +1247,48 @@ export class SecurityControlService implements SecretManager {
   ): InternalCredentialResolutionResult {
     const actorId = authContext?.actor.id ?? request.actorId;
     const principalId = authContext?.principal.id ?? request.principalId;
+    if (secretRef?.provider === "vault" && eventType === "credential_resolution_authorization_denied") {
+      this.recordAudit({
+        targetKind: "secret",
+        targetId: secretRef.id,
+        eventType: "vault_secret_resolution_auth_denied",
+        result: "blocked",
+        reason: result.blockedReason,
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId,
+        principalId,
+        metadata: {
+          resolutionId: result.id,
+          purpose: request.purpose,
+          providerId: request.providerId,
+          providerKind: providerKindForCredentialRequest(request),
+          authorizationDecisionId: result.authorizationDecisionId,
+          containsSecretMaterial: false
+        }
+      });
+    }
+    if (secretRef?.provider === "vault" && eventType === "credential_resolution_policy_denied") {
+      this.recordAudit({
+        targetKind: "secret",
+        targetId: secretRef.id,
+        eventType: "vault_secret_resolution_policy_denied",
+        result: "blocked",
+        reason: result.blockedReason,
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        actorId,
+        principalId,
+        metadata: {
+          resolutionId: result.id,
+          purpose: request.purpose,
+          providerId: request.providerId,
+          providerKind: providerKindForCredentialRequest(request),
+          policyDecisionId: result.policyDecisionId,
+          containsSecretMaterial: false
+        }
+      });
+    }
     const audit = this.recordAudit({
       targetKind: "secret",
       targetId: secretRef?.id ?? request.secretRefId,
@@ -980,7 +1308,10 @@ export class SecurityControlService implements SecretManager {
         authMode: authContext?.authMode,
         policyDecisionId: result.policyDecisionId,
         authorizationDecisionId: result.authorizationDecisionId,
-        envKeyConfigured: Boolean(secretRef?.envKey)
+        envKeyConfigured: Boolean(secretRef?.envKey),
+        vaultMountConfigured: secretRef?.provider === "vault" ? Boolean(vaultMetadataFromSecretRef(secretRef).vaultMount) : undefined,
+        vaultPathConfigured: secretRef?.provider === "vault" ? Boolean(vaultMetadataFromSecretRef(secretRef).vaultPath) : undefined,
+        vaultKeyConfigured: secretRef?.provider === "vault" ? Boolean(vaultMetadataFromSecretRef(secretRef).vaultKey) : undefined
       }
     });
     return {
@@ -1087,12 +1418,21 @@ export class SecurityControlService implements SecretManager {
   }
 
   private credentialPolicyEnvironment(request: CredentialResolutionRequest, secretRef: SecretRef): Record<string, unknown> {
+    const vaultConfig = this.vaultSecretProvider.getConfig();
+    const vaultValidation = secretRef.provider === "vault" ? this.vaultSecretProvider.validateSecretRef(secretRef) : undefined;
+    const vaultPathAllowed = secretRef.provider === "vault" ? this.vaultSecretProvider.isSecretRefPathAllowed(secretRef) : false;
     return {
       ...sanitizeMetadata(request.policyContext ?? {}),
-      credentialsConfigured: secretRef.status === "active" && Boolean(secretRef.envKey),
+      credentialsConfigured: secretRef.status === "active" && (secretRef.provider === "env" ? Boolean(secretRef.envKey) : secretRef.provider === "vault" ? vaultValidation?.ok === true : false),
       secretRefActive: secretRef.status === "active",
       envSecretProviderEnabled: this.envSecretProvider.getConfig().enabled,
       envKeyAllowlistConfigured: this.envSecretProvider.getConfig().allowedEnvKeyCount > 0,
+      vaultSecretBackendSelected: vaultConfig.selectedProvider === "vault",
+      vaultSecretProviderEnabled: vaultConfig.vaultProviderEnabled,
+      vaultAddressConfigured: vaultConfig.vaultAddressConfigured,
+      vaultAuthConfigured: vaultConfig.vaultAuthMethod === "token" && vaultConfig.vaultTokenConfigured,
+      vaultPathAllowed,
+      vaultClientKind: this.vaultSecretProvider.getClientKind(),
       provider: secretRef.provider,
       secretKind: secretRef.secretKind,
       credentialCacheAccessAllowed: false,
@@ -1105,7 +1445,7 @@ export class SecurityControlService implements SecretManager {
   private credentialConfiguredFor(secretKind: SecretRef["secretKind"]): boolean {
     return this.repositories.secretRefs
       .listSecretRefs()
-      .some((secretRef) => secretRef.secretKind === secretKind && secretRef.status === "active" && Boolean(secretRef.envKey));
+      .some((secretRef) => secretRef.secretKind === secretKind && secretRef.status === "active" && (Boolean(secretRef.envKey) || (secretRef.provider === "vault" && this.vaultSecretProvider.validateSecretRef(secretRef).ok)));
   }
 
   private recordAudit(input: Omit<SecurityAuditEvent, "id" | "createdAt">): SecurityAuditEvent {
@@ -1163,6 +1503,9 @@ export class AzureKeyVaultFuture {
 function hasRawSecretMaterial(metadata: Record<string, unknown>): boolean {
   return Object.entries(metadata).some(([key, value]) => {
     const lowerKey = key.toLowerCase();
+    if (["vaultmount", "vaultpath", "vaultkey", "vaultversion", "vaultnamespace", "vaulttransitwrapped", "datashape", "description"].includes(lowerKey)) {
+      return typeof value === "string" && looksLikeRawSecret(value);
+    }
     if (lowerKey === "value" || lowerKey.includes("token") || lowerKey.includes("secret") || lowerKey.includes("api_key")) {
       return typeof value === "string" && value.length > 0 && value !== "[redacted]";
     }
@@ -1173,6 +1516,7 @@ function hasRawSecretMaterial(metadata: Record<string, unknown>): boolean {
 function isSecretProviderKind(value: unknown): value is SecretRef["provider"] {
   return value === "mock" ||
     value === "env" ||
+    value === "vault" ||
     value === "vault_future" ||
     value === "aws_secrets_manager_future" ||
     value === "gcp_secret_manager_future" ||
@@ -1222,6 +1566,7 @@ function looksLikeRawSecret(value: string): boolean {
   return /\bsk-[A-Za-z0-9_-]{8,}\b/.test(value) ||
     /\bghp_[A-Za-z0-9_]{8,}\b/.test(value) ||
     /\bgithub_pat_[A-Za-z0-9_]{8,}\b/.test(value) ||
+    /\bhv[bs]\.[A-Za-z0-9_-]{8,}\b/.test(value) ||
     /\b[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD)\s*=\s*[^\s]+/i.test(value) ||
     /Bearer\s+[A-Za-z0-9._~+/=-]+/i.test(value);
 }
@@ -1236,6 +1581,13 @@ function looksLikeCredentialCachePath(value: string): boolean {
 function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
   const clone = structuredClone(metadata);
   for (const [key, value] of Object.entries(clone)) {
+    const lowerKey = key.toLowerCase();
+    if (["vaultmount", "vaultpath", "vaultkey", "vaultversion", "vaultnamespace", "vaulttransitwrapped", "datashape"].includes(lowerKey)) {
+      if (typeof value === "string" && (looksLikeRawSecret(value) || looksLikeCredentialCachePath(value))) {
+        clone[key] = "[redacted]";
+      }
+      continue;
+    }
     if (/token|secret|key|credential|prompt/i.test(key)) {
       clone[key] = "[redacted]";
       continue;

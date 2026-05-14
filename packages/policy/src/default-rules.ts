@@ -302,6 +302,29 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_git_credential_resolve_allow_vault_secretref_v1",
+      name: "Allow Git Vault-backed SecretRef credential resolution",
+      description: "GitHub credentials and webhook secrets may be resolved from active Vault-backed SecretRefs only when Vault is explicitly selected, enabled, configured, and path-allowlisted.",
+      effect: "allow",
+      action: "git.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        providerKinds: ["github"],
+        environmentEquals: {
+          credentialsConfigured: true,
+          secretRefActive: true,
+          vaultSecretBackendSelected: true,
+          vaultSecretProviderEnabled: true,
+          vaultAddressConfigured: true,
+          vaultAuthConfigured: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
       id: "policy_github_app_configure_deny_without_gate",
       name: "Deny GitHub App configuration without enable gate",
       description: "GitHub App configuration requires the explicit GitHub App enable gate.",
@@ -750,6 +773,29 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_llm_credential_resolve_allow_vault_secretref_v1",
+      name: "Allow LLM Vault-backed SecretRef credential resolution",
+      description: "OpenAI-compatible API keys may be resolved from active Vault-backed SecretRefs only when Vault is explicitly selected, enabled, configured, and path-allowlisted.",
+      effect: "allow",
+      action: "llm.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        providerKinds: ["openai_compatible"],
+        environmentEquals: {
+          credentialsConfigured: true,
+          secretRefActive: true,
+          vaultSecretBackendSelected: true,
+          vaultSecretProviderEnabled: true,
+          vaultAddressConfigured: true,
+          vaultAuthConfigured: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
       id: "policy_llm_active_model_allow",
       name: "Allow active model use",
       description: "Active models may be used when other checks pass.",
@@ -1014,6 +1060,28 @@ export function createDefaultPolicyRules(): PolicyRule[] {
           credentialsConfigured: true,
           secretRefActive: true,
           envSecretProviderEnabled: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 300,
+      enabled: true
+    },
+    {
+      id: "policy_provider_credential_resolve_allow_vault_secretref_v1",
+      name: "Allow Vault-backed SecretRef credential resolution",
+      description: "Provider credentials may be resolved from active Vault-backed SecretRefs only when Vault is explicitly selected, enabled, configured, and path-allowlisted.",
+      effect: "allow",
+      action: "provider.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        environmentEquals: {
+          credentialsConfigured: true,
+          secretRefActive: true,
+          vaultSecretBackendSelected: true,
+          vaultSecretProviderEnabled: true,
+          vaultAddressConfigured: true,
+          vaultAuthConfigured: true,
           credentialCacheAccessAllowed: false,
           credentialMaterialStored: false
         }
@@ -1486,6 +1554,27 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_secret_lease_request_allow_vault_provider_credentials_v1",
+      name: "Allow metadata lease request for Vault provider credentials",
+      description: "Vault-backed provider credential resolution may create a metadata SecretLease after credential policy approval; secret.read remains denied.",
+      effect: "allow",
+      action: "secret.lease.request",
+      resourceKind: "secret_lease",
+      conditions: {
+        environmentEquals: {
+          secretRefActive: true,
+          vaultSecretBackendSelected: true,
+          vaultSecretProviderEnabled: true,
+          vaultAddressConfigured: true,
+          vaultAuthConfigured: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 1100,
+      enabled: true
+    },
+    {
       id: "policy_secret_lease_request_requires_approval",
       name: "Require approval for secret lease requests",
       description: "Secret leases cannot be issued automatically in v0.",
@@ -1507,6 +1596,27 @@ export function createDefaultPolicyRules(): PolicyRule[] {
         environmentEquals: {
           secretRefActive: true,
           envSecretProviderEnabled: true,
+          credentialCacheAccessAllowed: false,
+          credentialMaterialStored: false
+        }
+      },
+      priority: 1100,
+      enabled: true
+    },
+    {
+      id: "policy_secret_lease_issue_allow_vault_provider_credentials_v1",
+      name: "Allow metadata lease issue for Vault provider credentials",
+      description: "Vault-backed provider credential resolution may issue a metadata-only SecretLease without exposing the secret value outside the adapter boundary.",
+      effect: "allow",
+      action: "secret.lease.issue",
+      resourceKind: "secret_lease",
+      conditions: {
+        environmentEquals: {
+          secretRefActive: true,
+          vaultSecretBackendSelected: true,
+          vaultSecretProviderEnabled: true,
+          vaultAddressConfigured: true,
+          vaultAuthConfigured: true,
           credentialCacheAccessAllowed: false,
           credentialMaterialStored: false
         }

@@ -37,6 +37,7 @@
 - [auth-rbac/v0.md](foundations/auth-rbac/v0.md)
 - [auth-rbac/v1-plan.md](foundations/auth-rbac/v1-plan.md)
 - [secretref-provider-credentials/v1.md](foundations/secretref-provider-credentials/v1.md) (+ plan; Auth/RBAC + Policy-backed credential checks)
+- [vault-secret-backend/v1.md](foundations/vault-secret-backend/v1.md) (+ plan; gated non-default Vault SecretRef provider boundary)
 - [observability-audit-retention/v0.md](foundations/observability-audit-retention/v0.md) (+ plan; common audit envelope, retention/redaction classes, metric/trace skeletons)
 - [persistent-storage-schema-v0.md](foundations/persistent-storage-schema-v0.md)
 - [repository-inventory.md](foundations/repository-inventory.md)
@@ -71,17 +72,24 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 
 - [persistent-db-production-operations/](roadmaps/persistent-db-production-operations/) - Persistent DB Production Operations v1: DB operations runbook, migration readiness, index review, retention/audit growth, webhook persistence, backup/restore, and pooling planning.
 - [secret-backend-migration/](roadmaps/secret-backend-migration/) - Secret Backend Migration Planning v0: backend options, SecretRef provider migration, credential kind migration, lease/rotation, env fallback deprecation, readiness APIs, health, and dashboard planning.
+- [production-secret-backend-option-decision/](roadmaps/production-secret-backend-option-decision/) - Production Secret Backend Implementation Option Decision v0: decision criteria, backend evaluation, Vault-first recommendation, SecretRef provider mapping, v1 implementation scope, env migration plan, test strategy, risk register, readiness APIs, health, and dashboard planning. Vault-backed Secret Backend v1 now implements the selected gated `vault` provider boundary under foundations.
 - [auth-rbac-production/](roadmaps/auth-rbac-production/) - Production Auth/RBAC v1 Planning: IdP options, role/permission matrix, tenant/scope model, service accounts/system actors, request context propagation, mock actor deprecation, readiness APIs, health, and dashboard planning.
 - [policy-bundle-opa-cedar/](roadmaps/policy-bundle-opa-cedar/) - Policy Bundle / OPA-Cedar Planning v0: engine comparison, bundle schema, domain mapping, review workflow, tests, rollout/rollback, break-glass, readiness APIs, health, and dashboard planning.
 - [staging-deployment-profile/](roadmaps/staging-deployment-profile/) - Staging Deployment Profile v0: non-production profile contract, staging gate matrix, integration-test policy, promotion/rollback criteria, risk register, readiness APIs, health, and dashboard planning.
+- [staging-deployment-dry-run/](roadmaps/staging-deployment-dry-run/) - Staging Deployment Dry-run Profile v0: read-only readiness aggregation, blocker taxonomy, report format, staging dry-run APIs, health metadata, and dashboard planning.
+- [staging-release-candidate/](roadmaps/staging-release-candidate/) - Staging Release Candidate Checklist v0 and Evidence Pack v0: read-only RC criteria, validation gates, optional skipped integration policy, signoff/release-note/rollback models, evidence pack plan, release-note draft, rollback evidence, signoff readiness, staging RC APIs, health metadata, and dashboard planning.
+- [staging-deployment-execution/](roadmaps/staging-deployment-execution/) - Staging Deployment Execution Plan v0: read-only execution sequence, pre-deploy gates, optional live integration decisions, post-deployment smoke placeholders, rollback plan, go/no-go model, staging execution APIs, health metadata, and dashboard planning.
 - [staging-ci-cd-pipeline/](roadmaps/staging-ci-cd-pipeline/) - Staging CI/CD Pipeline Planning v0: CI job matrix, optional integration-test gates, secret/env safety, artifacts/reports, staging promotion, cleanup/rollback, readiness APIs, health, and dashboard planning.
 - [github-app-integration-test-profile/](roadmaps/github-app-integration-test-profile/) - GitHub App integration-test profile v1: skipped-by-default live-test profile, required gates, safety checks, cleanup policy, readiness APIs, health, and dashboard planning.
 - [llm-gateway-integration-test-profile/](roadmaps/llm-gateway-integration-test-profile/) - LLM Gateway integration-test profile v1: skipped-by-default OpenAI-compatible live-test profile, model allowlist, budget cap, SecretRef preference, readiness APIs, health, and dashboard planning.
+- [vault-integration-test-profile/](roadmaps/vault-integration-test-profile/) - Vault Integration-Test Profile v1: skipped-by-default Vault KV v2 test profile, required gates, test-only path and allowlist policy, safety checks, readiness APIs, health, and dashboard planning.
 
 ## audits/
 
 시점이 중요한 감사 보고서. 파일명 앞 `YYYY-MM-DD-` 접두사로 시계열화. 가장 최신부터 보면 됨.
 
+- Evidence Pack v0 — [staging-rc-evidence-pack-v0.md](audits/staging-rc-evidence-pack-v0.md) — Staging RC validation, skipped-test, release-note, rollback, and signoff readiness evidence for a future audit; this is not a release, tag, deployment, or production-ready claim.
+- 2026-05-14 — [staging-release-candidate-audit-v0.md](audits/2026-05-14-staging-release-candidate-audit-v0.md) — Staging Release Candidate Audit v0; decision `staging_rc_not_ready` because signoffs, release notes, and validation evidence needed follow-up evidence.
 - 2026-05-12 — [secretref-provider-credentials-v1-audit.claude.md](audits/2026-05-12-secretref-provider-credentials-v1-audit.claude.md) — SecretRef Credentials v1 보안 감사 (이슈 #SR1~#SR8)
 - 2026-05-12 — [ai-behavior-audit.claude.md](audits/2026-05-12-ai-behavior-audit.claude.md) — AI 동작/지침 일관성 관점 감사 (신규 이슈 #N1~#N7)
 - 2026-05-12 — [audit_claude_01.html](audits/2026-05-12-audit_claude_01.html) — 5개 영역 통합 감사 (이슈 24건)

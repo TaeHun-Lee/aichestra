@@ -60,6 +60,10 @@ import {
   llmIntegrationTestProfileToDto,
   llmIntegrationTestReadinessSummaryToDto,
   llmIntegrationTestSafetyCheckToDto,
+  vaultIntegrationTestCaseToDto,
+  vaultIntegrationTestProfileToDto,
+  vaultIntegrationTestReadinessSummaryToDto,
+  vaultIntegrationTestSafetyCheckToDto,
   policyBundleMigrationPhaseToDto,
   policyBundlePlanToDto,
   policyBundleReadinessCheckToDto,
@@ -69,23 +73,50 @@ import {
   policyEngineOptionToDto,
   productionRiskToDto,
   readinessCheckToDto,
+  secretBackendDecisionCriterionToDto,
+  secretBackendDecisionRiskToDto,
+  secretBackendDecisionScoreToDto,
+  secretBackendImplementationScopeToDto,
   secretBackendMigrationPhaseToDto,
   secretBackendMigrationSummaryToDto,
   secretBackendOptionToDto,
+  secretBackendOptionDecisionSummaryToDto,
+  secretBackendOptionDecisionToDto,
+  secretBackendProviderMappingToDto,
   secretBackendReadinessCheckToDto,
   secretBackendRiskToDto,
   secretLeasePolicyToDto,
   secretRotationPlanToDto,
   serviceAccountPlanToDto,
+  stagingDeploymentDryRunBlockerToDto,
+  stagingDeploymentDryRunCheckToDto,
+  stagingDeploymentDryRunProfileToDto,
+  stagingDeploymentDryRunReportToDto,
+  stagingDeploymentDryRunSourceToDto,
+  stagingDeploymentDryRunSummaryToDto,
+  stagingDeploymentExecutionPlanToDto,
+  stagingDeploymentExecutionSummaryToDto,
+  stagingDeploymentGateToDto,
+  stagingDeploymentGoNoGoDecisionToDto,
+  stagingDeploymentRollbackPlanToDto,
+  stagingDeploymentStepToDto,
   stagingDeploymentProfileToDto,
   stagingDeploymentSummaryToDto,
   stagingIntegrationGateToDto,
   stagingPromotionCriterionToDto,
   stagingReadinessCheckToDto,
+  stagingReleaseCandidateBlockerToDto,
+  stagingReleaseCandidateChecklistToDto,
+  stagingReleaseCandidateGateToDto,
+  stagingReleaseCandidateReportToDto,
+  stagingReleaseCandidateSignoffToDto,
+  stagingReleaseCandidateSummaryToDto,
+  stagingReleaseNoteRequirementToDto,
+  stagingRollbackChecklistItemToDto,
   stagingRollbackCriterionToDto,
   tenantBoundaryPlanToDto
 } from "@aichestra/deployment-readiness";
-import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, PolicyBundleReadinessCategory, SecretBackendReadinessCategory, StagingReadinessCategory } from "@aichestra/deployment-readiness";
+import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, PolicyBundleReadinessCategory, SecretBackendReadinessCategory, StagingDeploymentDryRunCheckCategory, StagingDeploymentGateCategory, StagingReadinessCategory, StagingReleaseCandidateGateCategory, VaultIntegrationTestSafetyCategory } from "@aichestra/deployment-readiness";
 import {
   AuthorizationService,
   InMemoryAuthRepository,
@@ -268,7 +299,9 @@ import {
   secretLeaseToDto,
   secretRefToDto,
   secretScopeToDto,
-  securityAuditEventToDto
+  securityAuditEventToDto,
+  vaultClientHealthToDto,
+  vaultSecretProviderConfigToDto
 } from "@aichestra/security";
 import type { SecretKind, SecretProviderKind, SecretRefStatus } from "@aichestra/security";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
@@ -523,6 +556,7 @@ function authorizationResourceFromBody(body: Record<string, unknown>): Authoriza
 function secretProviderKindValue(value: unknown): SecretProviderKind | undefined {
   return value === "mock" ||
     value === "env" ||
+    value === "vault" ||
     value === "vault_future" ||
     value === "aws_secrets_manager_future" ||
     value === "gcp_secret_manager_future" ||
@@ -710,12 +744,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const storage = await context.storageProvider.healthCheck();
       const databaseOperations = context.deploymentReadinessService.getDatabaseOperationsSummary();
       const secretBackendMigration = context.deploymentReadinessService.getSecretBackendMigrationSummary();
+      const secretBackendDecision = context.deploymentReadinessService.getSecretBackendOptionDecisionSummary();
       const authRbacProduction = context.deploymentReadinessService.getAuthRbacProductionSummary();
       const policyBundleReadiness = context.deploymentReadinessService.getPolicyBundleReadinessSummary();
       const stagingDeployment = context.deploymentReadinessService.getStagingDeploymentSummary();
+      const stagingDryRun = context.deploymentReadinessService.getStagingDeploymentDryRunSummary();
+      const stagingReleaseCandidate = context.deploymentReadinessService.getStagingReleaseCandidateSummary();
+      const stagingExecution = context.deploymentReadinessService.getStagingDeploymentExecutionSummary();
       const cicdReadiness = context.deploymentReadinessService.getCicdPipelineReadinessSummary();
       const githubAppIntegration = context.deploymentReadinessService.getGitHubAppIntegrationTestReadinessSummary();
       const llmIntegration = context.deploymentReadinessService.getLLMIntegrationTestReadinessSummary();
+      const vaultIntegration = context.deploymentReadinessService.getVaultIntegrationTestReadinessSummary();
       const secretRefs = context.securityService.listSecretRefs();
       sendJson(response, storage.healthy ? 200 : 503, {
         status: storage.healthy ? "ok" : "degraded",
@@ -761,6 +800,46 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           rotationJobsImplemented: secretBackendMigration.rotationJobsImplemented,
           productionCredentialIssuanceImplemented: secretBackendMigration.productionCredentialIssuanceImplemented,
           externalCallsEnabled: secretBackendMigration.externalCallsEnabled
+        },
+        secretBackendDecision: {
+          status: secretBackendDecision.status,
+          planningOnly: secretBackendDecision.planningOnly,
+          decisionStatus: secretBackendDecision.decisionStatus,
+          recommendedBackend: secretBackendDecision.recommendedBackend,
+          secondChoiceBackend: secretBackendDecision.secondChoiceBackend,
+          implementationReady: secretBackendDecision.implementationReady,
+          productionSecretBackendImplemented: secretBackendDecision.productionSecretBackendImplemented,
+          envFallbackProductionAllowed: secretBackendDecision.envFallbackProductionAllowed,
+          criterionCount: secretBackendDecision.criterionCount,
+          scoreCount: secretBackendDecision.scoreCount,
+          implementationScopeCount: secretBackendDecision.implementationScopeCount,
+          riskCount: secretBackendDecision.riskCount,
+          criticalRiskCount: secretBackendDecision.criticalRiskCount,
+          providerMappingCount: secretBackendDecision.providerMappingCount,
+          noSecretValuesExposed: secretBackendDecision.noSecretsExposed,
+          noEnvValuesExposed: !secretBackendDecision.envValuesExposed,
+          externalCallsEnabled: secretBackendDecision.externalCallsEnabled,
+          secretReadsAttempted: secretBackendDecision.secretReadsAttempted,
+          secretRotationsAttempted: secretBackendDecision.secretRotationsAttempted,
+          secretMigrationsAttempted: secretBackendDecision.secretMigrationsAttempted,
+          productionCredentialsIssued: secretBackendDecision.productionCredentialsIssued,
+          credentialCachesRead: secretBackendDecision.credentialCachesRead
+        },
+        vaultSecretBackend: {
+          selectedProvider: context.securityService.getVaultConfig().selectedProvider,
+          vaultProviderEnabled: context.securityService.getVaultConfig().vaultProviderEnabled,
+          vaultAddressConfigured: context.securityService.getVaultConfig().vaultAddressConfigured,
+          vaultNamespaceConfigured: context.securityService.getVaultConfig().vaultNamespaceConfigured,
+          vaultAuthMethod: context.securityService.getVaultConfig().vaultAuthMethod,
+          vaultAllowedPathPrefixCount: context.securityService.getVaultConfig().vaultAllowedPathPrefixCount,
+          vaultIntegrationTestsEnabled: context.securityService.getVaultConfig().vaultIntegrationTestsEnabled,
+          vaultClientKind: context.securityService.getVaultHealth().clientKind,
+          vaultHealthStatus: context.securityService.getVaultHealth().status,
+          implementationReady: context.securityService.getVaultConfig().configStatus === "ready",
+          productionSecretBackendImplemented: false,
+          envFallbackProductionAllowed: false,
+          noSecretValuesExposed: true,
+          noEnvValuesExposed: true
         },
         git: {
           providerKind: context.gitProviderConfig.providerKind,
@@ -873,6 +952,84 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           noSecretsExposed: stagingDeployment.noSecretsExposed,
           envValuesExposed: stagingDeployment.envValuesExposed
         },
+        stagingDryRun: {
+          status: stagingDryRun.status,
+          planningOnly: stagingDryRun.planningOnly,
+          dryRunMode: stagingDryRun.dryRunMode,
+          overallStatus: stagingDryRun.overallStatus,
+          profileStatus: stagingDryRun.profileStatus,
+          productionReady: stagingDryRun.productionReady,
+          stagingDeployed: stagingDryRun.stagingDeployed,
+          blockerCount: stagingDryRun.blockerCount,
+          criticalBlockerCount: stagingDryRun.criticalBlockerCount,
+          warningCount: stagingDryRun.warningCount,
+          skippedIntegrationProfileCount: stagingDryRun.skippedIntegrationProfileCount,
+          generatedAt: stagingDryRun.generatedAt.toISOString(),
+          deploymentExecuted: stagingDryRun.deploymentExecuted,
+          externalCallsEnabled: stagingDryRun.externalCallsEnabled,
+          remoteIntegrationTestsExecuted: stagingDryRun.remoteIntegrationTestsExecuted,
+          validationCommandsExecuted: stagingDryRun.validationCommandsExecuted,
+          noSecretsExposed: stagingDryRun.noSecretsExposed,
+          envValuesExposed: stagingDryRun.envValuesExposed,
+          productionReadyClaimed: stagingDryRun.productionReadyClaimed,
+          stagingDeploymentClaimed: stagingDryRun.stagingDeploymentClaimed
+        },
+        stagingReleaseCandidate: {
+          status: stagingReleaseCandidate.status,
+          planningOnly: stagingReleaseCandidate.planningOnly,
+          overallStatus: stagingReleaseCandidate.overallStatus,
+          checklistStatus: stagingReleaseCandidate.checklistStatus,
+          productionReady: stagingReleaseCandidate.productionReady,
+          stagingDeployed: stagingReleaseCandidate.stagingDeployed,
+          releaseCreated: stagingReleaseCandidate.releaseCreated,
+          gitTagCreated: stagingReleaseCandidate.gitTagCreated,
+          githubReleaseCreated: stagingReleaseCandidate.githubReleaseCreated,
+          deploymentExecuted: stagingReleaseCandidate.deploymentExecuted,
+          externalCallsEnabled: stagingReleaseCandidate.externalCallsEnabled,
+          remoteIntegrationTestsExecuted: stagingReleaseCandidate.remoteIntegrationTestsExecuted,
+          gateCount: stagingReleaseCandidate.gateCount,
+          requiredGateCount: stagingReleaseCandidate.requiredGateCount,
+          blockerCount: stagingReleaseCandidate.blockerCount,
+          criticalBlockerCount: stagingReleaseCandidate.criticalBlockerCount,
+          signoffCount: stagingReleaseCandidate.signoffCount,
+          requiredSignoffCount: stagingReleaseCandidate.requiredSignoffCount,
+          pendingSignoffCount: stagingReleaseCandidate.pendingSignoffCount,
+          releaseNoteRequirementCount: stagingReleaseCandidate.releaseNoteRequirementCount,
+          missingReleaseNoteRequirementCount: stagingReleaseCandidate.missingReleaseNoteRequirementCount,
+          rollbackItemCount: stagingReleaseCandidate.rollbackItemCount,
+          missingRollbackItemCount: stagingReleaseCandidate.missingRollbackItemCount,
+          skippedTestCount: stagingReleaseCandidate.skippedTestCount,
+          generatedAt: stagingReleaseCandidate.generatedAt.toISOString(),
+          noSecretsExposed: stagingReleaseCandidate.noSecretsExposed,
+          envValuesExposed: stagingReleaseCandidate.envValuesExposed,
+          productionReadyClaimed: stagingReleaseCandidate.productionReadyClaimed,
+          stagingDeploymentClaimed: stagingReleaseCandidate.stagingDeploymentClaimed
+        },
+        stagingExecution: {
+          status: stagingExecution.status,
+          planningOnly: stagingExecution.planningOnly,
+          planStatus: stagingExecution.planStatus,
+          goNoGoStatus: stagingExecution.goNoGoStatus,
+          productionReady: stagingExecution.productionReady,
+          stagingDeployed: stagingExecution.stagingDeployed,
+          deploymentExecuted: stagingExecution.deploymentExecuted,
+          releaseCreated: stagingExecution.releaseCreated,
+          gitTagCreated: stagingExecution.gitTagCreated,
+          externalCallsEnabled: stagingExecution.externalCallsEnabled,
+          remoteIntegrationTestsExecuted: stagingExecution.remoteIntegrationTestsExecuted,
+          gateCount: stagingExecution.gateCount,
+          requiredGateCount: stagingExecution.requiredGateCount,
+          blockerCount: stagingExecution.blockerCount,
+          criticalBlockerCount: stagingExecution.criticalBlockerCount,
+          warningCount: stagingExecution.warningCount,
+          stepCount: stagingExecution.stepCount,
+          pendingSignoffCount: stagingExecution.pendingSignoffCount,
+          rollbackStepCount: stagingExecution.rollbackStepCount,
+          noSecretsExposed: stagingExecution.noSecretsExposed,
+          envValuesExposed: stagingExecution.envValuesExposed,
+          productionReadyClaimed: stagingExecution.productionReadyClaimed,
+          stagingDeployedClaimed: stagingExecution.stagingDeployedClaimed
+        },
         cicdPipeline: {
           status: cicdReadiness.status,
           planningOnly: cicdReadiness.planningOnly,
@@ -949,6 +1106,40 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           apiKeyExposed: llmIntegration.apiKeyExposed,
           rawProviderResponseExposed: llmIntegration.rawProviderResponseExposed,
           remoteLlmCallsInDefaultTests: llmIntegration.remoteLlmCallsInDefaultTests
+        },
+        vaultIntegrationTests: {
+          status: vaultIntegration.status,
+          planningOnly: vaultIntegration.planningOnly,
+          productionReady: vaultIntegration.productionReady,
+          profileStatus: vaultIntegration.profileStatus,
+          enabled: vaultIntegration.liveTestsEnabled,
+          canRunLiveTests: vaultIntegration.canRunLiveTests,
+          defaultLiveTestsSkipped: vaultIntegration.defaultLiveTestsSkipped,
+          requiredGatesConfiguredCount: vaultIntegration.configuredGateCount,
+          missingGatesCount: vaultIntegration.missingGateCount,
+          unsafeGatesCount: vaultIntegration.unsafeGateCount,
+          vaultBackendSelected: vaultIntegration.vaultBackendSelected,
+          vaultProviderEnabled: vaultIntegration.vaultProviderEnabled,
+          vaultAddressConfigured: vaultIntegration.vaultAddressConfigured,
+          vaultNamespaceConfigured: vaultIntegration.vaultNamespaceConfigured,
+          vaultAuthMethod: vaultIntegration.vaultAuthMethod,
+          vaultTokenConfigured: vaultIntegration.vaultTokenConfigured,
+          vaultKvMountConfigured: vaultIntegration.vaultKvMountConfigured,
+          pathAllowlistPrefixCount: vaultIntegration.pathAllowlistPrefixCount,
+          testSecretPathConfigured: vaultIntegration.testSecretPathConfigured,
+          testSecretKeyConfigured: vaultIntegration.testSecretKeyConfigured,
+          testSecretPathAllowlisted: vaultIntegration.testSecretPathAllowlisted,
+          testSecretPathLooksTestOnly: vaultIntegration.testSecretPathLooksTestOnly,
+          noWrite: vaultIntegration.noWrite,
+          noDelete: vaultIntegration.noDelete,
+          noRotate: vaultIntegration.noRotate,
+          noBroadList: vaultIntegration.noBroadList,
+          noSecretsExposed: vaultIntegration.noSecretsExposed,
+          envValuesExposed: vaultIntegration.envValuesExposed,
+          vaultTokenExposed: vaultIntegration.vaultTokenExposed,
+          vaultAddressExposed: vaultIntegration.vaultAddressExposed,
+          vaultSecretValueExposed: vaultIntegration.vaultSecretValueExposed,
+          vaultCallsInDefaultTests: vaultIntegration.vaultCallsInDefaultTests
         },
         auth: {
           providerKind: context.authorizationService.getConfig().providerKind,
@@ -1243,7 +1434,57 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { leasePolicies: readiness.listSecretLeasePolicies().map(secretLeasePolicyToDto) });
         return;
       }
+      if (segments.length === 4 && segments[2] === "vault" && segments[3] === "config") {
+        sendJson(response, 200, { config: vaultSecretProviderConfigToDto(context.securityService.getVaultConfig()) });
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "vault" && segments[3] === "checks") {
+        sendJson(response, 200, { checks: context.securityService.listVaultReadinessChecks() });
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "vault" && segments[3] === "summary") {
+        sendJson(response, 200, { summary: context.securityService.getVaultSummary() });
+        return;
+      }
       sendJson(response, 404, { error: "secret_backend_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "secret-backend-decision") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Secret backend option decision endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: secretBackendOptionDecisionSummaryToDto(readiness.getSecretBackendOptionDecisionSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "decision") {
+        sendJson(response, 200, { decision: secretBackendOptionDecisionToDto(readiness.getSecretBackendOptionDecision()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "criteria") {
+        sendJson(response, 200, { criteria: readiness.listSecretBackendDecisionCriteria().map(secretBackendDecisionCriterionToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "scores") {
+        sendJson(response, 200, { scores: readiness.listSecretBackendDecisionScores().map(secretBackendDecisionScoreToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "implementation-scope") {
+        sendJson(response, 200, { implementationScopes: readiness.listSecretBackendImplementationScopes().map(secretBackendImplementationScopeToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listSecretBackendDecisionRisks().map(secretBackendDecisionRiskToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "provider-mapping") {
+        sendJson(response, 200, { providerMappings: readiness.listSecretBackendProviderMappings().map(secretBackendProviderMappingToDto) });
+        return;
+      }
+      sendJson(response, 404, { error: "secret_backend_decision_route_not_found" });
       return;
     }
 
@@ -1363,6 +1604,37 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "vault-integration") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Vault integration-test readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "profile") {
+        sendJson(response, 200, { profile: vaultIntegrationTestProfileToDto(readiness.getVaultIntegrationTestProfile()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "test-cases") {
+        sendJson(response, 200, { testCases: readiness.listVaultIntegrationTestCases().map(vaultIntegrationTestCaseToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "safety-checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["env_gates", "vault_address", "auth_method", "token_presence", "path_allowlist", "test_secret_path", "no_write", "no_delete", "no_rotate", "no_broad_list", "redaction", "audit", "no_secret_exposure"];
+        sendJson(response, 200, {
+          safetyChecks: readiness.listVaultIntegrationTestSafetyChecks(category && categories.includes(category) ? { category: category as VaultIntegrationTestSafetyCategory } : {})
+            .map(vaultIntegrationTestSafetyCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: vaultIntegrationTestReadinessSummaryToDto(readiness.getVaultIntegrationTestReadinessSummary()) });
+        return;
+      }
+      sendJson(response, 404, { error: "vault_integration_readiness_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "policy-bundles") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Policy bundle readiness endpoints are read-only planning models." });
@@ -1442,6 +1714,131 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       sendJson(response, 404, { error: "staging_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "staging-dry-run") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Staging deployment dry-run endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: stagingDeploymentDryRunSummaryToDto(readiness.getStagingDeploymentDryRunSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "profile") {
+        sendJson(response, 200, { profile: stagingDeploymentDryRunProfileToDto(readiness.getStagingDeploymentDryRunProfile()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "sources") {
+        sendJson(response, 200, { sources: readiness.listStagingDeploymentDryRunSources().map(stagingDeploymentDryRunSourceToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["validation", "environment", "storage", "secrets", "auth", "policy", "git", "github_app", "webhook", "llm", "mcp", "runner", "local_agent", "observability", "dashboard", "ci_cd", "security", "rollback"];
+        sendJson(response, 200, {
+          checks: readiness.listStagingDeploymentDryRunChecks(category && categories.includes(category) ? { category: category as StagingDeploymentDryRunCheckCategory } : {})
+            .map(stagingDeploymentDryRunCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "blockers") {
+        sendJson(response, 200, { blockers: readiness.listStagingDeploymentDryRunBlockers().map(stagingDeploymentDryRunBlockerToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "report") {
+        sendJson(response, 200, { report: stagingDeploymentDryRunReportToDto(readiness.generateStagingDeploymentDryRunReport()) });
+        return;
+      }
+      sendJson(response, 404, { error: "staging_dry_run_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "staging-rc") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Staging release candidate checklist endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: stagingReleaseCandidateSummaryToDto(readiness.getStagingReleaseCandidateSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checklist") {
+        sendJson(response, 200, { checklist: stagingReleaseCandidateChecklistToDto(readiness.getStagingReleaseCandidateChecklist()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "gates") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["validation", "docs", "staging_dry_run", "ci_cd", "git_integration", "llm_integration", "mcp", "db", "secrets", "auth", "policy", "observability", "dashboard", "security", "rollback"];
+        sendJson(response, 200, {
+          gates: readiness.listStagingReleaseCandidateGates(category && categories.includes(category) ? { category: category as StagingReleaseCandidateGateCategory } : {})
+            .map(stagingReleaseCandidateGateToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "blockers") {
+        sendJson(response, 200, { blockers: readiness.listStagingReleaseCandidateBlockers().map(stagingReleaseCandidateBlockerToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "signoffs") {
+        sendJson(response, 200, { signoffs: readiness.listStagingReleaseCandidateSignoffs().map(stagingReleaseCandidateSignoffToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "release-notes") {
+        sendJson(response, 200, { releaseNoteRequirements: readiness.listStagingReleaseNoteRequirements().map(stagingReleaseNoteRequirementToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "rollback") {
+        sendJson(response, 200, { rollbackChecklist: readiness.listStagingRollbackChecklist().map(stagingRollbackChecklistItemToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "report") {
+        sendJson(response, 200, { report: stagingReleaseCandidateReportToDto(readiness.generateStagingReleaseCandidateReport()) });
+        return;
+      }
+      sendJson(response, 404, { error: "staging_rc_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "staging-execution") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Staging deployment execution endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: stagingDeploymentExecutionSummaryToDto(readiness.getStagingDeploymentExecutionSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "plan") {
+        sendJson(response, 200, { plan: stagingDeploymentExecutionPlanToDto(readiness.getStagingDeploymentExecutionPlan()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "steps") {
+        sendJson(response, 200, { steps: readiness.listStagingDeploymentExecutionSteps().map(stagingDeploymentStepToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "gates") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["validation", "signoff", "environment", "database", "secrets", "auth", "policy", "git", "github_app", "webhook", "llm", "vault", "mcp", "observability", "dashboard", "rollback"];
+        sendJson(response, 200, {
+          gates: readiness.listStagingDeploymentExecutionGates(category && categories.includes(category) ? { category: category as StagingDeploymentGateCategory } : {})
+            .map(stagingDeploymentGateToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "go-no-go") {
+        sendJson(response, 200, { decision: stagingDeploymentGoNoGoDecisionToDto(readiness.getStagingDeploymentGoNoGoDecision()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "rollback") {
+        sendJson(response, 200, { rollback: stagingDeploymentRollbackPlanToDto(readiness.getStagingDeploymentRollbackPlan()) });
+        return;
+      }
+      sendJson(response, 404, { error: "staging_execution_readiness_route_not_found" });
       return;
     }
 
@@ -1655,8 +2052,32 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { secretBackend: dashboard.secretBackend });
         return;
       }
+      if (section === "secret-backend-decision") {
+        sendJson(response, 200, { secretBackendDecision: dashboard.secretBackendDecision });
+        return;
+      }
+      if (section === "vault-secret-backend") {
+        sendJson(response, 200, { vaultSecretBackend: dashboard.vaultSecretBackend });
+        return;
+      }
+      if (section === "vault-integration") {
+        sendJson(response, 200, { vaultIntegration: dashboard.vaultIntegration });
+        return;
+      }
       if (section === "staging") {
         sendJson(response, 200, { staging: dashboard.staging });
+        return;
+      }
+      if (section === "staging-dry-run") {
+        sendJson(response, 200, { stagingDryRun: dashboard.stagingDryRun });
+        return;
+      }
+      if (section === "staging-rc") {
+        sendJson(response, 200, { stagingReleaseCandidate: dashboard.stagingReleaseCandidate });
+        return;
+      }
+      if (section === "staging-execution") {
+        sendJson(response, 200, { stagingExecution: dashboard.stagingExecution });
         return;
       }
       if (section === "ci-cd") {
@@ -2135,6 +2556,61 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
 
       if (segments[1] === "secrets") {
+        if (segments[2] === "vault") {
+          if (method === "GET" && segments[3] === "config") {
+            sendJson(response, 200, { config: vaultSecretProviderConfigToDto(securityService.getVaultConfig()) });
+            return;
+          }
+          if (method === "GET" && segments[3] === "health") {
+            sendJson(response, 200, { health: vaultClientHealthToDto(securityService.getVaultHealth()) });
+            return;
+          }
+          if (method === "POST" && segments[3] === "resolve" && segments[4] === "check") {
+            const body = await readJson(request) as Record<string, unknown>;
+            const secretRefId = stringValue(body.secretRefId);
+            const purpose = credentialPurposeValue(body.purpose);
+            if (!secretRefId || !purpose) {
+              sendJson(response, 400, { error: "invalid_vault_resolution_check", message: "secretRefId and purpose are required." });
+              return;
+            }
+            const secretRef = securityService.getSecretMetadata(secretRefId);
+            if (secretRef?.provider !== "vault") {
+              sendJson(response, 409, { result: { allowed: false, status: "blocked", blockedReason: "secret_ref_provider_not_vault", containsSecretMaterial: false } });
+              return;
+            }
+            const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+            const result = securityService.resolveCredential({
+              secretRefId,
+              purpose,
+              actorId: requestContext.authContext.actor.id,
+              principalId: requestContext.authContext.principal.id,
+              authContext: requestContext.authContext,
+              taskId: stringValue(body.taskId),
+              taskRunId: stringValue(body.taskRunId),
+              providerId: stringValue(body.providerId),
+              policyContext: {
+                ...recordValue(body.policyContext),
+                requestedActorId: stringValue(body.actorId)
+              }
+            });
+            sendJson(response, 200, { result: credentialResolutionResultToDto(result) });
+            return;
+          }
+          if (method === "GET" && segments[3] === "audit") {
+            sendJson(response, 200, {
+              auditEvents: securityService.listAuditEvents({
+                targetKind: "secret",
+                eventType: url.searchParams.get("eventType") ?? undefined,
+                taskId: url.searchParams.get("taskId") ?? undefined,
+                taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+                actorId: url.searchParams.get("actorId") ?? undefined
+              })
+                .filter((event) => event.eventType.startsWith("vault_"))
+                .map(securityAuditEventToDto)
+            });
+            return;
+          }
+        }
         if (method === "GET" && segments[2] === "refs") {
           sendJson(response, 200, { secretRefs: securityService.listSecretRefs().map(secretRefToDto) });
           return;

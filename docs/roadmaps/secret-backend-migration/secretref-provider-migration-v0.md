@@ -13,17 +13,25 @@ The env-backed provider is explicit and gated:
 
 It reads only a requested allowlisted key and must not enumerate or return env values.
 
-## Desired provider values
+## Provider values
+
+Current provider values include:
+
+- `mock`;
+- `env`;
+- `vault`, implemented by Vault-backed Secret Backend v1 as a gated, non-default provider boundary.
 
 Future production provider values should include backend-specific references such as:
 
-- `vault`
-- `aws_secrets_manager`
-- `gcp_secret_manager`
-- `azure_key_vault`
+- `vault_future` as a planning alias retained for older docs;
+- `aws_secrets_manager_future`;
+- `gcp_secret_manager_future`;
+- `azure_key_vault_future`;
 - `custom_future`
 
-The values above remain planning-only until an explicit backend adapter task implements them.
+The cloud/custom values above remain planning-only until explicit backend adapter tasks implement them.
+
+Production Secret Backend Implementation Option Decision v0 selected Vault first and `aws_secrets_manager_future` second for AWS-first deployments. Vault v1 now supports `provider: vault`, but it does not migrate secret values, make Vault the default, or mark production secrets ready.
 
 ## Migration from env to real backend
 
@@ -31,7 +39,7 @@ The values above remain planning-only until an explicit backend adapter task imp
 2. Add backend provider metadata that points to backend reference ids or versions, not values.
 3. Validate read-only dashboard/API output for no secret names, env values, raw values, or credential cache paths.
 4. Switch staging to backend-backed SecretRefs.
-5. Deny legacy env fallback in staging/production.
+5. Deny legacy env fallback in staging/production once the live backend rollout policy is accepted.
 6. Keep local profile mock-first and integration profile warning-only until production gates are implemented.
 
 ## Legacy GitHub token migration
@@ -117,3 +125,7 @@ Validation must assert that API, dashboard, health, audit, and logs do not expos
 ## Env fallback phaseout
 
 Production profile must treat env fallback as blocked. Integration may allow it with warnings. Local may allow it for developer setup only.
+
+## Related decision
+
+Canonical provider mapping for the selected v1 backend is documented in `docs/roadmaps/production-secret-backend-option-decision/secretref-provider-mapping-v0.md`. Vault Integration-Test Profile v1 documents the optional test-only SecretRef pattern for allowlisted KV v2 smoke validation without changing production migration status.

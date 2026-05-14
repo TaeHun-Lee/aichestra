@@ -33,6 +33,10 @@ import type {
   LLMIntegrationTestProfile,
   LLMIntegrationTestReadinessSummary,
   LLMIntegrationTestSafetyCheck,
+  VaultIntegrationTestCase,
+  VaultIntegrationTestProfile,
+  VaultIntegrationTestReadinessSummary,
+  VaultIntegrationTestSafetyCheck,
   GitHubAppInstallation,
   GitHubAppPermissionMatrixEntry,
   GitHubAppProductionRisk,
@@ -54,16 +58,44 @@ import type {
   PolicyEngineOption,
   ProductionRisk,
   ReadinessCheck,
+  SecretBackendDecisionCriterion,
+  SecretBackendDecisionRisk,
+  SecretBackendDecisionScore,
+  SecretBackendImplementationScope,
   SecretBackendMigrationPhase,
   SecretBackendMigrationSummary,
   SecretBackendOption,
+  SecretBackendOptionDecision,
+  SecretBackendOptionDecisionSummary,
+  SecretBackendProviderMapping,
   SecretBackendReadinessCheck,
   SecretBackendRisk,
   SecretLeasePolicy,
   SecretRotationPlan,
   ServiceAccountPlan,
+  StagingDeploymentDryRunBlocker,
+  StagingDeploymentDryRunCheck,
+  StagingDeploymentDryRunIntegrationProfileStatus,
+  StagingDeploymentDryRunProfile,
+  StagingDeploymentDryRunReport,
+  StagingDeploymentDryRunSource,
+  StagingDeploymentDryRunSummary,
+  StagingDeploymentExecutionPlan,
+  StagingDeploymentExecutionSummary,
+  StagingDeploymentGate,
+  StagingDeploymentGoNoGoDecision,
+  StagingDeploymentRollbackPlan,
+  StagingDeploymentStep,
   StagingDeploymentProfile,
   StagingDeploymentSummary,
+  StagingReleaseCandidateBlocker,
+  StagingReleaseCandidateChecklist,
+  StagingReleaseCandidateGate,
+  StagingReleaseCandidateReport,
+  StagingReleaseCandidateSignoff,
+  StagingReleaseCandidateSummary,
+  StagingReleaseNoteRequirement,
+  StagingRollbackChecklistItem,
   StagingIntegrationGate,
   StagingPromotionCriterion,
   StagingReadinessCheck,
@@ -200,6 +232,22 @@ export function llmIntegrationTestReadinessSummaryToDto(summary: LLMIntegrationT
   return sanitize(summary);
 }
 
+export function vaultIntegrationTestProfileToDto(profile: VaultIntegrationTestProfile) {
+  return sanitize(profile);
+}
+
+export function vaultIntegrationTestCaseToDto(testCase: VaultIntegrationTestCase) {
+  return sanitize(testCase);
+}
+
+export function vaultIntegrationTestSafetyCheckToDto(check: VaultIntegrationTestSafetyCheck) {
+  return sanitize(check);
+}
+
+export function vaultIntegrationTestReadinessSummaryToDto(summary: VaultIntegrationTestReadinessSummary) {
+  return sanitize(summary);
+}
+
 export function databaseDeploymentProfileToDto(profile: DatabaseDeploymentProfile) {
   return sanitize(profile);
 }
@@ -265,6 +313,34 @@ export function secretLeasePolicyToDto(policy: SecretLeasePolicy) {
 }
 
 export function secretBackendMigrationSummaryToDto(summary: SecretBackendMigrationSummary) {
+  return sanitize(summary);
+}
+
+export function secretBackendOptionDecisionToDto(decision: SecretBackendOptionDecision) {
+  return sanitize(decision);
+}
+
+export function secretBackendDecisionCriterionToDto(criterion: SecretBackendDecisionCriterion) {
+  return sanitize(criterion);
+}
+
+export function secretBackendDecisionScoreToDto(score: SecretBackendDecisionScore) {
+  return sanitize(score);
+}
+
+export function secretBackendImplementationScopeToDto(scope: SecretBackendImplementationScope) {
+  return sanitize(scope);
+}
+
+export function secretBackendProviderMappingToDto(mapping: SecretBackendProviderMapping) {
+  return sanitize(mapping);
+}
+
+export function secretBackendDecisionRiskToDto(risk: SecretBackendDecisionRisk) {
+  return sanitize(risk);
+}
+
+export function secretBackendOptionDecisionSummaryToDto(summary: SecretBackendOptionDecisionSummary) {
   return sanitize(summary);
 }
 
@@ -349,6 +425,90 @@ export function stagingRollbackCriterionToDto(criterion: StagingRollbackCriterio
 }
 
 export function stagingDeploymentSummaryToDto(summary: StagingDeploymentSummary) {
+  return sanitize(summary);
+}
+
+export function stagingDeploymentDryRunProfileToDto(profile: StagingDeploymentDryRunProfile) {
+  return sanitize(profile);
+}
+
+export function stagingDeploymentDryRunSourceToDto(source: StagingDeploymentDryRunSource) {
+  return sanitize(source);
+}
+
+export function stagingDeploymentDryRunCheckToDto(check: StagingDeploymentDryRunCheck) {
+  return sanitize(check);
+}
+
+export function stagingDeploymentDryRunBlockerToDto(blocker: StagingDeploymentDryRunBlocker) {
+  return sanitize(blocker);
+}
+
+export function stagingDeploymentDryRunIntegrationProfileStatusToDto(status: StagingDeploymentDryRunIntegrationProfileStatus) {
+  return sanitize(status);
+}
+
+export function stagingDeploymentDryRunReportToDto(report: StagingDeploymentDryRunReport) {
+  return sanitize(report);
+}
+
+export function stagingDeploymentDryRunSummaryToDto(summary: StagingDeploymentDryRunSummary) {
+  return sanitize(summary);
+}
+
+export function stagingReleaseCandidateChecklistToDto(checklist: StagingReleaseCandidateChecklist) {
+  return sanitize(checklist);
+}
+
+export function stagingReleaseCandidateGateToDto(gate: StagingReleaseCandidateGate) {
+  return sanitize(gate);
+}
+
+export function stagingReleaseCandidateBlockerToDto(blocker: StagingReleaseCandidateBlocker) {
+  return sanitize(blocker);
+}
+
+export function stagingReleaseCandidateSignoffToDto(signoff: StagingReleaseCandidateSignoff) {
+  return sanitize(signoff);
+}
+
+export function stagingReleaseNoteRequirementToDto(requirement: StagingReleaseNoteRequirement) {
+  return sanitize(requirement);
+}
+
+export function stagingRollbackChecklistItemToDto(item: StagingRollbackChecklistItem) {
+  return sanitize(item);
+}
+
+export function stagingReleaseCandidateReportToDto(report: StagingReleaseCandidateReport) {
+  return sanitize(report);
+}
+
+export function stagingReleaseCandidateSummaryToDto(summary: StagingReleaseCandidateSummary) {
+  return sanitize(summary);
+}
+
+export function stagingDeploymentExecutionPlanToDto(plan: StagingDeploymentExecutionPlan) {
+  return sanitize(plan);
+}
+
+export function stagingDeploymentStepToDto(step: StagingDeploymentStep) {
+  return sanitize(step);
+}
+
+export function stagingDeploymentGateToDto(gate: StagingDeploymentGate) {
+  return sanitize(gate);
+}
+
+export function stagingDeploymentGoNoGoDecisionToDto(decision: StagingDeploymentGoNoGoDecision) {
+  return sanitize(decision);
+}
+
+export function stagingDeploymentRollbackPlanToDto(plan: StagingDeploymentRollbackPlan) {
+  return sanitize(plan);
+}
+
+export function stagingDeploymentExecutionSummaryToDto(summary: StagingDeploymentExecutionSummary) {
   return sanitize(summary);
 }
 

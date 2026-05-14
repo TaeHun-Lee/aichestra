@@ -29,6 +29,9 @@ import {
   defaultLLMIntegrationTestCases,
   defaultLLMIntegrationTestProfile,
   defaultLLMIntegrationTestSafetyChecks,
+  defaultVaultIntegrationTestCases,
+  defaultVaultIntegrationTestProfile,
+  defaultVaultIntegrationTestSafetyChecks,
   defaultGitHubAppInstallations,
   defaultGitHubAppPermissionMatrix,
   defaultGitHubAppProductionRisks,
@@ -48,12 +51,21 @@ import {
   defaultPolicyEngineOptions,
   defaultProductionRisks,
   defaultReadinessChecks,
+  defaultSecretBackendDecisionCriteria,
+  defaultSecretBackendDecisionRisks,
+  defaultSecretBackendDecisionScores,
+  defaultSecretBackendImplementationScopes,
   defaultSecretBackendMigrationPhases,
   defaultSecretBackendOptions,
+  defaultSecretBackendOptionDecision,
+  defaultSecretBackendProviderMappings,
   defaultSecretBackendReadinessChecks,
   defaultSecretBackendRisks,
   defaultServiceAccountPlans,
   defaultStagingDeploymentProfile,
+  defaultStagingDeploymentDryRunProfile,
+  defaultStagingDeploymentExecutionPlan,
+  defaultStagingReleaseCandidateChecklist,
   defaultStagingIntegrationGates,
   defaultStagingPromotionCriteria,
   defaultStagingReadinessChecks,
@@ -107,6 +119,12 @@ import type {
   LLMIntegrationTestReadinessSummary,
   LLMIntegrationTestSafetyCategory,
   LLMIntegrationTestSafetyCheck,
+  VaultIntegrationTestCase,
+  VaultIntegrationTestProfile,
+  VaultIntegrationTestProfileStatus,
+  VaultIntegrationTestReadinessSummary,
+  VaultIntegrationTestSafetyCategory,
+  VaultIntegrationTestSafetyCheck,
   GitHubAppInstallation,
   GitHubAppPermissionMatrixEntry,
   GitHubAppProductionRisk,
@@ -134,14 +152,60 @@ import type {
   SecretBackendMigrationPhase,
   SecretBackendMigrationSummary,
   SecretBackendOption,
+  SecretBackendDecisionCriterion,
+  SecretBackendDecisionRisk,
+  SecretBackendDecisionScore,
+  SecretBackendImplementationScope,
+  SecretBackendOptionDecision,
+  SecretBackendOptionDecisionSummary,
+  SecretBackendProviderMapping,
   SecretBackendReadinessCategory,
   SecretBackendReadinessCheck,
   SecretBackendRisk,
   SecretLeasePolicy,
   SecretRotationPlan,
   ServiceAccountPlan,
+  StagingDeploymentDryRunBlocker,
+  StagingDeploymentDryRunCheck,
+  StagingDeploymentDryRunCheckCategory,
+  StagingDeploymentDryRunCheckStatus,
+  StagingDeploymentDryRunIntegrationProfileStatus,
+  StagingDeploymentDryRunIntegrationStatus,
+  StagingDeploymentDryRunOptions,
+  StagingDeploymentDryRunOverallStatus,
+  StagingDeploymentDryRunProfile,
+  StagingDeploymentDryRunReport,
+  StagingDeploymentDryRunSource,
+  StagingDeploymentDryRunSourceKind,
+  StagingDeploymentDryRunSourceStatus,
+  StagingDeploymentDryRunSummary,
+  StagingDeploymentExecutionOptions,
+  StagingDeploymentExecutionPlan,
+  StagingDeploymentExecutionPlanStatus,
+  StagingDeploymentExecutionSummary,
+  StagingDeploymentGate,
+  StagingDeploymentGateCategory,
+  StagingDeploymentGateStatus,
+  StagingDeploymentGoNoGoDecision,
+  StagingDeploymentRollbackPlan,
+  StagingDeploymentStep,
   StagingDeploymentProfile,
   StagingDeploymentSummary,
+  StagingReleaseCandidateBlocker,
+  StagingReleaseCandidateChecklist,
+  StagingReleaseCandidateGate,
+  StagingReleaseCandidateGateCategory,
+  StagingReleaseCandidateGateStatus,
+  StagingReleaseCandidateOptions,
+  StagingReleaseCandidateOverallStatus,
+  StagingReleaseCandidateReport,
+  StagingReleaseCandidateSignoff,
+  StagingReleaseCandidateSignoffRole,
+  StagingReleaseCandidateSummary,
+  StagingReleaseNoteRequirement,
+  StagingReleaseNoteSection,
+  StagingRollbackChecklistItem,
+  StagingRollbackChecklistCategory,
   StagingIntegrationGate,
   StagingPromotionCriterion,
   StagingReadinessCategory,
@@ -152,6 +216,11 @@ import type {
 
 const checkStatuses: ReadinessCheckStatus[] = ["pass", "fail", "warning", "not_applicable", "not_checked"];
 const severities: ReadinessSeverity[] = ["low", "medium", "high", "critical"];
+const dryRunSourceStatuses: StagingDeploymentDryRunSourceStatus[] = ["pass", "warning", "fail", "skipped", "future", "not_applicable"];
+const dryRunCheckStatuses: StagingDeploymentDryRunCheckStatus[] = ["pass", "warning", "fail", "skipped", "not_checked", "not_applicable"];
+const dryRunIntegrationStatuses: StagingDeploymentDryRunIntegrationStatus[] = ["ready", "gated", "skipped", "blocked", "future"];
+const stagingRcGateStatuses: StagingReleaseCandidateGateStatus[] = ["pass", "warning", "fail", "skipped", "not_checked", "not_applicable"];
+const stagingExecutionGateStatuses: StagingDeploymentGateStatus[] = ["pass", "warning", "fail", "skipped", "not_checked", "not_applicable"];
 
 export type DeploymentReadinessServiceInput = {
   env?: Record<string, string | undefined>;
@@ -185,6 +254,12 @@ export type DeploymentReadinessServiceInput = {
   secretBackendRisks?: SecretBackendRisk[];
   secretRotationPlans?: SecretRotationPlan[];
   secretLeasePolicies?: SecretLeasePolicy[];
+  secretBackendOptionDecision?: SecretBackendOptionDecision;
+  secretBackendDecisionCriteria?: SecretBackendDecisionCriterion[];
+  secretBackendDecisionScores?: SecretBackendDecisionScore[];
+  secretBackendImplementationScopes?: SecretBackendImplementationScope[];
+  secretBackendProviderMappings?: SecretBackendProviderMapping[];
+  secretBackendDecisionRisks?: SecretBackendDecisionRisk[];
   authProviderOptions?: AuthProviderOption[];
   authRbacMigrationPhases?: AuthRbacMigrationPhase[];
   authRbacReadinessChecks?: AuthRbacReadinessCheck[];
@@ -203,6 +278,12 @@ export type DeploymentReadinessServiceInput = {
   stagingReadinessChecks?: StagingReadinessCheck[];
   stagingPromotionCriteria?: StagingPromotionCriterion[];
   stagingRollbackCriteria?: StagingRollbackCriterion[];
+  stagingDryRunProfile?: StagingDeploymentDryRunProfile;
+  stagingDryRunOptions?: StagingDeploymentDryRunOptions;
+  stagingReleaseCandidateChecklist?: StagingReleaseCandidateChecklist;
+  stagingReleaseCandidateOptions?: StagingReleaseCandidateOptions;
+  stagingDeploymentExecutionPlan?: StagingDeploymentExecutionPlan;
+  stagingDeploymentExecutionOptions?: StagingDeploymentExecutionOptions;
   cicdPipelineProfiles?: CICDPipelineProfile[];
   cicdJobDefinitions?: CICDJobDefinition[];
   cicdIntegrationTestGates?: CICDIntegrationTestGate[];
@@ -214,6 +295,9 @@ export type DeploymentReadinessServiceInput = {
   llmIntegrationTestProfile?: LLMIntegrationTestProfile;
   llmIntegrationTestCases?: LLMIntegrationTestCase[];
   llmIntegrationTestSafetyChecks?: LLMIntegrationTestSafetyCheck[];
+  vaultIntegrationTestProfile?: VaultIntegrationTestProfile;
+  vaultIntegrationTestCases?: VaultIntegrationTestCase[];
+  vaultIntegrationTestSafetyChecks?: VaultIntegrationTestSafetyCheck[];
   staticPolicyRuleCount?: number;
   repoRoot?: string;
   migrationsDir?: string;
@@ -251,6 +335,21 @@ function positiveNumber(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+function stringConfigured(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function testSecretPathAllowedByPrefix(pathValue: string, prefix: string): boolean {
+  const normalizedPath = pathValue.trim().replace(/^\/+/, "");
+  const normalizedPrefix = prefix.trim().replace(/^\/+/, "");
+  return normalizedPrefix.length > 0 &&
+    (normalizedPath === normalizedPrefix || normalizedPath.startsWith(normalizedPrefix.endsWith("/") ? normalizedPrefix : `${normalizedPrefix}/`));
+}
+
+function looksLikeTestOnlyVaultPath(pathValue: string): boolean {
+  return /(^|[/_-])(test|tests|integration|sandbox|nonprod|non-production|ci)([/_-]|$)/i.test(pathValue);
+}
+
 function profileFromEnv(value: string | undefined): DeploymentProfileName {
   if (value === "integration" || value === "staging" || value === "production") return value;
   return "local";
@@ -262,6 +361,26 @@ function countByStatus(checks: ReadinessCheck[]): Record<ReadinessCheckStatus, n
 
 function countBySeverity(items: Array<{ severity: ReadinessSeverity }>): Record<ReadinessSeverity, number> {
   return Object.fromEntries(severities.map((severity) => [severity, items.filter((item) => item.severity === severity).length])) as Record<ReadinessSeverity, number>;
+}
+
+function countDryRunSourcesByStatus(sources: StagingDeploymentDryRunSource[]): Record<StagingDeploymentDryRunSourceStatus, number> {
+  return Object.fromEntries(dryRunSourceStatuses.map((status) => [status, sources.filter((source) => source.status === status).length])) as Record<StagingDeploymentDryRunSourceStatus, number>;
+}
+
+function countDryRunChecksByStatus(checks: StagingDeploymentDryRunCheck[]): Record<StagingDeploymentDryRunCheckStatus, number> {
+  return Object.fromEntries(dryRunCheckStatuses.map((status) => [status, checks.filter((check) => check.status === status).length])) as Record<StagingDeploymentDryRunCheckStatus, number>;
+}
+
+function countDryRunIntegrationProfilesByStatus(profiles: StagingDeploymentDryRunIntegrationProfileStatus[]): Record<StagingDeploymentDryRunIntegrationStatus, number> {
+  return Object.fromEntries(dryRunIntegrationStatuses.map((status) => [status, profiles.filter((profile) => profile.status === status).length])) as Record<StagingDeploymentDryRunIntegrationStatus, number>;
+}
+
+function countStagingRcGatesByStatus(gates: StagingReleaseCandidateGate[]): Record<StagingReleaseCandidateGateStatus, number> {
+  return Object.fromEntries(stagingRcGateStatuses.map((status) => [status, gates.filter((gate) => gate.status === status).length])) as Record<StagingReleaseCandidateGateStatus, number>;
+}
+
+function countStagingExecutionGatesByStatus(gates: StagingDeploymentGate[]): Record<StagingDeploymentGateStatus, number> {
+  return Object.fromEntries(stagingExecutionGateStatuses.map((status) => [status, gates.filter((gate) => gate.status === status).length])) as Record<StagingDeploymentGateStatus, number>;
 }
 
 function clone<T>(value: T): T {
@@ -304,6 +423,12 @@ export class DeploymentReadinessService {
   private readonly secretBackendRisks: SecretBackendRisk[];
   private readonly secretRotationPlans: SecretRotationPlan[];
   private readonly secretLeasePolicies: SecretLeasePolicy[];
+  private readonly secretBackendOptionDecision: SecretBackendOptionDecision;
+  private readonly secretBackendDecisionCriteria: SecretBackendDecisionCriterion[];
+  private readonly secretBackendDecisionScores: SecretBackendDecisionScore[];
+  private readonly secretBackendImplementationScopes: SecretBackendImplementationScope[];
+  private readonly secretBackendProviderMappings: SecretBackendProviderMapping[];
+  private readonly secretBackendDecisionRisks: SecretBackendDecisionRisk[];
   private readonly authProviderOptions: AuthProviderOption[];
   private readonly authRbacMigrationPhases: AuthRbacMigrationPhase[];
   private readonly authRbacReadinessChecks: AuthRbacReadinessCheck[];
@@ -322,6 +447,12 @@ export class DeploymentReadinessService {
   private readonly stagingReadinessChecks: StagingReadinessCheck[];
   private readonly stagingPromotionCriteria: StagingPromotionCriterion[];
   private readonly stagingRollbackCriteria: StagingRollbackCriterion[];
+  private readonly stagingDryRunProfile: StagingDeploymentDryRunProfile;
+  private readonly stagingDryRunOptions: StagingDeploymentDryRunOptions;
+  private readonly stagingReleaseCandidateChecklist: StagingReleaseCandidateChecklist;
+  private readonly stagingReleaseCandidateOptions: StagingReleaseCandidateOptions;
+  private readonly stagingDeploymentExecutionPlan: StagingDeploymentExecutionPlan;
+  private readonly stagingDeploymentExecutionOptions: StagingDeploymentExecutionOptions;
   private readonly cicdPipelineProfiles: CICDPipelineProfile[];
   private readonly cicdJobDefinitions: CICDJobDefinition[];
   private readonly cicdIntegrationTestGates: CICDIntegrationTestGate[];
@@ -333,6 +464,9 @@ export class DeploymentReadinessService {
   private readonly llmIntegrationTestProfile: LLMIntegrationTestProfile;
   private readonly llmIntegrationTestCases: LLMIntegrationTestCase[];
   private readonly llmIntegrationTestSafetyChecks: LLMIntegrationTestSafetyCheck[];
+  private readonly vaultIntegrationTestProfile: VaultIntegrationTestProfile;
+  private readonly vaultIntegrationTestCases: VaultIntegrationTestCase[];
+  private readonly vaultIntegrationTestSafetyChecks: VaultIntegrationTestSafetyCheck[];
   private readonly staticPolicyRuleCount: number;
   private readonly repoRoot: string;
   private readonly migrationsDir: string;
@@ -371,6 +505,12 @@ export class DeploymentReadinessService {
     this.secretBackendRisks = clone(input.secretBackendRisks ?? defaultSecretBackendRisks);
     this.secretRotationPlans = clone(input.secretRotationPlans ?? defaultSecretRotationPlans);
     this.secretLeasePolicies = clone(input.secretLeasePolicies ?? defaultSecretLeasePolicies);
+    this.secretBackendOptionDecision = clone(input.secretBackendOptionDecision ?? defaultSecretBackendOptionDecision);
+    this.secretBackendDecisionCriteria = clone(input.secretBackendDecisionCriteria ?? defaultSecretBackendDecisionCriteria);
+    this.secretBackendDecisionScores = clone(input.secretBackendDecisionScores ?? defaultSecretBackendDecisionScores);
+    this.secretBackendImplementationScopes = clone(input.secretBackendImplementationScopes ?? defaultSecretBackendImplementationScopes);
+    this.secretBackendProviderMappings = clone(input.secretBackendProviderMappings ?? defaultSecretBackendProviderMappings);
+    this.secretBackendDecisionRisks = clone(input.secretBackendDecisionRisks ?? defaultSecretBackendDecisionRisks);
     this.authProviderOptions = clone(input.authProviderOptions ?? defaultAuthProviderOptions);
     this.authRbacMigrationPhases = clone(input.authRbacMigrationPhases ?? defaultAuthRbacMigrationPhases);
     this.authRbacReadinessChecks = clone(input.authRbacReadinessChecks ?? defaultAuthRbacReadinessChecks);
@@ -389,6 +529,12 @@ export class DeploymentReadinessService {
     this.stagingReadinessChecks = clone(input.stagingReadinessChecks ?? defaultStagingReadinessChecks);
     this.stagingPromotionCriteria = clone(input.stagingPromotionCriteria ?? defaultStagingPromotionCriteria);
     this.stagingRollbackCriteria = clone(input.stagingRollbackCriteria ?? defaultStagingRollbackCriteria);
+    this.stagingDryRunProfile = clone(input.stagingDryRunProfile ?? defaultStagingDeploymentDryRunProfile);
+    this.stagingDryRunOptions = clone(input.stagingDryRunOptions ?? {});
+    this.stagingReleaseCandidateChecklist = clone(input.stagingReleaseCandidateChecklist ?? defaultStagingReleaseCandidateChecklist);
+    this.stagingReleaseCandidateOptions = clone(input.stagingReleaseCandidateOptions ?? {});
+    this.stagingDeploymentExecutionPlan = clone(input.stagingDeploymentExecutionPlan ?? defaultStagingDeploymentExecutionPlan);
+    this.stagingDeploymentExecutionOptions = clone(input.stagingDeploymentExecutionOptions ?? {});
     this.cicdPipelineProfiles = clone(input.cicdPipelineProfiles ?? defaultCicdPipelineProfiles);
     this.cicdJobDefinitions = clone(input.cicdJobDefinitions ?? defaultCicdJobDefinitions);
     this.cicdIntegrationTestGates = clone(input.cicdIntegrationTestGates ?? defaultCicdIntegrationTestGates);
@@ -400,6 +546,9 @@ export class DeploymentReadinessService {
     this.llmIntegrationTestProfile = clone(input.llmIntegrationTestProfile ?? defaultLLMIntegrationTestProfile);
     this.llmIntegrationTestCases = clone(input.llmIntegrationTestCases ?? defaultLLMIntegrationTestCases);
     this.llmIntegrationTestSafetyChecks = clone(input.llmIntegrationTestSafetyChecks ?? defaultLLMIntegrationTestSafetyChecks);
+    this.vaultIntegrationTestProfile = clone(input.vaultIntegrationTestProfile ?? defaultVaultIntegrationTestProfile);
+    this.vaultIntegrationTestCases = clone(input.vaultIntegrationTestCases ?? defaultVaultIntegrationTestCases);
+    this.vaultIntegrationTestSafetyChecks = clone(input.vaultIntegrationTestSafetyChecks ?? defaultVaultIntegrationTestSafetyChecks);
     this.staticPolicyRuleCount = input.staticPolicyRuleCount ?? 0;
     this.repoRoot = input.repoRoot ?? process.cwd();
     this.migrationsDir = input.migrationsDir ?? path.join(this.repoRoot, "infra", "migrations");
@@ -563,6 +712,30 @@ export class DeploymentReadinessService {
     return clone(this.secretLeasePolicies);
   }
 
+  getSecretBackendOptionDecision(): SecretBackendOptionDecision {
+    return clone(this.secretBackendOptionDecision);
+  }
+
+  listSecretBackendDecisionCriteria(): SecretBackendDecisionCriterion[] {
+    return clone(this.secretBackendDecisionCriteria);
+  }
+
+  listSecretBackendDecisionScores(): SecretBackendDecisionScore[] {
+    return clone(this.secretBackendDecisionScores);
+  }
+
+  listSecretBackendImplementationScopes(): SecretBackendImplementationScope[] {
+    return clone(this.secretBackendImplementationScopes);
+  }
+
+  listSecretBackendProviderMappings(): SecretBackendProviderMapping[] {
+    return clone(this.secretBackendProviderMappings);
+  }
+
+  listSecretBackendDecisionRisks(): SecretBackendDecisionRisk[] {
+    return clone(this.secretBackendDecisionRisks);
+  }
+
   listAuthProviderOptions(): AuthProviderOption[] {
     return clone(this.authProviderOptions);
   }
@@ -688,6 +861,1991 @@ export class DeploymentReadinessService {
         secretValuesReturned: false
       }
     };
+  }
+
+  getStagingDeploymentDryRunProfile(): StagingDeploymentDryRunProfile {
+    const reportStatus = this.calculateStagingDryRunOverallStatus(
+      this.listStagingDeploymentDryRunSources(),
+      this.listStagingDeploymentDryRunChecks(),
+      this.listStagingDeploymentDryRunBlockers()
+    );
+    return clone({
+      ...this.stagingDryRunProfile,
+      status: reportStatus === "blocked"
+        ? "blocked" as const
+        : reportStatus === "pass"
+          ? "ready_to_evaluate" as const
+          : "warning" as const,
+      metadata: {
+        ...this.stagingDryRunProfile.metadata,
+        generatedByService: true,
+        noDeploymentExecution: true,
+        noExternalCalls: true,
+        noIntegrationTestsExecuted: true
+      }
+    });
+  }
+
+  listStagingDeploymentDryRunSources(): StagingDeploymentDryRunSource[] {
+    const staging = this.getStagingDeploymentSummary();
+    const cicd = this.getCicdPipelineReadinessSummary();
+    const database = this.getDatabaseOperationsSummary();
+    const githubHardening = this.getGitHubWebhookHardeningSummary();
+    const githubIntegration = this.getGitHubAppIntegrationTestReadinessSummary();
+    const llmIntegration = this.getLLMIntegrationTestReadinessSummary();
+    const auth = this.getAuthRbacProductionSummary();
+    const secretBackend = this.getSecretBackendMigrationSummary();
+    const policyBundle = this.getPolicyBundleReadinessSummary();
+    const environment = this.getEnvironment();
+    const options = this.stagingDryRunOptions;
+    const unsafeGitEnabled = this.remoteMergeEnabled() || this.remoteForcePushEnabled() || this.remoteBranchDeletionEnabled();
+    const vendorCliEnabled = this.vendorCliExecutionEnabled();
+    const realMcpTransportEnabled = this.realMcpTransportEnabled();
+    const postgresConfiguredForStaging = database.storageProviderKind === "postgres" && database.databaseUrlConfigured;
+    const source = (
+      sourceKind: StagingDeploymentDryRunSourceKind,
+      status: StagingDeploymentDryRunSourceStatus,
+      severity: ReadinessSeverity,
+      summary: string,
+      evidence: string[],
+      remediation: string,
+      metadata: Record<string, unknown> = {}
+    ): StagingDeploymentDryRunSource => ({
+      id: `staging_dry_run_source_${sourceKind}`,
+      sourceKind,
+      status,
+      severity,
+      summary,
+      evidence,
+      remediation,
+      metadata: {
+        readOnly: true,
+        deploymentExecuted: false,
+        externalCallsExecuted: false,
+        secretsReturned: false,
+        envValuesReturned: false,
+        ...metadata
+      }
+    });
+
+    return clone([
+      source(
+        "staging_profile",
+        staging.criticalBlockerCount > 0 ? "fail" : staging.warningCount > 0 ? "warning" : "pass",
+        staging.criticalBlockerCount > 0 ? "critical" : staging.warningCount > 0 ? "high" : "low",
+        "Staging Deployment Profile v0 is available, but current staging readiness still contains rollout blockers.",
+        ["docs/roadmaps/staging-deployment-profile/v0.md"],
+        "Resolve staging profile fail checks before attempting a real staging validation.",
+        {
+          profileStatus: staging.profileStatus,
+          criticalBlockerCount: staging.criticalBlockerCount,
+          warningCount: staging.warningCount
+        }
+      ),
+      source(
+        "ci_cd",
+        cicd.criticalBlockerCount > 0 ? "fail" : cicd.stagingPromotionReady ? "pass" : "warning",
+        cicd.criticalBlockerCount > 0 ? "critical" : "medium",
+        "Staging CI/CD Pipeline Planning v0 is available as metadata; no active workflow is created.",
+        ["docs/roadmaps/staging-ci-cd-pipeline/v0.md"],
+        "Keep validation commands local and add active staging workflow only in a future explicit task.",
+        {
+          activeWorkflowCreated: cicd.activeWorkflowCreated,
+          deploymentWorkflowCreated: cicd.deploymentWorkflowCreated,
+          remoteIntegrationTestsEnabledByDefault: cicd.remoteIntegrationTestsEnabledByDefault
+        }
+      ),
+      source(
+        "postgres",
+        postgresConfiguredForStaging ? "pass" : "fail",
+        postgresConfiguredForStaging ? "low" : "high",
+        "Persistent DB Production Operations v1 exposes read-only database readiness; staging still requires Postgres configuration.",
+        ["docs/roadmaps/persistent-db-production-operations/v1.md"],
+        "Use Postgres for staging validation and keep migrations explicitly invoked.",
+        {
+          storageProviderKind: database.storageProviderKind,
+          databaseUrlConfigured: database.databaseUrlConfigured,
+          databaseUrlExposed: database.databaseUrlExposed,
+          productionDbConnectionAttempted: database.productionDbConnectionAttempted
+        }
+      ),
+      source(
+        "github_app",
+        githubHardening.blockerCount > 0 ? "warning" : "pass",
+        githubHardening.blockerCount > 0 ? "high" : "low",
+        "GitHub App hardening is planning-only; live app rollout remains gated and mock-first.",
+        ["docs/roadmaps/github-app-production-webhook-hardening/v0.md", "docs/features/real-git-adapter/v2.md"],
+        "Keep live GitHub App operations behind explicit gates and SecretRef metadata.",
+        {
+          githubAppLiveEnabled: githubHardening.githubAppLiveEnabled,
+          productionWebhooksEnabled: githubHardening.productionWebhooksEnabled,
+          externalCallsEnabled: githubHardening.externalCallsEnabled,
+          blockerCount: githubHardening.blockerCount
+        }
+      ),
+      source(
+        "github_integration_tests",
+        githubIntegration.unsafeGateCount > 0
+          ? "fail"
+          : githubIntegration.canRunLiveTests
+            ? "pass"
+            : options.requireLiveGitHubValidation
+              ? "fail"
+              : "skipped",
+        githubIntegration.unsafeGateCount > 0 ? "critical" : options.requireLiveGitHubValidation && !githubIntegration.canRunLiveTests ? "high" : "medium",
+        "GitHub App integration-test profile v1 is skipped by default unless every live-test gate is configured.",
+        ["docs/roadmaps/github-app-integration-test-profile/v1.md"],
+        options.requireLiveGitHubValidation
+          ? "Configure all GitHub App integration-test gates or remove live GitHub validation from the staging dry-run requirements."
+          : "Keep live GitHub tests skipped until an explicit gated validation run is requested.",
+        {
+          liveTestsEnabled: githubIntegration.liveTestsEnabled,
+          canRunLiveTests: githubIntegration.canRunLiveTests,
+          defaultLiveTestsSkipped: githubIntegration.defaultLiveTestsSkipped,
+          missingGateCount: githubIntegration.missingGateCount,
+          unsafeGateCount: githubIntegration.unsafeGateCount,
+          requiredForStaging: Boolean(options.requireLiveGitHubValidation)
+        }
+      ),
+      source(
+        "llm_gateway",
+        llmIntegration.unsafeGateCount > 0 ? "fail" : llmIntegration.remoteCompletionEnabled && !llmIntegration.canRunLiveTests ? "warning" : "pass",
+        llmIntegration.unsafeGateCount > 0 ? "critical" : llmIntegration.remoteCompletionEnabled ? "high" : "low",
+        "LLM Gateway v2 stays mock-first by default; remote completion remains gated.",
+        ["docs/features/llm-gateway/v2.md"],
+        "Use remote LLM only through LLM Gateway v2 gates, model allowlists, budget policy, Auth/RBAC, and Policy checks.",
+        {
+          remoteLlmEnabled: llmIntegration.remoteLlmEnabled,
+          remoteCompletionEnabled: llmIntegration.remoteCompletionEnabled,
+          routingMode: llmIntegration.routingMode,
+          unsafeGateCount: llmIntegration.unsafeGateCount
+        }
+      ),
+      source(
+        "llm_integration_tests",
+        llmIntegration.unsafeGateCount > 0
+          ? "fail"
+          : llmIntegration.canRunLiveTests
+            ? "pass"
+            : options.requireLiveLLMValidation
+              ? "fail"
+              : "skipped",
+        llmIntegration.unsafeGateCount > 0 ? "critical" : options.requireLiveLLMValidation && !llmIntegration.canRunLiveTests ? "high" : "medium",
+        "LLM Gateway integration-test profile v1 is skipped by default unless every live-test gate is configured.",
+        ["docs/roadmaps/llm-gateway-integration-test-profile/v1.md"],
+        options.requireLiveLLMValidation
+          ? "Configure all LLM integration-test gates or remove live LLM validation from staging dry-run requirements."
+          : "Keep live LLM tests skipped until an explicit gated validation run is requested.",
+        {
+          liveTestsEnabled: llmIntegration.liveTestsEnabled,
+          canRunLiveTests: llmIntegration.canRunLiveTests,
+          defaultLiveTestsSkipped: llmIntegration.defaultLiveTestsSkipped,
+          missingGateCount: llmIntegration.missingGateCount,
+          unsafeGateCount: llmIntegration.unsafeGateCount,
+          requiredForStaging: Boolean(options.requireLiveLLMValidation)
+        }
+      ),
+      source(
+        "mcp_gateway",
+        realMcpTransportEnabled ? "fail" : "pass",
+        realMcpTransportEnabled ? "critical" : "low",
+        "MCP Gateway v0 remains mock-first; real transport is disabled for staging dry-run v0.",
+        ["docs/features/mcp-gateway/v0.md"],
+        "Keep real MCP transport disabled until policy, SecretRef, sandbox, and audit readiness exist.",
+        { realMcpTransportEnabled }
+      ),
+      source(
+        "auth_rbac",
+        "warning",
+        "critical",
+        "Production Auth/RBAC v1 Planning exists, but real IdP, sessions, JWT issuance, and service-account credentials are not implemented.",
+        ["docs/roadmaps/auth-rbac-production/v1.md"],
+        "Treat mock auth as acceptable only for this read-only dry-run; implement production auth before promotion.",
+        {
+          productionAuthEnabled: auth.productionAuthEnabled,
+          authMode: auth.authMode,
+          mockActorWarning: auth.mockActorWarning,
+          externalIdpCallsEnabled: auth.externalIdpCallsEnabled
+        }
+      ),
+      source(
+        "secret_backend",
+        "warning",
+        "critical",
+        "Secret Backend Migration v0 exists, but no real Vault/cloud/custom backend is configured.",
+        ["docs/roadmaps/secret-backend-migration/v0.md"],
+        "Choose and implement a real secret backend or record a controlled staging fallback decision before provider validation.",
+        {
+          realSecretBackendConfigured: secretBackend.realSecretBackendConfigured,
+          externalCallsEnabled: secretBackend.externalCallsEnabled,
+          envFallbackWarning: secretBackend.envFallbackWarning,
+          envValuesExposed: secretBackend.envValuesExposed
+        }
+      ),
+      source(
+        "secretref_credentials",
+        secretBackend.envSecretProviderEnabled ? "warning" : "pass",
+        secretBackend.envSecretProviderEnabled ? "medium" : "low",
+        "SecretRef-backed provider credential models are implemented with metadata-only env fallback, not a real backend.",
+        ["docs/foundations/secretref-provider-credentials/v1.md", "docs/features/secrets-sandbox/v0.md"],
+        "Keep credential values out of read models and migrate SecretRef resolution to a real backend later.",
+        {
+          envSecretProviderEnabled: secretBackend.envSecretProviderEnabled,
+          allowedSecretEnvKeyCount: secretBackend.allowedSecretEnvKeyCount,
+          credentialResolutionAttempted: secretBackend.credentialResolutionAttempted
+        }
+      ),
+      source(
+        "policy_bundle",
+        "warning",
+        "high",
+        "Policy Bundle / OPA-Cedar Planning v0 exists; StaticPolicyEngine remains runtime and dynamic policy execution is disabled.",
+        ["docs/roadmaps/policy-bundle-opa-cedar/v0.md"],
+        "Keep static policy authoritative until reviewed, signed, testable policy bundles are implemented.",
+        {
+          externalPolicyEngineEnabled: policyBundle.externalPolicyEngineEnabled,
+          dynamicPolicyExecutionEnabled: policyBundle.dynamicPolicyExecutionEnabled,
+          policyCodeExecuted: policyBundle.policyCodeExecuted
+        }
+      ),
+      source(
+        "observability",
+        "warning",
+        "high",
+        "Observability / Audit Retention v0 is mock-first and read-only; no external observability backend/export is enabled.",
+        ["docs/foundations/observability-audit-retention/v0.md"],
+        "Add durable audit/metrics/logging readiness before treating staging as operational.",
+        {
+          externalBackendConfigured: environment.observabilityBackendConfigured,
+          auditExportConfigured: environment.auditExportConfigured
+        }
+      ),
+      source(
+        "dashboard",
+        "pass",
+        "low",
+        "Dashboard API-backed read models are implemented and remain read-only.",
+        ["docs/features/dashboard/v0.md"],
+        "Keep dashboard endpoints read-only and sanitized.",
+        { dashboardDataSource: environment.dashboardDataSource }
+      ),
+      source(
+        "local_agent",
+        vendorCliEnabled ? "fail" : "pass",
+        vendorCliEnabled ? "critical" : "low",
+        "Local Agent Protocol v1 remains mock/fixture metadata coordination only.",
+        ["docs/features/local-agent-protocol/v1.md"],
+        "Keep vendor CLI execution and credential-cache reads disabled.",
+        { vendorCliExecutionEnabled: vendorCliEnabled, realTransportEnabled: false }
+      ),
+      source(
+        "runner",
+        vendorCliEnabled ? "fail" : "pass",
+        vendorCliEnabled ? "critical" : "low",
+        "Local Agent Runner v1 stays mock-first with command execution disabled by default.",
+        ["docs/features/local-agent-runner/v1.md"],
+        "Keep command execution disabled outside explicit fixture/temp workspaces and never use vendor CLI execution in staging dry-run.",
+        {
+          localAgentRunnerEnabled: environment.localAgentRunnerEnabled,
+          localCommandExecutionEnabled: environment.localCommandExecutionEnabled,
+          vendorCliExecutionEnabled: vendorCliEnabled
+        }
+      ),
+      source(
+        "git",
+        unsafeGitEnabled ? "fail" : environment.remoteGitEnabled ? "warning" : "pass",
+        unsafeGitEnabled ? "critical" : environment.remoteGitEnabled ? "medium" : "low",
+        "Real Git Adapter v2 remains mock-first; remote Git is allowed only through explicit safe gates.",
+        ["docs/features/real-git-adapter/v2.md"],
+        "Keep remote merge, force-push, and branch deletion disabled.",
+        {
+          remoteGitEnabled: environment.remoteGitEnabled,
+          remoteMergeEnabled: this.remoteMergeEnabled(),
+          forcePushEnabled: this.remoteForcePushEnabled(),
+          branchDeletionEnabled: this.remoteBranchDeletionEnabled()
+        }
+      )
+    ]);
+  }
+
+  listStagingDeploymentDryRunChecks(filter: { category?: StagingDeploymentDryRunCheckCategory } = {}): StagingDeploymentDryRunCheck[] {
+    const database = this.getDatabaseOperationsSummary();
+    const githubIntegration = this.getGitHubAppIntegrationTestReadinessSummary();
+    const llmIntegration = this.getLLMIntegrationTestReadinessSummary();
+    const options = this.stagingDryRunOptions;
+    const validationFailed = options.validationCommandStatus === "fail";
+    const secretOrEnvExposureDetected = Boolean(options.secretsExposed || options.envValuesExposed);
+    const postgresConfiguredForStaging = database.storageProviderKind === "postgres" && database.databaseUrlConfigured;
+    const githubLiveRequired = Boolean(options.requireLiveGitHubValidation);
+    const llmLiveRequired = Boolean(options.requireLiveLLMValidation);
+    const githubLiveStatus: StagingDeploymentDryRunCheckStatus = githubIntegration.unsafeGateCount > 0
+      ? "fail"
+      : githubIntegration.canRunLiveTests
+        ? "pass"
+        : githubLiveRequired
+          ? "fail"
+          : "skipped";
+    const llmLiveStatus: StagingDeploymentDryRunCheckStatus = llmIntegration.unsafeGateCount > 0
+      ? "fail"
+      : llmIntegration.canRunLiveTests
+        ? "pass"
+        : llmLiveRequired
+          ? "fail"
+          : "skipped";
+    const check = (
+      id: string,
+      category: StagingDeploymentDryRunCheckCategory,
+      name: string,
+      status: StagingDeploymentDryRunCheckStatus,
+      severity: ReadinessSeverity,
+      requiredForStaging: boolean,
+      description: string,
+      evidence: string[],
+      remediation: string,
+      metadata: Record<string, unknown> = {}
+    ): StagingDeploymentDryRunCheck => ({
+      id,
+      category,
+      name,
+      status,
+      severity,
+      requiredForStaging,
+      description,
+      evidence,
+      remediation,
+      metadata: {
+        readOnly: true,
+        deploymentExecuted: false,
+        externalCallsExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        ...metadata
+      }
+    });
+
+    const checks: StagingDeploymentDryRunCheck[] = [
+      check(
+        "dry_run_validation_commands_status",
+        "validation",
+        "Validation command status",
+        validationFailed ? "fail" : "not_checked",
+        "critical",
+        true,
+        "The dry-run records validation status without executing commands itself.",
+        ["docs/roadmaps/staging-deployment-dry-run/v0.md"],
+        validationFailed ? "Fix failing validation commands before staging dry-run can be trusted." : "Run normal local validation after implementation.",
+        {
+          commandsExecutedByDryRun: false,
+          failedCommandCount: options.failedValidationCommands?.length ?? 0,
+          failedCommands: options.failedValidationCommands ?? []
+        }
+      ),
+      check(
+        "dry_run_no_deployment_execution",
+        "environment",
+        "No deployment execution",
+        "pass",
+        "critical",
+        true,
+        "The dry-run produces read models only and never deploys resources.",
+        ["AGENTS.md", "docs/roadmaps/staging-deployment-dry-run/v0.md"],
+        "Keep deployment commands and infrastructure changes out of this profile.",
+        { deploymentExecuted: false, stagingDeployed: false, productionReady: false }
+      ),
+      check(
+        "dry_run_no_external_calls",
+        "environment",
+        "No external provider calls",
+        "pass",
+        "critical",
+        true,
+        "The dry-run does not call GitHub, LLM, MCP, cloud, identity, policy, registry, or observability providers.",
+        ["AGENTS.md"],
+        "Keep external validation behind separately invoked gated integration-test profiles.",
+        { externalCallsExecuted: false }
+      ),
+      check(
+        "dry_run_no_remote_integration_tests",
+        "validation",
+        "No remote integration tests executed",
+        "pass",
+        "high",
+        true,
+        "The dry-run classifies GitHub and LLM integration profiles but does not execute them.",
+        ["docs/roadmaps/github-app-integration-test-profile/v1.md", "docs/roadmaps/llm-gateway-integration-test-profile/v1.md"],
+        "Run live integration profiles only as explicit, separately gated tasks.",
+        { remoteIntegrationTestsExecuted: false }
+      ),
+      check(
+        "dry_run_no_secret_or_env_exposure",
+        "security",
+        "No secret or env exposure",
+        secretOrEnvExposureDetected ? "fail" : "pass",
+        "critical",
+        true,
+        "Dry-run API, dashboard, health, and report data must expose booleans/counts/statuses only.",
+        ["packages/deployment-readiness/src/dto.ts"],
+        "Redact or remove any secret/env value from read models before continuing.",
+        { noSecretsExposed: !options.secretsExposed, envValuesExposed: Boolean(options.envValuesExposed) }
+      ),
+      check(
+        "dry_run_remote_merge_forbidden",
+        "git",
+        "Remote merge disabled",
+        this.remoteMergeEnabled() ? "fail" : "pass",
+        "critical",
+        true,
+        "Remote merge must remain unsupported and disabled for staging dry-run.",
+        ["docs/features/real-git-adapter/v2.md"],
+        "Set AICHESTRA_ALLOW_REMOTE_MERGE=false or unset it.",
+        { remoteMergeEnabled: this.remoteMergeEnabled() }
+      ),
+      check(
+        "dry_run_force_push_forbidden",
+        "git",
+        "Force push disabled",
+        this.remoteForcePushEnabled() ? "fail" : "pass",
+        "critical",
+        true,
+        "Force-push behavior is not part of Real Git Adapter v2 and blocks staging dry-run.",
+        ["docs/features/real-git-adapter/v2.md"],
+        "Unset force-push gates and keep branch operations non-destructive.",
+        { forcePushEnabled: this.remoteForcePushEnabled() }
+      ),
+      check(
+        "dry_run_branch_deletion_forbidden",
+        "git",
+        "Branch deletion disabled",
+        this.remoteBranchDeletionEnabled() ? "fail" : "pass",
+        "critical",
+        true,
+        "Remote branch deletion is not supported and blocks staging dry-run.",
+        ["docs/features/real-git-adapter/v2.md"],
+        "Unset branch deletion gates.",
+        { branchDeletionEnabled: this.remoteBranchDeletionEnabled() }
+      ),
+      check(
+        "dry_run_vendor_cli_forbidden",
+        "runner",
+        "Vendor CLI execution disabled",
+        this.vendorCliExecutionEnabled() ? "fail" : "pass",
+        "critical",
+        true,
+        "Vendor CLI execution and credential-cache reads are outside this milestone.",
+        ["docs/features/local-agent-runner/v1.md", "docs/features/local-agent-protocol/v1.md"],
+        "Keep command execution and vendor CLI gates disabled.",
+        { vendorCliExecutionEnabled: this.vendorCliExecutionEnabled() }
+      ),
+      check(
+        "dry_run_real_mcp_transport_forbidden",
+        "mcp",
+        "Real MCP transport disabled",
+        this.realMcpTransportEnabled() ? "fail" : "pass",
+        "critical",
+        true,
+        "Real MCP transport is blocked until policy, SecretRef, sandbox, and audit readiness exist.",
+        ["docs/features/mcp-gateway/v0.md"],
+        "Keep AICHESTRA_ENABLE_MCP_REAL_TRANSPORT unset or false.",
+        { realMcpTransportEnabled: this.realMcpTransportEnabled() }
+      ),
+      check(
+        "dry_run_postgres_staging_required",
+        "storage",
+        "Postgres configured for staging",
+        postgresConfiguredForStaging ? "pass" : "fail",
+        "high",
+        true,
+        "Staging validation should not rely on in-memory repositories.",
+        ["docs/roadmaps/persistent-db-production-operations/v1.md"],
+        "Configure Postgres through safe deployment config and rehearse migration/backup/restore planning.",
+        { storageProviderKind: database.storageProviderKind, databaseUrlConfigured: database.databaseUrlConfigured }
+      ),
+      check(
+        "dry_run_github_live_profile_classified",
+        "github_app",
+        "GitHub App integration-test profile classified",
+        githubLiveStatus,
+        githubIntegration.unsafeGateCount > 0 ? "critical" : githubLiveRequired ? "high" : "medium",
+        githubLiveRequired,
+        "GitHub live tests are classified without being executed.",
+        ["docs/roadmaps/github-app-integration-test-profile/v1.md"],
+        githubLiveRequired ? "Configure all live GitHub gates or make the profile optional for this dry-run." : "Leave skipped until an explicit live validation run.",
+        {
+          liveTestsEnabled: githubIntegration.liveTestsEnabled,
+          canRunLiveTests: githubIntegration.canRunLiveTests,
+          defaultLiveTestsSkipped: githubIntegration.defaultLiveTestsSkipped,
+          missingGateCount: githubIntegration.missingGateCount,
+          unsafeGateCount: githubIntegration.unsafeGateCount
+        }
+      ),
+      check(
+        "dry_run_llm_live_profile_classified",
+        "llm",
+        "LLM integration-test profile classified",
+        llmLiveStatus,
+        llmIntegration.unsafeGateCount > 0 ? "critical" : llmLiveRequired ? "high" : "medium",
+        llmLiveRequired,
+        "LLM live tests are classified without being executed.",
+        ["docs/roadmaps/llm-gateway-integration-test-profile/v1.md"],
+        llmLiveRequired ? "Configure all live LLM gates or make the profile optional for this dry-run." : "Leave skipped until an explicit live validation run.",
+        {
+          liveTestsEnabled: llmIntegration.liveTestsEnabled,
+          canRunLiveTests: llmIntegration.canRunLiveTests,
+          defaultLiveTestsSkipped: llmIntegration.defaultLiveTestsSkipped,
+          missingGateCount: llmIntegration.missingGateCount,
+          unsafeGateCount: llmIntegration.unsafeGateCount
+        }
+      ),
+      check(
+        "dry_run_mock_auth_warning",
+        "auth",
+        "Mock auth remains staging warning",
+        "warning",
+        "critical",
+        false,
+        "Missing production auth blocks production and remains visible as staging warning.",
+        ["docs/roadmaps/auth-rbac-production/v1.md"],
+        "Implement real Auth/RBAC before production and before any staging profile that requires real identity.",
+        { blockingLevel: "blocks_production_only" }
+      ),
+      check(
+        "dry_run_secret_backend_warning",
+        "secrets",
+        "Real secret backend missing",
+        "warning",
+        "critical",
+        true,
+        "Missing real secret backend blocks meaningful provider validation unless a controlled staging fallback is explicitly accepted.",
+        ["docs/roadmaps/secret-backend-migration/v0.md"],
+        "Choose a real secret backend or document a controlled staging fallback before provider validation.",
+        { blockingLevel: "blocks_staging_deployment" }
+      ),
+      check(
+        "dry_run_policy_bundle_warning",
+        "policy",
+        "Policy bundle runtime not implemented",
+        "warning",
+        "high",
+        false,
+        "StaticPolicyEngine remains authoritative and no dynamic OPA/Cedar execution is enabled.",
+        ["docs/roadmaps/policy-bundle-opa-cedar/v0.md"],
+        "Keep static policy in place until policy bundle governance is implemented.",
+        { dynamicPolicyExecutionEnabled: false, externalPolicyEngineEnabled: false }
+      ),
+      check(
+        "dry_run_observability_warning",
+        "observability",
+        "External observability backend missing",
+        "warning",
+        "high",
+        true,
+        "Observability v0 provides sanitized read models but no external backend/export.",
+        ["docs/foundations/observability-audit-retention/v0.md"],
+        "Add durable observability and alerting before staging is considered operational.",
+        { externalBackendConfigured: false, auditExportConfigured: false }
+      ),
+      check(
+        "dry_run_dashboard_read_model",
+        "dashboard",
+        "Dashboard read model available",
+        "pass",
+        "low",
+        true,
+        "Dashboard API-backed read models expose safe dry-run data.",
+        ["docs/features/dashboard/v0.md"],
+        "Keep dashboard read-only.",
+        { dashboardReadOnly: true }
+      ),
+      check(
+        "dry_run_rollback_guidance_defined",
+        "rollback",
+        "Rollback guidance defined",
+        "pass",
+        "medium",
+        true,
+        "The dry-run report includes rollback guidance without running rollback actions.",
+        ["docs/roadmaps/staging-deployment-dry-run/report-format-v0.md"],
+        "Keep rollback execution out of this profile.",
+        { rollbackExecuted: false }
+      )
+    ];
+
+    return clone(checks.filter((checkItem) => filter.category === undefined || checkItem.category === filter.category));
+  }
+
+  listStagingDeploymentDryRunBlockers(): StagingDeploymentDryRunBlocker[] {
+    const checks = this.listStagingDeploymentDryRunChecks();
+    const githubIntegration = this.getGitHubAppIntegrationTestReadinessSummary();
+    const llmIntegration = this.getLLMIntegrationTestReadinessSummary();
+    const options = this.stagingDryRunOptions;
+    const blocker = (
+      id: string,
+      category: StagingDeploymentDryRunCheckCategory | StagingDeploymentDryRunSourceKind,
+      title: string,
+      severity: ReadinessSeverity,
+      blockingLevel: StagingDeploymentDryRunBlocker["blockingLevel"],
+      description: string,
+      remediation: string,
+      sourceIds: string[],
+      metadata: Record<string, unknown> = {}
+    ): StagingDeploymentDryRunBlocker => ({
+      id,
+      category,
+      title,
+      severity,
+      blockingLevel,
+      description,
+      remediation,
+      sourceIds,
+      status: "open",
+      metadata: {
+        readOnly: true,
+        deploymentExecuted: false,
+        externalCallsExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        ...metadata
+      }
+    });
+    const blockers: StagingDeploymentDryRunBlocker[] = [];
+
+    for (const checkItem of checks.filter((check) => check.status === "fail")) {
+      const level: StagingDeploymentDryRunBlocker["blockingLevel"] = checkItem.severity === "critical"
+        ? "blocks_staging_dry_run"
+        : "blocks_staging_deployment";
+      blockers.push(blocker(
+        `blocker_${checkItem.id}`,
+        checkItem.category,
+        checkItem.name,
+        checkItem.severity,
+        level,
+        checkItem.description,
+        checkItem.remediation,
+        [checkItem.id],
+        checkItem.metadata
+      ));
+    }
+
+    blockers.push(
+      blocker(
+        "blocker_missing_secret_backend",
+        "secret_backend",
+        "Real secret backend missing",
+        "critical",
+        "blocks_staging_deployment",
+        "Staging provider validation is not meaningful until secret resolution no longer depends on local env fallback, unless a controlled staging fallback is explicitly accepted.",
+        "Choose and implement a real secret backend or document a controlled non-production fallback decision.",
+        ["staging_dry_run_source_secret_backend", "dry_run_secret_backend_warning"],
+        { productionBlocker: true, realSecretBackendConfigured: false }
+      ),
+      blocker(
+        "blocker_mock_auth_production",
+        "auth_rbac",
+        "Production auth missing",
+        "critical",
+        "blocks_production_only",
+        "Mock auth can support this read-only dry-run but cannot be promoted to production.",
+        "Implement production Auth/RBAC and tenant-aware request context before production.",
+        ["staging_dry_run_source_auth_rbac", "dry_run_mock_auth_warning"],
+        { productionAuthEnabled: false }
+      ),
+      blocker(
+        "blocker_policy_bundle_planning_only",
+        "policy_bundle",
+        "Managed policy bundles missing",
+        "high",
+        "blocks_production_only",
+        "Policy bundle planning exists, but runtime policy still uses static TypeScript rules.",
+        "Keep StaticPolicyEngine authoritative until signed policy bundles are implemented and tested.",
+        ["staging_dry_run_source_policy_bundle", "dry_run_policy_bundle_warning"],
+        { dynamicPolicyExecutionEnabled: false }
+      ),
+      blocker(
+        "blocker_observability_backend_missing",
+        "observability",
+        "External observability backend missing",
+        "high",
+        "blocks_staging_deployment",
+        "The dry-run can report readiness, but staging operations need durable logs, metrics, audit retention, and alerting.",
+        "Add durable observability planning or implementation before operational staging validation.",
+        ["staging_dry_run_source_observability", "dry_run_observability_warning"],
+        { externalBackendConfigured: false }
+      )
+    );
+
+    if (githubIntegration.unsafeGateCount > 0) {
+      blockers.push(blocker(
+        "blocker_github_integration_unsafe_gates",
+        "github_integration_tests",
+        "GitHub integration-test unsafe gates enabled",
+        "critical",
+        "blocks_staging_dry_run",
+        "Unsafe GitHub integration-test gates are enabled in the environment metadata.",
+        "Disable remote merge, force-push, branch deletion, unverified webhook acceptance, raw private-key env values, and branch-prefix mismatches.",
+        ["staging_dry_run_source_github_integration_tests", "dry_run_github_live_profile_classified"],
+        { unsafeGateCount: githubIntegration.unsafeGateCount, unsafeGateWarnings: githubIntegration.unsafeGateWarnings }
+      ));
+    } else if (options.requireLiveGitHubValidation && !githubIntegration.canRunLiveTests) {
+      blockers.push(blocker(
+        "blocker_github_live_validation_required",
+        "github_integration_tests",
+        "GitHub live validation required but gated",
+        "high",
+        "blocks_staging_deployment",
+        "The staging dry-run requires live GitHub validation, but required gates are missing.",
+        "Configure every GitHub App integration-test gate or make the profile optional.",
+        ["staging_dry_run_source_github_integration_tests", "dry_run_github_live_profile_classified"],
+        { missingGateCount: githubIntegration.missingGateCount }
+      ));
+    }
+
+    if (llmIntegration.unsafeGateCount > 0) {
+      blockers.push(blocker(
+        "blocker_llm_integration_unsafe_gates",
+        "llm_integration_tests",
+        "LLM integration-test unsafe gates enabled",
+        "critical",
+        "blocks_staging_dry_run",
+        "Unsafe LLM integration-test gates are enabled in the environment metadata.",
+        "Disable unbounded fallback, streaming, tool calls, BYOK/OAuth/WIF/IAM, credential cache references, invalid budgets, and model allowlist mismatches.",
+        ["staging_dry_run_source_llm_integration_tests", "dry_run_llm_live_profile_classified"],
+        { unsafeGateCount: llmIntegration.unsafeGateCount, unsafeGateWarnings: llmIntegration.unsafeGateWarnings }
+      ));
+    } else if (options.requireLiveLLMValidation && !llmIntegration.canRunLiveTests) {
+      blockers.push(blocker(
+        "blocker_llm_live_validation_required",
+        "llm_integration_tests",
+        "LLM live validation required but gated",
+        "high",
+        "blocks_staging_deployment",
+        "The staging dry-run requires live LLM validation, but required gates are missing.",
+        "Configure every LLM Gateway integration-test gate or make the profile optional.",
+        ["staging_dry_run_source_llm_integration_tests", "dry_run_llm_live_profile_classified"],
+        { missingGateCount: llmIntegration.missingGateCount }
+      ));
+    }
+
+    return clone(blockers);
+  }
+
+  generateStagingDeploymentDryRunReport(): StagingDeploymentDryRunReport {
+    const profile = this.getStagingDeploymentDryRunProfile();
+    const sources = this.listStagingDeploymentDryRunSources();
+    const checks = this.listStagingDeploymentDryRunChecks();
+    const blockers = this.listStagingDeploymentDryRunBlockers();
+    const integrationProfiles = this.getStagingDryRunIntegrationProfiles();
+    const overallStatus = this.calculateStagingDryRunOverallStatus(sources, checks, blockers);
+    const criticalBlockerCount = blockers.filter((blockerItem) => blockerItem.status === "open" && blockerItem.severity === "critical").length;
+    const skippedProfiles = integrationProfiles.filter((profileItem) => profileItem.status === "skipped");
+    return clone({
+      id: "staging_dry_run_report_v0",
+      generatedAt: this.now(),
+      overallStatus,
+      summary: overallStatus === "blocked"
+        ? "Staging deployment validation is blocked by critical readiness or safety blockers."
+        : overallStatus === "not_ready"
+          ? "Staging deployment validation is not ready; resolve high-priority rollout blockers first."
+          : overallStatus === "pass_with_warnings"
+            ? "The dry-run passed with warnings and skipped optional integration profiles."
+            : "The dry-run passed all required read-only checks.",
+      profile,
+      sourceSummaries: sources,
+      checks,
+      blockers,
+      integrationProfiles,
+      promotionGuidance: [
+        "Do not mark staging as deployed from this report.",
+        "Resolve all blocks_staging_dry_run and blocks_staging_deployment blockers before attempting deployment validation.",
+        "Run normal local validation commands outside the dry-run report.",
+        "Run optional GitHub App or LLM live profiles only as explicit gated validation tasks."
+      ],
+      rollbackGuidance: [
+        "Because this profile does not deploy anything, rollback is limited to reverting configuration proposals and documentation changes.",
+        "If a future staging validation exposes secret/env data, revoke exposed credentials out of band and block the dry-run until sanitized.",
+        "If a future staging validation enables destructive Git or vendor CLI capabilities, disable gates before retrying."
+      ],
+      recommendedNextActions: this.stagingDryRunRecommendedNextActions(blockers, skippedProfiles),
+      metadata: {
+        docs: "docs/roadmaps/staging-deployment-dry-run/v0.md",
+        reportFormatDocs: "docs/roadmaps/staging-deployment-dry-run/report-format-v0.md",
+        blockerTaxonomyDocs: "docs/roadmaps/staging-deployment-dry-run/blocker-taxonomy-v0.md",
+        sourceCount: sources.length,
+        checkCount: checks.length,
+        blockerCount: blockers.length,
+        criticalBlockerCount,
+        skippedIntegrationProfileCount: skippedProfiles.length,
+        deploymentExecuted: false,
+        externalCallsExecuted: false,
+        remoteIntegrationTestsExecuted: false,
+        secretsReturned: false,
+        envValuesReturned: false,
+        productionReady: false,
+        stagingDeployed: false
+      }
+    });
+  }
+
+  getStagingDeploymentDryRunSummary(): StagingDeploymentDryRunSummary {
+    const report = this.generateStagingDeploymentDryRunReport();
+    const sources = report.sourceSummaries;
+    const checks = report.checks;
+    const blockers = report.blockers;
+    const integrationProfiles = report.integrationProfiles;
+    const warnings = checks.filter((check) => check.status === "warning").length +
+      sources.filter((source) => source.status === "warning" || source.status === "skipped").length;
+    const sourceRequired = new Set(this.stagingDryRunProfile.requiredReadinessSources);
+    const sourceOptional = new Set(this.stagingDryRunProfile.optionalReadinessSources);
+    return clone({
+      generatedAt: report.generatedAt,
+      status: "v0_implemented",
+      planningOnly: true,
+      dryRunMode: "read_only",
+      overallStatus: report.overallStatus,
+      profileStatus: report.profile.status,
+      productionReady: false,
+      stagingDeployed: false,
+      deploymentExecuted: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      validationCommandsExecuted: false,
+      sourceCount: sources.length,
+      requiredSourceCount: sources.filter((source) => sourceRequired.has(source.sourceKind)).length,
+      optionalSourceCount: sources.filter((source) => sourceOptional.has(source.sourceKind)).length,
+      sourcesByStatus: countDryRunSourcesByStatus(sources),
+      checkCount: checks.length,
+      requiredCheckCount: checks.filter((check) => check.requiredForStaging).length,
+      checksByStatus: countDryRunChecksByStatus(checks),
+      blockerCount: blockers.length,
+      criticalBlockerCount: blockers.filter((blockerItem) => blockerItem.status === "open" && blockerItem.severity === "critical").length,
+      warningCount: warnings,
+      integrationProfileCount: integrationProfiles.length,
+      integrationProfilesByStatus: countDryRunIntegrationProfilesByStatus(integrationProfiles),
+      skippedIntegrationProfileCount: integrationProfiles.filter((profileItem) => profileItem.status === "skipped").length,
+      recommendedNextActionCount: report.recommendedNextActions.length,
+      noSecretsExposed: !this.stagingDryRunOptions.secretsExposed,
+      envValuesExposed: Boolean(this.stagingDryRunOptions.envValuesExposed),
+      productionReadyClaimed: false,
+      stagingDeploymentClaimed: false,
+      metadata: {
+        docs: "docs/roadmaps/staging-deployment-dry-run/v0.md",
+        reportId: report.id,
+        reportFormatDocs: "docs/roadmaps/staging-deployment-dry-run/report-format-v0.md",
+        blockerTaxonomyDocs: "docs/roadmaps/staging-deployment-dry-run/blocker-taxonomy-v0.md",
+        deploymentImplemented: false,
+        infrastructureCodeAdded: false,
+        externalProviderCallsEnabled: false,
+        envValuesReturned: false,
+        secretValuesReturned: false
+      }
+    });
+  }
+
+  getStagingReleaseCandidateChecklist(): StagingReleaseCandidateChecklist {
+    const gates = this.listStagingReleaseCandidateGates();
+    const blockers = this.listStagingReleaseCandidateBlockers();
+    const signoffs = this.listStagingReleaseCandidateSignoffs();
+    const releaseNotes = this.listStagingReleaseNoteRequirements();
+    const rollback = this.listStagingRollbackChecklist();
+    const overallStatus = this.calculateStagingReleaseCandidateOverallStatus(gates, blockers, signoffs, releaseNotes, rollback);
+    return clone({
+      ...this.stagingReleaseCandidateChecklist,
+      status: overallStatus === "pass"
+        ? "pass" as const
+        : overallStatus === "pass_with_warnings"
+          ? "pass_with_warnings" as const
+          : overallStatus === "blocked"
+            ? "blocked" as const
+            : "not_ready" as const,
+      metadata: {
+        ...this.stagingReleaseCandidateChecklist.metadata,
+        generatedByService: true,
+        noReleaseCreation: true,
+        noDeploymentExecution: true,
+        noExternalCalls: true,
+        noIntegrationTestsExecuted: true
+      }
+    });
+  }
+
+  listStagingReleaseCandidateGates(filter: { category?: StagingReleaseCandidateGateCategory } = {}): StagingReleaseCandidateGate[] {
+    const dryRun = this.getStagingDeploymentDryRunSummary();
+    const cicd = this.getCicdPipelineReadinessSummary();
+    const githubIntegration = this.getGitHubAppIntegrationTestReadinessSummary();
+    const llmIntegration = this.getLLMIntegrationTestReadinessSummary();
+    const database = this.getDatabaseOperationsSummary();
+    const auth = this.getAuthRbacProductionSummary();
+    const secretBackend = this.getSecretBackendMigrationSummary();
+    const policyBundle = this.getPolicyBundleReadinessSummary();
+    const deployment = this.getSummary();
+    const options = this.stagingReleaseCandidateOptions;
+    const validationStatus = options.validationCommandStatus ?? "not_checked";
+    const diffStatus = options.diffCheckStatus ?? "not_checked";
+    const failedCommands = new Set(options.failedValidationCommands ?? []);
+    const validationGateStatus = (command: string): StagingReleaseCandidateGateStatus => {
+      if (validationStatus === "pass") return "pass";
+      if (validationStatus === "fail" && (failedCommands.size === 0 || failedCommands.has(command))) return "fail";
+      return validationStatus === "fail" ? "not_checked" : "not_checked";
+    };
+    const docsMissing = (options.missingRequiredDocs ?? []).length > 0;
+    const secretOrEnvExposure = Boolean(options.secretsExposed || options.envValuesExposed);
+    const releaseOrDeploymentExecuted = Boolean(options.releaseCreated || options.gitTagCreated || options.githubReleaseCreated || options.deploymentExecuted || options.externalCallsExecuted);
+    const overclaimDetected = Boolean(options.productionReadyClaimed || options.stagingDeployedClaimed);
+    const gate = (
+      id: string,
+      category: StagingReleaseCandidateGateCategory,
+      name: string,
+      status: StagingReleaseCandidateGateStatus,
+      required: boolean,
+      severity: ReadinessSeverity,
+      description: string,
+      evidence: string[],
+      remediation: string,
+      metadata: Record<string, unknown> = {}
+    ): StagingReleaseCandidateGate => ({
+      id,
+      category,
+      name,
+      status,
+      required,
+      severity,
+      description,
+      evidence,
+      remediation,
+      metadata: {
+        readOnly: true,
+        releaseCreated: false,
+        gitTagCreated: false,
+        githubReleaseCreated: false,
+        deploymentExecuted: false,
+        externalCallsExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        ...metadata
+      }
+    });
+
+    const gates: StagingReleaseCandidateGate[] = [
+      gate(
+        "staging_rc_pnpm_lint",
+        "validation",
+        "pnpm lint",
+        validationGateStatus("pnpm lint"),
+        true,
+        validationStatus === "fail" && (failedCommands.size === 0 || failedCommands.has("pnpm lint")) ? "critical" : "high",
+        "The lint gate must pass before a branch can be called a staging release candidate.",
+        ["README.md", "docs/roadmaps/staging-ci-cd-pipeline/v0.md"],
+        "Run pnpm lint and fix reported issues.",
+        { commandExecutedByChecklist: false }
+      ),
+      gate(
+        "staging_rc_pnpm_typecheck",
+        "validation",
+        "pnpm typecheck",
+        validationGateStatus("pnpm typecheck"),
+        true,
+        validationStatus === "fail" && (failedCommands.size === 0 || failedCommands.has("pnpm typecheck")) ? "critical" : "high",
+        "The TypeScript typecheck gate must pass before staging RC designation.",
+        ["README.md"],
+        "Run pnpm typecheck and fix type errors.",
+        { commandExecutedByChecklist: false }
+      ),
+      gate(
+        "staging_rc_pnpm_test",
+        "validation",
+        "pnpm test",
+        validationGateStatus("pnpm test"),
+        true,
+        validationStatus === "fail" && (failedCommands.size === 0 || failedCommands.has("pnpm test")) ? "critical" : "high",
+        "The deterministic test suite must pass before staging RC designation.",
+        ["README.md"],
+        "Run pnpm test and fix failures.",
+        { commandExecutedByChecklist: false }
+      ),
+      gate(
+        "staging_rc_pnpm_build",
+        "validation",
+        "pnpm build",
+        validationGateStatus("pnpm build"),
+        true,
+        validationStatus === "fail" && (failedCommands.size === 0 || failedCommands.has("pnpm build")) ? "critical" : "high",
+        "The scaffold build smoke check must pass before staging RC designation.",
+        ["README.md"],
+        "Run pnpm build and fix failures.",
+        { commandExecutedByChecklist: false }
+      ),
+      gate(
+        "staging_rc_git_diff_check",
+        "validation",
+        "git diff --check",
+        diffStatus === "fail" ? "fail" : diffStatus === "warning" ? "warning" : diffStatus === "pass" ? "pass" : "not_checked",
+        true,
+        diffStatus === "fail" ? "critical" : "high",
+        "Whitespace validation must pass; documented line-ending-only issues may be treated as warnings.",
+        ["docs/roadmaps/staging-release-candidate/v0-plan.md"],
+        diffStatus === "fail" ? "Fix git diff --check errors." : "Run git diff --check before RC designation.",
+        { commandExecutedByChecklist: false, knownWarnings: options.knownDiffCheckWarnings ?? [] }
+      ),
+      gate(
+        "staging_rc_safe_integration_scan",
+        "security",
+        "Safe integration compliance scan",
+        validationStatus === "pass" ? "pass" : validationStatus === "fail" ? "fail" : "not_checked",
+        true,
+        validationStatus === "fail" ? "critical" : "high",
+        "The RC checklist requires a scan for direct external calls, unsafe release/deployment behavior, and secret exposure.",
+        ["docs/roadmaps/staging-release-candidate/v0.md"],
+        "Run the safe integration scan and classify findings before RC designation.",
+        { scanExecutedByChecklist: false }
+      ),
+      gate(
+        "staging_rc_required_docs_present",
+        "docs",
+        "Required RC docs present",
+        docsMissing ? "fail" : "pass",
+        true,
+        docsMissing ? "high" : "low",
+        "The RC checklist, report format, release notes template, rollback checklist, README, AGENTS, and index docs must be present.",
+        ["docs/README.md", "README.md", "AGENTS.md"],
+        "Add missing required docs before RC designation.",
+        { missingRequiredDocs: options.missingRequiredDocs ?? [] }
+      ),
+      gate(
+        "staging_rc_dry_run_reviewed",
+        "staging_dry_run",
+        "Staging dry-run reviewed",
+        dryRun.overallStatus === "pass" ? "pass" : dryRun.overallStatus === "pass_with_warnings" ? "warning" : dryRun.overallStatus === "blocked" ? "fail" : "warning",
+        true,
+        dryRun.overallStatus === "blocked" ? "high" : "medium",
+        "The staging dry-run report must be reviewed before RC designation. Production-only blockers can be accepted as documented limitations for v0.",
+        ["docs/roadmaps/staging-deployment-dry-run/v0.md"],
+        "Resolve blocks_staging_dry_run blockers and document accepted staging limitations.",
+        { dryRunOverallStatus: dryRun.overallStatus, dryRunCriticalBlockerCount: dryRun.criticalBlockerCount }
+      ),
+      gate(
+        "staging_rc_cicd_baseline",
+        "ci_cd",
+        "CI/CD baseline planned",
+        cicd.criticalBlockerCount > 0 ? "fail" : cicd.activeWorkflowCreated ? "warning" : "pass",
+        true,
+        cicd.criticalBlockerCount > 0 ? "critical" : "medium",
+        "Staging CI/CD planning must define the required local validation profile without creating active deployment workflows.",
+        ["docs/roadmaps/staging-ci-cd-pipeline/v0.md"],
+        "Keep active workflows out of this task and use the documented local validation profile.",
+        { activeWorkflowCreated: cicd.activeWorkflowCreated, deploymentWorkflowCreated: cicd.deploymentWorkflowCreated }
+      ),
+      gate(
+        "staging_rc_optional_postgres_profile_documented",
+        "db",
+        "Optional Postgres profile documented",
+        database.testDatabaseUrlConfigured ? "pass" : "skipped",
+        false,
+        "medium",
+        "Optional Postgres repository contracts may skip unless the test database URL is configured.",
+        ["docs/roadmaps/persistent-db-production-operations/v1.md"],
+        "Document the skip in release notes when the optional Postgres URL is absent.",
+        { testDatabaseUrlConfigured: database.testDatabaseUrlConfigured, databaseUrlExposed: database.databaseUrlExposed }
+      ),
+      gate(
+        "staging_rc_github_integration_profile_documented",
+        "git_integration",
+        "GitHub integration-test profile documented",
+        githubIntegration.unsafeGateCount > 0 ? "fail" : githubIntegration.canRunLiveTests ? "pass" : "skipped",
+        false,
+        githubIntegration.unsafeGateCount > 0 ? "critical" : "medium",
+        "GitHub App integration-test profile v1 is optional and skipped by default unless all live gates are configured.",
+        ["docs/roadmaps/github-app-integration-test-profile/v1.md"],
+        "Keep skipped by default or run as a separate gated live validation task.",
+        { canRunLiveTests: githubIntegration.canRunLiveTests, missingGateCount: githubIntegration.missingGateCount, unsafeGateCount: githubIntegration.unsafeGateCount }
+      ),
+      gate(
+        "staging_rc_llm_integration_profile_documented",
+        "llm_integration",
+        "LLM integration-test profile documented",
+        llmIntegration.unsafeGateCount > 0 ? "fail" : llmIntegration.canRunLiveTests ? "pass" : "skipped",
+        false,
+        llmIntegration.unsafeGateCount > 0 ? "critical" : "medium",
+        "LLM Gateway integration-test profile v1 is optional and skipped by default unless all live gates are configured.",
+        ["docs/roadmaps/llm-gateway-integration-test-profile/v1.md"],
+        "Keep skipped by default or run as a separate gated live validation task.",
+        { canRunLiveTests: llmIntegration.canRunLiveTests, missingGateCount: llmIntegration.missingGateCount, unsafeGateCount: llmIntegration.unsafeGateCount }
+      ),
+      gate(
+        "staging_rc_remote_merge_forbidden",
+        "git_integration",
+        "Remote merge disabled",
+        this.remoteMergeEnabled() ? "fail" : "pass",
+        true,
+        "critical",
+        "Remote merge must remain unsupported for staging RC v0.",
+        ["docs/features/real-git-adapter/v2.md"],
+        "Unset AICHESTRA_ALLOW_REMOTE_MERGE.",
+        { remoteMergeEnabled: this.remoteMergeEnabled() }
+      ),
+      gate(
+        "staging_rc_force_push_forbidden",
+        "git_integration",
+        "Force push disabled",
+        this.remoteForcePushEnabled() ? "fail" : "pass",
+        true,
+        "critical",
+        "Force push is destructive and blocks staging RC designation.",
+        ["docs/features/real-git-adapter/v2.md"],
+        "Unset force-push gates.",
+        { forcePushEnabled: this.remoteForcePushEnabled() }
+      ),
+      gate(
+        "staging_rc_branch_deletion_forbidden",
+        "git_integration",
+        "Branch deletion disabled",
+        this.remoteBranchDeletionEnabled() ? "fail" : "pass",
+        true,
+        "critical",
+        "Branch deletion is destructive and blocks staging RC designation.",
+        ["docs/features/real-git-adapter/v2.md"],
+        "Unset branch deletion gates.",
+        { branchDeletionEnabled: this.remoteBranchDeletionEnabled() }
+      ),
+      gate(
+        "staging_rc_real_mcp_transport_forbidden",
+        "mcp",
+        "Real MCP transport disabled",
+        this.realMcpTransportEnabled() ? "fail" : "pass",
+        true,
+        "critical",
+        "Real MCP transport remains out of scope for staging RC v0.",
+        ["docs/features/mcp-gateway/v0.md"],
+        "Keep AICHESTRA_ENABLE_MCP_REAL_TRANSPORT unset or false.",
+        { realMcpTransportEnabled: this.realMcpTransportEnabled() }
+      ),
+      gate(
+        "staging_rc_vendor_cli_forbidden",
+        "security",
+        "Vendor CLI execution disabled",
+        this.vendorCliExecutionEnabled() ? "fail" : "pass",
+        true,
+        "critical",
+        "Vendor CLI execution and credential-cache reads block staging RC designation.",
+        ["docs/features/local-agent-runner/v1.md", "docs/features/local-agent-protocol/v1.md"],
+        "Keep vendor CLI and local command execution gates disabled.",
+        { vendorCliExecutionEnabled: this.vendorCliExecutionEnabled() }
+      ),
+      gate(
+        "staging_rc_no_secret_or_env_exposure",
+        "security",
+        "No secret or env exposure",
+        secretOrEnvExposure ? "fail" : "pass",
+        true,
+        "critical",
+        "No readiness, health, API, dashboard, report, release-note, or rollback output may expose secret/env values.",
+        ["packages/deployment-readiness/src/dto.ts", "packages/shared/src/dashboard-read-models.ts"],
+        "Redact or remove exposed secret/env values before RC designation.",
+        { noSecretsExposed: !options.secretsExposed, envValuesExposed: Boolean(options.envValuesExposed) }
+      ),
+      gate(
+        "staging_rc_no_release_or_deployment_execution",
+        "security",
+        "No release or deployment execution",
+        releaseOrDeploymentExecuted ? "fail" : "pass",
+        true,
+        "critical",
+        "The RC checklist must not create releases, Git tags, GitHub releases, deployments, or external calls.",
+        ["AGENTS.md", "docs/roadmaps/staging-release-candidate/v0-plan.md"],
+        "Remove release/deployment side effects and rerun validation.",
+        {
+          releaseCreated: Boolean(options.releaseCreated),
+          gitTagCreated: Boolean(options.gitTagCreated),
+          githubReleaseCreated: Boolean(options.githubReleaseCreated),
+          deploymentExecuted: Boolean(options.deploymentExecuted),
+          externalCallsExecuted: Boolean(options.externalCallsExecuted)
+        }
+      ),
+      gate(
+        "staging_rc_no_ready_overclaim",
+        "docs",
+        "No staging/production overclaim",
+        overclaimDetected ? "fail" : "pass",
+        true,
+        "critical",
+        "Docs, health, dashboard, and reports must not claim staging is deployed or production is ready.",
+        ["docs/roadmaps/production-deployment-readiness/checklist-v0.md"],
+        "Remove overclaims and keep productionReady=false and stagingDeployed=false.",
+        { productionReadyClaimed: Boolean(options.productionReadyClaimed), stagingDeployedClaimed: Boolean(options.stagingDeployedClaimed) }
+      ),
+      gate(
+        "staging_rc_production_auth_documented",
+        "auth",
+        "Production auth limitation documented",
+        auth.productionAuthEnabled ? "pass" : "warning",
+        false,
+        "medium",
+        "Missing production auth is a production blocker, but not a staging RC blocker when documented.",
+        ["docs/roadmaps/auth-rbac-production/v1.md"],
+        "Keep this limitation in release notes and do not call production ready.",
+        { productionAuthEnabled: auth.productionAuthEnabled, blockingLevel: "blocks_production_only" }
+      ),
+      gate(
+        "staging_rc_secret_backend_documented",
+        "secrets",
+        "Secret backend limitation documented",
+        secretBackend.realSecretBackendConfigured ? "pass" : "warning",
+        false,
+        "medium",
+        "Missing real secret backend is a production blocker and accepted staging RC limitation only when documented.",
+        ["docs/roadmaps/secret-backend-migration/v0.md"],
+        "Document the limitation and avoid live provider validation without a controlled SecretRef path.",
+        { realSecretBackendConfigured: secretBackend.realSecretBackendConfigured, blockingLevel: "blocks_production_only" }
+      ),
+      gate(
+        "staging_rc_policy_bundle_documented",
+        "policy",
+        "Policy bundle limitation documented",
+        policyBundle.dynamicPolicyExecutionEnabled ? "fail" : "warning",
+        false,
+        policyBundle.dynamicPolicyExecutionEnabled ? "critical" : "medium",
+        "Policy Bundle / OPA-Cedar remains planning-only; StaticPolicyEngine stays runtime.",
+        ["docs/roadmaps/policy-bundle-opa-cedar/v0.md"],
+        "Keep dynamic policy execution disabled and document production limitation.",
+        { dynamicPolicyExecutionEnabled: policyBundle.dynamicPolicyExecutionEnabled }
+      ),
+      gate(
+        "staging_rc_observability_documented",
+        "observability",
+        "Observability limitation documented",
+        deployment.missingProductionRequirements.includes("durable_observability_backend") ? "warning" : "pass",
+        false,
+        "medium",
+        "Observability v0 is read-only and local; external backend/export remains future work.",
+        ["docs/foundations/observability-audit-retention/v0.md"],
+        "Document limitation and do not treat staging as operationally deployed.",
+        { externalObservabilityBackendConfigured: false }
+      ),
+      gate(
+        "staging_rc_dashboard_readiness",
+        "dashboard",
+        "Dashboard/readiness panel available",
+        "pass",
+        true,
+        "low",
+        "Dashboard API read models expose staging RC status without secrets.",
+        ["docs/features/dashboard/v0.md"],
+        "Keep dashboard endpoints read-only and sanitized.",
+        { dashboardReadOnly: true }
+      ),
+      gate(
+        "staging_rc_rollback_checklist_defined",
+        "rollback",
+        "Rollback checklist defined",
+        "pass",
+        true,
+        "medium",
+        "The RC checklist defines rollback expectations without executing rollback.",
+        ["docs/roadmaps/staging-release-candidate/rollback-checklist-v0.md"],
+        "Keep rollback execution out of this profile.",
+        { rollbackExecuted: false }
+      )
+    ];
+
+    return clone(gates.filter((gateItem) => filter.category === undefined || gateItem.category === filter.category));
+  }
+
+  listStagingReleaseCandidateBlockers(): StagingReleaseCandidateBlocker[] {
+    const gates = this.listStagingReleaseCandidateGates();
+    const signoffs = this.listStagingReleaseCandidateSignoffs();
+    const releaseNotes = this.listStagingReleaseNoteRequirements();
+    const rollback = this.listStagingRollbackChecklist();
+    const dryRunReport = this.generateStagingDeploymentDryRunReport();
+    const blocker = (
+      id: string,
+      category: StagingReleaseCandidateBlocker["category"],
+      title: string,
+      severity: ReadinessSeverity,
+      blockingLevel: StagingReleaseCandidateBlocker["blockingLevel"],
+      description: string,
+      evidence: string[],
+      remediation: string,
+      source: string,
+      status: StagingReleaseCandidateBlocker["status"] = "open",
+      metadata: Record<string, unknown> = {}
+    ): StagingReleaseCandidateBlocker => ({
+      id,
+      category,
+      title,
+      severity,
+      blockingLevel,
+      description,
+      evidence,
+      remediation,
+      source,
+      status,
+      metadata: {
+        readOnly: true,
+        releaseCreated: false,
+        deploymentExecuted: false,
+        externalCallsExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        ...metadata
+      }
+    });
+    const blockers: StagingReleaseCandidateBlocker[] = [];
+
+    for (const gateItem of gates.filter((gate) => gate.status === "fail")) {
+      blockers.push(blocker(
+        `blocker_${gateItem.id}`,
+        gateItem.category,
+        gateItem.name,
+        gateItem.severity,
+        gateItem.severity === "critical" ? "blocks_release_candidate" : "blocks_release_candidate",
+        gateItem.description,
+        gateItem.evidence,
+        gateItem.remediation,
+        gateItem.id,
+        "open",
+        gateItem.metadata
+      ));
+    }
+
+    for (const gateItem of gates.filter((gate) => gate.required && gate.status === "not_checked")) {
+      blockers.push(blocker(
+        `blocker_${gateItem.id}_not_checked`,
+        gateItem.category,
+        `${gateItem.name} not checked`,
+        "high",
+        "blocks_release_candidate",
+        "Required RC validation gate has not been checked.",
+        gateItem.evidence,
+        gateItem.remediation,
+        gateItem.id,
+        "open",
+        gateItem.metadata
+      ));
+    }
+
+    for (const dryRunBlocker of dryRunReport.blockers.filter((item) => item.blockingLevel === "blocks_staging_dry_run" && item.status === "open")) {
+      blockers.push(blocker(
+        `blocker_staging_rc_${dryRunBlocker.id}`,
+        "staging_dry_run",
+        dryRunBlocker.title,
+        dryRunBlocker.severity,
+        "blocks_release_candidate",
+        dryRunBlocker.description,
+        dryRunBlocker.sourceIds,
+        dryRunBlocker.remediation,
+        dryRunBlocker.id,
+        "open",
+        dryRunBlocker.metadata
+      ));
+    }
+
+    for (const signoff of signoffs.filter((item) => item.required && item.status === "pending")) {
+      blockers.push(blocker(
+        `blocker_staging_rc_signoff_${signoff.role}`,
+        "security",
+        `${signoff.role} signoff pending`,
+        "high",
+        "blocks_release_candidate",
+        "Required staging RC signoff is pending.",
+        ["docs/roadmaps/staging-release-candidate/v0.md"],
+        "Record required signoff or an explicit waiver before RC designation.",
+        signoff.id,
+        "open",
+        { role: signoff.role }
+      ));
+    }
+
+    for (const note of releaseNotes.filter((item) => item.required && item.status === "missing")) {
+      blockers.push(blocker(
+        `blocker_staging_rc_release_note_${note.section}`,
+        "docs",
+        `${note.section} release note section missing`,
+        "high",
+        "blocks_release_candidate",
+        "Required release-note section is missing.",
+        ["docs/roadmaps/staging-release-candidate/release-notes-template-v0.md"],
+        "Add the required release-note section before RC designation.",
+        note.id,
+        "open",
+        { section: note.section }
+      ));
+    }
+
+    for (const item of rollback.filter((entry) => entry.required && entry.status === "missing")) {
+      blockers.push(blocker(
+        `blocker_staging_rc_rollback_${item.category}`,
+        "rollback",
+        `${item.name} rollback item missing`,
+        "high",
+        "blocks_release_candidate",
+        "Required rollback checklist item is missing.",
+        ["docs/roadmaps/staging-release-candidate/rollback-checklist-v0.md"],
+        "Define the rollback item before RC designation.",
+        item.id,
+        "open",
+        { category: item.category }
+      ));
+    }
+
+    blockers.push(
+      blocker(
+        "blocker_staging_rc_production_auth_missing",
+        "auth",
+        "Production auth missing",
+        "medium",
+        "blocks_production_only",
+        "Production Auth/RBAC remains planning-only. This is documented as a production blocker, not a staging RC blocker for v0.",
+        ["docs/roadmaps/auth-rbac-production/v1.md"],
+        "Keep this limitation in release notes and do not mark production ready.",
+        "staging_rc_production_auth_documented",
+        "accepted",
+        { productionAuthEnabled: false }
+      ),
+      blocker(
+        "blocker_staging_rc_real_secret_backend_missing",
+        "secrets",
+        "Real secret backend missing",
+        "medium",
+        "blocks_production_only",
+        "Secret Backend Migration v0 is planning-only. This is documented as a production blocker and accepted staging RC limitation for v0.",
+        ["docs/roadmaps/secret-backend-migration/v0.md"],
+        "Choose a production secret backend in a future task before live provider validation or production rollout.",
+        "staging_rc_secret_backend_documented",
+        "accepted",
+        { realSecretBackendConfigured: false }
+      )
+    );
+
+    return clone(blockers);
+  }
+
+  listStagingReleaseCandidateSignoffs(): StagingReleaseCandidateSignoff[] {
+    const labels: Record<StagingReleaseCandidateSignoffRole, string> = {
+      engineering_owner: "Engineering owner validates code scope and local validation evidence.",
+      platform_owner: "Platform owner validates staging readiness and deployment boundaries.",
+      security_reviewer: "Security reviewer validates no-secret/no-env exposure and safety gates.",
+      product_owner: "Product owner validates user-facing scope and known limitation acceptance.",
+      qa_reviewer: "QA reviewer validates test evidence and skipped-test documentation.",
+      release_manager: "Release manager validates RC checklist, release notes, and rollback plan."
+    };
+    return clone(this.stagingReleaseCandidateChecklist.requiredSignoffs.map((role) => ({
+      id: `staging_rc_signoff_${role}`,
+      role,
+      required: true,
+      status: this.stagingReleaseCandidateOptions.signoffStatuses?.[role] ?? "pending",
+      reason: labels[role],
+      metadata: {
+        readOnly: true,
+        mockApprovalOnly: true,
+        productionAuthRequiredForRealApproval: true
+      }
+    })));
+  }
+
+  listStagingReleaseNoteRequirements(): StagingReleaseNoteRequirement[] {
+    const guidance: Record<StagingReleaseNoteSection, string> = {
+      summary: "Summarize the candidate scope without claiming release creation or deployment.",
+      changed_areas: "List packages, apps, docs, and tests changed.",
+      validation: "Record lint, typecheck, test, build, git diff --check, and safety scan results.",
+      skipped_tests: "List skipped optional Postgres/GitHub/LLM/MCP/auth tests with gate reasons.",
+      known_limitations: "Document production auth, real secret backend, observability, staging deployment, and live integration limitations.",
+      safety_gates: "State no release, no tag, no deployment, no external calls, no secret/env exposure, no destructive Git, no vendor CLI, and no real MCP transport.",
+      migration_notes: "State whether dependency metadata, DB schema, migrations, or storage behavior changed.",
+      dashboard_readiness: "Record readiness API, dashboard panel, health metadata, no-release/no-deployment, and no-secret/no-env status.",
+      rollback_notes: "Reference the rollback checklist and any config/documentation reversal steps.",
+      follow_ups: "List the next recommended task and non-blocking follow-ups."
+    };
+    return clone(this.stagingReleaseCandidateChecklist.requiredReleaseNotes.map((section) => ({
+      id: `staging_rc_release_note_${section}`,
+      section,
+      required: true,
+      status: this.stagingReleaseCandidateOptions.releaseNoteSectionsPresent?.[section] === true ? "present" : "missing",
+      guidance: guidance[section],
+      metadata: {
+        readOnly: true,
+        templateDocs: "docs/roadmaps/staging-release-candidate/release-notes-template-v0.md"
+      }
+    })));
+  }
+
+  listStagingRollbackChecklist(): StagingRollbackChecklistItem[] {
+    const descriptions: Record<StagingRollbackChecklistCategory, string> = {
+      code_revert: "Identify the commit range or branch changes to revert if the RC is rejected.",
+      database: "Document migration and data rollback considerations without running migrations.",
+      config: "Document config/env gate rollback without exposing env values.",
+      feature_flags: "Document any feature flags or gates to disable.",
+      git_integration: "Document Git/GitHub gate rollback while keeping merge/force-push/delete disabled.",
+      llm_integration: "Document remote LLM gate rollback while keeping mock default and budget/policy gates.",
+      secrets: "Document SecretRef/env fallback rollback and credential revocation expectations without secret values.",
+      observability: "Document audit/observability review and no-export/no-alert limitations.",
+      dashboard: "Document dashboard/readiness panel rollback or disablement steps."
+    };
+    return clone((this.stagingReleaseCandidateChecklist.rollbackChecklist as StagingRollbackChecklistCategory[]).map((category) => ({
+      id: `staging_rc_rollback_${category}`,
+      category,
+      name: category.replaceAll("_", " "),
+      required: true,
+      status: this.stagingReleaseCandidateOptions.rollbackStatuses?.[category] ?? "planned",
+      description: descriptions[category],
+      metadata: {
+        readOnly: true,
+        rollbackExecuted: false,
+        docs: "docs/roadmaps/staging-release-candidate/rollback-checklist-v0.md"
+      }
+    })));
+  }
+
+  generateStagingReleaseCandidateReport(): StagingReleaseCandidateReport {
+    const gates = this.listStagingReleaseCandidateGates();
+    const blockers = this.listStagingReleaseCandidateBlockers();
+    const signoffs = this.listStagingReleaseCandidateSignoffs();
+    const releaseNoteRequirements = this.listStagingReleaseNoteRequirements();
+    const rollbackChecklist = this.listStagingRollbackChecklist();
+    const overallStatus = this.calculateStagingReleaseCandidateOverallStatus(gates, blockers, signoffs, releaseNoteRequirements, rollbackChecklist);
+    const checklist = this.getStagingReleaseCandidateChecklist();
+    const skippedTests = this.stagingReleaseCandidateSkippedTests(gates);
+    return clone({
+      id: "staging_release_candidate_report_v0",
+      generatedAt: this.now(),
+      overallStatus,
+      summary: overallStatus === "blocked"
+        ? "Staging release candidate designation is blocked by critical safety or validation blockers."
+        : overallStatus === "not_ready"
+          ? "Staging release candidate checklist is not ready; required validation, signoff, release notes, or rollback evidence is missing."
+          : overallStatus === "pass_with_warnings"
+            ? "Staging release candidate checklist passes with documented warnings and skipped optional integration tests."
+            : "Staging release candidate checklist passes all required read-only criteria.",
+      checklist,
+      gates,
+      blockers,
+      signoffs,
+      releaseNoteRequirements,
+      rollbackChecklist,
+      skippedTests,
+      recommendedNextActions: this.stagingReleaseCandidateRecommendedNextActions(gates, blockers, signoffs, releaseNoteRequirements, rollbackChecklist, skippedTests),
+      metadata: {
+        docs: "docs/roadmaps/staging-release-candidate/v0.md",
+        reportFormatDocs: "docs/roadmaps/staging-release-candidate/report-format-v0.md",
+        releaseNotesTemplateDocs: "docs/roadmaps/staging-release-candidate/release-notes-template-v0.md",
+        rollbackChecklistDocs: "docs/roadmaps/staging-release-candidate/rollback-checklist-v0.md",
+        gateCount: gates.length,
+        blockerCount: blockers.length,
+        criticalBlockerCount: blockers.filter((blockerItem) => blockerItem.status === "open" && blockerItem.severity === "critical").length,
+        releaseCreated: false,
+        gitTagCreated: false,
+        githubReleaseCreated: false,
+        deploymentExecuted: false,
+        externalCallsExecuted: false,
+        remoteIntegrationTestsExecuted: false,
+        secretsReturned: false,
+        envValuesReturned: false,
+        productionReady: false,
+        stagingDeployed: false
+      }
+    });
+  }
+
+  getStagingReleaseCandidateSummary(): StagingReleaseCandidateSummary {
+    const report = this.generateStagingReleaseCandidateReport();
+    const requiredSignoffs = report.signoffs.filter((signoff) => signoff.required);
+    const missingNotes = report.releaseNoteRequirements.filter((note) => note.required && note.status === "missing");
+    const missingRollback = report.rollbackChecklist.filter((item) => item.required && item.status === "missing");
+    return clone({
+      generatedAt: report.generatedAt,
+      status: "v0_implemented",
+      planningOnly: true,
+      overallStatus: report.overallStatus,
+      checklistStatus: report.checklist.status,
+      productionReady: false,
+      stagingDeployed: false,
+      releaseCreated: false,
+      gitTagCreated: false,
+      githubReleaseCreated: false,
+      deploymentExecuted: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      gateCount: report.gates.length,
+      requiredGateCount: report.gates.filter((gate) => gate.required).length,
+      gatesByStatus: countStagingRcGatesByStatus(report.gates),
+      blockerCount: report.blockers.length,
+      criticalBlockerCount: report.blockers.filter((blockerItem) => blockerItem.status === "open" && blockerItem.severity === "critical").length,
+      signoffCount: report.signoffs.length,
+      requiredSignoffCount: requiredSignoffs.length,
+      pendingSignoffCount: requiredSignoffs.filter((signoff) => signoff.status === "pending").length,
+      releaseNoteRequirementCount: report.releaseNoteRequirements.length,
+      missingReleaseNoteRequirementCount: missingNotes.length,
+      rollbackItemCount: report.rollbackChecklist.length,
+      missingRollbackItemCount: missingRollback.length,
+      skippedTestCount: report.skippedTests.length,
+      recommendedNextActionCount: report.recommendedNextActions.length,
+      noSecretsExposed: !this.stagingReleaseCandidateOptions.secretsExposed,
+      envValuesExposed: Boolean(this.stagingReleaseCandidateOptions.envValuesExposed),
+      productionReadyClaimed: Boolean(this.stagingReleaseCandidateOptions.productionReadyClaimed),
+      stagingDeploymentClaimed: Boolean(this.stagingReleaseCandidateOptions.stagingDeployedClaimed),
+      metadata: {
+        docs: "docs/roadmaps/staging-release-candidate/v0.md",
+        reportId: report.id,
+        releaseCreated: false,
+        gitTagCreated: false,
+        githubReleaseCreated: false,
+        deploymentExecuted: false,
+        externalCallsEnabled: false,
+        envValuesReturned: false,
+        secretValuesReturned: false
+      }
+    });
+  }
+
+  getStagingDeploymentExecutionPlan(): StagingDeploymentExecutionPlan {
+    const gates = this.listStagingDeploymentExecutionGates();
+    const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
+    const criticalFail = gates.some((gate) => gate.status === "fail" && gate.severity === "critical");
+    const status: StagingDeploymentExecutionPlanStatus = criticalFail
+      ? "blocked"
+      : pendingApprovals.length > 0
+        ? "ready_for_signoff"
+        : "planned";
+    return clone({
+      ...this.stagingDeploymentExecutionPlan,
+      status,
+      metadata: {
+        ...this.stagingDeploymentExecutionPlan.metadata,
+        generatedByService: true,
+        noDeploymentExecution: true,
+        noReleaseCreation: true,
+        noGitTagCreation: true,
+        noExternalCalls: true,
+        noIntegrationTestsExecuted: true,
+        pendingApprovalCount: pendingApprovals.length
+      }
+    });
+  }
+
+  listStagingDeploymentExecutionSteps(): StagingDeploymentStep[] {
+    const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
+    const step = (
+      order: number,
+      phase: StagingDeploymentStep["phase"],
+      name: string,
+      description: string,
+      required: boolean,
+      status: StagingDeploymentStep["status"],
+      automationLevel: StagingDeploymentStep["automationLevel"],
+      ownerRole: StagingDeploymentStep["ownerRole"],
+      evidenceRequired: string[],
+      metadata: Record<string, unknown> = {}
+    ): StagingDeploymentStep => ({
+      id: `staging_execution_step_${String(order).padStart(2, "0")}_${safeIdPart(name)}`,
+      order,
+      phase,
+      name,
+      description,
+      required,
+      status,
+      automationLevel,
+      ownerRole,
+      evidenceRequired,
+      metadata: {
+        readOnly: true,
+        deploymentExecuted: false,
+        externalCallsExecuted: false,
+        releaseCreated: false,
+        gitTagCreated: false,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        ...metadata
+      }
+    });
+    return clone([
+      step(1, "pre_deploy", "Confirm clean worktree or documented diff scope", "Record whether the staging candidate scope is clean or intentionally dirty before deployment execution.", true, "ready", "manual", "engineering_owner", ["git status review", "diff scope note"], { destructiveGitAllowed: false }),
+      step(2, "pre_deploy", "Confirm Node/Volta baseline", "Verify the Node/Volta and pnpm baseline before any staging execution task.", true, "ready", "manual", "platform_owner", ["package.json engines", "README install section"], { deploymentExecutedByStep: false }),
+      step(3, "validation", "Run required validation", "Run lint, typecheck, test, build, diff check, and safety scans before signoff.", true, "ready", "manual", "qa_reviewer", ["validation command output", "safe integration scan classification"], { commandExecutionByPlan: false }),
+      step(4, "validation", "Confirm staging RC decision", "Confirm the latest Staging RC audit decision and accepted warnings.", true, "ready", "manual", "release_manager", ["docs/audits/2026-05-14-staging-release-candidate-audit-v0-rerun.md"], { acceptedRcDecision: "staging_rc_pass_with_warnings" }),
+      step(5, "approval", "Collect human signoffs", "Collect required human approvals before any staging deployment execution.", true, pendingApprovals.length > 0 ? "blocked" : "ready", "manual", "release_manager", ["engineering_owner", "platform_owner", "security_reviewer", "product_owner", "qa_reviewer", "release_manager"], { pendingApprovals }),
+      step(6, "config_freeze", "Freeze config/environment gates", "Record the exact staging environment gate decisions without exposing env values.", true, pendingApprovals.length > 0 ? "planned" : "ready", "manual", "platform_owner", ["environment gate matrix review"], { envValuesReturned: false }),
+      step(7, "validation", "Decide whether optional live integration tests are required", "Document which optional live integrations remain skipped or are separately approved.", true, "planned", "manual", "release_manager", ["live integration decision record"], { liveTestsExecutedByPlan: false }),
+      step(8, "migration_decision", "Confirm Postgres/staging DB decision", "Decide whether optional Postgres contracts and migration rehearsal are required for this staging execution.", true, "planned", "manual", "platform_owner", ["DB readiness review", "migration decision note"], { migrationsExecutedByPlan: false }),
+      step(9, "migration_decision", "Confirm secret backend / Vault decision", "Confirm whether gated Vault validation is required or skipped for this staging execution.", true, "planned", "manual", "security_reviewer", ["Vault integration profile summary"], { vaultCallsExecutedByPlan: false }),
+      step(10, "validation", "Confirm GitHub App integration test decision", "Decide whether skipped-by-default GitHub App live tests are required.", true, "planned", "manual", "platform_owner", ["GitHub App integration profile summary"], { githubCallsExecutedByPlan: false }),
+      step(11, "validation", "Confirm LLM integration test decision", "Decide whether skipped-by-default LLM live tests are required.", true, "planned", "manual", "qa_reviewer", ["LLM integration profile summary"], { llmCallsExecutedByPlan: false }),
+      step(12, "validation", "Confirm MCP remains mock/future", "Confirm real MCP transport remains blocked for staging execution v0.", true, "ready", "manual", "security_reviewer", ["MCP Gateway v0 docs"], { realMcpTransportEnabled: false }),
+      step(13, "approval", "Confirm Auth/RBAC remains mock/planning or staging-approved", "Accept mock/planning auth as a staging limitation or block deployment execution until production auth exists.", true, "planned", "manual", "security_reviewer", ["Auth/RBAC production readiness review"], { productionAuthEnabled: false }),
+      step(14, "pre_deploy", "Confirm dashboard/readiness surfaces", "Confirm API-backed readiness and dashboard surfaces are available and sanitized.", true, "ready", "manual", "qa_reviewer", ["dashboard read model smoke list"], { dashboardReadOnly: true }),
+      step(15, "observability_check", "Confirm observability/audit readiness", "Confirm v0 audit/observability metadata is available and external export remains disabled.", true, "planned", "manual", "platform_owner", ["observability summary"], { externalObservabilityExporterEnabled: false }),
+      step(16, "rollback_decision", "Confirm rollback plan", "Confirm rollback criteria and manual verification are ready before execution.", true, "ready", "manual", "release_manager", ["rollback evidence", "rollback plan"], { rollbackExecutedByPlan: false }),
+      step(17, "approval", "Final go/no-go decision", "Record final go/no-go after signoffs and gates are reviewed.", true, pendingApprovals.length > 0 ? "blocked" : "ready", "manual", "release_manager", ["go/no-go decision record"], { pendingApprovals }),
+      step(18, "deployment_placeholder", "Future deployment execution placeholder", "Placeholder for a future explicit deployment execution task; this plan never deploys.", true, "future", "scripted_future", "operator", ["future deployment runbook"], { deploymentExecuted: false }),
+      step(19, "smoke_test", "Post-deployment smoke test placeholder", "Placeholder for future smoke checks after an explicitly executed staging deployment.", true, "future", "scripted_future", "qa_reviewer", ["future smoke results"], { smokeExecutedByPlan: false }),
+      step(20, "post_deploy_review", "Post-deployment review placeholder", "Placeholder for future post-deployment review and incident/triage closure.", true, "future", "manual", "release_manager", ["future review notes"], { postDeployReviewExecuted: false })
+    ]);
+  }
+
+  listStagingDeploymentExecutionGates(filter: { category?: StagingDeploymentGateCategory } = {}): StagingDeploymentGate[] {
+    const options = this.stagingDeploymentExecutionOptions;
+    const githubIntegration = this.getGitHubAppIntegrationTestReadinessSummary();
+    const llmIntegration = this.getLLMIntegrationTestReadinessSummary();
+    const vaultIntegration = this.getVaultIntegrationTestReadinessSummary();
+    const database = this.getDatabaseOperationsSummary();
+    const dryRun = this.getStagingDeploymentDryRunSummary();
+    const rcAuditStatus = "staging_rc_pass_with_warnings";
+    const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
+    const validationStatus = options.validationCommandStatus ?? "pass";
+    const diffStatus = options.diffCheckStatus ?? "pass";
+    const safeScanStatus = options.safeIntegrationScanStatus ?? "pass";
+    const noSecretStatus = options.noSecretExposureStatus ?? "pass";
+    const failedCommands = new Set(options.failedValidationCommands ?? []);
+    const validationGateStatus = (command: string): StagingDeploymentGateStatus => {
+      if (validationStatus === "pass") return "pass";
+      if (validationStatus === "fail" && (failedCommands.size === 0 || failedCommands.has(command))) return "fail";
+      return "not_checked";
+    };
+    const sideEffectDetected = Boolean(options.deploymentExecuted || options.releaseCreated || options.gitTagCreated || options.externalCallsExecuted);
+    const exposureDetected = Boolean(options.secretsExposed || options.envValuesExposed || noSecretStatus === "fail");
+    const overclaimDetected = Boolean(options.productionReadyClaimed || options.stagingDeployedClaimed);
+    const gate = (
+      id: string,
+      category: StagingDeploymentGateCategory,
+      name: string,
+      status: StagingDeploymentGateStatus,
+      severity: ReadinessSeverity,
+      required: boolean,
+      description: string,
+      evidence: string[],
+      remediation: string,
+      metadata: Record<string, unknown> = {}
+    ): StagingDeploymentGate => ({
+      id,
+      category,
+      name,
+      status,
+      severity,
+      required,
+      description,
+      evidence,
+      remediation,
+      metadata: {
+        readOnly: true,
+        deploymentExecuted: false,
+        releaseCreated: false,
+        gitTagCreated: false,
+        externalCallsExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        ...metadata
+      }
+    });
+    const gates: StagingDeploymentGate[] = [
+      gate("staging_execution_pnpm_lint", "validation", "pnpm lint", validationGateStatus("pnpm lint"), validationStatus === "fail" ? "critical" : "high", true, "Lint must pass before staging execution.", ["README.md"], "Run pnpm lint and fix failures.", { commandExecutedByPlan: false }),
+      gate("staging_execution_pnpm_typecheck", "validation", "pnpm typecheck", validationGateStatus("pnpm typecheck"), validationStatus === "fail" ? "critical" : "high", true, "Typecheck must pass before staging execution.", ["README.md"], "Run pnpm typecheck and fix failures.", { commandExecutedByPlan: false }),
+      gate("staging_execution_pnpm_test", "validation", "pnpm test", validationGateStatus("pnpm test"), validationStatus === "fail" ? "critical" : "high", true, "The deterministic test suite must pass before staging execution.", ["README.md"], "Run pnpm test and fix failures.", { commandExecutedByPlan: false }),
+      gate("staging_execution_pnpm_build", "validation", "pnpm build", validationGateStatus("pnpm build"), validationStatus === "fail" ? "critical" : "high", true, "Build must pass before staging execution.", ["README.md"], "Run pnpm build and fix failures.", { commandExecutedByPlan: false }),
+      gate("staging_execution_git_diff_check", "validation", "git diff --check", diffStatus === "fail" ? "fail" : diffStatus === "warning" ? "warning" : diffStatus === "pass" ? "pass" : "not_checked", diffStatus === "fail" ? "critical" : "high", true, "Whitespace validation must pass before staging execution.", ["docs/roadmaps/staging-ci-cd-pipeline/v0.md"], "Run git diff --check and fix failures.", { commandExecutedByPlan: false }),
+      gate("staging_execution_safe_integration_scan", "validation", "Safe integration scan", safeScanStatus === "fail" ? "fail" : safeScanStatus === "pass" ? "pass" : "not_checked", safeScanStatus === "fail" ? "critical" : "high", true, "Safe integration compliance must be reviewed before deployment execution.", ["docs/audits/2026-05-14-staging-release-candidate-audit-v0-rerun.md"], "Run and classify the safe integration scan.", { scanExecutedByPlan: false }),
+      gate("staging_execution_no_secret_no_env", "secrets", "No secret/no-env exposure", exposureDetected ? "fail" : "pass", "critical", true, "No readiness, API, health, dashboard, audit, docs, or smoke output may expose secrets or env values.", ["docs/audits/2026-05-14-staging-release-candidate-audit-v0-rerun.md"], "Redact exposed values and block staging execution.", { noSecretsExposed: !options.secretsExposed, envValuesExposed: Boolean(options.envValuesExposed) }),
+      gate("staging_execution_no_release_tag_deploy_side_effects", "environment", "No release, tag, deployment, or external call executed", sideEffectDetected ? "fail" : "pass", "critical", true, "This execution plan must remain planning-only until an explicit future deployment task.", ["AGENTS.md"], "Remove side effects and rerun audit.", { deploymentExecuted: Boolean(options.deploymentExecuted), releaseCreated: Boolean(options.releaseCreated), gitTagCreated: Boolean(options.gitTagCreated), externalCallsExecuted: Boolean(options.externalCallsExecuted) }),
+      gate("staging_execution_no_ready_overclaim", "environment", "No staging/production overclaim", overclaimDetected ? "fail" : "pass", "critical", true, "Docs and read models must not claim staging is deployed or production is ready.", ["docs/roadmaps/production-deployment-readiness/checklist-v0.md"], "Remove staging-deployed or production-ready overclaims.", { productionReadyClaimed: Boolean(options.productionReadyClaimed), stagingDeployedClaimed: Boolean(options.stagingDeployedClaimed) }),
+      gate("staging_execution_rc_audit_accepted", "signoff", "Staging RC audit rerun accepted", "warning", "medium", true, "The latest audit returned staging_rc_pass_with_warnings, not staging_rc_pass.", ["docs/audits/2026-05-14-staging-release-candidate-audit-v0-rerun.md"], "Treat warnings as accepted limitations and collect real signoffs before deployment.", { rcAuditStatus, runtimeRcStatus: this.getStagingReleaseCandidateSummary().overallStatus }),
+      gate("staging_execution_human_signoff_collected", "signoff", "Human signoffs collected", pendingApprovals.length > 0 ? "fail" : "pass", "high", true, "Real human signoffs are required before actual staging deployment execution.", ["docs/roadmaps/staging-release-candidate/signoff-readiness-v0.md"], "Collect required signoffs; do not fake approval.", { pendingApprovals }),
+      gate("staging_execution_release_notes_present", "environment", "Release notes present", options.releaseNotesPresent === false ? "fail" : "pass", "high", true, "Release notes draft/evidence must be present before staging execution.", ["docs/roadmaps/staging-release-candidate/release-notes-draft-v0.md"], "Complete release notes before execution.", { releaseArtifactCreated: false }),
+      gate("staging_execution_rollback_plan_present", "rollback", "Rollback plan present", options.rollbackPlanPresent === false ? "fail" : "pass", "high", true, "Rollback plan and manual verification must be present before staging execution.", ["docs/roadmaps/staging-release-candidate/rollback-evidence-v0.md"], "Complete rollback plan before execution.", { rollbackExecuted: false }),
+      gate("staging_execution_config_freeze_planned", "environment", "Config/environment gate freeze planned", "warning", "medium", true, "Config freeze is a manual pre-deployment activity and has not been executed by this plan.", ["docs/reference/environment-gate-matrix.md"], "Record final non-secret config gates before deployment execution.", { envValuesReturned: false }),
+      gate("staging_execution_postgres_decision", "database", "Postgres/staging DB decision", options.requirePostgresLiveValidation && !database.testDatabaseUrlConfigured ? "fail" : "warning", options.requirePostgresLiveValidation ? "high" : "medium", true, "Postgres validation is optional but recommended unless staging mandates live DB evidence.", ["docs/roadmaps/persistent-db-production-operations/v1.md"], "Run optional Postgres tests only under explicit non-production gates or accept the skip.", { testDatabaseUrlConfigured: database.testDatabaseUrlConfigured, liveValidationRequired: Boolean(options.requirePostgresLiveValidation), databaseUrlExposed: database.databaseUrlExposed }),
+      gate("staging_execution_github_app_decision", "github_app", "GitHub App integration decision", options.requireGitHubLiveValidation && !githubIntegration.canRunLiveTests ? "fail" : "skipped", options.requireGitHubLiveValidation ? "high" : "medium", false, "GitHub App live tests remain skipped unless separately required and fully gated.", ["docs/roadmaps/github-app-integration-test-profile/v1.md"], "Keep skipped or run a separate gated non-production validation task.", { canRunLiveTests: githubIntegration.canRunLiveTests, missingGateCount: githubIntegration.missingGateCount, unsafeGateCount: githubIntegration.unsafeGateCount }),
+      gate("staging_execution_github_webhook_decision", "webhook", "GitHub webhook integration decision", "skipped", "medium", false, "Live webhook validation remains skipped/future unless explicitly configured.", ["docs/roadmaps/github-app-integration-test-profile/v1.md"], "Keep skipped or run a separate gated webhook validation task.", { liveWebhookTestsEnabled: githubIntegration.liveWebhookTestsEnabled }),
+      gate("staging_execution_llm_decision", "llm", "LLM integration decision", options.requireLLMLiveValidation && !llmIntegration.canRunLiveTests ? "fail" : "skipped", options.requireLLMLiveValidation ? "high" : "medium", false, "LLM live tests remain skipped unless separately required and fully gated.", ["docs/roadmaps/llm-gateway-integration-test-profile/v1.md"], "Keep skipped or run a separate gated non-production validation task.", { canRunLiveTests: llmIntegration.canRunLiveTests, missingGateCount: llmIntegration.missingGateCount, unsafeGateCount: llmIntegration.unsafeGateCount }),
+      gate("staging_execution_vault_decision", "vault", "Vault integration decision", options.requireVaultLiveValidation && !vaultIntegration.canRunLiveTests ? "fail" : "skipped", options.requireVaultLiveValidation ? "high" : "medium", false, "Vault live tests remain skipped unless separately required and fully gated.", ["docs/roadmaps/vault-integration-test-profile/v1.md"], "Keep skipped or run a separate gated non-production Vault validation task.", { canRunLiveTests: vaultIntegration.canRunLiveTests, missingGateCount: vaultIntegration.missingGateCount, unsafeGateCount: vaultIntegration.unsafeGateCount }),
+      gate("staging_execution_secret_backend_acknowledged", "secrets", "Secret backend readiness acknowledged", "warning", "medium", false, "Vault-backed Secret Backend v1 is gated and non-default; production secret backend readiness remains false.", ["docs/foundations/vault-secret-backend/v1.md", "docs/roadmaps/secret-backend-migration/v0.md"], "Keep production secret readiness false and do not use env fallback as a production backend.", { productionSecretBackendReady: false }),
+      gate("staging_execution_auth_rbac_acknowledged", "auth", "Auth/RBAC limitation acknowledged", "warning", "medium", false, "Production Auth/RBAC remains planning-only; mock auth must be explicitly accepted as a staging limitation.", ["docs/roadmaps/auth-rbac-production/v1.md"], "Collect security/product acceptance or block deployment until production auth exists.", { productionAuthReady: false }),
+      gate("staging_execution_policy_static_runtime", "policy", "Policy runtime remains static/mock-first", this.realMcpTransportEnabled() ? "fail" : "warning", this.realMcpTransportEnabled() ? "critical" : "medium", true, "StaticPolicyEngine remains runtime; real OPA/Cedar execution is out of scope.", ["docs/roadmaps/policy-bundle-opa-cedar/v0.md"], "Keep dynamic policy execution disabled.", { dynamicPolicyExecutionEnabled: false }),
+      gate("staging_execution_destructive_git_disabled", "git", "Destructive Git disabled", this.remoteMergeEnabled() || this.remoteForcePushEnabled() || this.remoteBranchDeletionEnabled() ? "fail" : "pass", "critical", true, "Remote merge, force-push, and branch deletion must remain disabled.", ["docs/features/real-git-adapter/v2.md"], "Disable destructive Git gates.", { remoteMergeEnabled: this.remoteMergeEnabled(), forcePushEnabled: this.remoteForcePushEnabled(), branchDeletionEnabled: this.remoteBranchDeletionEnabled() }),
+      gate("staging_execution_mcp_policy", "mcp", "MCP remains mock/future", this.realMcpTransportEnabled() ? "fail" : "not_applicable", this.realMcpTransportEnabled() ? "critical" : "low", false, "Real MCP transport remains future/blocked for staging execution v0.", ["docs/features/mcp-gateway/v0.md"], "Keep real MCP transport disabled.", { realMcpTransportEnabled: this.realMcpTransportEnabled() }),
+      gate("staging_execution_observability_ready", "observability", "Observability/audit readiness reviewed", "warning", "medium", true, "Observability v0 is available but external exporter and durable production retention remain future work.", ["docs/foundations/observability-audit-retention/v0.md"], "Accept limitation for staging or implement durable observability before execution.", { externalObservabilityBackendEnabled: false }),
+      gate("staging_execution_dashboard_ready", "dashboard", "Dashboard/readiness surfaces ready", "pass", "low", true, "Dashboard and readiness surfaces are read-only and sanitized.", ["docs/features/dashboard/v0.md"], "Keep dashboard read-only.", { dashboardReadOnly: true }),
+      gate("staging_execution_dry_run_reviewed", "environment", "Staging dry-run reviewed", dryRun.criticalBlockerCount > 0 ? "warning" : "pass", "medium", true, "Dry-run blockers and production-only limitations must be acknowledged before execution.", ["docs/roadmaps/staging-deployment-dry-run/v0.md"], "Document accepted limitations and do not treat dry-run as deployment execution.", { dryRunOverallStatus: dryRun.overallStatus, dryRunCriticalBlockerCount: dryRun.criticalBlockerCount })
+    ];
+    return clone(gates.filter((gateItem) => filter.category === undefined || gateItem.category === filter.category));
+  }
+
+  getStagingDeploymentGoNoGoDecision(): StagingDeploymentGoNoGoDecision {
+    const gates = this.listStagingDeploymentExecutionGates();
+    const pendingApprovals = this.getStagingDeploymentExecutionPendingApprovals();
+    const blockers = gates.filter((gate) => gate.required && gate.status === "fail").map((gate) => gate.id);
+    const criticalBlockers = gates.filter((gate) => gate.status === "fail" && gate.severity === "critical").map((gate) => gate.id);
+    const notChecked = gates.filter((gate) => gate.required && gate.status === "not_checked").map((gate) => gate.id);
+    const warnings = gates.filter((gate) => gate.status === "warning" || gate.status === "skipped").map((gate) => gate.id);
+    // Go/no-go is deliberately conservative: critical safety or validation
+    // failures are no_go; pending real signoff or unchecked required gates keep
+    // the execution plan not_ready; optional skipped integrations produce
+    // go_with_warnings only after required approvals are complete.
+    const status: StagingDeploymentGoNoGoDecision["status"] = criticalBlockers.length > 0
+      ? "no_go"
+      : pendingApprovals.length > 0 || blockers.length > 0 || notChecked.length > 0
+        ? "not_ready"
+        : warnings.length > 0
+          ? "go_with_warnings"
+          : "go";
+    return clone({
+      id: "staging_deployment_execution_go_no_go_v0",
+      status,
+      reason: status === "no_go"
+        ? "Critical staging execution blocker is open."
+        : status === "not_ready"
+          ? "Required human signoffs or required gates are still pending before any staging deployment execution."
+          : status === "go_with_warnings"
+            ? "Required gates are satisfied, but optional integrations and production limitations remain documented warnings."
+            : "Required gates and approvals are satisfied for a future explicit staging deployment task.",
+      requiredApprovals: this.stagingDeploymentExecutionPlan.requiredSignoffs,
+      pendingApprovals,
+      blockers: [...new Set([...criticalBlockers, ...blockers, ...notChecked])],
+      acceptedRisks: warnings,
+      generatedAt: this.now(),
+      metadata: {
+        docs: "docs/roadmaps/staging-deployment-execution/v0.md",
+        deploymentExecuted: false,
+        releaseCreated: false,
+        gitTagCreated: false,
+        externalCallsExecuted: false,
+        productionReady: false,
+        stagingDeployed: false,
+        secretValuesReturned: false,
+        envValuesReturned: false
+      }
+    });
+  }
+
+  getStagingDeploymentRollbackPlan(): StagingDeploymentRollbackPlan {
+    const rollbackStep = (
+      order: number,
+      name: string,
+      ownerRole: StagingDeploymentStep["ownerRole"],
+      description: string,
+      metadata: Record<string, unknown> = {}
+    ): StagingDeploymentStep => ({
+      id: `staging_execution_rollback_step_${String(order).padStart(2, "0")}_${safeIdPart(name)}`,
+      order,
+      phase: "rollback_decision",
+      name,
+      description,
+      required: true,
+      status: "planned",
+      automationLevel: "manual",
+      ownerRole,
+      evidenceRequired: ["manual rollback review"],
+      metadata: {
+        readOnly: true,
+        rollbackExecuted: false,
+        destructiveCommandExecuted: false,
+        deploymentExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        ...metadata
+      }
+    });
+    return clone({
+      id: "staging_deployment_execution_rollback_plan_v0",
+      status: "ready_for_review",
+      triggers: [
+        "health check failure after future deployment",
+        "dashboard/readiness no-secret failure",
+        "unexpected external provider call",
+        "destructive Git gate enabled",
+        "migration failure or data inconsistency",
+        "policy/Auth/RBAC bypass",
+        "observability/audit gap during validation"
+      ],
+      rollbackSteps: [
+        rollbackStep(1, "Code rollback", "engineering_owner", "Revert the future staging deployment candidate through a reviewed code rollback path."),
+        rollbackStep(2, "Config rollback", "platform_owner", "Restore prior staging config gates without exposing env values."),
+        rollbackStep(3, "Environment gate rollback", "platform_owner", "Disable optional live integration and remote provider gates."),
+        rollbackStep(4, "Database migration rollback consideration", "platform_owner", "Follow migration rollback decision points; this plan does not run migrations."),
+        rollbackStep(5, "GitHub integration rollback", "platform_owner", "Disable GitHub App/webhook/live Git gates; no branch deletion or remote cleanup is automated."),
+        rollbackStep(6, "LLM integration rollback", "qa_reviewer", "Return LLM routing to mock-only gates and preserve budget/policy controls."),
+        rollbackStep(7, "Vault/SecretRef rollback", "security_reviewer", "Disable Vault live test/provider gates and keep SecretRef values hidden."),
+        rollbackStep(8, "Dashboard/readiness rollback", "qa_reviewer", "Remove or hide stale readiness panels if they overclaim deployment state."),
+        rollbackStep(9, "Observability/audit review", "security_reviewer", "Review sanitized audit/readiness records and record incident evidence."),
+        rollbackStep(10, "Manual verification", "release_manager", "Manually verify health, dashboard, readiness, no-secret, no-env, and productionReady=false.")
+      ],
+      manualVerification: [
+        "GET /health reports deploymentExecuted=false before future execution and no secrets/env values",
+        "dashboard readiness panels do not expose tokens, database URLs, Vault values, or env values",
+        "stagingDeployed and productionReady remain false until explicitly updated by future approved work",
+        "optional live integration gates are disabled unless separately approved"
+      ],
+      dataConsiderations: [
+        "No database rollback command is run by this plan.",
+        "Future migration rollback must be decided before deployment execution.",
+        "No real secret migration or rotation is performed by this plan.",
+        "No production data or production secrets may be used in staging validation."
+      ],
+      auditRequirements: [
+        "Record owner, decision, timestamp, reason, and sanitized evidence.",
+        "Do not store raw secrets, env values, raw webhook payloads, raw prompts, raw provider responses, or credential cache paths.",
+        "Document accepted limitations and post-incident follow-ups."
+      ],
+      ownerRoles: this.stagingDeploymentExecutionPlan.requiredSignoffs,
+      metadata: {
+        docs: "docs/roadmaps/staging-deployment-execution/rollback-plan-v0.md",
+        rollbackExecuted: false,
+        destructiveCommandExecuted: false,
+        deploymentExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false
+      }
+    });
+  }
+
+  getStagingDeploymentExecutionSummary(): StagingDeploymentExecutionSummary {
+    const plan = this.getStagingDeploymentExecutionPlan();
+    const gates = this.listStagingDeploymentExecutionGates();
+    const steps = this.listStagingDeploymentExecutionSteps();
+    const decision = this.getStagingDeploymentGoNoGoDecision();
+    const rollback = this.getStagingDeploymentRollbackPlan();
+    const warnings = gates.filter((gate) => gate.status === "warning" || gate.status === "skipped");
+    const blockers = gates.filter((gate) => gate.required && (gate.status === "fail" || gate.status === "not_checked"));
+    return clone({
+      generatedAt: decision.generatedAt,
+      status: "v0_implemented",
+      planningOnly: true,
+      planStatus: plan.status,
+      goNoGoStatus: decision.status,
+      productionReady: false,
+      stagingDeployed: false,
+      deploymentExecuted: false,
+      releaseCreated: false,
+      gitTagCreated: false,
+      externalCallsEnabled: false,
+      remoteIntegrationTestsExecuted: false,
+      gateCount: gates.length,
+      requiredGateCount: gates.filter((gate) => gate.required).length,
+      gatesByStatus: countStagingExecutionGatesByStatus(gates),
+      blockerCount: blockers.length,
+      criticalBlockerCount: gates.filter((gate) => gate.status === "fail" && gate.severity === "critical").length,
+      warningCount: warnings.length,
+      stepCount: steps.length,
+      readyStepCount: steps.filter((step) => step.status === "ready").length,
+      pendingSignoffCount: decision.pendingApprovals.length,
+      optionalIntegrationDecisionCount: gates.filter((gate) => !gate.required && ["github_app", "webhook", "llm", "vault", "mcp"].includes(gate.category)).length,
+      rollbackStepCount: rollback.rollbackSteps.length,
+      noSecretsExposed: !this.stagingDeploymentExecutionOptions.secretsExposed,
+      envValuesExposed: Boolean(this.stagingDeploymentExecutionOptions.envValuesExposed),
+      productionReadyClaimed: Boolean(this.stagingDeploymentExecutionOptions.productionReadyClaimed),
+      stagingDeployedClaimed: Boolean(this.stagingDeploymentExecutionOptions.stagingDeployedClaimed),
+      metadata: {
+        docs: "docs/roadmaps/staging-deployment-execution/v0.md",
+        goNoGoDecisionId: decision.id,
+        rollbackPlanId: rollback.id,
+        releaseCreated: false,
+        gitTagCreated: false,
+        deploymentExecuted: false,
+        externalCallsEnabled: false,
+        remoteIntegrationTestsExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        recommendedNextActions: [
+          "Collect real human signoffs before any staging deployment execution.",
+          "Run optional live integrations only as separate explicitly gated non-production validation tasks.",
+          "Keep staging deployed false and production ready false until future execution/audit work."
+        ]
+      }
+    });
   }
 
   listCicdPipelineProfiles(): CICDPipelineProfile[] {
@@ -1124,6 +3282,254 @@ export class DeploymentReadinessService {
     };
   }
 
+  getVaultIntegrationTestProfile(): VaultIntegrationTestProfile {
+    const summary = this.getVaultIntegrationTestReadinessSummary();
+    return clone({
+      ...this.vaultIntegrationTestProfile,
+      status: summary.profileStatus,
+      requiredPathAllowlist: summary.pathAllowlistConfigured ? ["configured_path_allowlist_redacted"] : this.vaultIntegrationTestProfile.requiredPathAllowlist,
+      metadata: {
+        ...this.vaultIntegrationTestProfile.metadata,
+        liveTestsEnabled: summary.liveTestsEnabled,
+        canRunLiveTests: summary.canRunLiveTests,
+        missingGateCount: summary.missingGateCount,
+        unsafeGateCount: summary.unsafeGateCount,
+        vaultBackendSelected: summary.vaultBackendSelected,
+        vaultProviderEnabled: summary.vaultProviderEnabled,
+        vaultAddressConfigured: summary.vaultAddressConfigured,
+        vaultNamespaceConfigured: summary.vaultNamespaceConfigured,
+        pathAllowlistPrefixCount: summary.pathAllowlistPrefixCount,
+        testSecretPathAllowlisted: summary.testSecretPathAllowlisted,
+        envValuesReturned: false,
+        secretValuesReturned: false,
+        vaultTokenReturned: false,
+        vaultAddressReturned: false,
+        rawPathReturned: false
+      }
+    });
+  }
+
+  listVaultIntegrationTestCases(): VaultIntegrationTestCase[] {
+    return clone(this.vaultIntegrationTestCases);
+  }
+
+  listVaultIntegrationTestSafetyChecks(filter: { category?: VaultIntegrationTestSafetyCategory } = {}): VaultIntegrationTestSafetyCheck[] {
+    const summary = this.getVaultIntegrationTestReadinessSummary();
+    const checks = this.vaultIntegrationTestSafetyChecks.map((check) => {
+      if (check.category === "env_gates") {
+        return {
+          ...check,
+          status: summary.unsafeGateCount > 0 ? "fail" as const : summary.canRunLiveTests ? "pass" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            liveTestsEnabled: summary.liveTestsEnabled,
+            missingGateCount: summary.missingGateCount,
+            missingRequiredEnvVars: summary.missingRequiredEnvVars,
+            unsafeGateCount: summary.unsafeGateCount,
+            skipReason: summary.canRunLiveTests ? undefined : summary.reason,
+            envValuesReturned: false
+          }
+        };
+      }
+      if (check.category === "vault_address") {
+        return {
+          ...check,
+          status: summary.vaultAddressConfigured ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            configured: summary.vaultAddressConfigured,
+            addressValueReturned: false
+          }
+        };
+      }
+      if (check.category === "auth_method") {
+        return {
+          ...check,
+          status: summary.vaultAuthMethodConfigured && summary.vaultAuthMethod === "token" ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            authMethod: summary.vaultAuthMethod,
+            authMethodConfigured: summary.vaultAuthMethodConfigured,
+            tokenAuthRequired: true
+          }
+        };
+      }
+      if (check.category === "token_presence") {
+        return {
+          ...check,
+          status: summary.vaultTokenConfigured ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            tokenConfigured: summary.vaultTokenConfigured,
+            tokenValueReturned: false
+          }
+        };
+      }
+      if (check.category === "path_allowlist") {
+        return {
+          ...check,
+          status: summary.pathAllowlistConfigured && summary.testSecretPathAllowlisted ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            pathAllowlistConfigured: summary.pathAllowlistConfigured,
+            pathAllowlistPrefixCount: summary.pathAllowlistPrefixCount,
+            testSecretPathAllowlisted: summary.testSecretPathAllowlisted,
+            pathValuesReturned: false
+          }
+        };
+      }
+      if (check.category === "test_secret_path") {
+        const unsafePath = summary.unsafeGateWarnings.includes("test_secret_path_not_allowlisted") ||
+          summary.unsafeGateWarnings.includes("test_secret_path_not_test_only") ||
+          summary.unsafeGateWarnings.includes("production_like_test_path_configured");
+        return {
+          ...check,
+          status: unsafePath ? "fail" as const : summary.testSecretPathConfigured && summary.testSecretKeyConfigured ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            testSecretPathConfigured: summary.testSecretPathConfigured,
+            testSecretKeyConfigured: summary.testSecretKeyConfigured,
+            testSecretPathAllowlisted: summary.testSecretPathAllowlisted,
+            testSecretPathLooksTestOnly: summary.testSecretPathLooksTestOnly,
+            rawPathReturned: false,
+            rawKeyReturned: false
+          }
+        };
+      }
+      if (check.category === "no_write") {
+        return {
+          ...check,
+          status: summary.unsafeGateWarnings.includes("vault_write_enabled") ? "fail" as const : "pass" as const,
+          metadata: { ...check.metadata, writeAllowed: false }
+        };
+      }
+      if (check.category === "no_delete") {
+        return {
+          ...check,
+          status: summary.unsafeGateWarnings.includes("vault_delete_enabled") ? "fail" as const : "pass" as const,
+          metadata: { ...check.metadata, deleteAllowed: false }
+        };
+      }
+      if (check.category === "no_rotate") {
+        return {
+          ...check,
+          status: summary.unsafeGateWarnings.includes("vault_rotate_enabled") ? "fail" as const : "pass" as const,
+          metadata: { ...check.metadata, rotateAllowed: false }
+        };
+      }
+      if (check.category === "no_broad_list") {
+        return {
+          ...check,
+          status: summary.unsafeGateWarnings.includes("vault_broad_list_enabled") ? "fail" as const : "pass" as const,
+          metadata: { ...check.metadata, broadListAllowed: false }
+        };
+      }
+      return check;
+    });
+    return clone(checks.filter((check) => filter.category === undefined || check.category === filter.category));
+  }
+
+  canRunVaultIntegrationLiveTests(): boolean {
+    return this.getVaultIntegrationTestReadinessSummary().canRunLiveTests;
+  }
+
+  getVaultIntegrationTestReadinessSummary(): VaultIntegrationTestReadinessSummary {
+    const missingRequiredEnvVars = this.vaultIntegrationMissingRequiredEnvVars();
+    const unsafeGateWarnings = this.vaultIntegrationUnsafeGateWarnings();
+    const liveTestsEnabled = flag(this.env.AICHESTRA_VAULT_INTEGRATION_TESTS);
+    const vaultBackendSelected = this.env.AICHESTRA_SECRET_BACKEND_PROVIDER === "vault";
+    const vaultProviderEnabled = flag(this.env.AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER);
+    const vaultAddressConfigured = stringConfigured(this.env.AICHESTRA_VAULT_ADDR);
+    const vaultNamespaceConfigured = stringConfigured(this.env.AICHESTRA_VAULT_NAMESPACE);
+    const vaultAuthMethodConfigured = stringConfigured(this.env.AICHESTRA_VAULT_AUTH_METHOD);
+    const vaultAuthMethod = this.env.AICHESTRA_VAULT_AUTH_METHOD ?? "token";
+    const vaultTokenConfigured = stringConfigured(this.env.AICHESTRA_VAULT_TOKEN);
+    const vaultKvMountConfigured = stringConfigured(this.env.AICHESTRA_VAULT_KV_MOUNT);
+    const pathPrefixes = csvValues(this.env.AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES);
+    const testSecretPath = this.env.AICHESTRA_TEST_VAULT_SECRET_PATH?.trim();
+    const testSecretKey = this.env.AICHESTRA_TEST_VAULT_SECRET_KEY?.trim();
+    const testSecretPathConfigured = Boolean(testSecretPath);
+    const testSecretKeyConfigured = Boolean(testSecretKey);
+    const configuredTestSecretPath = testSecretPath ?? "";
+    const testSecretPathAllowlisted = testSecretPathConfigured && pathPrefixes.some((prefix) => testSecretPathAllowedByPrefix(configuredTestSecretPath, prefix));
+    const testSecretPathLooksTestOnly = testSecretPathConfigured && looksLikeTestOnlyVaultPath(configuredTestSecretPath);
+    const configuredSecretRefCount = vaultBackendSelected && vaultKvMountConfigured && testSecretPathConfigured && testSecretKeyConfigured ? 1 : 0;
+    const canRunLiveTests = liveTestsEnabled && missingRequiredEnvVars.length === 0 && unsafeGateWarnings.length === 0;
+    const profileStatus: VaultIntegrationTestProfileStatus = unsafeGateWarnings.length > 0
+      ? "blocked"
+      : liveTestsEnabled
+        ? "ready_if_configured"
+        : "disabled";
+    return {
+      generatedAt: this.now(),
+      id: "vault_integration_test_summary_v1",
+      status: "v1_implemented",
+      planningOnly: true,
+      productionReady: false,
+      profileStatus,
+      backendKind: "vault",
+      liveTestsEnabled,
+      canRunLiveTests,
+      defaultLiveTestsSkipped: true,
+      requiredGateCount: this.vaultIntegrationTestProfile.requiredEnvVars.length,
+      configuredGateCount: this.vaultIntegrationTestProfile.requiredEnvVars.length - missingRequiredEnvVars.length,
+      missingGateCount: missingRequiredEnvVars.length,
+      unsafeGateCount: unsafeGateWarnings.length,
+      missingRequiredEnvVars,
+      unsafeGateWarnings,
+      reason: canRunLiveTests ? "all_vault_integration_gates_configured" : unsafeGateWarnings.length > 0 ? "unsafe_vault_integration_gate_detected" : "live_vault_tests_skip_until_all_gates_configured",
+      vaultBackendSelected,
+      vaultProviderEnabled,
+      vaultAddressConfigured,
+      vaultNamespaceConfigured,
+      vaultAuthMethodConfigured,
+      vaultAuthMethod,
+      vaultTokenConfigured,
+      vaultKvMountConfigured,
+      pathAllowlistConfigured: pathPrefixes.length > 0,
+      pathAllowlistPrefixCount: pathPrefixes.length,
+      testSecretPathConfigured,
+      testSecretKeyConfigured,
+      testSecretPathAllowlisted,
+      testSecretPathLooksTestOnly,
+      requiredSecretRefCount: this.vaultIntegrationTestProfile.requiredSecretRefs.length,
+      configuredSecretRefCount,
+      credentialSource: configuredSecretRefCount > 0 ? "vault_secretref" : "none",
+      envFallbackUsed: false,
+      testCaseCount: this.vaultIntegrationTestCases.length,
+      gatedLiveTestCaseCount: this.vaultIntegrationTestCases.filter((testCase) => testCase.requiresLiveVault).length,
+      activeMockTestCaseCount: this.vaultIntegrationTestCases.filter((testCase) => !testCase.requiresLiveVault).length,
+      noWrite: true,
+      noDelete: true,
+      noRotate: true,
+      noBroadList: true,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      vaultTokenExposed: false,
+      vaultAddressExposed: false,
+      vaultSecretValueExposed: false,
+      vaultCallsInDefaultTests: false,
+      metadata: {
+        docs: "docs/roadmaps/vault-integration-test-profile/v1.md",
+        planDocs: "docs/roadmaps/vault-integration-test-profile/v1-plan.md",
+        vaultBackendDocs: "docs/foundations/vault-secret-backend/v1.md",
+        liveTestsSkipWhenGatesMissing: true,
+        defaultTestsCallVault: false,
+        vaultAddressReturned: false,
+        vaultTokenReturned: false,
+        secretPathReturned: false,
+        secretKeyReturned: false,
+        secretValueReturned: false,
+        envValuesReturned: false,
+        writeAllowed: false,
+        deleteAllowed: false,
+        rotateAllowed: false,
+        broadListAllowed: false,
+        productionSecretBackendReady: false
+      }
+    };
+  }
+
   getAuthRbacProductionSummary(): AuthRbacProductionSummary {
     const currentProfileId = profileFromEnv(this.env.AICHESTRA_DEPLOYMENT_PROFILE);
     const criticalBlockers = this.authRbacReadinessChecks.filter((check) => check.status === "fail" && check.severity === "critical");
@@ -1271,7 +3677,8 @@ export class DeploymentReadinessService {
         docs: "docs/roadmaps/secret-backend-migration/v0.md",
         backendOptionsDocs: "docs/roadmaps/secret-backend-migration/backend-options-v0.md",
         envFallbackDeprecationDocs: "docs/roadmaps/secret-backend-migration/env-fallback-deprecation-v0.md",
-        realVaultIntegrationImplemented: false,
+        vaultSecretBackendV1Implemented: true,
+        realVaultIntegrationImplemented: true,
         realCloudSecretManagerIntegrationImplemented: false,
         actualSecretMigrationImplemented: false,
         actualSecretRotationImplemented: false,
@@ -1280,6 +3687,56 @@ export class DeploymentReadinessService {
         wifIamImplemented: false,
         envValuesReturned: false,
         secretValuesReturned: false
+      }
+    };
+  }
+
+  getSecretBackendOptionDecisionSummary(): SecretBackendOptionDecisionSummary {
+    const criticalRisks = this.secretBackendDecisionRisks.filter((risk) => risk.status === "open" && risk.severity === "critical");
+    // This summary is deterministic metadata only. It may reflect that a
+    // gated provider boundary exists, but it must never inspect env values,
+    // call Vault/cloud secret managers, or imply production readiness.
+    return {
+      generatedAt: this.now(),
+      status: "v0_implemented",
+      planningOnly: true,
+      decisionStatus: this.secretBackendOptionDecision.decisionStatus,
+      recommendedBackend: this.secretBackendOptionDecision.recommendedBackend,
+      secondChoiceBackend: this.secretBackendOptionDecision.secondChoiceBackend,
+      implementationReady: this.secretBackendImplementationScopes.some((scope) => scope.backendKind === this.secretBackendOptionDecision.recommendedBackend && (scope.status === "ready_for_implementation" || scope.status === "v1_implemented")),
+      productionSecretBackendImplemented: false,
+      envFallbackProductionAllowed: false,
+      externalCallsEnabled: false,
+      secretReadsAttempted: false,
+      secretRotationsAttempted: false,
+      secretMigrationsAttempted: false,
+      productionCredentialsIssued: false,
+      credentialCachesRead: false,
+      criterionCount: this.secretBackendDecisionCriteria.length,
+      scoreCount: this.secretBackendDecisionScores.length,
+      implementationScopeCount: this.secretBackendImplementationScopes.length,
+      riskCount: this.secretBackendDecisionRisks.length,
+      criticalRiskCount: criticalRisks.length,
+      providerMappingCount: this.secretBackendProviderMappings.length,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      metadata: {
+        docs: "docs/roadmaps/production-secret-backend-option-decision/recommendation-v0.md",
+        criteriaDocs: "docs/roadmaps/production-secret-backend-option-decision/decision-criteria-v0.md",
+        backendEvaluationDocs: "docs/roadmaps/production-secret-backend-option-decision/backend-evaluation-v0.md",
+        implementationScopeDocs: "docs/roadmaps/production-secret-backend-option-decision/implementation-scope-v1.md",
+        providerMappingDocs: "docs/roadmaps/production-secret-backend-option-decision/secretref-provider-mapping-v0.md",
+        selectedBackendImplemented: true,
+        vaultSecretBackendV1Implemented: true,
+        realVaultIntegrationImplemented: true,
+        awsSecretsManagerImplemented: false,
+        gcpSecretManagerImplemented: false,
+        azureKeyVaultImplemented: false,
+        customSecretBackendImplemented: false,
+        envFallbackProductionDefault: false,
+        backendCallsExecuted: false,
+        secretValuesReturned: false,
+        envValuesReturned: false
       }
     };
   }
@@ -1468,6 +3925,244 @@ export class DeploymentReadinessService {
     };
   }
 
+  private getStagingDryRunIntegrationProfiles(): StagingDeploymentDryRunIntegrationProfileStatus[] {
+    const githubIntegration = this.getGitHubAppIntegrationTestReadinessSummary();
+    const llmIntegration = this.getLLMIntegrationTestReadinessSummary();
+    const githubRequired = Boolean(this.stagingDryRunOptions.requireLiveGitHubValidation);
+    const llmRequired = Boolean(this.stagingDryRunOptions.requireLiveLLMValidation);
+    const classify = (
+      id: string,
+      name: string,
+      requiredForStaging: boolean,
+      canRunLiveTests: boolean,
+      liveTestsEnabled: boolean,
+      unsafeGateCount: number,
+      missingGateCount: number,
+      docs: string
+    ): StagingDeploymentDryRunIntegrationProfileStatus => {
+      const status: StagingDeploymentDryRunIntegrationStatus = unsafeGateCount > 0
+        ? "blocked"
+        : canRunLiveTests
+          ? "ready"
+          : requiredForStaging
+            ? "gated"
+            : liveTestsEnabled || missingGateCount > 0
+              ? "skipped"
+              : "skipped";
+      return {
+        id,
+        name,
+        status,
+        requiredForStaging,
+        skippedByDefault: true,
+        summary: status === "ready"
+          ? `${name} can run if invoked separately with explicit gates.`
+          : status === "blocked"
+            ? `${name} has unsafe gate metadata and blocks dry-run trust.`
+            : status === "gated"
+              ? `${name} is required for this dry-run but required gates are missing.`
+              : `${name} is skipped by default and is not a failure unless required.`,
+        remediation: requiredForStaging
+          ? "Configure every live-test gate or make this integration profile optional."
+          : "Keep skipped until an explicit gated live validation task is requested.",
+        metadata: {
+          docs,
+          canRunLiveTests,
+          liveTestsEnabled,
+          unsafeGateCount,
+          missingGateCount,
+          integrationTestsExecutedByDryRun: false,
+          externalCallsExecutedByDryRun: false
+        }
+      };
+    };
+    return clone([
+      classify(
+        "github_app_integration_test_profile_v1",
+        "GitHub App integration-test profile v1",
+        githubRequired,
+        githubIntegration.canRunLiveTests,
+        githubIntegration.liveTestsEnabled,
+        githubIntegration.unsafeGateCount,
+        githubIntegration.missingGateCount,
+        "docs/roadmaps/github-app-integration-test-profile/v1.md"
+      ),
+      classify(
+        "llm_gateway_integration_test_profile_v1",
+        "LLM Gateway integration-test profile v1",
+        llmRequired,
+        llmIntegration.canRunLiveTests,
+        llmIntegration.liveTestsEnabled,
+        llmIntegration.unsafeGateCount,
+        llmIntegration.missingGateCount,
+        "docs/roadmaps/llm-gateway-integration-test-profile/v1.md"
+      )
+    ]);
+  }
+
+  private getStagingDeploymentExecutionPendingApprovals(): StagingReleaseCandidateSignoffRole[] {
+    return this.stagingDeploymentExecutionPlan.requiredSignoffs.filter((role) =>
+      (this.stagingDeploymentExecutionOptions.signoffStatuses?.[role] ?? "pending") === "pending"
+    );
+  }
+
+  private stagingDryRunRecommendedNextActions(
+    blockers: StagingDeploymentDryRunBlocker[],
+    skippedProfiles: StagingDeploymentDryRunIntegrationProfileStatus[]
+  ): string[] {
+    const actions = [
+      "Keep the dry-run read-only and do not mark staging as deployed.",
+      "Resolve critical staging dry-run blockers before attempting staging deployment validation."
+    ];
+    if (blockers.some((blocker) => blocker.id === "blocker_missing_secret_backend")) {
+      actions.push("Choose a real secret backend or document a controlled non-production fallback decision.");
+    }
+    if (blockers.some((blocker) => blocker.category === "storage")) {
+      actions.push("Configure Postgres readiness, migration ordering, backup, and restore rehearsal before staging validation.");
+    }
+    if (blockers.some((blocker) => blocker.category === "observability")) {
+      actions.push("Add durable observability and sanitized audit evidence for staging operations.");
+    }
+    if (skippedProfiles.length > 0) {
+      actions.push("Leave GitHub App and LLM live integration profiles skipped until a separate gated validation task is requested.");
+    }
+    actions.push("Run local validation commands outside the dry-run report before publishing a release candidate checklist.");
+    return [...new Set(actions)];
+  }
+
+  private stagingReleaseCandidateSkippedTests(gates: StagingReleaseCandidateGate[]): string[] {
+    return gates
+      .filter((gate) => gate.status === "skipped")
+      .map((gate) => gate.id);
+  }
+
+  private stagingReleaseCandidateRecommendedNextActions(
+    gates: StagingReleaseCandidateGate[],
+    blockers: StagingReleaseCandidateBlocker[],
+    signoffs: StagingReleaseCandidateSignoff[],
+    releaseNotes: StagingReleaseNoteRequirement[],
+    rollback: StagingRollbackChecklistItem[],
+    skippedTests: string[]
+  ): string[] {
+    const actions = [
+      "Do not create a release, Git tag, GitHub release, or deployment from this checklist.",
+      "Run required local validation commands and record their status before staging RC designation."
+    ];
+    if (blockers.some((blocker) => blocker.severity === "critical" && blocker.status === "open")) {
+      actions.push("Resolve critical RC blockers before calling the branch a staging release candidate.");
+    }
+    if (gates.some((gate) => gate.required && gate.status === "not_checked")) {
+      actions.push("Check all required validation gates: pnpm lint, pnpm typecheck, pnpm test, pnpm build, git diff --check, and safety scans.");
+    }
+    if (signoffs.some((signoff) => signoff.required && signoff.status === "pending")) {
+      actions.push("Record required signoffs or explicit waivers before RC designation.");
+    }
+    if (releaseNotes.some((note) => note.required && note.status === "missing")) {
+      actions.push("Complete the staging RC release notes template.");
+    }
+    if (rollback.some((item) => item.required && item.status === "missing")) {
+      actions.push("Complete required rollback checklist items.");
+    }
+    if (skippedTests.length > 0) {
+      actions.push("Document skipped optional integration tests and why their gates were not configured.");
+    }
+    actions.push("Keep production auth, real secret backend, external observability, staging deployment, and active release workflows as known limitations.");
+    return [...new Set(actions)];
+  }
+
+  private calculateStagingReleaseCandidateOverallStatus(
+    gates: StagingReleaseCandidateGate[],
+    blockers: StagingReleaseCandidateBlocker[],
+    signoffs: StagingReleaseCandidateSignoff[],
+    releaseNotes: StagingReleaseNoteRequirement[],
+    rollback: StagingRollbackChecklistItem[]
+  ): StagingReleaseCandidateOverallStatus {
+    // RC evaluation is metadata-only. Critical open blockers such as failed
+    // validation, release/deployment side effects, destructive Git, real MCP,
+    // vendor CLI, secret/env exposure, or readiness overclaims block outright.
+    // Production-only limitations stay warnings when they are documented.
+    if (blockers.some((blocker) => blocker.status === "open" && blocker.severity === "critical")) return "blocked";
+    if (
+      gates.some((gate) => gate.required && gate.status === "fail") ||
+      gates.some((gate) => gate.required && gate.status === "not_checked") ||
+      blockers.some((blocker) => blocker.status === "open" && blocker.blockingLevel === "blocks_release_candidate") ||
+      signoffs.some((signoff) => signoff.required && signoff.status === "pending") ||
+      releaseNotes.some((note) => note.required && note.status === "missing") ||
+      rollback.some((item) => item.required && item.status === "missing")
+    ) {
+      return "not_ready";
+    }
+    if (
+      gates.some((gate) => gate.status === "warning" || gate.status === "skipped") ||
+      blockers.some((blocker) => blocker.status === "open" || blocker.status === "accepted") ||
+      signoffs.some((signoff) => signoff.status === "waived") ||
+      releaseNotes.some((note) => note.status === "not_applicable") ||
+      rollback.some((item) => item.status === "not_applicable")
+    ) {
+      return "pass_with_warnings";
+    }
+    return "pass";
+  }
+
+  private calculateStagingDryRunOverallStatus(
+    sources: StagingDeploymentDryRunSource[],
+    checks: StagingDeploymentDryRunCheck[],
+    blockers: StagingDeploymentDryRunBlocker[]
+  ): StagingDeploymentDryRunOverallStatus {
+    // Aggregation rules are deliberately conservative: critical required-source
+    // failures and any critical open blocker make the dry-run blocked; high
+    // staging blockers keep deployment validation not_ready; optional skipped
+    // live profiles stay warnings unless this dry-run explicitly requires them.
+    const requiredSourceKinds = new Set(this.stagingDryRunProfile.requiredReadinessSources);
+    const criticalFailedRequiredSource = sources.some((source) =>
+      requiredSourceKinds.has(source.sourceKind) &&
+      source.status === "fail" &&
+      source.severity === "critical"
+    );
+    const criticalOpenBlocker = blockers.some((blocker) => blocker.status === "open" && blocker.severity === "critical");
+    const dryRunBlocker = blockers.some((blocker) => blocker.status === "open" && blocker.blockingLevel === "blocks_staging_dry_run");
+    if (criticalFailedRequiredSource || criticalOpenBlocker || dryRunBlocker) return "blocked";
+    if (
+      sources.some((source) => requiredSourceKinds.has(source.sourceKind) && source.status === "fail") ||
+      checks.some((check) => check.requiredForStaging && check.status === "fail") ||
+      blockers.some((blocker) => blocker.status === "open" && blocker.blockingLevel === "blocks_staging_deployment")
+    ) {
+      return "not_ready";
+    }
+    if (
+      sources.some((source) => source.status === "warning" || source.status === "skipped" || source.status === "future") ||
+      checks.some((check) => check.status === "warning" || check.status === "skipped" || check.status === "not_checked") ||
+      blockers.some((blocker) => blocker.status === "open")
+    ) {
+      return "pass_with_warnings";
+    }
+    return "pass";
+  }
+
+  private remoteMergeEnabled(): boolean {
+    return flag(this.env.AICHESTRA_ALLOW_REMOTE_MERGE);
+  }
+
+  private remoteForcePushEnabled(): boolean {
+    return flag(this.env.AICHESTRA_ALLOW_REMOTE_FORCE_PUSH);
+  }
+
+  private remoteBranchDeletionEnabled(): boolean {
+    return flag(this.env.AICHESTRA_ALLOW_REMOTE_BRANCH_DELETE);
+  }
+
+  private realMcpTransportEnabled(): boolean {
+    return flag(this.env.AICHESTRA_ENABLE_MCP_REAL_TRANSPORT);
+  }
+
+  private vendorCliExecutionEnabled(): boolean {
+    return flag(this.env.AICHESTRA_ALLOW_LOCAL_COMMAND_EXECUTION) ||
+      flag(this.env.AICHESTRA_ENABLE_VENDOR_CLI_EXECUTION) ||
+      flag(this.env.AICHESTRA_ENABLE_CODEX_CLI) ||
+      flag(this.env.AICHESTRA_ENABLE_CLAUDE_CODE) ||
+      flag(this.env.AICHESTRA_ENABLE_AIDER);
+  }
+
   private environmentWarnings(environment: DeploymentReadinessEnvironment): string[] {
     const warnings = [
       "mock_actor_warning",
@@ -1617,6 +4312,48 @@ export class DeploymentReadinessService {
       warnings.push("credential_cache_reference_configured");
     }
     if (typeof this.env.GOOGLE_APPLICATION_CREDENTIALS === "string" && this.env.GOOGLE_APPLICATION_CREDENTIALS.trim().length > 0) {
+      warnings.push("credential_cache_reference_configured");
+    }
+    return [...new Set(warnings)];
+  }
+
+  private vaultIntegrationMissingRequiredEnvVars(): string[] {
+    return this.vaultIntegrationTestProfile.requiredEnvVars.filter((name) => {
+      if (name === "AICHESTRA_VAULT_INTEGRATION_TESTS") return !flag(this.env.AICHESTRA_VAULT_INTEGRATION_TESTS);
+      if (name === "AICHESTRA_SECRET_BACKEND_PROVIDER") return this.env.AICHESTRA_SECRET_BACKEND_PROVIDER !== "vault";
+      if (name === "AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER") return !flag(this.env.AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER);
+      if (name === "AICHESTRA_VAULT_AUTH_METHOD") return this.env.AICHESTRA_VAULT_AUTH_METHOD !== "token";
+      return !stringConfigured(this.env[name]);
+    });
+  }
+
+  private vaultIntegrationUnsafeGateWarnings(): string[] {
+    const warnings: string[] = [];
+    const testSecretPath = this.env.AICHESTRA_TEST_VAULT_SECRET_PATH?.trim();
+    const pathPrefixes = csvValues(this.env.AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES);
+    if (stringConfigured(this.env.AICHESTRA_VAULT_AUTH_METHOD) && this.env.AICHESTRA_VAULT_AUTH_METHOD !== "token") {
+      warnings.push("vault_auth_method_not_token");
+    }
+    if (testSecretPath) {
+      if (!pathPrefixes.some((prefix) => testSecretPathAllowedByPrefix(testSecretPath, prefix))) {
+        warnings.push("test_secret_path_not_allowlisted");
+      }
+      if (!looksLikeTestOnlyVaultPath(testSecretPath)) {
+        warnings.push("test_secret_path_not_test_only");
+      }
+      if (/(^|[/_-])(prod|production)([/_-]|$)/i.test(testSecretPath)) {
+        warnings.push("production_like_test_path_configured");
+      }
+    }
+    if (flag(this.env.AICHESTRA_VAULT_ALLOW_WRITE) || flag(this.env.AICHESTRA_ALLOW_VAULT_WRITE)) warnings.push("vault_write_enabled");
+    if (flag(this.env.AICHESTRA_VAULT_ALLOW_DELETE) || flag(this.env.AICHESTRA_ALLOW_VAULT_DELETE)) warnings.push("vault_delete_enabled");
+    if (flag(this.env.AICHESTRA_VAULT_ALLOW_ROTATE) || flag(this.env.AICHESTRA_ALLOW_VAULT_ROTATE)) warnings.push("vault_rotate_enabled");
+    if (flag(this.env.AICHESTRA_VAULT_ALLOW_BROAD_LIST) || flag(this.env.AICHESTRA_ALLOW_VAULT_BROAD_LIST)) warnings.push("vault_broad_list_enabled");
+    if (stringConfigured(this.env.AICHESTRA_VAULT_CREDENTIAL_CACHE_PATH) ||
+      stringConfigured(this.env.AICHESTRA_VAULT_CLI_AUTH_PATH) ||
+      stringConfigured(this.env.AICHESTRA_VAULT_CLI_TOKEN_PATH) ||
+      stringConfigured(this.env.VAULT_TOKEN_FILE) ||
+      stringConfigured(this.env.GOOGLE_APPLICATION_CREDENTIALS)) {
       warnings.push("credential_cache_reference_configured");
     }
     return [...new Set(warnings)];

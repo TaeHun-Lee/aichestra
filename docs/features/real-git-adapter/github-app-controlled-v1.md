@@ -196,4 +196,4 @@ Live GitHub App tests still skip unless every required gate is configured, inclu
 
 ## Recommended Next Task
 
-LLM Gateway integration-test profile v1 is implemented. Next recommended task: Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Vault Integration-Test Profile v1 is implemented as a skipped-by-default readiness surface. Next recommended task: Staging Deployment Execution Plan v0, or Staging Release Candidate Audit rerun if Vault integration profile readiness should be included in RC evidence.

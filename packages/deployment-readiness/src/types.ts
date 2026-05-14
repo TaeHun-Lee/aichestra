@@ -289,6 +289,222 @@ export type LLMIntegrationTestSafetyCategory =
   | "no_streaming"
   | "no_tool_calls"
   | "no_unbounded_fallback";
+export type VaultIntegrationTestProfileStatus = "disabled" | "ready_if_configured" | "blocked" | "future";
+export type VaultIntegrationTestCaseCategory =
+  | "config_validation"
+  | "secretref_validation"
+  | "path_allowlist"
+  | "kv_v2_read"
+  | "credential_resolution"
+  | "auth_policy_gate"
+  | "audit_redaction"
+  | "no_secret_exposure";
+export type VaultIntegrationTestCaseStatus = "planned" | "active_mock" | "gated_live" | "future";
+export type VaultIntegrationTestSafetyCategory =
+  | "env_gates"
+  | "vault_address"
+  | "auth_method"
+  | "token_presence"
+  | "path_allowlist"
+  | "test_secret_path"
+  | "no_write"
+  | "no_delete"
+  | "no_rotate"
+  | "no_broad_list"
+  | "redaction"
+  | "audit"
+  | "no_secret_exposure";
+export type StagingDeploymentDryRunProfileStatus = "ready_to_evaluate" | "blocked" | "warning" | "future";
+export type StagingDeploymentDryRunMode = "read_only";
+export type StagingDeploymentDryRunSourceKind =
+  | "staging_profile"
+  | "ci_cd"
+  | "postgres"
+  | "github_app"
+  | "github_integration_tests"
+  | "llm_gateway"
+  | "llm_integration_tests"
+  | "mcp_gateway"
+  | "auth_rbac"
+  | "secret_backend"
+  | "secretref_credentials"
+  | "policy_bundle"
+  | "observability"
+  | "dashboard"
+  | "local_agent"
+  | "runner"
+  | "git";
+export type StagingDeploymentDryRunSourceStatus = "pass" | "warning" | "fail" | "skipped" | "future" | "not_applicable";
+export type StagingDeploymentDryRunCheckCategory =
+  | "validation"
+  | "environment"
+  | "storage"
+  | "secrets"
+  | "auth"
+  | "policy"
+  | "git"
+  | "github_app"
+  | "webhook"
+  | "llm"
+  | "mcp"
+  | "runner"
+  | "local_agent"
+  | "observability"
+  | "dashboard"
+  | "ci_cd"
+  | "security"
+  | "rollback";
+export type StagingDeploymentDryRunCheckStatus = "pass" | "warning" | "fail" | "skipped" | "not_checked" | "not_applicable";
+export type StagingDeploymentDryRunBlockingLevel =
+  | "blocks_staging_dry_run"
+  | "blocks_staging_deployment"
+  | "blocks_production_only"
+  | "advisory";
+export type StagingDeploymentDryRunBlockerStatus = "open" | "accepted" | "mitigated" | "deferred";
+export type StagingDeploymentDryRunOverallStatus = "pass" | "pass_with_warnings" | "blocked" | "not_ready";
+export type StagingDeploymentDryRunIntegrationStatus = "ready" | "gated" | "skipped" | "blocked" | "future";
+
+export type StagingDeploymentDryRunOptions = {
+  requireLiveGitHubValidation?: boolean;
+  requireLiveLLMValidation?: boolean;
+  validationCommandStatus?: "pass" | "fail";
+  failedValidationCommands?: string[];
+  secretsExposed?: boolean;
+  envValuesExposed?: boolean;
+};
+export type StagingReleaseCandidateStatus = "ready_to_evaluate" | "pass" | "pass_with_warnings" | "blocked" | "not_ready";
+export type StagingReleaseCandidateGateCategory =
+  | "validation"
+  | "docs"
+  | "staging_dry_run"
+  | "ci_cd"
+  | "git_integration"
+  | "llm_integration"
+  | "mcp"
+  | "db"
+  | "secrets"
+  | "auth"
+  | "policy"
+  | "observability"
+  | "dashboard"
+  | "security"
+  | "rollback";
+export type StagingReleaseCandidateGateStatus = "pass" | "warning" | "fail" | "skipped" | "not_checked" | "not_applicable";
+export type StagingReleaseCandidateBlockingLevel =
+  | "blocks_release_candidate"
+  | "blocks_staging_deployment"
+  | "blocks_production_only"
+  | "advisory";
+export type StagingReleaseCandidateBlockerStatus = "open" | "accepted" | "mitigated" | "deferred";
+export type StagingReleaseCandidateSignoffRole =
+  | "engineering_owner"
+  | "platform_owner"
+  | "security_reviewer"
+  | "product_owner"
+  | "qa_reviewer"
+  | "release_manager";
+export type StagingReleaseCandidateSignoffStatus = "pending" | "approved_mock" | "waived" | "not_applicable";
+export type StagingReleaseNoteSection =
+  | "summary"
+  | "changed_areas"
+  | "validation"
+  | "skipped_tests"
+  | "known_limitations"
+  | "safety_gates"
+  | "migration_notes"
+  | "dashboard_readiness"
+  | "rollback_notes"
+  | "follow_ups";
+export type StagingReleaseNoteRequirementStatus = "present" | "missing" | "not_applicable";
+export type StagingRollbackChecklistCategory =
+  | "code_revert"
+  | "database"
+  | "config"
+  | "feature_flags"
+  | "git_integration"
+  | "llm_integration"
+  | "secrets"
+  | "observability"
+  | "dashboard";
+export type StagingRollbackChecklistStatus = "planned" | "missing" | "not_applicable";
+export type StagingReleaseCandidateOverallStatus = "pass" | "pass_with_warnings" | "blocked" | "not_ready";
+
+export type StagingReleaseCandidateOptions = {
+  validationCommandStatus?: "pass" | "fail" | "not_checked";
+  failedValidationCommands?: string[];
+  diffCheckStatus?: "pass" | "warning" | "fail" | "not_checked";
+  knownDiffCheckWarnings?: string[];
+  missingRequiredDocs?: string[];
+  releaseNoteSectionsPresent?: Partial<Record<StagingReleaseNoteSection, boolean>>;
+  signoffStatuses?: Partial<Record<StagingReleaseCandidateSignoffRole, StagingReleaseCandidateSignoffStatus>>;
+  rollbackStatuses?: Partial<Record<StagingRollbackChecklistCategory, StagingRollbackChecklistStatus>>;
+  secretsExposed?: boolean;
+  envValuesExposed?: boolean;
+  releaseCreated?: boolean;
+  gitTagCreated?: boolean;
+  githubReleaseCreated?: boolean;
+  deploymentExecuted?: boolean;
+  externalCallsExecuted?: boolean;
+  productionReadyClaimed?: boolean;
+  stagingDeployedClaimed?: boolean;
+};
+export type StagingDeploymentExecutionPlanStatus = "planned" | "ready_for_signoff" | "blocked" | "future";
+export type StagingDeploymentStepPhase =
+  | "pre_deploy"
+  | "approval"
+  | "config_freeze"
+  | "validation"
+  | "migration_decision"
+  | "deployment_placeholder"
+  | "smoke_test"
+  | "observability_check"
+  | "rollback_decision"
+  | "post_deploy_review";
+export type StagingDeploymentStepStatus = "planned" | "ready" | "blocked" | "not_applicable" | "future";
+export type StagingDeploymentAutomationLevel = "manual" | "scripted_future" | "automated_future";
+export type StagingDeploymentGateCategory =
+  | "validation"
+  | "signoff"
+  | "environment"
+  | "database"
+  | "secrets"
+  | "auth"
+  | "policy"
+  | "git"
+  | "github_app"
+  | "webhook"
+  | "llm"
+  | "vault"
+  | "mcp"
+  | "observability"
+  | "dashboard"
+  | "rollback";
+export type StagingDeploymentGateStatus = "pass" | "warning" | "fail" | "skipped" | "not_checked" | "not_applicable";
+export type StagingDeploymentGoNoGoStatus = "go" | "go_with_warnings" | "no_go" | "not_ready";
+export type StagingDeploymentRollbackPlanStatus = "planned" | "ready_for_review" | "blocked" | "future";
+
+export type StagingDeploymentExecutionOptions = {
+  signoffStatuses?: Partial<Record<StagingReleaseCandidateSignoffRole, StagingReleaseCandidateSignoffStatus>>;
+  validationCommandStatus?: "pass" | "fail" | "not_checked";
+  failedValidationCommands?: string[];
+  diffCheckStatus?: "pass" | "warning" | "fail" | "not_checked";
+  safeIntegrationScanStatus?: "pass" | "fail" | "not_checked";
+  noSecretExposureStatus?: "pass" | "fail" | "not_checked";
+  requirePostgresLiveValidation?: boolean;
+  requireGitHubLiveValidation?: boolean;
+  requireLLMLiveValidation?: boolean;
+  requireVaultLiveValidation?: boolean;
+  releaseNotesPresent?: boolean;
+  rollbackPlanPresent?: boolean;
+  deploymentExecuted?: boolean;
+  releaseCreated?: boolean;
+  gitTagCreated?: boolean;
+  externalCallsExecuted?: boolean;
+  secretsExposed?: boolean;
+  envValuesExposed?: boolean;
+  productionReadyClaimed?: boolean;
+  stagingDeployedClaimed?: boolean;
+};
 
 export type DeploymentProfile = {
   id: DeploymentProfileName;
@@ -845,6 +1061,135 @@ export type SecretBackendMigrationSummary = {
   riskCount: number;
   rotationPlanCount: number;
   leasePolicyCount: number;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  metadata: Record<string, unknown>;
+};
+
+export type SecretBackendDecisionProviderValue =
+  | "mock"
+  | "env"
+  | "vault"
+  | "vault_future"
+  | "aws_secrets_manager_future"
+  | "gcp_secret_manager_future"
+  | "azure_key_vault_future"
+  | "custom_future";
+
+export type SecretBackendOptionDecisionStatus = "proposed" | "accepted_mock" | "blocked" | "deferred";
+export type SecretBackendImplementationScopeStatus = "planned" | "ready_for_implementation" | "v1_implemented" | "blocked" | "future";
+export type SecretBackendProviderProductionStatus = "test_only" | "local_integration_only" | "selected_for_v1" | "v1_implemented_gated" | "deferred" | "future" | "not_allowed";
+export type SecretBackendDecisionRiskCategory =
+  | "secret_exposure"
+  | "tenant_access"
+  | "env_fallback"
+  | "rotation"
+  | "backend_outage"
+  | "audit"
+  | "break_glass"
+  | "iam"
+  | "credential_cache"
+  | "local_agent"
+  | "testing"
+  | "dashboard_health"
+  | "backup_restore"
+  | "incident_response";
+
+export type SecretBackendOptionDecision = {
+  id: string;
+  recommendedBackend: SecretBackendDecisionProviderValue;
+  secondChoiceBackend: SecretBackendDecisionProviderValue;
+  decisionStatus: SecretBackendOptionDecisionStatus;
+  rationale: string[];
+  assumptions: string[];
+  risks: string[];
+  implementationScopeRef: string;
+  createdAt: Date;
+  metadata: Record<string, unknown>;
+};
+
+export type SecretBackendDecisionCriterion = {
+  id: string;
+  name: string;
+  weight: number;
+  description: string;
+  metadata: Record<string, unknown>;
+};
+
+export type SecretBackendDecisionScore = {
+  id: string;
+  backendKind: SecretBackendDecisionProviderValue;
+  criterionId: string;
+  score: number;
+  weightedScore: number;
+  rationale: string;
+  metadata: Record<string, unknown>;
+};
+
+export type SecretBackendImplementationScope = {
+  id: string;
+  backendKind: SecretBackendDecisionProviderValue;
+  version: "v1";
+  status: SecretBackendImplementationScopeStatus;
+  includedCapabilities: string[];
+  excludedCapabilities: string[];
+  requiredConfig: string[];
+  requiredTests: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type SecretBackendProviderMapping = {
+  id: string;
+  providerValue: SecretBackendDecisionProviderValue;
+  currentStatus: string;
+  productionStatus: SecretBackendProviderProductionStatus;
+  providerIdentifier: string;
+  requiredConfig: string[];
+  allowedProfiles: DeploymentProfileName[];
+  forbiddenProfiles: DeploymentProfileName[];
+  requiredAuthRbac: string[];
+  requiredPolicy: string[];
+  auditRequirements: string[];
+  healthDashboardExposure: string[];
+  testStrategy: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type SecretBackendDecisionRisk = {
+  id: string;
+  category: SecretBackendDecisionRiskCategory;
+  title: string;
+  severity: ReadinessSeverity;
+  likelihood: ProductionRiskLikelihood;
+  impact: string;
+  mitigation: string;
+  ownerPlaceholder: string;
+  status: ProductionRiskStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type SecretBackendOptionDecisionSummary = {
+  generatedAt: Date;
+  status: "v0_implemented";
+  planningOnly: true;
+  decisionStatus: SecretBackendOptionDecisionStatus;
+  recommendedBackend: SecretBackendDecisionProviderValue;
+  secondChoiceBackend: SecretBackendDecisionProviderValue;
+  implementationReady: boolean;
+  productionSecretBackendImplemented: false;
+  envFallbackProductionAllowed: false;
+  externalCallsEnabled: false;
+  secretReadsAttempted: false;
+  secretRotationsAttempted: false;
+  secretMigrationsAttempted: false;
+  productionCredentialsIssued: false;
+  credentialCachesRead: false;
+  criterionCount: number;
+  scoreCount: number;
+  implementationScopeCount: number;
+  riskCount: number;
+  criticalRiskCount: number;
+  providerMappingCount: number;
   noSecretsExposed: true;
   envValuesExposed: false;
   metadata: Record<string, unknown>;
@@ -1481,5 +1826,427 @@ export type LLMIntegrationTestReadinessSummary = {
   apiKeyExposed: false;
   rawProviderResponseExposed: false;
   remoteLlmCallsInDefaultTests: false;
+  metadata: Record<string, unknown>;
+};
+
+export type VaultIntegrationTestProfile = {
+  id: string;
+  name: string;
+  status: VaultIntegrationTestProfileStatus;
+  backendKind: "vault";
+  requiredEnvVars: string[];
+  requiredSecretRefs: string[];
+  requiredPathAllowlist: string[];
+  allowedOperations: string[];
+  forbiddenOperations: string[];
+  testSecretPattern: string;
+  auditRequirements: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type VaultIntegrationTestCase = {
+  id: string;
+  profileId: string;
+  name: string;
+  category: VaultIntegrationTestCaseCategory;
+  enabledByDefault: boolean;
+  requiresLiveVault: boolean;
+  requiredEnvVars: string[];
+  expectedSideEffects: string[];
+  cleanupRequired: boolean;
+  status: VaultIntegrationTestCaseStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type VaultIntegrationTestSafetyCheck = {
+  id: string;
+  category: VaultIntegrationTestSafetyCategory;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type VaultIntegrationTestReadinessSummary = {
+  generatedAt: Date;
+  id: string;
+  status: "v1_implemented";
+  planningOnly: true;
+  productionReady: false;
+  profileStatus: VaultIntegrationTestProfileStatus;
+  backendKind: "vault";
+  liveTestsEnabled: boolean;
+  canRunLiveTests: boolean;
+  defaultLiveTestsSkipped: true;
+  requiredGateCount: number;
+  configuredGateCount: number;
+  missingGateCount: number;
+  unsafeGateCount: number;
+  missingRequiredEnvVars: string[];
+  unsafeGateWarnings: string[];
+  reason: string;
+  vaultBackendSelected: boolean;
+  vaultProviderEnabled: boolean;
+  vaultAddressConfigured: boolean;
+  vaultNamespaceConfigured: boolean;
+  vaultAuthMethodConfigured: boolean;
+  vaultAuthMethod: string;
+  vaultTokenConfigured: boolean;
+  vaultKvMountConfigured: boolean;
+  pathAllowlistConfigured: boolean;
+  pathAllowlistPrefixCount: number;
+  testSecretPathConfigured: boolean;
+  testSecretKeyConfigured: boolean;
+  testSecretPathAllowlisted: boolean;
+  testSecretPathLooksTestOnly: boolean;
+  requiredSecretRefCount: number;
+  configuredSecretRefCount: number;
+  credentialSource: "vault_secretref" | "none";
+  envFallbackUsed: false;
+  testCaseCount: number;
+  gatedLiveTestCaseCount: number;
+  activeMockTestCaseCount: number;
+  noWrite: true;
+  noDelete: true;
+  noRotate: true;
+  noBroadList: true;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  vaultTokenExposed: false;
+  vaultAddressExposed: false;
+  vaultSecretValueExposed: false;
+  vaultCallsInDefaultTests: false;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentDryRunProfile = {
+  id: string;
+  name: string;
+  status: StagingDeploymentDryRunProfileStatus;
+  description: string;
+  requiredReadinessSources: StagingDeploymentDryRunSourceKind[];
+  optionalReadinessSources: StagingDeploymentDryRunSourceKind[];
+  blockedCapabilities: string[];
+  allowedCapabilities: string[];
+  dryRunMode: StagingDeploymentDryRunMode;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentDryRunSource = {
+  id: string;
+  sourceKind: StagingDeploymentDryRunSourceKind;
+  status: StagingDeploymentDryRunSourceStatus;
+  severity: ReadinessSeverity;
+  summary: string;
+  evidence: string[];
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentDryRunCheck = {
+  id: string;
+  category: StagingDeploymentDryRunCheckCategory;
+  name: string;
+  status: StagingDeploymentDryRunCheckStatus;
+  severity: ReadinessSeverity;
+  requiredForStaging: boolean;
+  description: string;
+  evidence: string[];
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentDryRunBlocker = {
+  id: string;
+  category: StagingDeploymentDryRunCheckCategory | StagingDeploymentDryRunSourceKind;
+  title: string;
+  severity: ReadinessSeverity;
+  blockingLevel: StagingDeploymentDryRunBlockingLevel;
+  description: string;
+  remediation: string;
+  sourceIds: string[];
+  status: StagingDeploymentDryRunBlockerStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentDryRunIntegrationProfileStatus = {
+  id: string;
+  name: string;
+  status: StagingDeploymentDryRunIntegrationStatus;
+  requiredForStaging: boolean;
+  skippedByDefault: boolean;
+  summary: string;
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentDryRunReport = {
+  id: string;
+  generatedAt: Date;
+  overallStatus: StagingDeploymentDryRunOverallStatus;
+  summary: string;
+  profile: StagingDeploymentDryRunProfile;
+  sourceSummaries: StagingDeploymentDryRunSource[];
+  checks: StagingDeploymentDryRunCheck[];
+  blockers: StagingDeploymentDryRunBlocker[];
+  integrationProfiles: StagingDeploymentDryRunIntegrationProfileStatus[];
+  promotionGuidance: string[];
+  rollbackGuidance: string[];
+  recommendedNextActions: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentDryRunSummary = {
+  generatedAt: Date;
+  status: "v0_implemented";
+  planningOnly: true;
+  dryRunMode: StagingDeploymentDryRunMode;
+  overallStatus: StagingDeploymentDryRunOverallStatus;
+  profileStatus: StagingDeploymentDryRunProfileStatus;
+  productionReady: false;
+  stagingDeployed: false;
+  deploymentExecuted: false;
+  externalCallsEnabled: false;
+  remoteIntegrationTestsExecuted: false;
+  validationCommandsExecuted: false;
+  sourceCount: number;
+  requiredSourceCount: number;
+  optionalSourceCount: number;
+  sourcesByStatus: Record<StagingDeploymentDryRunSourceStatus, number>;
+  checkCount: number;
+  requiredCheckCount: number;
+  checksByStatus: Record<StagingDeploymentDryRunCheckStatus, number>;
+  blockerCount: number;
+  criticalBlockerCount: number;
+  warningCount: number;
+  integrationProfileCount: number;
+  integrationProfilesByStatus: Record<StagingDeploymentDryRunIntegrationStatus, number>;
+  skippedIntegrationProfileCount: number;
+  recommendedNextActionCount: number;
+  noSecretsExposed: boolean;
+  envValuesExposed: boolean;
+  productionReadyClaimed: false;
+  stagingDeploymentClaimed: false;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingReleaseCandidateChecklist = {
+  id: string;
+  name: string;
+  status: StagingReleaseCandidateStatus;
+  description: string;
+  requiredValidationGates: string[];
+  optionalIntegrationProfiles: string[];
+  allowedSkippedTests: string[];
+  blockerPolicy: string[];
+  requiredSignoffs: StagingReleaseCandidateSignoffRole[];
+  requiredReleaseNotes: StagingReleaseNoteSection[];
+  rollbackChecklist: string[];
+  knownLimitations: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingReleaseCandidateGate = {
+  id: string;
+  category: StagingReleaseCandidateGateCategory;
+  name: string;
+  status: StagingReleaseCandidateGateStatus;
+  required: boolean;
+  severity: ReadinessSeverity;
+  description: string;
+  evidence: string[];
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingReleaseCandidateBlocker = {
+  id: string;
+  category: StagingReleaseCandidateGateCategory | "release" | "deployment" | "production";
+  title: string;
+  severity: ReadinessSeverity;
+  blockingLevel: StagingReleaseCandidateBlockingLevel;
+  description: string;
+  evidence: string[];
+  remediation: string;
+  source: string;
+  status: StagingReleaseCandidateBlockerStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingReleaseCandidateSignoff = {
+  id: string;
+  role: StagingReleaseCandidateSignoffRole;
+  required: boolean;
+  status: StagingReleaseCandidateSignoffStatus;
+  reason?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingReleaseNoteRequirement = {
+  id: string;
+  section: StagingReleaseNoteSection;
+  required: boolean;
+  status: StagingReleaseNoteRequirementStatus;
+  guidance: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingRollbackChecklistItem = {
+  id: string;
+  category: StagingRollbackChecklistCategory;
+  name: string;
+  required: boolean;
+  status: StagingRollbackChecklistStatus;
+  description: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingReleaseCandidateReport = {
+  id: string;
+  generatedAt: Date;
+  overallStatus: StagingReleaseCandidateOverallStatus;
+  summary: string;
+  checklist: StagingReleaseCandidateChecklist;
+  gates: StagingReleaseCandidateGate[];
+  blockers: StagingReleaseCandidateBlocker[];
+  signoffs: StagingReleaseCandidateSignoff[];
+  releaseNoteRequirements: StagingReleaseNoteRequirement[];
+  rollbackChecklist: StagingRollbackChecklistItem[];
+  skippedTests: string[];
+  recommendedNextActions: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingReleaseCandidateSummary = {
+  generatedAt: Date;
+  status: "v0_implemented";
+  planningOnly: true;
+  overallStatus: StagingReleaseCandidateOverallStatus;
+  checklistStatus: StagingReleaseCandidateStatus;
+  productionReady: false;
+  stagingDeployed: false;
+  releaseCreated: false;
+  gitTagCreated: false;
+  githubReleaseCreated: false;
+  deploymentExecuted: false;
+  externalCallsEnabled: false;
+  remoteIntegrationTestsExecuted: false;
+  gateCount: number;
+  requiredGateCount: number;
+  gatesByStatus: Record<StagingReleaseCandidateGateStatus, number>;
+  blockerCount: number;
+  criticalBlockerCount: number;
+  signoffCount: number;
+  requiredSignoffCount: number;
+  pendingSignoffCount: number;
+  releaseNoteRequirementCount: number;
+  missingReleaseNoteRequirementCount: number;
+  rollbackItemCount: number;
+  missingRollbackItemCount: number;
+  skippedTestCount: number;
+  recommendedNextActionCount: number;
+  noSecretsExposed: boolean;
+  envValuesExposed: boolean;
+  productionReadyClaimed: boolean;
+  stagingDeploymentClaimed: boolean;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentExecutionPlan = {
+  id: string;
+  name: string;
+  status: StagingDeploymentExecutionPlanStatus;
+  description: string;
+  requiredSignoffs: StagingReleaseCandidateSignoffRole[];
+  requiredPreDeployChecks: string[];
+  optionalIntegrationChecks: string[];
+  deploymentSteps: string[];
+  postDeployChecks: string[];
+  rollbackSteps: string[];
+  goNoGoCriteria: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentStep = {
+  id: string;
+  order: number;
+  phase: StagingDeploymentStepPhase;
+  name: string;
+  description: string;
+  required: boolean;
+  status: StagingDeploymentStepStatus;
+  automationLevel: StagingDeploymentAutomationLevel;
+  ownerRole: StagingReleaseCandidateSignoffRole | "operator" | "system";
+  evidenceRequired: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentGate = {
+  id: string;
+  category: StagingDeploymentGateCategory;
+  name: string;
+  status: StagingDeploymentGateStatus;
+  severity: ReadinessSeverity;
+  required: boolean;
+  description: string;
+  evidence: string[];
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentGoNoGoDecision = {
+  id: string;
+  status: StagingDeploymentGoNoGoStatus;
+  reason: string;
+  requiredApprovals: StagingReleaseCandidateSignoffRole[];
+  pendingApprovals: StagingReleaseCandidateSignoffRole[];
+  blockers: string[];
+  acceptedRisks: string[];
+  generatedAt: Date;
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentRollbackPlan = {
+  id: string;
+  status: StagingDeploymentRollbackPlanStatus;
+  triggers: string[];
+  rollbackSteps: StagingDeploymentStep[];
+  manualVerification: string[];
+  dataConsiderations: string[];
+  auditRequirements: string[];
+  ownerRoles: StagingReleaseCandidateSignoffRole[];
+  metadata: Record<string, unknown>;
+};
+
+export type StagingDeploymentExecutionSummary = {
+  generatedAt: Date;
+  status: "v0_implemented";
+  planningOnly: true;
+  planStatus: StagingDeploymentExecutionPlanStatus;
+  goNoGoStatus: StagingDeploymentGoNoGoStatus;
+  productionReady: false;
+  stagingDeployed: false;
+  deploymentExecuted: false;
+  releaseCreated: false;
+  gitTagCreated: false;
+  externalCallsEnabled: false;
+  remoteIntegrationTestsExecuted: false;
+  gateCount: number;
+  requiredGateCount: number;
+  gatesByStatus: Record<StagingDeploymentGateStatus, number>;
+  blockerCount: number;
+  criticalBlockerCount: number;
+  warningCount: number;
+  stepCount: number;
+  readyStepCount: number;
+  pendingSignoffCount: number;
+  optionalIntegrationDecisionCount: number;
+  rollbackStepCount: number;
+  noSecretsExposed: boolean;
+  envValuesExposed: boolean;
+  productionReadyClaimed: boolean;
+  stagingDeployedClaimed: boolean;
   metadata: Record<string, unknown>;
 };

@@ -39,19 +39,30 @@ Values must never be exposed through health, readiness, audit, or dashboard surf
 | `AICHESTRA_LLM_TEST_PROMPT_CLASS` | Safe prompt class label | gated | no | no | no | no | Readiness exposes configured boolean only. |
 | `AICHESTRA_ENABLE_LLM_STREAMING` | Future streaming gate | no | no | yes | no | no | Streaming is out of scope for staging v0/v1 tests. |
 | `AICHESTRA_ENABLE_LLM_TOOL_CALLS` | Future tool-call gate | no | no | yes | no | no | Tool calling is out of scope for staging v0/v1 tests. |
+| `AICHESTRA_VAULT_INTEGRATION_TESTS` | Vault integration-test profile gate | gated | no | no | no | no | Skipped by default; live tests require every Vault gate. |
+| `AICHESTRA_SECRET_BACKEND_PROVIDER` | Secret backend provider selection | gated | no | no | no | no | `vault` is allowed only behind explicit Vault gates; default remains mock. |
+| `AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER` | Enable Vault SecretRef provider | gated | no | no | no | no | Must be false by default. |
+| `AICHESTRA_VAULT_ADDR` | Vault address | gated | no | no | yes-adjacent | yes | Readiness exposes configured boolean only, never value. |
+| `AICHESTRA_VAULT_TOKEN` | Vault token | gated-test-only | no | no | yes | yes | Optional live test token only; never exposed. |
+| `AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES` | Vault path allowlist | gated | no | no | yes-adjacent | yes | Readiness exposes count only. |
+| `AICHESTRA_TEST_VAULT_SECRET_PATH` | Test-only Vault secret path | gated-test-only | no | no | yes-adjacent | yes | Must be allowlisted and non-production; readiness exposes booleans only. |
+| `AICHESTRA_TEST_VAULT_SECRET_KEY` | Test-only Vault secret key | gated-test-only | no | no | yes-adjacent | yes | Readiness exposes configured boolean only. |
 | `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER` | Env SecretRef provider | discouraged | no | gated | no | no | Local/integration only except tightly controlled tests. |
 | `AICHESTRA_ALLOWED_SECRET_ENV_KEYS` | Env SecretRef allowlist | discouraged | no | gated | yes-adjacent | yes | Count only; no values. |
 | `AICHESTRA_DASHBOARD_DATA_SOURCE` | Dashboard data source | yes | yes | no | no | no | Use `api` for staging. |
 | `AICHESTRA_ENABLE_LOCAL_AGENT_RUNNER` | Local runner boundary | gated | no | no | no | no | Command execution remains disabled by default. |
 | `AICHESTRA_ALLOW_LOCAL_COMMAND_EXECUTION` | Local command execution | no | no | yes | no | no | Forbidden in staging v0. |
 | future auth provider vars | OIDC/SAML/SCIM config | future | no | no | yes | yes | Not implemented. |
-| future secret backend vars | Vault/cloud/custom backend config | future | no | no | yes | yes | Not implemented. |
+| future secret backend vars | Cloud/custom backend config | future | no | no | yes | yes | AWS/GCP/Azure/custom backends remain unimplemented. |
 | future MCP vars | Real MCP transport config | no | no | yes | yes | yes | Remote MCP is blocked in staging v0. |
 | future policy bundle vars | Bundle source/signing config | future | no | no | yes | yes | Runtime remains StaticPolicyEngine. |
 
 Staging default rules:
 
 - Postgres is required or strongly recommended.
+- Staging Deployment Dry-run Profile v0 may aggregate these gates and related readiness sources, but it must not deploy, run CI jobs, execute remote integration tests, call providers, expose secrets/env values, or mark staging/production ready.
+- Staging Release Candidate Checklist v0 may aggregate dry-run and related readiness surfaces, but it must not create releases, Git tags, GitHub releases, deployments, CI jobs, remote integration runs, provider calls, secrets/env values, or staging/production-ready claims.
+- Staging Deployment Execution Plan v0 may sequence these gates for future manual execution, but it must not deploy, create releases or tags, run deployment commands, run CI jobs, execute remote integration tests, call providers, expose secrets/env values, or mark staging/production ready.
 - Env secret provider is discouraged or blocked except controlled integration tests.
 - Real auth is future and remains required before production.
 - Remote merge, force push, branch deletion, remote MCP, and vendor CLI execution are forbidden.

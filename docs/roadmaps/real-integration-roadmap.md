@@ -30,7 +30,14 @@
 26. Staging Deployment Profile v0 - implemented
 27. Staging CI/CD Pipeline Planning v0 - implemented
 28. GitHub App integration-test profile v1 - implemented
-29. Phase 5 enterprise planning
+29. LLM Gateway integration-test profile v1 - implemented
+30. Staging Deployment Dry-run Profile v0 - implemented
+31. Staging Release Candidate Checklist v0 - implemented
+32. Production Secret Backend Implementation Option Decision v0 - implemented
+33. Vault-backed Secret Backend v1 - implemented
+34. Vault Integration-Test Profile v1 - implemented
+35. Staging Deployment Execution Plan v0 - implemented
+36. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -294,7 +301,7 @@ Goals:
 - Apply redaction to input/output/audit previews.
 - Expose `/mcp/*`, `/health`, and `/dashboard/mcp` visibility without secrets or raw output.
 
-Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 18. Production Deployment Readiness Planning v0
 
@@ -308,7 +315,7 @@ Goals:
 - Expose planning-only readiness API/dashboard read models without external calls or secrets.
 - Keep production deployment, infrastructure manifests, real auth, real secret backends, real MCP transport, real provider calls, and vendor CLI execution out of scope.
 
-Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 19. Observability / Audit Retention v0
 
@@ -324,7 +331,7 @@ Goals:
 - Surface observability/audit state in API health and dashboard read models.
 - Keep external observability backends, alert delivery, audit export, and retention deletion jobs out of scope.
 
-Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 20. GitHub App / Production Webhook Hardening Planning v0
 
@@ -338,7 +345,7 @@ Goals:
 - Model replay classification, retry/dead-letter readiness, credential readiness, production endpoint readiness, blockers, and production risks.
 - Keep default runtime mock-first with no GitHub calls, no private key reads, no JWT signing, no installation token exchange, no production webhooks, and no destructive Git operations.
 
-Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 21. Persistent DB Production Operations v1
 
@@ -352,7 +359,7 @@ Goals:
 - Keep DB operations non-destructive: no deletion jobs, no backup/restore jobs, no live partition jobs, no automatic migrations, and no DB URL exposure.
 - Keep default runtime in-memory/mock-first and optional Postgres tests gated by `AICHESTRA_TEST_DATABASE_URL`.
 
-Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 22. Secret Backend Migration Planning v0
 
@@ -366,7 +373,7 @@ Goals:
 - Model lease TTL, rotation, revocation, env fallback deprecation, readiness checks, and production risks.
 - Keep runtime read-only and mock-first: no real secret backend calls, no rotation jobs, no credential issuance, no cache reads, and no env value exposure.
 
-Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 23. Production Auth/RBAC v1 Planning
 
@@ -381,7 +388,7 @@ Goals:
 - Plan request context propagation and mock actor deprecation.
 - Keep runtime read-only and mock-first: no real OIDC/SAML/SCIM/SSO, no login/logout/session/JWT/password behavior, no external IdP calls, no service-account credential issuance, no tenant isolation enforcement, and no token/cookie/session/assertion exposure.
 
-Recommended next step: Staging Deployment Profile v0, Staging CI/CD Pipeline Planning v0, GitHub App integration-test profile v1, and LLM Gateway integration-test profile v1 have been completed. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 24. Policy Bundle / OPA-Cedar Planning v0
 
@@ -395,7 +402,7 @@ Goals:
 - Keep `StaticPolicyEngine` as the only runtime.
 - Keep runtime read-only and mock-first: no OPA/Cedar execution, no external policy decision service, no dynamic policy code, no remote bundle loading, no hot reload, no signed bundle verification, no production rollout, and no break-glass execution.
 
-Recommended next step: LLM Gateway integration-test profile v1 is implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 25. GitHub App Controlled Implementation v1
 
@@ -411,7 +418,7 @@ Goals:
 - Return token handle metadata only; never expose private keys, installation tokens, webhook secrets, legacy PATs, raw credentials, or credential cache contents.
 - Integrate branch creation, PR creation, and changed-file reads with the token provider boundary while keeping merge, rebase, force push, branch deletion, workflow/admin/secrets/deployments permissions, GitLab, and Bitbucket out of scope.
 
-Recommended next step: LLM Gateway integration-test profile v1 is implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 26. Staging Deployment Profile v0
 
@@ -425,7 +432,7 @@ Goals:
 - Surface staging readiness checks, promotion criteria, rollback criteria, blockers, warnings, mock actor warning, env fallback warning, and no-secret/no-env status.
 - Keep runtime read-only and mock-first: no deployment, no infrastructure manifests, no production traffic, no external provider calls by default, no remote MCP, no vendor CLI execution, no secrets, and no env values.
 
-Recommended next step: LLM Gateway integration-test profile v1 is implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 27. Staging CI/CD Pipeline Planning v0
 
@@ -437,7 +444,7 @@ Goals:
 - Document required validation jobs, optional integration-test gates, secret/env safety, artifact/report handling, staging promotion, and cleanup/rollback expectations.
 - Keep runtime read-only and mock-first: no deployment, no active CI workflow, no external provider calls by default, no remote Git/LLM/MCP/auth/vendor tests by default, no secrets, and no env values.
 
-Recommended next step: GitHub App integration-test profile v1 and LLM Gateway integration-test profile v1 are implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 28. GitHub App integration-test profile v1
 
@@ -450,7 +457,7 @@ Goals:
 - Report missing and unsafe gates as booleans, counts, statuses, and env var names only.
 - Keep runtime read-only and mock-first: no GitHub calls in default tests, no installation token generation, no private-key read, no env value exposure, no auto-merge, no force-push, and no branch deletion.
 
-Recommended next step: LLM Gateway integration-test profile v1 is implemented. Continue with Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
 ## 29. LLM Gateway integration-test profile v1
 
@@ -463,9 +470,102 @@ Goals:
 - Report missing and unsafe gates as booleans, counts, statuses, and env var names only.
 - Keep runtime read-only and mock-first: no LLM calls in default tests, no API key/env value exposure, no raw provider response exposure, no streaming, no tool calls, no vendor CLI, no credential cache reads, and no unbounded fallback.
 
-Recommended next step: Staging Deployment Dry-run Profile v0, or production secret backend implementation option decision.
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
 
-## 30. Phase 5 Enterprise Planning
+## 30. Staging Deployment Dry-run Profile v0
+
+Implemented with `docs/roadmaps/staging-deployment-dry-run/v0.md`, `docs/roadmaps/staging-deployment-dry-run/v0-plan.md`, report format, blocker taxonomy, deterministic dry-run profile/source/check/blocker/report/summary models in `packages/deployment-readiness`, read-only `/readiness/staging-dry-run/*` API endpoints, `/dashboard/staging-dry-run`, safe `/health` metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Aggregate staging, CI/CD, DB operations, GitHub App integration-test, LLM integration-test, Secret Backend Migration, Auth/RBAC, Policy Bundle, Observability, MCP, Git, LLM, Local Agent, Runner, and Dashboard readiness.
+- Classify blockers by severity and blocking level.
+- Classify integration profiles as ready, gated, skipped, blocked, or future without executing them.
+- Return promotion and rollback guidance while keeping the dry-run read-only.
+- Keep runtime safe: no deployment, no CI job execution, no remote integration-test execution, no provider calls, no resource mutation, no secrets, no env values, no staging-deployed claim, and no production-ready claim.
+
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+
+## 31. Staging Release Candidate Checklist v0
+
+Implemented with `docs/roadmaps/staging-release-candidate/v0.md`, `docs/roadmaps/staging-release-candidate/v0-plan.md`, report format, release-notes template, rollback checklist, Evidence Pack v0 plan, release-notes draft, rollback evidence, signoff readiness, deterministic checklist/gate/blocker/signoff/release-note/rollback/report/summary models in `packages/deployment-readiness`, read-only `/readiness/staging-rc/*` API endpoints, `/dashboard/staging-rc`, safe `/health` metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Define criteria for calling a commit or branch a staging release candidate without creating a release.
+- Require local validation evidence for lint, typecheck, test, build, `git diff --check`, and safe integration scan.
+- Classify blockers by severity and blocking level.
+- Allow skipped optional Postgres/GitHub/LLM/MCP/auth profiles only when documented.
+- Model signoff expectations, release-note requirements, rollback checklist items, known limitations, and recommended next actions.
+- Record evidence-pack documentation for validation, skipped optional tests, release notes, rollback planning, and planning-ready signoff status without faking real approval.
+- Keep runtime safe: no release creation, no Git tag creation, no GitHub release creation, no deployment, no CI job execution, no remote integration-test execution, no provider calls, no resource mutation, no secrets, no env values, no staging-deployed claim, and no production-ready claim.
+
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+
+## 32. Production Secret Backend Implementation Option Decision v0
+
+Implemented with `docs/roadmaps/production-secret-backend-option-decision/v0.md`, `v0-plan.md`, decision criteria, backend evaluation, recommendation, SecretRef provider mapping, v1 implementation scope, env-to-production migration plan, test strategy, risk register, deterministic decision/readiness models in `packages/deployment-readiness`, read-only `/readiness/secret-backend-decision/*` API endpoints, `/dashboard/secret-backend-decision`, safe `/health` metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Select the first production-grade secret backend implementation path without calling or deploying the backend in the decision milestone.
+- Recommend Vault first because the deployment cloud is undecided and Vault best exercises lease, TTL, revocation, namespace, audit, and self-hosted SecretRef requirements.
+- Keep AWS Secrets Manager as the second choice if the first production deployment is AWS-first.
+- Defer GCP Secret Manager, Azure Key Vault, and custom enterprise backends until their deployment context is selected.
+- Keep EnvSecretProvider local/integration only and mock provider test-only.
+- Define v1 scope, config names, Auth/RBAC and Policy checks, redaction rules, API/dashboard/health expectations, tests, migration strategy, and operational risks.
+- Keep the decision runtime safe: no Vault/cloud/custom secret backend calls from the decision surface, no secret reads, no secret migration, no rotation, no production credential issuance, no env value exposure, no credential cache reads, no BYOK/OAuth/WIF/IAM, and no production-ready claim.
+
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+
+## 33. Vault-backed Secret Backend v1
+
+Implemented with `docs/foundations/vault-secret-backend/v1.md`, `docs/foundations/vault-secret-backend/v1-plan.md`, `packages/security` Vault config/client/provider boundaries, policy allow rules for gated Vault-backed credential resolution, read-only Vault readiness/security API endpoints, health metadata, dashboard read model rendering, and deterministic tests.
+
+Goals:
+
+- Add `provider: vault` SecretRef support without making Vault the default.
+- Add `DisabledVaultClient`, `MockVaultClient`, and isolated `GatedHttpVaultClient`.
+- Map Vault KV v2 mount/path/key/version/namespace metadata without storing secret values.
+- Require Auth/RBAC, purpose Policy, provider credential Policy, lease Policy, active SecretRef status, and path allowlists before any Vault client read.
+- Issue metadata-only SecretLease and CredentialHandle records for successful internal resolutions.
+- Support GitHub token, GitHub webhook secret, GitHub App private-key metadata, LLM API key, and provider API key SecretRefs through the same credential boundary.
+- Expose `/readiness/secrets/vault/*`, `/security/secrets/vault/*`, `/dashboard/vault-secret-backend`, and safe `/health` metadata without Vault tokens, Vault address values, secret values, env values, or credential cache paths.
+- Keep live Vault tests skipped unless every explicit gate is configured.
+- Keep production Vault rollout, HA, unseal, storage backend, Terraform/Helm/Kubernetes, rotation, destructive migration, AppRole/workload identity rollout, BYOK/OAuth/WIF/IAM, and production readiness out of scope.
+
+Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+
+## 34. Vault Integration-Test Profile v1
+
+Implemented with `docs/roadmaps/vault-integration-test-profile/v1.md`, `docs/roadmaps/vault-integration-test-profile/v1-plan.md`, deterministic Vault integration-test profile/test-case/safety-check/summary models in `packages/deployment-readiness`, read-only `/readiness/vault-integration/*` API endpoints, `/dashboard/vault-integration`, safe `/health` metadata, dashboard rendering, and deterministic tests.
+
+Goals:
+
+- Define the required gates for optional live Vault KV v2 validation without making Vault default.
+- Require a test-only SecretRef pattern, a non-production allowlisted path, and token-auth test gate.
+- Classify missing gates as skipped and unsafe gates as blocked.
+- Expose booleans, counts, statuses, and safety checks only; never expose Vault token/address/path/key/secret/env values.
+- Preserve no-write, no-delete, no-rotate, no-broad-list, no credential-cache-read, and no-default-Vault-call guarantees.
+- Keep production Vault rollout, rotation jobs, destructive migration, cloud identity exchange, and production-ready secret backend status out of scope.
+
+Recommended next step: Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+
+## 35. Staging Deployment Execution Plan v0
+
+Implemented with `docs/roadmaps/staging-deployment-execution/v0.md`, `docs/roadmaps/staging-deployment-execution/v0-plan.md`, execution sequence, pre-deploy gates, live integration decision policy, post-deployment smoke plan, rollback plan, deterministic plan/step/gate/go-no-go/rollback/summary models in `packages/deployment-readiness`, read-only `/readiness/staging-execution/*` API endpoints, `/dashboard/staging-execution`, safe `/health` metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Define a controlled future staging deployment sequence after human signoff without performing deployment.
+- Require validation, no-secret/no-env, no side effect, release-note, rollback, and signoff gates.
+- Classify optional Postgres, GitHub App, LLM, Vault, MCP, external auth, and vendor CLI decisions before execution.
+- Expose go/no-go and rollback readiness while keeping pending real signoffs as `not_ready`.
+- Keep runtime safe: no release creation, no Git tag creation, no GitHub release, no deployment, no CI job execution, no remote integration-test execution, no provider calls, no resource mutation, no secrets, no env values, no staging-deployed claim, and no production-ready claim.
+
+Recommended next step: Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+
+## 36. Phase 5 Enterprise Planning
 
 Goals:
 

@@ -124,7 +124,13 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const readiness = await getJson(port, "/dashboard/readiness") as { readiness: { summary: { productionReady: boolean; criticalBlockerCount: number }; environmentWarnings: unknown[]; noSecretsExposed: boolean } };
     const database = await getJson(port, "/dashboard/database") as { database: { summary: { productionReady: boolean; databaseUrlExposed: boolean; productionDbConnectionAttempted: boolean }; migrations: unknown[]; indexReview: unknown[]; noSecretStatus: { databaseUrlExposed: boolean } } };
     const secretBackend = await getJson(port, "/dashboard/secret-backend") as { secretBackend: { summary: { productionReady: boolean; realSecretBackendConfigured: boolean; externalCallsEnabled: boolean }; backendOptions: unknown[]; blockers: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
+    const secretBackendDecision = await getJson(port, "/dashboard/secret-backend-decision") as { secretBackendDecision: { summary: { recommendedBackend: string; productionSecretBackendImplemented: boolean; envFallbackProductionAllowed: boolean; externalCallsEnabled: boolean }; criteria: unknown[]; scores: unknown[]; implementationScopes: unknown[]; providerMappings: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
+    const vaultSecretBackend = await getJson(port, "/dashboard/vault-secret-backend") as { vaultSecretBackend: { summary: { selectedProvider: string; vaultProviderEnabled: boolean; productionSecretBackendImplemented: boolean }; config: { vaultAddressConfigured: boolean; vaultTokenConfigured: boolean }; health: { clientKind: string; liveCallAttempted: boolean }; checks: unknown[]; noSecretStatus: { noSecretsExposed: boolean; noEnvValuesExposed: boolean; vaultTokenExposed: boolean; vaultSecretValueExposed: boolean } } };
+    const vaultIntegration = await getJson(port, "/dashboard/vault-integration") as { vaultIntegration: { summary: { productionReady: boolean; defaultLiveTestsSkipped: boolean; vaultCallsInDefaultTests: boolean }; testCases: unknown[]; safetyChecks: unknown[]; gateStatus: { vaultAddressConfigured: boolean; vaultTokenConfigured: boolean; rawPathReturned: boolean }; operationPolicy: { noWrite: boolean; noDelete: boolean; noRotate: boolean; noBroadList: boolean }; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean; vaultTokenExposed: boolean; vaultSecretValueExposed: boolean } } };
     const staging = await getJson(port, "/dashboard/staging") as { staging: { summary: { productionReady: boolean; stagingDeployed: boolean; remoteMergeForbidden: boolean; remoteMcpForbidden: boolean; vendorCliForbidden: boolean }; integrationGates: unknown[]; promotionCriteria: unknown[]; rollbackCriteria: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
+    const stagingDryRun = await getJson(port, "/dashboard/staging-dry-run") as { stagingDryRun: { summary: { productionReady: boolean; stagingDeployed: boolean; deploymentExecuted: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean }; sources: unknown[]; requiredChecks: unknown[]; blockers: unknown[]; criticalBlockers: unknown[]; skippedIntegrationProfiles: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
+    const stagingReleaseCandidate = await getJson(port, "/dashboard/staging-rc") as { stagingReleaseCandidate: { summary: { productionReady: boolean; stagingDeployed: boolean; releaseCreated: boolean; gitTagCreated: boolean; githubReleaseCreated: boolean; deploymentExecuted: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean }; requiredGates: unknown[]; blockers: unknown[]; signoffs: unknown[]; releaseNoteRequirements: unknown[]; rollbackChecklist: unknown[]; skippedTests: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
+    const stagingExecution = await getJson(port, "/dashboard/staging-execution") as { stagingExecution: { summary: { productionReady: boolean; stagingDeployed: boolean; deploymentExecuted: boolean; releaseCreated: boolean; gitTagCreated: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean; goNoGoStatus: string }; steps: unknown[]; requiredGates: unknown[]; blockers: unknown[]; pendingSignoffs: unknown[]; optionalIntegrationDecisions: unknown[]; rollbackSteps: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const cicd = await getJson(port, "/dashboard/ci-cd") as { cicd: { summary: { productionReady: boolean; stagingDeployed: boolean; activeWorkflowCreated: boolean; remoteIntegrationTestsEnabledByDefault: boolean; externalCallsEnabledByDefault: boolean }; jobs: unknown[]; integrationGates: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const observability = await getJson(port, "/dashboard/observability") as { observability: { config: { externalBackendEnabled: boolean }; sourceCoverage: unknown[]; noSecretStatus: { noSecretsExposed: boolean } } };
     const audit = await getJson(port, "/dashboard/audit") as { audit: { auditGroups: unknown[]; summary: { noSecretsExposed: boolean } } };
@@ -207,6 +213,44 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(secretBackend.secretBackend.blockers.length > 0, true);
     assert.equal(secretBackend.secretBackend.noSecretStatus.noSecretsExposed, true);
     assert.equal(secretBackend.secretBackend.noSecretStatus.envValuesExposed, false);
+    assert.equal(secretBackendDecision.secretBackendDecision.summary.recommendedBackend, "vault");
+    assert.equal(secretBackendDecision.secretBackendDecision.summary.productionSecretBackendImplemented, false);
+    assert.equal(secretBackendDecision.secretBackendDecision.summary.envFallbackProductionAllowed, false);
+    assert.equal(secretBackendDecision.secretBackendDecision.summary.externalCallsEnabled, false);
+    assert.equal(secretBackendDecision.secretBackendDecision.criteria.length > 0, true);
+    assert.equal(secretBackendDecision.secretBackendDecision.scores.length > 0, true);
+    assert.equal(secretBackendDecision.secretBackendDecision.implementationScopes.length > 0, true);
+    assert.equal(secretBackendDecision.secretBackendDecision.providerMappings.length > 0, true);
+    assert.equal(secretBackendDecision.secretBackendDecision.noSecretStatus.noSecretsExposed, true);
+    assert.equal(secretBackendDecision.secretBackendDecision.noSecretStatus.envValuesExposed, false);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.summary.selectedProvider, "mock");
+    assert.equal(vaultSecretBackend.vaultSecretBackend.summary.vaultProviderEnabled, false);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.summary.productionSecretBackendImplemented, false);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.config.vaultAddressConfigured, false);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.config.vaultTokenConfigured, false);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.health.clientKind, "disabled");
+    assert.equal(vaultSecretBackend.vaultSecretBackend.health.liveCallAttempted, false);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.checks.length > 0, true);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.noSecretStatus.noSecretsExposed, true);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.noSecretStatus.noEnvValuesExposed, true);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.noSecretStatus.vaultTokenExposed, false);
+    assert.equal(vaultSecretBackend.vaultSecretBackend.noSecretStatus.vaultSecretValueExposed, false);
+    assert.equal(vaultIntegration.vaultIntegration.summary.productionReady, false);
+    assert.equal(vaultIntegration.vaultIntegration.summary.defaultLiveTestsSkipped, true);
+    assert.equal(vaultIntegration.vaultIntegration.summary.vaultCallsInDefaultTests, false);
+    assert.equal(vaultIntegration.vaultIntegration.testCases.length > 0, true);
+    assert.equal(vaultIntegration.vaultIntegration.safetyChecks.length > 0, true);
+    assert.equal(vaultIntegration.vaultIntegration.gateStatus.vaultAddressConfigured, false);
+    assert.equal(vaultIntegration.vaultIntegration.gateStatus.vaultTokenConfigured, false);
+    assert.equal(vaultIntegration.vaultIntegration.gateStatus.rawPathReturned, false);
+    assert.equal(vaultIntegration.vaultIntegration.operationPolicy.noWrite, true);
+    assert.equal(vaultIntegration.vaultIntegration.operationPolicy.noDelete, true);
+    assert.equal(vaultIntegration.vaultIntegration.operationPolicy.noRotate, true);
+    assert.equal(vaultIntegration.vaultIntegration.operationPolicy.noBroadList, true);
+    assert.equal(vaultIntegration.vaultIntegration.noSecretStatus.noSecretsExposed, true);
+    assert.equal(vaultIntegration.vaultIntegration.noSecretStatus.envValuesExposed, false);
+    assert.equal(vaultIntegration.vaultIntegration.noSecretStatus.vaultTokenExposed, false);
+    assert.equal(vaultIntegration.vaultIntegration.noSecretStatus.vaultSecretValueExposed, false);
     assert.equal(staging.staging.summary.productionReady, false);
     assert.equal(staging.staging.summary.stagingDeployed, false);
     assert.equal(staging.staging.summary.remoteMergeForbidden, true);
@@ -217,6 +261,49 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(staging.staging.rollbackCriteria.length > 0, true);
     assert.equal(staging.staging.noSecretStatus.noSecretsExposed, true);
     assert.equal(staging.staging.noSecretStatus.envValuesExposed, false);
+    assert.equal(stagingDryRun.stagingDryRun.summary.productionReady, false);
+    assert.equal(stagingDryRun.stagingDryRun.summary.stagingDeployed, false);
+    assert.equal(stagingDryRun.stagingDryRun.summary.deploymentExecuted, false);
+    assert.equal(stagingDryRun.stagingDryRun.summary.externalCallsEnabled, false);
+    assert.equal(stagingDryRun.stagingDryRun.summary.remoteIntegrationTestsExecuted, false);
+    assert.equal(stagingDryRun.stagingDryRun.sources.length > 0, true);
+    assert.equal(stagingDryRun.stagingDryRun.requiredChecks.length > 0, true);
+    assert.equal(stagingDryRun.stagingDryRun.blockers.length > 0, true);
+    assert.equal(stagingDryRun.stagingDryRun.skippedIntegrationProfiles.length > 0, true);
+    assert.equal(stagingDryRun.stagingDryRun.noSecretStatus.noSecretsExposed, true);
+    assert.equal(stagingDryRun.stagingDryRun.noSecretStatus.envValuesExposed, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.summary.productionReady, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.summary.stagingDeployed, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.summary.releaseCreated, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.summary.gitTagCreated, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.summary.githubReleaseCreated, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.summary.deploymentExecuted, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.summary.externalCallsEnabled, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.summary.remoteIntegrationTestsExecuted, false);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.requiredGates.length > 0, true);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.blockers.length > 0, true);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.signoffs.length > 0, true);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.releaseNoteRequirements.length > 0, true);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.rollbackChecklist.length > 0, true);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.skippedTests.length > 0, true);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.noSecretStatus.noSecretsExposed, true);
+    assert.equal(stagingReleaseCandidate.stagingReleaseCandidate.noSecretStatus.envValuesExposed, false);
+    assert.equal(stagingExecution.stagingExecution.summary.productionReady, false);
+    assert.equal(stagingExecution.stagingExecution.summary.stagingDeployed, false);
+    assert.equal(stagingExecution.stagingExecution.summary.deploymentExecuted, false);
+    assert.equal(stagingExecution.stagingExecution.summary.releaseCreated, false);
+    assert.equal(stagingExecution.stagingExecution.summary.gitTagCreated, false);
+    assert.equal(stagingExecution.stagingExecution.summary.externalCallsEnabled, false);
+    assert.equal(stagingExecution.stagingExecution.summary.remoteIntegrationTestsExecuted, false);
+    assert.equal(stagingExecution.stagingExecution.summary.goNoGoStatus, "not_ready");
+    assert.equal(stagingExecution.stagingExecution.steps.length > 0, true);
+    assert.equal(stagingExecution.stagingExecution.requiredGates.length > 0, true);
+    assert.equal(stagingExecution.stagingExecution.blockers.length > 0, true);
+    assert.equal(stagingExecution.stagingExecution.pendingSignoffs.length > 0, true);
+    assert.equal(stagingExecution.stagingExecution.optionalIntegrationDecisions.length > 0, true);
+    assert.equal(stagingExecution.stagingExecution.rollbackSteps.length > 0, true);
+    assert.equal(stagingExecution.stagingExecution.noSecretStatus.noSecretsExposed, true);
+    assert.equal(stagingExecution.stagingExecution.noSecretStatus.envValuesExposed, false);
     assert.equal(cicd.cicd.summary.productionReady, false);
     assert.equal(cicd.cicd.summary.stagingDeployed, false);
     assert.equal(cicd.cicd.summary.activeWorkflowCreated, false);
@@ -231,7 +318,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(observability.observability.noSecretStatus.noSecretsExposed, true);
     assert.equal(audit.audit.auditGroups.length > 0, true);
     assert.equal(audit.audit.summary.noSecretsExposed, true);
-    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, githubAppIntegration, llm, llmIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, readiness, database, secretBackend, staging, cicd, observability, audit }), false);
+    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, githubAppIntegration, llm, llmIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, vaultIntegration, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit }), false);
   });
 });
 
@@ -277,7 +364,13 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
     ["/dashboard/readiness", { readiness: demo.readiness }],
     ["/dashboard/database", { database: demo.database }],
     ["/dashboard/secret-backend", { secretBackend: demo.secretBackend }],
+    ["/dashboard/secret-backend-decision", { secretBackendDecision: demo.secretBackendDecision }],
+    ["/dashboard/vault-secret-backend", { vaultSecretBackend: demo.vaultSecretBackend }],
+    ["/dashboard/vault-integration", { vaultIntegration: demo.vaultIntegration }],
     ["/dashboard/staging", { staging: demo.staging }],
+    ["/dashboard/staging-dry-run", { stagingDryRun: demo.stagingDryRun }],
+    ["/dashboard/staging-rc", { stagingReleaseCandidate: demo.stagingReleaseCandidate }],
+    ["/dashboard/staging-execution", { stagingExecution: demo.stagingExecution }],
     ["/dashboard/ci-cd", { cicd: demo.cicd }],
     ["/dashboard/observability", { observability: demo.observability }],
     ["/dashboard/audit", { audit: demo.audit }]
@@ -331,7 +424,12 @@ test("dashboard renderer consumes read models and preserves static demo fallback
   assert.equal(html.includes("Production Readiness"), true);
   assert.equal(html.includes("Database Operations"), true);
   assert.equal(html.includes("Secret Backend Migration"), true);
+  assert.equal(html.includes("Production Secret Backend Decision"), true);
+  assert.equal(html.includes("Vault Integration Tests"), true);
   assert.equal(html.includes("Staging Deployment Profile"), true);
+  assert.equal(html.includes("Staging Deployment Dry-run"), true);
+  assert.equal(html.includes("Staging Release Candidate Checklist"), true);
+  assert.equal(html.includes("Staging Deployment Execution Plan"), true);
   assert.equal(html.includes("Staging CI/CD Pipeline"), true);
   assert.equal(html.includes("Observability"), true);
   assert.equal(html.includes("credential cache paths redacted"), true);

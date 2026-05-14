@@ -4,6 +4,7 @@ import type { PolicyDecision } from "@aichestra/policy";
 export type SecretProviderKind =
   | "mock"
   | "env"
+  | "vault"
   | "vault_future"
   | "aws_secrets_manager_future"
   | "gcp_secret_manager_future"
@@ -126,7 +127,22 @@ export type SecretAuditEventType =
   | "credential_env_key_not_allowlisted"
   | "credential_legacy_env_fallback_used"
   | "credential_cache_access_denied"
-  | "credential_value_redacted";
+  | "credential_value_redacted"
+  | "vault_secret_provider_selected"
+  | "vault_config_validated"
+  | "vault_config_missing"
+  | "vault_path_allowlist_checked"
+  | "vault_path_not_allowlisted"
+  | "vault_secret_resolution_requested"
+  | "vault_secret_resolution_auth_denied"
+  | "vault_secret_resolution_policy_denied"
+  | "vault_secret_resolution_allowed"
+  | "vault_secret_resolution_missing"
+  | "vault_secret_resolution_forbidden"
+  | "vault_secret_resolution_unavailable"
+  | "vault_secret_value_redacted"
+  | "vault_integration_test_skipped"
+  | "vault_integration_test_ready";
 
 export type CredentialPurpose =
   | "github_api_call"
@@ -182,6 +198,96 @@ export type EnvSecretProviderConfig = {
   enabled: boolean;
   allowedEnvKeys: string[];
   allowedEnvKeyCount: number;
+};
+
+export type SecretBackendProviderSelection = "mock" | "env" | "vault";
+
+export type VaultAuthMethod = "token" | "approle_future";
+
+export type VaultDataShape = "single_key" | "full_object";
+
+export type VaultConfigStatus = "disabled" | "missing_config" | "ready" | "blocked";
+
+export type VaultSecretProviderConfig = {
+  selectedProvider: SecretBackendProviderSelection;
+  vaultProviderEnabled: boolean;
+  vaultAddressConfigured: boolean;
+  vaultNamespaceConfigured: boolean;
+  vaultKvMount: string;
+  vaultAuthMethod: VaultAuthMethod;
+  vaultTokenConfigured: boolean;
+  vaultTokenSecretRefConfigured: boolean;
+  vaultAllowedPathPrefixes: string[];
+  vaultAllowedPathPrefixCount: number;
+  vaultIntegrationTestsEnabled: boolean;
+  requestTimeoutMs: number;
+  liveUsageReady: boolean;
+  configStatus: VaultConfigStatus;
+  missingConfig: string[];
+  productionSecretBackendImplemented: false;
+  envFallbackProductionAllowed: false;
+  containsSecretMaterial: false;
+};
+
+export type VaultSecretRefMetadata = {
+  vaultMount?: string;
+  vaultPath?: string;
+  vaultKey?: string;
+  vaultVersion?: number;
+  vaultNamespace?: string;
+  vaultTransitWrapped?: boolean;
+  dataShape?: VaultDataShape;
+  description?: string;
+};
+
+export type VaultClientKind = "disabled" | "mock" | "gated_http";
+
+export type VaultClientHealthStatus = "disabled" | "ready" | "missing_config" | "unavailable" | "error";
+
+export type VaultClientHealth = {
+  clientKind: VaultClientKind;
+  status: VaultClientHealthStatus;
+  configStatus: VaultConfigStatus;
+  vaultProviderEnabled: boolean;
+  vaultAddressConfigured: boolean;
+  vaultNamespaceConfigured: boolean;
+  vaultAuthMethod: VaultAuthMethod;
+  allowedPathPrefixCount: number;
+  integrationTestsEnabled: boolean;
+  liveCallAttempted: boolean;
+  containsSecretMaterial: false;
+  sanitizedError?: string;
+};
+
+export type VaultKvReadRequest = {
+  mount: string;
+  path: string;
+  key?: string;
+  version?: number;
+  namespace?: string;
+  timeoutMs?: number;
+  dataShape: VaultDataShape;
+  metadata?: Record<string, unknown>;
+};
+
+export type VaultKvReadStatus = "found" | "missing" | "forbidden" | "unavailable" | "error";
+
+export type VaultKvReadResult = {
+  status: VaultKvReadStatus;
+  value?: string;
+  dataShape: VaultDataShape;
+  version?: number;
+  metadata: Record<string, unknown>;
+  errorCode?: string;
+  sanitizedError?: string;
+};
+
+export type VaultSecretProviderResolveResult = {
+  ok: boolean;
+  status: CredentialResolutionStatus;
+  value?: string;
+  reason?: string;
+  metadata: Record<string, unknown>;
 };
 
 export type SandboxKind = "none" | "local_temp_workspace" | "container_future" | "firecracker_future" | "kubernetes_future";
@@ -330,7 +436,7 @@ export type SecurityAuditEvent = {
   createdAt: Date;
 };
 
-export type SecretManagerKind = "mock" | "mock_with_env_secret_provider";
+export type SecretManagerKind = "mock" | "mock_with_env_secret_provider" | "mock_with_vault_secret_provider" | "mock_with_env_and_vault_secret_provider";
 
 export type SecretManager = {
   getManagerKind(): SecretManagerKind;
