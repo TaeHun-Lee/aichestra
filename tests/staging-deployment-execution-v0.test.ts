@@ -1,15 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 import { createApiServer } from "@aichestra/api";
 import { createSeededStore } from "@aichestra/db";
-import { createDeploymentReadinessService, type StagingHumanSignoffEvidence, type StagingReleaseCandidateSignoffRole } from "@aichestra/deployment-readiness";
+import {
+  captureLocalStagingSignoffScope,
+  createDeploymentReadinessService,
+  createStagingSignoffScopeSnapshot,
+  type StagingHumanSignoffEvidence,
+  type StagingReleaseCandidateSignoffRole,
+  type StagingSignoffScopeSnapshot
+} from "@aichestra/deployment-readiness";
 import { DemoDashboardDataProvider } from "../apps/web/lib/dashboard-data-provider.ts";
 import { createWebServer } from "../apps/web/src/main.ts";
 import { renderDashboardHtml } from "../apps/web/src/render.ts";
 
 const fixedNow = new Date("2026-05-14T00:00:00.000Z");
+const stagingSignoffRoles: StagingReleaseCandidateSignoffRole[] = [
+  "engineering_owner",
+  "platform_owner",
+  "security_reviewer",
+  "product_owner",
+  "qa_reviewer",
+  "release_manager"
+];
+const fixedScope = createStagingSignoffScopeSnapshot({
+  reviewedCommitSha: "4056ac7ddb31d63687d5474ba39104d3969371d7",
+  reviewedBranch: "codex/codex-work",
+  scopeCapturedAt: fixedNow.toISOString()
+});
 
 function hasSecretOrEnvValue(value: unknown): boolean {
   const text = JSON.stringify(value);
@@ -129,12 +153,121 @@ function humanSignoff(
       "docs/roadmaps/staging-deployment-execution/signoff-evidence-checklist-v0.md",
       "docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md"
     ],
+    reviewedCommitSha: fixedScope.reviewedCommitSha,
+    reviewedBranch: fixedScope.reviewedBranch,
+    reviewedScopeMethod: fixedScope.reviewedScopeMethod,
+    reviewedDiffScope: fixedScope.reviewedDiffScope,
+    scopeCapturedAt: fixedScope.scopeCapturedAt,
+    scopeEvidencePath: fixedScope.scopeEvidencePath,
+    validationEvidencePaths: fixedScope.validationEvidencePaths,
     signatureMethod: "recorded_human_evidence",
     evidenceSource: "test fixture explicit evidence",
     metadata: { fixture: true },
     ...patch
   };
 }
+
+function signoffScopePatch(scope: StagingSignoffScopeSnapshot): Partial<StagingHumanSignoffEvidence> {
+  return {
+    reviewedCommitSha: scope.reviewedCommitSha,
+    reviewedBranch: scope.reviewedBranch,
+    reviewedScopeMethod: scope.reviewedScopeMethod,
+    reviewedDiffScope: scope.reviewedDiffScope,
+    scopeCapturedAt: scope.scopeCapturedAt,
+    scopeEvidencePath: scope.scopeEvidencePath,
+    validationEvidencePaths: scope.validationEvidencePaths
+  };
+}
+
+function withoutReviewedScope(): Partial<StagingHumanSignoffEvidence> {
+  return {
+    reviewedCommitSha: undefined,
+    reviewedBranch: undefined,
+    reviewedScopeMethod: undefined,
+    reviewedDiffScope: undefined,
+    scopeCapturedAt: undefined,
+    scopeEvidencePath: undefined,
+    validationEvidencePaths: undefined
+  };
+}
+
+function runGit(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function createLocalGitFixture(): string {
+  const repo = mkdtempSync(path.join(os.tmpdir(), "aichestra-signoff-scope-"));
+  runGit(repo, ["init", "-b", "main"]);
+  writeFileSync(path.join(repo, "README.md"), "initial\n", "utf8");
+  runGit(repo, ["add", "README.md"]);
+  runGit(repo, ["-c", "user.name=Aichestra Test", "-c", "user.email=test@example.invalid", "commit", "-m", "initial"]);
+  return repo;
+}
+
+test("clean worktree scope capture uses commit SHA scope", async (t) => {
+  const repo = createLocalGitFixture();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+
+  const scope = await captureLocalStagingSignoffScope({ cwd: repo, capturedAt: fixedNow });
+
+  assert.equal(scope.reviewedCommitSha.length, 40);
+  assert.equal(scope.reviewedBranch, "main");
+  assert.equal(scope.reviewedScopeMethod, "commit_sha");
+  assert.equal(scope.reviewedDiffScope.worktreeStatus, "clean");
+  assert.deepEqual(scope.reviewedDiffScope.modifiedFiles, []);
+  assert.deepEqual(scope.reviewedDiffScope.untrackedFiles, []);
+  assert.equal(scope.scopeCapturedAt, fixedNow.toISOString());
+  assert.match(scope.reviewedDiffScope.diffScopeHash ?? "", /^sha256:[a-f0-9]{64}$/);
+  assert.equal(hasSecretOrEnvValue(scope), false);
+});
+
+test("dirty worktree scope capture uses explicit diff scope", async (t) => {
+  const repo = createLocalGitFixture();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(path.join(repo, "README.md"), "changed\n", "utf8");
+
+  const scope = await captureLocalStagingSignoffScope({ cwd: repo, capturedAt: fixedNow });
+
+  assert.equal(scope.reviewedScopeMethod, "explicit_diff_scope");
+  assert.equal(scope.reviewedDiffScope.worktreeStatus, "dirty");
+  assert.deepEqual(scope.reviewedDiffScope.modifiedFiles, ["README.md"]);
+  assert.deepEqual(scope.reviewedDiffScope.untrackedFiles, []);
+  assert.equal(scope.reviewedDiffScope.diffNameStatus?.some((line) => line.includes("README.md")), true);
+  assert.match(scope.reviewedDiffScope.diffScopeHash ?? "", /^sha256:[a-f0-9]{64}$/);
+  assert.equal(hasSecretOrEnvValue(scope), false);
+});
+
+test("untracked file scope capture records explicit diff scope without file contents", async (t) => {
+  const repo = createLocalGitFixture();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  writeFileSync(path.join(repo, "local-secret-note.txt"), "AICHESTRA_LLM_API_KEY=sk-staging-secret\n", "utf8");
+
+  const scope = await captureLocalStagingSignoffScope({ cwd: repo, capturedAt: fixedNow });
+
+  assert.equal(scope.reviewedScopeMethod, "explicit_diff_scope");
+  assert.equal(scope.reviewedDiffScope.worktreeStatus, "dirty");
+  assert.deepEqual(scope.reviewedDiffScope.modifiedFiles, []);
+  assert.deepEqual(scope.reviewedDiffScope.untrackedFiles, ["local-secret-note.txt"]);
+  assert.equal(JSON.stringify(scope).includes("sk-staging-secret"), false);
+  assert.equal(hasSecretOrEnvValue(scope), false);
+});
+
+test("scope capture redacts credential cache paths", async (t) => {
+  const repo = createLocalGitFixture();
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  mkdirSync(path.join(repo, ".codex"), { recursive: true });
+  writeFileSync(path.join(repo, ".codex", "auth.json"), "{\"token\":\"sk-staging-secret\"}\n", "utf8");
+
+  const scope = await captureLocalStagingSignoffScope({ cwd: repo, capturedAt: fixedNow });
+  const serialized = JSON.stringify(scope);
+
+  assert.equal(scope.reviewedScopeMethod, "explicit_diff_scope");
+  assert.equal(scope.reviewedDiffScope.untrackedFiles.includes("[redacted-credential-cache-path]"), true);
+  assert.equal(serialized.includes(".codex"), false);
+  assert.equal(serialized.includes("auth.json"), false);
+  assert.equal(serialized.includes("sk-staging-secret"), false);
+  assert.equal(hasSecretOrEnvValue(scope), false);
+});
 
 test("staging execution models expose plan, steps, gates, go/no-go, rollback, and summary safely", () => {
   const service = createDeploymentReadinessService({ now: () => fixedNow });
@@ -311,17 +444,9 @@ test("staging signoff collection counts only explicit human evidence and keeps m
 });
 
 test("complete real human signoff evidence updates counts without executing deployment", () => {
-  const roles: StagingReleaseCandidateSignoffRole[] = [
-    "engineering_owner",
-    "platform_owner",
-    "security_reviewer",
-    "product_owner",
-    "qa_reviewer",
-    "release_manager"
-  ];
   const service = createDeploymentReadinessService({
     stagingDeploymentExecutionOptions: {
-      humanSignoffs: Object.fromEntries(roles.map((role) => [role, humanSignoff(role, "approved")])) as Partial<Record<StagingReleaseCandidateSignoffRole, StagingHumanSignoffEvidence>>
+      humanSignoffs: Object.fromEntries(stagingSignoffRoles.map((role) => [role, humanSignoff(role, "approved")])) as Partial<Record<StagingReleaseCandidateSignoffRole, StagingHumanSignoffEvidence>>
     },
     now: () => fixedNow
   });
@@ -343,6 +468,104 @@ test("complete real human signoff evidence updates counts without executing depl
   assert.equal(hasSecretOrEnvValue({ decision, summary }), false);
 });
 
+test("scope-less human approvals remain collected but require scope revalidation", () => {
+  const service = createDeploymentReadinessService({
+    stagingDeploymentExecutionOptions: {
+      humanSignoffs: Object.fromEntries(stagingSignoffRoles.map((role) => [
+        role,
+        humanSignoff(role, "approved", withoutReviewedScope())
+      ])) as Partial<Record<StagingReleaseCandidateSignoffRole, StagingHumanSignoffEvidence>>
+    },
+    now: () => fixedNow
+  });
+
+  const decision = service.getStagingDeploymentGoNoGoDecision();
+  const summary = service.getStagingDeploymentExecutionSummary();
+  const scopeReview = service.getStagingHumanSignoffScopeReview(fixedScope);
+
+  assert.equal(decision.pendingApprovals.length, 0);
+  assert.equal(summary.approvedSignoffCount, 6);
+  assert.equal(summary.pendingSignoffCount, 0);
+  assert.equal(summary.signoffStatus, "approved");
+  assert.equal(summary.actualDeploymentBlocked, true);
+  assert.equal(scopeReview.status, "stale");
+  assert.equal(scopeReview.staleRoles.length, 6);
+  assert.equal(scopeReview.approvalAuditCanPass, false);
+  assert.equal(scopeReview.actualDeploymentBlocked, true);
+  assert.equal(hasSecretOrEnvValue({ decision, summary, scopeReview }), false);
+});
+
+test("scope mismatch keeps staging deployment blocked and marks revalidation stale", () => {
+  const reviewedScope = createStagingSignoffScopeSnapshot({
+    reviewedCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    reviewedBranch: "main",
+    scopeCapturedAt: fixedNow.toISOString()
+  });
+  const currentScope = createStagingSignoffScopeSnapshot({
+    reviewedCommitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    reviewedBranch: "main",
+    modifiedFiles: ["packages/deployment-readiness/src/service.ts"],
+    diffNameStatus: ["M\tpackages/deployment-readiness/src/service.ts"],
+    scopeCapturedAt: fixedNow.toISOString()
+  });
+  const service = createDeploymentReadinessService({
+    stagingDeploymentExecutionOptions: {
+      humanSignoffs: Object.fromEntries(stagingSignoffRoles.map((role) => [
+        role,
+        humanSignoff(role, "approved", signoffScopePatch(reviewedScope))
+      ])) as Partial<Record<StagingReleaseCandidateSignoffRole, StagingHumanSignoffEvidence>>
+    },
+    now: () => fixedNow
+  });
+
+  const review = service.getStagingHumanSignoffScopeReview(currentScope);
+  const summary = service.getStagingDeploymentExecutionSummary();
+
+  assert.equal(review.status, "stale");
+  assert.equal(review.staleRoles.length, 6);
+  assert.equal(review.pendingRoles.length, 0);
+  assert.equal(review.approvalAuditCanPass, false);
+  assert.equal(review.actualDeploymentBlocked, true);
+  assert.equal(summary.actualDeploymentBlocked, true);
+  assert.equal(summary.productionReady, false);
+  assert.equal(summary.stagingDeployed, false);
+  assert.equal(hasSecretOrEnvValue({ review, summary }), false);
+});
+
+test("all six roles must have matching scope before approval audit can pass", () => {
+  const currentScope = createStagingSignoffScopeSnapshot({
+    reviewedCommitSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    reviewedBranch: "main",
+    modifiedFiles: ["apps/api/src/main.ts"],
+    diffNameStatus: ["M\tapps/api/src/main.ts"],
+    scopeCapturedAt: fixedNow.toISOString()
+  });
+  const service = createDeploymentReadinessService({
+    stagingDeploymentExecutionOptions: {
+      humanSignoffs: Object.fromEntries(stagingSignoffRoles.map((role) => [
+        role,
+        humanSignoff(role, "approved", signoffScopePatch(currentScope))
+      ])) as Partial<Record<StagingReleaseCandidateSignoffRole, StagingHumanSignoffEvidence>>
+    },
+    now: () => fixedNow
+  });
+
+  const review = service.getStagingHumanSignoffScopeReview(currentScope);
+  const summary = service.getStagingDeploymentExecutionSummary();
+
+  assert.equal(review.status, "matched");
+  assert.equal(review.matchingRoleCount, 6);
+  assert.equal(review.pendingRoles.length, 0);
+  assert.equal(review.staleRoles.length, 0);
+  assert.equal(review.rejectedRoles.length, 0);
+  assert.equal(review.approvalAuditCanPass, true);
+  assert.equal(summary.approvedSignoffCount, 6);
+  assert.equal(summary.actualDeploymentBlocked, true);
+  assert.equal(summary.productionReady, false);
+  assert.equal(summary.stagingDeployed, false);
+  assert.equal(hasSecretOrEnvValue({ review, summary }), false);
+});
+
 test("staging signoff collection page records explicit approvals and rejections safely", async () => {
   await withApiServer(async (port) => {
     const page = await getText(port, "/staging/signoffs");
@@ -350,6 +573,8 @@ test("staging signoff collection page records explicit approvals and rejections 
     assert.equal(page.contentType.includes("text/html"), true);
     assert.equal(page.body.includes("Staging Human Signoff Collection"), true);
     assert.equal(page.body.includes("Record Signoff"), true);
+    assert.equal(page.body.includes("Current Repository Scope"), true);
+    assert.equal(page.body.includes("reviewedScopeMethod="), true);
     assert.equal(page.body.includes("actualDeploymentBlocked=true"), true);
 
     const incomplete = await postJson(port, "/staging/signoffs/evidence", {
@@ -370,10 +595,19 @@ test("staging signoff collection page records explicit approvals and rejections 
       notes: "Reviewed staging signoff pack."
     });
     assert.equal(approval.statusCode, 201);
+    assert.equal(typeof (approval.body.evidence as Record<string, unknown>).reviewedCommitSha, "string");
+    assert.equal(typeof (approval.body.evidence as Record<string, unknown>).reviewedBranch, "string");
+    assert.equal(["commit_sha", "explicit_diff_scope"].includes(String((approval.body.evidence as Record<string, unknown>).reviewedScopeMethod)), true);
+    assert.equal(typeof (approval.body.evidence as Record<string, unknown>).scopeCapturedAt, "string");
+    assert.equal((approval.body.evidence as Record<string, unknown>).scopeEvidencePath, "docs/roadmaps/staging-deployment-execution/signoff-scope-evidence-v0.md");
+    assert.equal(Array.isArray((approval.body.evidence as Record<string, unknown>).validationEvidencePaths), true);
     assert.equal((approval.body.summary as Record<string, unknown>).approvedSignoffCount, 1);
     assert.equal((approval.body.summary as Record<string, unknown>).pendingSignoffCount, 5);
     assert.equal((approval.body.summary as Record<string, unknown>).actualDeploymentBlocked, true);
     assert.equal((approval.body.decision as Record<string, unknown>).status, "not_ready");
+    assert.equal((approval.body.scopeReview as Record<string, unknown>).status, "pending");
+    assert.equal((approval.body.scopeReview as Record<string, unknown>).matchingRoleCount, 1);
+    assert.equal((approval.body.scopeReview as Record<string, unknown>).actualDeploymentBlocked, true);
 
     const rejection = await postJson(port, "/staging/signoffs/evidence", {
       role: "security_reviewer",
@@ -395,6 +629,8 @@ test("staging signoff collection page records explicit approvals and rejections 
     assert.equal((evidence.body.evidence as unknown[]).length, 2);
     assert.equal(((evidence.body.summary as Record<string, unknown>).approvedSignoffCount), 1);
     assert.equal(((evidence.body.summary as Record<string, unknown>).rejectedSignoffCount), 1);
+    assert.equal(typeof ((evidence.body.currentScope as Record<string, unknown>).reviewedCommitSha), "string");
+    assert.equal((evidence.body.scopeReview as Record<string, unknown>).actualDeploymentBlocked, true);
 
     const summary = await getJson(port, "/readiness/staging-execution/summary");
     assert.equal((summary.body.summary as Record<string, unknown>).approvedSignoffCount, 1);
@@ -411,17 +647,22 @@ test("web server exposes staging signoff collection on the dashboard port", asyn
     assert.equal(page.contentType.includes("text/html"), true);
     assert.equal(page.body.includes("Staging Human Signoff Collection"), true);
     assert.equal(page.body.includes("Record Signoff"), true);
+    assert.equal(page.body.includes("Current Repository Scope"), true);
+    assert.equal(page.body.includes("reviewedScopeMethod="), true);
     assert.equal(page.body.includes("actualDeploymentBlocked=true"), true);
 
     const approval = await postJson(port, "/staging/signoffs/evidence", {
       role: "engineering_owner",
       status: "approved",
       approverName: "Engineering Owner",
-      signatureMethod: "typed_name",
       reviewedEvidence: ["docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md"],
       notes: "Reviewed through the web dashboard signoff page."
     });
     assert.equal(approval.statusCode, 201);
+    assert.equal(typeof (approval.body.evidence as Record<string, unknown>).reviewedCommitSha, "string");
+    assert.equal(["commit_sha", "explicit_diff_scope"].includes(String((approval.body.evidence as Record<string, unknown>).reviewedScopeMethod)), true);
+    assert.equal((approval.body.evidence as Record<string, unknown>).signatureMethod, "typed_name");
+    assert.equal((approval.body.evidence as Record<string, unknown>).scopeEvidencePath, "docs/roadmaps/staging-deployment-execution/signoff-scope-evidence-v0.md");
     assert.equal((approval.body.summary as Record<string, unknown>).approvedSignoffCount, 1);
     assert.equal((approval.body.summary as Record<string, unknown>).pendingSignoffCount, 5);
     assert.equal((approval.body.summary as Record<string, unknown>).actualDeploymentBlocked, true);
@@ -430,6 +671,7 @@ test("web server exposes staging signoff collection on the dashboard port", asyn
     assert.equal(evidence.statusCode, 200);
     assert.equal((evidence.body.evidence as unknown[]).length, 1);
     assert.equal((evidence.body.decision as Record<string, unknown>).status, "not_ready");
+    assert.equal((evidence.body.scopeReview as Record<string, unknown>).status, "pending");
     assert.equal(hasSecretOrEnvValue({ page, approval, evidence }), false);
   });
 });

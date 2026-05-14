@@ -74,6 +74,7 @@ import {
   defaultSecretLeasePolicies,
   defaultSecretRotationPlans
 } from "./catalog.ts";
+import { signoffEvidenceHasScope, signoffEvidenceScopeMatches } from "./signoff-scope.ts";
 import type {
   AuthProviderOption,
   AuthRbacMigrationPhase,
@@ -191,6 +192,9 @@ import type {
   StagingDeploymentStep,
   StagingHumanSignoffEvidence,
   StagingHumanSignoffStatus,
+  StagingSignoffReviewedDiffScope,
+  StagingSignoffScopeReview,
+  StagingSignoffScopeSnapshot,
   StagingDeploymentProfile,
   StagingDeploymentSummary,
   StagingReleaseCandidateBlocker,
@@ -362,7 +366,7 @@ function nonEmptyText(value: string | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function hasExplicitHumanSignoffEvidence(record: StagingHumanSignoffEvidence): boolean {
+function hasExplicitHumanDecisionEvidence(record: StagingHumanSignoffEvidence): boolean {
   if (record.status === "pending" || record.status === "waived") return false;
   const hasRequiredFields = nonEmptyText(record.approverName) &&
     nonEmptyText(record.signedAt) &&
@@ -379,6 +383,10 @@ function hasExplicitHumanSignoffEvidence(record: StagingHumanSignoffEvidence): b
   return true;
 }
 
+function hasExplicitHumanSignoffEvidence(record: StagingHumanSignoffEvidence): boolean {
+  return hasExplicitHumanDecisionEvidence(record) && signoffEvidenceHasScope(record);
+}
+
 function cleanText(value: string | undefined, maxLength = 1000): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -387,6 +395,20 @@ function cleanText(value: string | undefined, maxLength = 1000): string | undefi
 
 function cleanTextArray(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function cleanStagingSignoffDiffScope(scope: StagingHumanSignoffEvidence["reviewedDiffScope"]): StagingSignoffReviewedDiffScope | undefined {
+  if (scope === undefined) return undefined;
+  const worktreeStatus = scope.worktreeStatus === "clean" || scope.worktreeStatus === "dirty" ? scope.worktreeStatus : undefined;
+  if (worktreeStatus === undefined) return undefined;
+  return {
+    worktreeStatus,
+    modifiedFiles: cleanTextArray(scope.modifiedFiles ?? []).map((value) => value.slice(0, 500)),
+    untrackedFiles: cleanTextArray(scope.untrackedFiles ?? []).map((value) => value.slice(0, 500)),
+    diffNameStatus: cleanTextArray(scope.diffNameStatus ?? []).map((value) => value.slice(0, 1000)),
+    diffStat: cleanTextArray(scope.diffStat ?? []).map((value) => value.slice(0, 1000)),
+    diffScopeHash: cleanText(scope.diffScopeHash, 120)
+  };
 }
 
 function testSecretPathAllowedByPrefix(pathValue: string, prefix: string): boolean {
@@ -2975,6 +2997,69 @@ export class DeploymentReadinessService {
       .filter((evidence): evidence is StagingHumanSignoffEvidence => evidence !== undefined));
   }
 
+  getStagingHumanSignoffScopeReview(currentScope: StagingSignoffScopeSnapshot): StagingSignoffScopeReview {
+    const requiredRoles = this.stagingDeploymentExecutionPlan.requiredSignoffs;
+    const matchingRoles: StagingReleaseCandidateSignoffRole[] = [];
+    const pendingRoles: StagingReleaseCandidateSignoffRole[] = [];
+    const staleRoles: StagingReleaseCandidateSignoffRole[] = [];
+    const rejectedRoles: StagingReleaseCandidateSignoffRole[] = [];
+    const conditionalRoles: StagingReleaseCandidateSignoffRole[] = [];
+
+    for (const role of requiredRoles) {
+      const evidence = this.stagingHumanSignoffs[role];
+      if (evidence === undefined || !hasExplicitHumanDecisionEvidence(evidence)) {
+        pendingRoles.push(role);
+        continue;
+      }
+      if (evidence.status === "rejected") {
+        rejectedRoles.push(role);
+        continue;
+      }
+      if (!signoffEvidenceHasScope(evidence)) {
+        staleRoles.push(role);
+        continue;
+      }
+      if (!signoffEvidenceScopeMatches(evidence, currentScope)) {
+        staleRoles.push(role);
+        continue;
+      }
+      matchingRoles.push(role);
+      if (evidence.status === "conditionally_approved") conditionalRoles.push(role);
+    }
+
+    const status: StagingSignoffScopeReview["status"] = rejectedRoles.length > 0
+      ? "rejected"
+      : staleRoles.length > 0
+        ? "stale"
+        : pendingRoles.length > 0
+          ? "pending"
+          : "matched";
+
+    return clone({
+      status,
+      requiredRoleCount: requiredRoles.length,
+      matchingRoleCount: matchingRoles.length,
+      pendingRoles,
+      staleRoles,
+      rejectedRoles,
+      conditionalRoles,
+      currentScope,
+      actualDeploymentBlocked: true,
+      productionReady: false,
+      stagingDeployed: false,
+      approvalAuditCanPass: status === "matched",
+      metadata: {
+        scopeEvidencePath: currentScope.scopeEvidencePath,
+        reviewedScopeMethod: currentScope.reviewedScopeMethod,
+        currentDiffScopeHash: currentScope.reviewedDiffScope.diffScopeHash,
+        secretValuesReturned: false,
+        envValuesReturned: false,
+        rawDiffStored: false,
+        actualDeploymentAuthorized: false
+      }
+    });
+  }
+
   recordStagingHumanSignoffEvidence(input: StagingHumanSignoffEvidence): StagingHumanSignoffEvidence {
     const role = input.role;
     if (!this.stagingDeploymentExecutionPlan.requiredSignoffs.includes(role)) {
@@ -2983,6 +3068,9 @@ export class DeploymentReadinessService {
     if (input.status !== "approved" && input.status !== "rejected" && input.status !== "conditionally_approved") {
       throw new Error("Staging signoff status must be approved, rejected, or conditionally_approved.");
     }
+    const reviewedScopeMethod = input.reviewedScopeMethod === "commit_sha" || input.reviewedScopeMethod === "explicit_diff_scope"
+      ? input.reviewedScopeMethod
+      : undefined;
     const evidence: StagingHumanSignoffEvidence = {
       role,
       required: true,
@@ -2991,6 +3079,13 @@ export class DeploymentReadinessService {
       approverContact: cleanText(input.approverContact, 200),
       signedAt: cleanText(input.signedAt, 80) ?? this.now().toISOString(),
       reviewedEvidence: cleanTextArray(input.reviewedEvidence),
+      reviewedCommitSha: cleanText(input.reviewedCommitSha, 80),
+      reviewedBranch: cleanText(input.reviewedBranch, 200),
+      reviewedScopeMethod,
+      reviewedDiffScope: cleanStagingSignoffDiffScope(input.reviewedDiffScope),
+      scopeCapturedAt: cleanText(input.scopeCapturedAt, 80),
+      scopeEvidencePath: cleanText(input.scopeEvidencePath, 500),
+      validationEvidencePaths: cleanTextArray(input.validationEvidencePaths ?? []).map((value) => value.slice(0, 500)),
       conditions: cleanTextArray(input.conditions ?? []),
       notes: cleanText(input.notes, 2000),
       signatureMethod: cleanText(input.signatureMethod, 120),
@@ -3008,7 +3103,7 @@ export class DeploymentReadinessService {
       }
     };
     if (!hasExplicitHumanSignoffEvidence(evidence)) {
-      throw new Error("Staging signoff evidence is incomplete. Approver name, timestamp, signature method, reviewed evidence, and rejection reason or conditional terms when applicable are required.");
+      throw new Error("Staging signoff evidence is incomplete. Approver name, timestamp, signature method, reviewed evidence, reviewed repository scope, and rejection reason or conditional terms when applicable are required.");
     }
     this.stagingHumanSignoffs[role] = evidence;
     return clone(evidence);
@@ -4179,7 +4274,7 @@ export class DeploymentReadinessService {
     for (const role of requiredSignoffs) {
       const evidence = humanSignoffs[role];
       if (hasRealEvidenceInput) {
-        if (evidence === undefined || evidence.role !== role || evidence.required !== true || !hasExplicitHumanSignoffEvidence(evidence)) {
+        if (evidence === undefined || evidence.role !== role || evidence.required !== true || !hasExplicitHumanDecisionEvidence(evidence)) {
           pendingApprovals.push(role);
           if (evidence !== undefined && evidence.status !== "pending") invalidEvidenceRoles.push(role);
           continue;
@@ -4221,7 +4316,7 @@ export class DeploymentReadinessService {
       conditionalApprovals,
       rejectedApprovals,
       invalidEvidenceRoles,
-      realHumanEvidenceProvidedCount: Object.values(humanSignoffs).filter((evidence) => evidence !== undefined && hasExplicitHumanSignoffEvidence(evidence)).length,
+      realHumanEvidenceProvidedCount: Object.values(humanSignoffs).filter((evidence) => evidence !== undefined && hasExplicitHumanDecisionEvidence(evidence)).length,
       approvedSignoffCount: hasRealEvidenceInput ? approvedApprovals.length : 0,
       conditionalSignoffCount: hasRealEvidenceInput ? conditionalApprovals.length : 0,
       rejectedSignoffCount: hasRealEvidenceInput ? rejectedApprovals.length : 0,

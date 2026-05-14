@@ -1,13 +1,18 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
+  captureLocalStagingSignoffScope,
   createDeploymentReadinessService,
   stagingDeploymentExecutionSummaryToDto,
   stagingDeploymentGoNoGoDecisionToDto,
   stagingHumanSignoffEvidenceToDto,
+  stagingSignoffScopeEvidencePath,
+  stagingSignoffValidationEvidencePaths,
   type DeploymentReadinessService,
   type StagingHumanSignoffEvidence,
   type StagingHumanSignoffStatus,
-  type StagingReleaseCandidateSignoffRole
+  type StagingReleaseCandidateSignoffRole,
+  type StagingSignoffScopeReview,
+  type StagingSignoffScopeSnapshot
 } from "@aichestra/deployment-readiness";
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -25,6 +30,7 @@ const stagingSignoffEvidencePaths = [
   "docs/roadmaps/staging-deployment-execution/human-signoff-pack-v0.md",
   "docs/roadmaps/staging-deployment-execution/signoff-evidence-checklist-v0.md",
   "docs/roadmaps/staging-deployment-execution/signoff-decision-policy-v0.md",
+  stagingSignoffScopeEvidencePath,
   "docs/audits/2026-05-14-staging-go-no-go-audit-v0.md",
   "docs/audits/2026-05-14-staging-release-candidate-audit-v0-rerun.md",
   "docs/audits/staging-rc-evidence-pack-v0.md",
@@ -124,6 +130,18 @@ function containsRawSecretField(body: Record<string, unknown>): boolean {
   });
 }
 
+function scopeFilesHtml(files: string[]): string {
+  if (files.length === 0) return "<span>none</span>";
+  return `<ul>${files.map((file) => `<li><code>${htmlValue(file)}</code></li>`).join("")}</ul>`;
+}
+
+function scopeRoleStatus(role: StagingReleaseCandidateSignoffRole, review: StagingSignoffScopeReview): string {
+  if (review.rejectedRoles.includes(role)) return "rejected";
+  if (review.staleRoles.includes(role)) return "stale";
+  if (review.pendingRoles.includes(role)) return "pending";
+  return "matched";
+}
+
 function stagingSignoffRoleValue(value: unknown): StagingReleaseCandidateSignoffRole | undefined {
   return stagingSignoffRoles.includes(value as StagingReleaseCandidateSignoffRole)
     ? value as StagingReleaseCandidateSignoffRole
@@ -134,7 +152,11 @@ function stagingHumanSignoffStatusValue(value: unknown): StagingHumanSignoffStat
   return value === "approved" || value === "rejected" || value === "conditionally_approved" ? value : undefined;
 }
 
-function stagingHumanSignoffEvidenceFromBody(body: Record<string, unknown>, submittedAt: Date): { ok: true; evidence: StagingHumanSignoffEvidence } | { ok: false; error: string; message: string } {
+function stagingHumanSignoffEvidenceFromBody(
+  body: Record<string, unknown>,
+  submittedAt: Date,
+  currentScope: StagingSignoffScopeSnapshot
+): { ok: true; evidence: StagingHumanSignoffEvidence } | { ok: false; error: string; message: string } {
   const role = stagingSignoffRoleValue(body.role);
   const status = stagingHumanSignoffStatusValue(body.status);
   if (!role) return { ok: false, error: "invalid_signoff_role", message: "role must be a required staging signoff role." };
@@ -150,9 +172,16 @@ function stagingHumanSignoffEvidenceFromBody(body: Record<string, unknown>, subm
       approverContact: stringValue(body.approverContact),
       signedAt: stringValue(body.signedAt) ?? submittedAt.toISOString(),
       reviewedEvidence: reviewedEvidence.length > 0 ? reviewedEvidence : stagingSignoffEvidencePaths,
+      reviewedCommitSha: currentScope.reviewedCommitSha,
+      reviewedBranch: currentScope.reviewedBranch,
+      reviewedScopeMethod: currentScope.reviewedScopeMethod,
+      reviewedDiffScope: currentScope.reviewedDiffScope,
+      scopeCapturedAt: currentScope.scopeCapturedAt,
+      scopeEvidencePath: currentScope.scopeEvidencePath,
+      validationEvidencePaths: currentScope.validationEvidencePaths,
       conditions: textArrayFromUnknown(body.conditions),
       notes: stringValue(body.notes),
-      signatureMethod: stringValue(body.signatureMethod),
+      signatureMethod: stringValue(body.signatureMethod) ?? "typed_name",
       evidenceSource: stringValue(body.evidenceSource) ?? "staging_signoff_collection_ui",
       metadata: {
         submittedAt: submittedAt.toISOString(),
@@ -166,7 +195,12 @@ function stagingHumanSignoffEvidenceFromBody(body: Record<string, unknown>, subm
   };
 }
 
-function renderStagingSignoffCollectionHtml(readiness: DeploymentReadinessService, message?: { kind: "ok" | "error"; text: string }): string {
+function renderStagingSignoffCollectionHtml(
+  readiness: DeploymentReadinessService,
+  currentScope: StagingSignoffScopeSnapshot,
+  scopeReview: StagingSignoffScopeReview,
+  message?: { kind: "ok" | "error"; text: string }
+): string {
   const summary = readiness.getStagingDeploymentExecutionSummary();
   const decision = readiness.getStagingDeploymentGoNoGoDecision();
   const evidenceByRole = new Map(readiness.listStagingHumanSignoffEvidence().map((evidence) => [evidence.role, evidence]));
@@ -177,6 +211,7 @@ function renderStagingSignoffCollectionHtml(readiness: DeploymentReadinessServic
       <td>${htmlValue(evidence?.status ?? "pending")}</td>
       <td>${htmlValue(evidence?.approverName)}</td>
       <td>${htmlValue(evidence?.signedAt)}</td>
+      <td>${htmlValue(scopeRoleStatus(role, scopeReview))}</td>
       <td>${htmlValue(evidence?.signatureMethod)}</td>
       <td>${htmlValue(evidence?.notes)}</td>
     </tr>`;
@@ -222,7 +257,10 @@ function renderStagingSignoffCollectionHtml(readiness: DeploymentReadinessServic
     .notice.ok { border-color: #b8d9ca; background: #edf8f2; }
     .notice.error { border-color: #efb8b8; background: #fff0f0; }
     .safety { color: #596372; line-height: 1.45; }
-    @media (max-width: 860px) { .metrics, .grid { grid-template-columns: 1fr; } .topbar { align-items: flex-start; flex-direction: column; padding: 14px 0; } nav { flex-wrap: wrap; } }
+    code { overflow-wrap: anywhere; }
+    .scope-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+    .scope-lists ul { margin: 0; padding-left: 18px; color: #313844; }
+    @media (max-width: 860px) { .metrics, .grid, .scope-lists { grid-template-columns: 1fr; } .topbar { align-items: flex-start; flex-direction: column; padding: 14px 0; } nav { flex-wrap: wrap; } }
   </style>
 </head>
 <body>
@@ -244,11 +282,26 @@ function renderStagingSignoffCollectionHtml(readiness: DeploymentReadinessServic
       <div class="metric"><div class="label">Approved</div><div class="value">${htmlValue(summary.approvedSignoffCount)}</div></div>
       <div class="metric"><div class="label">Rejected</div><div class="value">${htmlValue(summary.rejectedSignoffCount)}</div></div>
     </div>
+    <section class="panel" style="margin-bottom:16px">
+      <h2>Current Repository Scope</h2>
+      <div class="safety">
+        HEAD=<code>${htmlValue(currentScope.reviewedCommitSha)}</code> /
+        branch=<code>${htmlValue(currentScope.reviewedBranch)}</code> /
+        worktree=${htmlValue(currentScope.reviewedDiffScope.worktreeStatus)} /
+        reviewedScopeMethod=${htmlValue(currentScope.reviewedScopeMethod)} /
+        scopeCapturedAt=${htmlValue(currentScope.scopeCapturedAt)} /
+        scopeRevalidation=${htmlValue(scopeReview.status)}
+      </div>
+      <div class="scope-lists">
+        <div><div class="label">Modified files</div>${scopeFilesHtml(currentScope.reviewedDiffScope.modifiedFiles)}</div>
+        <div><div class="label">Untracked files</div>${scopeFilesHtml(currentScope.reviewedDiffScope.untrackedFiles)}</div>
+      </div>
+    </section>
     <div class="grid">
       <section class="panel">
         <h2>Required Roles</h2>
         <table>
-          <thead><tr><th>Role</th><th>Status</th><th>Approver</th><th>Timestamp</th><th>Signature</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Role</th><th>Status</th><th>Approver</th><th>Timestamp</th><th>Scope</th><th>Signature</th><th>Notes</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </section>
@@ -295,6 +348,8 @@ function renderStagingSignoffCollectionHtml(readiness: DeploymentReadinessServic
         productionReady=${htmlValue(summary.productionReady)} /
         stagingDeployed=${htmlValue(summary.stagingDeployed)} /
         deploymentExecuted=${htmlValue(summary.deploymentExecuted)} /
+        scopeRevalidation=${htmlValue(scopeReview.status)} /
+        approvalAuditCanPass=${htmlValue(scopeReview.approvalAuditCanPass)} /
         approvalAuditRequired=${htmlValue(summary.metadata.approvalAuditRequired, "true")} /
         blockers=${htmlValue(decision.blockers)}
       </div>
@@ -311,14 +366,25 @@ export function createStagingSignoffRouteHandler(readiness: DeploymentReadinessS
     if (segments[0] !== "staging" || segments[1] !== "signoffs") return false;
 
     if (method === "GET" && segments.length === 2) {
-      sendHtml(response, 200, renderStagingSignoffCollectionHtml(readiness));
+      const currentScope = await captureLocalStagingSignoffScope({
+        scopeEvidencePath: stagingSignoffScopeEvidencePath,
+        validationEvidencePaths: stagingSignoffValidationEvidencePaths
+      });
+      const scopeReview = readiness.getStagingHumanSignoffScopeReview(currentScope);
+      sendHtml(response, 200, renderStagingSignoffCollectionHtml(readiness, currentScope, scopeReview));
       return true;
     }
     if (method === "GET" && segments.length === 3 && segments[2] === "evidence") {
+      const currentScope = await captureLocalStagingSignoffScope({
+        scopeEvidencePath: stagingSignoffScopeEvidencePath,
+        validationEvidencePaths: stagingSignoffValidationEvidencePaths
+      });
       sendJson(response, 200, {
         evidence: readiness.listStagingHumanSignoffEvidence().map(stagingHumanSignoffEvidenceToDto),
         summary: stagingDeploymentExecutionSummaryToDto(readiness.getStagingDeploymentExecutionSummary()),
-        decision: stagingDeploymentGoNoGoDecisionToDto(readiness.getStagingDeploymentGoNoGoDecision())
+        decision: stagingDeploymentGoNoGoDecisionToDto(readiness.getStagingDeploymentGoNoGoDecision()),
+        currentScope,
+        scopeReview: readiness.getStagingHumanSignoffScopeReview(currentScope)
       });
       return true;
     }
@@ -326,14 +392,40 @@ export function createStagingSignoffRouteHandler(readiness: DeploymentReadinessS
       const { body, formEncoded } = await readRequestBodyRecord(request);
       if (containsRawSecretField(body)) {
         const message = "Signoff evidence must not include raw secrets, tokens, env values, or credential-cache paths.";
-        if (formEncoded) sendHtml(response, 400, renderStagingSignoffCollectionHtml(readiness, { kind: "error", text: message }));
-        else sendJson(response, 400, { error: "raw_secret_material_rejected", message });
+        if (formEncoded) {
+          const currentScope = await captureLocalStagingSignoffScope({
+            scopeEvidencePath: stagingSignoffScopeEvidencePath,
+            validationEvidencePaths: stagingSignoffValidationEvidencePaths
+          });
+          sendHtml(response, 400, renderStagingSignoffCollectionHtml(
+            readiness,
+            currentScope,
+            readiness.getStagingHumanSignoffScopeReview(currentScope),
+            { kind: "error", text: message }
+          ));
+        } else {
+          sendJson(response, 400, { error: "raw_secret_material_rejected", message });
+        }
         return true;
       }
-      const parsed = stagingHumanSignoffEvidenceFromBody(body, new Date());
+      const submittedAt = new Date();
+      const currentScope = await captureLocalStagingSignoffScope({
+        capturedAt: submittedAt,
+        scopeEvidencePath: stagingSignoffScopeEvidencePath,
+        validationEvidencePaths: stagingSignoffValidationEvidencePaths
+      });
+      const parsed = stagingHumanSignoffEvidenceFromBody(body, submittedAt, currentScope);
       if (!parsed.ok) {
-        if (formEncoded) sendHtml(response, 400, renderStagingSignoffCollectionHtml(readiness, { kind: "error", text: parsed.message }));
-        else sendJson(response, 400, { error: parsed.error, message: parsed.message });
+        if (formEncoded) {
+          sendHtml(response, 400, renderStagingSignoffCollectionHtml(
+            readiness,
+            currentScope,
+            readiness.getStagingHumanSignoffScopeReview(currentScope),
+            { kind: "error", text: parsed.message }
+          ));
+        } else {
+          sendJson(response, 400, { error: parsed.error, message: parsed.message });
+        }
         return true;
       }
       try {
@@ -344,13 +436,23 @@ export function createStagingSignoffRouteHandler(readiness: DeploymentReadinessS
           sendJson(response, 201, {
             evidence: stagingHumanSignoffEvidenceToDto(evidence),
             summary: stagingDeploymentExecutionSummaryToDto(readiness.getStagingDeploymentExecutionSummary()),
-            decision: stagingDeploymentGoNoGoDecisionToDto(readiness.getStagingDeploymentGoNoGoDecision())
+            decision: stagingDeploymentGoNoGoDecisionToDto(readiness.getStagingDeploymentGoNoGoDecision()),
+            currentScope,
+            scopeReview: readiness.getStagingHumanSignoffScopeReview(currentScope)
           });
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Invalid staging signoff evidence.";
-        if (formEncoded) sendHtml(response, 400, renderStagingSignoffCollectionHtml(readiness, { kind: "error", text: message }));
-        else sendJson(response, 400, { error: "invalid_staging_signoff_evidence", message });
+        if (formEncoded) {
+          sendHtml(response, 400, renderStagingSignoffCollectionHtml(
+            readiness,
+            currentScope,
+            readiness.getStagingHumanSignoffScopeReview(currentScope),
+            { kind: "error", text: message }
+          ));
+        } else {
+          sendJson(response, 400, { error: "invalid_staging_signoff_evidence", message });
+        }
       }
       return true;
     }

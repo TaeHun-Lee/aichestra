@@ -405,6 +405,41 @@ export type StagingReleaseCandidateSignoffRole =
   | "release_manager";
 export type StagingReleaseCandidateSignoffStatus = "pending" | "approved_mock" | "waived" | "not_applicable";
 export type StagingHumanSignoffStatus = "pending" | "approved" | "conditionally_approved" | "rejected" | "waived";
+export type StagingSignoffReviewedScopeMethod = "commit_sha" | "explicit_diff_scope";
+export type StagingSignoffWorktreeStatus = "clean" | "dirty";
+export type StagingSignoffReviewedDiffScope = {
+  worktreeStatus: StagingSignoffWorktreeStatus;
+  modifiedFiles: string[];
+  untrackedFiles: string[];
+  diffNameStatus?: string[];
+  diffStat?: string[];
+  diffScopeHash?: string;
+};
+export type StagingSignoffScopeSnapshot = {
+  reviewedCommitSha: string;
+  reviewedBranch: string;
+  reviewedScopeMethod: StagingSignoffReviewedScopeMethod;
+  reviewedDiffScope: StagingSignoffReviewedDiffScope;
+  scopeCapturedAt: string;
+  scopeEvidencePath: string;
+  validationEvidencePaths: string[];
+};
+export type StagingSignoffScopeReviewStatus = "pending" | "matched" | "stale" | "rejected";
+export type StagingSignoffScopeReview = {
+  status: StagingSignoffScopeReviewStatus;
+  requiredRoleCount: number;
+  matchingRoleCount: number;
+  pendingRoles: StagingReleaseCandidateSignoffRole[];
+  staleRoles: StagingReleaseCandidateSignoffRole[];
+  rejectedRoles: StagingReleaseCandidateSignoffRole[];
+  conditionalRoles: StagingReleaseCandidateSignoffRole[];
+  currentScope: StagingSignoffScopeSnapshot;
+  actualDeploymentBlocked: true;
+  productionReady: false;
+  stagingDeployed: false;
+  approvalAuditCanPass: boolean;
+  metadata: Record<string, unknown>;
+};
 export type StagingHumanSignoffEvidence = {
   role: StagingReleaseCandidateSignoffRole;
   required: boolean;
@@ -413,6 +448,13 @@ export type StagingHumanSignoffEvidence = {
   approverContact?: string;
   signedAt?: string;
   reviewedEvidence: string[];
+  reviewedCommitSha?: string;
+  reviewedBranch?: string;
+  reviewedScopeMethod?: StagingSignoffReviewedScopeMethod;
+  reviewedDiffScope?: StagingSignoffReviewedDiffScope;
+  scopeCapturedAt?: string;
+  scopeEvidencePath?: string;
+  validationEvidencePaths?: string[];
   conditions?: string[];
   notes?: string;
   signatureMethod?: string;
