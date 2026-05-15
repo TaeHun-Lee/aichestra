@@ -101,6 +101,10 @@ export class MockAuthProvider implements AuthProvider {
       roles,
       permissions,
       roleBindings,
+      tenantScopes: request.tenantScopes ? structuredClone(request.tenantScopes) : undefined,
+      teamScopes: request.teamScopes ? structuredClone(request.teamScopes) : undefined,
+      projectScopes: request.projectScopes ? structuredClone(request.projectScopes) : undefined,
+      resourceScopes: request.resourceScopes ? structuredClone(request.resourceScopes) : undefined,
       authMode: "mock",
       authenticated,
       source: request.source ?? "api",
@@ -120,9 +124,12 @@ export class MockAuthProvider implements AuthProvider {
       result: missing ? "missing" : "resolved",
       reason: missing ? "actor_not_found" : "mock_auth_context_resolved",
       requestId,
+      correlationId: request.correlationId,
+      source: context.source,
       metadata: {
         authMode: "mock",
         source: context.source,
+        correlationId: request.correlationId,
         authenticated
       }
     });
@@ -134,18 +141,24 @@ export class MockAuthProvider implements AuthProvider {
         result: "resolved",
         reason: "MockAuthProvider is default and is not production auth.",
         requestId,
-        metadata: { authMode: "mock", productionAuthEnabled: false }
+        correlationId: request.correlationId,
+        source: context.source,
+        metadata: { authMode: "mock", source: context.source, correlationId: request.correlationId, productionAuthEnabled: false }
       });
     }
     if (resolvedActor.actorKind === "service_account") {
+      const serviceAccount = this.repository.getServiceAccount(principal.id);
       this.repository.recordAuthAuditEvent({
         eventType: "service_account_used",
         actorId: resolvedActor.id,
         principalId: principal.id,
+        serviceAccountId: serviceAccount?.id,
         result: authenticated ? "resolved" : "denied",
         reason: authenticated ? "service_account_context_resolved" : "service_account_disabled_or_missing",
         requestId,
-        metadata: { authMode: "mock" }
+        correlationId: request.correlationId,
+        source: context.source,
+        metadata: { authMode: "mock", source: context.source, correlationId: request.correlationId, serviceAccountId: serviceAccount?.id }
       });
     }
     return context;

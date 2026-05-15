@@ -1,4 +1,4 @@
-import type { AuthContext } from "@aichestra/auth";
+import type { AuthContext, RequestContext } from "@aichestra/auth";
 import type { PolicyDecision } from "@aichestra/policy";
 
 export type SecretProviderKind =
@@ -172,6 +172,7 @@ export type CredentialResolutionRequest = {
   actorId?: string;
   principalId?: string;
   authContext?: AuthContext;
+  requestContext?: RequestContext;
   taskId?: string;
   taskRunId?: string;
   providerId?: string;
@@ -426,6 +427,10 @@ export type SecurityAuditEvent = {
   eventType: SecurityAuditEventType;
   actorId?: string;
   principalId?: string;
+  serviceAccountId?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   taskId?: string;
   taskRunId?: string;
   targetId?: string;

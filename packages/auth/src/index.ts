@@ -4,4 +4,7 @@ export * from "./repository.ts";
 export * from "./providers.ts";
 export * from "./service.ts";
 export * from "./request-context.ts";
+export * from "./service-account-catalog.ts";
+export * from "./service-account-context.ts";
+export * from "./scope-context.ts";
 export * from "./dto.ts";

@@ -16,6 +16,8 @@ Phase 3 v3 adds local-only registry packaging and versioning:
 
 This is still mock-first. It does not add a real artifact registry, signed artifacts, hosted package publishing, or external network calls.
 
+Registry/Governance RequestContext Migration v1 later adds optional RequestContext/AuthContext attribution to migrated registry mutation, package, resolver, audit, revision, and eval-result paths without changing package safety gates.
+
 ## Package Manifest Model
 
 `RegistryPackageManifest` references registry objects without replacing them.
@@ -192,12 +194,10 @@ v3 tests cover:
 - No semver prerelease/build metadata support.
 - No remote import source.
 - No production auth/RBAC.
-- No policy-as-code enforcement.
+- Policy-as-code remains static/mock-first and deny-by-default.
 - No eval suite execution.
 - No automatic registry improvement loop.
 
 ## Next Recommended Task
 
-Work Order 3: Phase 4 Preparation.
-
-That task should prepare trace and eval foundations for future auto-improvement without starting automatic Skill, Harness, or Instruction mutation yet.
+Recommended next task: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.

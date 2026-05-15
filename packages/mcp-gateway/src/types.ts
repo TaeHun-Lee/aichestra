@@ -1,4 +1,4 @@
-import type { AuthContext, AuthorizationDecision } from "@aichestra/auth";
+import type { AuthContext, AuthorizationDecision, RequestContext } from "@aichestra/auth";
 import type { PolicyDecision } from "@aichestra/policy";
 
 export type MCPServerKind = "mock" | "stdio_future" | "http_future" | "sse_future" | "local_agent_future" | "custom_future";
@@ -53,6 +53,7 @@ export type MCPToolInvocationRequest = {
   taskRunId?: string;
   agentRunId?: string;
   authContext?: AuthContext;
+  requestContext?: RequestContext;
   input: Record<string, unknown>;
   purpose: string;
   metadata: Record<string, unknown>;
@@ -110,8 +111,11 @@ export type MCPToolAuditEvent = {
   requestId?: string;
   actorId?: string;
   principalId?: string;
+  serviceAccountId?: string;
   taskId?: string;
   taskRunId?: string;
+  correlationId?: string;
+  source?: string;
   result: MCPToolAuditResult;
   reason?: string;
   sanitizedMetadata: Record<string, unknown>;

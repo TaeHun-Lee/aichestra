@@ -27,6 +27,10 @@ import {
   createPolicySubject
 } from "@aichestra/policy";
 import type { PolicyDecision } from "@aichestra/policy";
+import {
+  createServiceAccountPolicySubject,
+  serviceAccountAuditMetadata
+} from "@aichestra/auth";
 
 export type GitHubAppSecretRefMetadata = {
   id: string;
@@ -200,12 +204,21 @@ export class MockGitHubAppTokenProvider implements GitHubAppTokenProvider {
 
   private evaluateTokenPolicy(request: GitHubInstallationTokenRequest, environment: Record<string, unknown>): PolicyDecision {
     return this.policyService.evaluate({
-      subject: createPolicySubject({
-        actorId: request.actorId ?? "github-app-token-provider",
-        principalId: request.principalId,
-        actorKind: "service",
-        roles: ["system"]
-      }),
+      subject: request.actorId
+        ? createPolicySubject({
+          actorId: request.actorId,
+          principalId: request.principalId,
+          actorKind: request.actorId === "github_app_token_service" ? "service_account" : "service",
+          roles: request.actorId === "github_app_token_service" ? ["service_account_github_app_token"] : ["system"],
+          authMode: request.actorId === "github_app_token_service" ? "mock_service_account" : undefined,
+          serviceAccountId: request.actorId === "github_app_token_service" ? "github_app_token_service" : undefined,
+          isMockActor: request.actorId === "github_app_token_service" ? true : undefined,
+          metadata: request.actorId === "github_app_token_service" ? serviceAccountAuditMetadata("github_app_token_service", { boundary: "github_app_token_provider" }) : undefined
+        })
+        : createServiceAccountPolicySubject("github_app_token_service", {
+          source: "system",
+          metadata: { boundary: "github_app_token_provider" }
+        }),
       action: "github_app.installation_token.issue",
       resource: createPolicyResource({
         resourceKind: "github_app_installation",
@@ -259,7 +272,7 @@ export class GitHubAppRuntimeService {
   constructor(input: GitHubAppRuntimeServiceInput) {
     this.store = input.store;
     this.config = input.config;
-    this.actorId = input.actorId ?? "github-app-runtime";
+    this.actorId = input.actorId ?? "github_app_token_service";
     this.tokenProvider = input.tokenProvider ?? (input.config.enabled && input.config.authMode === "github_app"
       ? new MockGitHubAppTokenProvider({
         config: input.config,
@@ -381,8 +394,10 @@ export class GitHubAppRuntimeService {
       targetType: "git",
       targetId: "github_app",
       actorUserId: this.actorId,
-      metadata: sanitizeGitHubAppMetadata(metadata) as Record<string, unknown>
+      metadata: sanitizeGitHubAppMetadata({
+        ...(this.actorId === "github_app_token_service" ? serviceAccountAuditMetadata("github_app_token_service", { boundary: "github_app_runtime_service" }) : {}),
+        ...metadata
+      }) as Record<string, unknown>
     });
   }
 }
-

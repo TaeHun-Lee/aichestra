@@ -23,7 +23,13 @@ import {
   createPolicyResource,
   createPolicySubject
 } from "@aichestra/policy";
-import type { PolicyAction, PolicyDecision } from "@aichestra/policy";
+import type { PolicyAction, PolicyDecision, PolicyResourceScope } from "@aichestra/policy";
+import {
+  createServiceAccountPolicySubject,
+  serviceAccountAuditMetadata,
+  ScopeContextFactory
+} from "@aichestra/auth";
+import type { AuthContext, RequestContext } from "@aichestra/auth";
 import type { GitHubAppTokenCheckInput } from "./github-app.ts";
 
 export type GitIntegrationServiceInput = {
@@ -49,6 +55,10 @@ export type CreateGitBranchInput = {
   baseBranch?: string;
   taskId?: string;
   taskRunId?: string;
+  actorId?: string;
+  principalId?: string;
+  authContext?: AuthContext;
+  requestContext?: RequestContext;
   branchLeaseId?: string;
   files?: string[];
   symbols?: string[];
@@ -59,6 +69,10 @@ export type CreateGitBranchInput = {
 export type CreateGitPullRequestInput = {
   taskId: string;
   taskRunId?: string;
+  actorId?: string;
+  principalId?: string;
+  authContext?: AuthContext;
+  requestContext?: RequestContext;
   branchLeaseId?: string;
   branchName: string;
   baseBranch?: string;
@@ -87,6 +101,16 @@ export type GitChangedFilesResult = {
   reason?: string;
 };
 
+type GitContextInput = {
+  taskId?: string;
+  taskRunId?: string;
+  actorId?: string;
+  principalId?: string;
+  authContext?: AuthContext;
+  requestContext?: RequestContext;
+  branchName?: string;
+};
+
 export class GitIntegrationService {
   private readonly store: InMemoryAichestraStore;
   private readonly provider: GitProvider;
@@ -94,12 +118,13 @@ export class GitIntegrationService {
   private readonly actorId: string;
   private readonly policyService: PolicyService;
   private readonly githubAppTokenIssuer?: GitIntegrationServiceInput["githubAppTokenIssuer"];
+  private readonly scopeContextFactory = new ScopeContextFactory();
 
   constructor(input: GitIntegrationServiceInput) {
     this.store = input.store;
     this.provider = input.provider;
     this.config = input.config;
-    this.actorId = input.actorId ?? "mock-git-actor";
+    this.actorId = input.actorId ?? "git_provider_service";
     this.policyService = input.policyService ?? new PolicyService();
     this.githubAppTokenIssuer = input.githubAppTokenIssuer;
   }
@@ -218,7 +243,8 @@ export class GitIntegrationService {
       repoId,
       taskId: input.taskId,
       taskRunId: input.taskRunId,
-      branchName: input.branchName
+      branchName: input.branchName,
+      ...this.requestContextMetadata(input)
     });
     if (this.provider.getProviderKind() === "github") {
       this.recordAudit("github_branch_create_requested", repoId, {
@@ -228,6 +254,7 @@ export class GitIntegrationService {
         taskId: input.taskId,
         taskRunId: input.taskRunId,
         branchName: input.branchName,
+        ...this.requestContextMetadata(input),
         operation: "create_branch"
       });
     }
@@ -282,6 +309,10 @@ export class GitIntegrationService {
       taskId: input.taskId,
       taskRunId: input.taskRunId,
       branchName: input.branchName,
+      actorId: input.actorId,
+      principalId: input.principalId,
+      authContext: input.authContext,
+      requestContext: input.requestContext,
       providerKind: this.provider.getProviderKind(),
       environment: {
         localFixture: this.provider.getProviderKind() === "local" && Boolean(input.localPath),
@@ -311,7 +342,11 @@ export class GitIntegrationService {
     const appToken = this.prepareGitHubAppToken(repo, "branch_create", {
       taskId: input.taskId,
       taskRunId: input.taskRunId,
-      branchName: input.branchName
+      branchName: input.branchName,
+      actorId: input.actorId,
+      principalId: input.principalId,
+      authContext: input.authContext,
+      requestContext: input.requestContext
     });
     if (!appToken.ok) {
       this.recordAudit("github_branch_create_blocked", repoId, {
@@ -340,7 +375,7 @@ export class GitIntegrationService {
         taskId: input.taskId,
         taskRunId: input.taskRunId,
         branchLeaseId: input.branchLeaseId,
-        actorId: this.actorId
+        actorId: this.actorIdFor(input)
       });
 
       const branch: BranchRef = {
@@ -367,14 +402,15 @@ export class GitIntegrationService {
         : undefined;
 
       this.recordAudit("branch_created", repoId, {
-        providerKind: this.provider.getProviderKind(),
-        repoId,
-        repoRef: repoSlug(repo),
-        taskId: input.taskId,
-        taskRunId: input.taskRunId,
-        branchName: input.branchName,
-        branchLeaseId: branchLease?.id
-      });
+      providerKind: this.provider.getProviderKind(),
+      repoId,
+      repoRef: repoSlug(repo),
+      taskId: input.taskId,
+      taskRunId: input.taskRunId,
+      branchName: input.branchName,
+      branchLeaseId: branchLease?.id,
+      ...this.requestContextMetadata(input)
+    });
       if (this.provider.getProviderKind() === "github") {
         this.recordAudit("github_branch_created", repoId, {
           providerKind: "github",
@@ -441,7 +477,8 @@ export class GitIntegrationService {
       taskId: input.taskId,
       taskRunId: input.taskRunId,
       branchLeaseId: input.branchLeaseId,
-      branchName: input.branchName
+      branchName: input.branchName,
+      ...this.requestContextMetadata(input)
     });
     if (this.provider.getProviderKind() === "github") {
       this.recordAudit("github_pr_create_requested", repoId, {
@@ -452,6 +489,7 @@ export class GitIntegrationService {
         taskRunId: input.taskRunId,
         branchLeaseId: input.branchLeaseId,
         branchName: input.branchName,
+        ...this.requestContextMetadata(input),
         operation: "create_pull_request"
       });
     }
@@ -508,6 +546,10 @@ export class GitIntegrationService {
       taskId: input.taskId,
       taskRunId: input.taskRunId,
       branchName: input.branchName,
+      actorId: input.actorId,
+      principalId: input.principalId,
+      authContext: input.authContext,
+      requestContext: input.requestContext,
       providerKind: this.provider.getProviderKind(),
       environment: {
         remoteGitEnabled: this.config.remoteGitEnabled,
@@ -535,7 +577,11 @@ export class GitIntegrationService {
     const appToken = this.prepareGitHubAppToken(repo, "pr_create", {
       taskId: input.taskId,
       taskRunId: input.taskRunId,
-      branchName: input.branchName
+      branchName: input.branchName,
+      actorId: input.actorId,
+      principalId: input.principalId,
+      authContext: input.authContext,
+      requestContext: input.requestContext
     });
     if (!appToken.ok) {
       this.recordAudit("github_pr_create_blocked", repoId, {
@@ -565,7 +611,7 @@ export class GitIntegrationService {
       baseBranch: input.baseBranch ?? repo.defaultBranch,
       title: input.title,
       body: input.body,
-      actorId: this.actorId,
+      actorId: this.actorIdFor(input),
       repoRef: this.repoRef(repo, input.localPath)
     };
     const result = await this.provider.createPullRequest(request);
@@ -631,7 +677,7 @@ export class GitIntegrationService {
     return this.store.listPullRequests().find((pullRequest) => pullRequest.id === id || pullRequest.externalId === id);
   }
 
-  async getChangedFiles(repoId: string, input: { branchName: string; baseBranch?: string; localPath?: string }): Promise<GitChangedFilesResult> {
+  async getChangedFiles(repoId: string, input: { branchName: string; baseBranch?: string; localPath?: string } & GitContextInput): Promise<GitChangedFilesResult> {
     const repo = this.store.getRepo(repoId);
     if (!repo) return { ok: false, changedFiles: [], reason: `Repo not found: ${repoId}` };
 
@@ -649,7 +695,7 @@ export class GitIntegrationService {
     };
   }
 
-  async getPullRequestChangedFiles(repoId: string, input: { pullRequestNumber: number; taskId?: string; taskRunId?: string }): Promise<GitChangedFilesResult> {
+  async getPullRequestChangedFiles(repoId: string, input: { pullRequestNumber: number; taskId?: string; taskRunId?: string } & GitContextInput): Promise<GitChangedFilesResult> {
     const repo = this.store.getRepo(repoId);
     if (!repo) return { ok: false, changedFiles: [], reason: `Repo not found: ${repoId}` };
 
@@ -660,6 +706,7 @@ export class GitIntegrationService {
       taskId: input.taskId,
       taskRunId: input.taskRunId,
       pullRequestNumber: input.pullRequestNumber,
+      ...this.requestContextMetadata(input),
       operation: "get_changed_files"
     });
 
@@ -698,6 +745,10 @@ export class GitIntegrationService {
     const remotePolicy = this.evaluatePolicy("git.remote_operation", "git_operation", repoId, {
       taskId: input.taskId,
       taskRunId: input.taskRunId,
+      actorId: input.actorId,
+      principalId: input.principalId,
+      authContext: input.authContext,
+      requestContext: input.requestContext,
       providerKind: this.provider.getProviderKind(),
       environment: {
         remoteGitEnabled: this.config.remoteGitEnabled,
@@ -726,7 +777,11 @@ export class GitIntegrationService {
     }
     const appToken = this.prepareGitHubAppToken(repo, "changed_files_read", {
       taskId: input.taskId,
-      taskRunId: input.taskRunId
+      taskRunId: input.taskRunId,
+      actorId: input.actorId,
+      principalId: input.principalId,
+      authContext: input.authContext,
+      requestContext: input.requestContext
     });
     if (!appToken.ok) {
       this.recordAudit("github_changed_files_blocked", repoId, {
@@ -875,18 +930,112 @@ export class GitIntegrationService {
   }
 
   private recordAudit(action: string, targetId: string, metadata: Record<string, unknown>): AuditLog {
+    const repoId = typeof metadata.repoId === "string" ? metadata.repoId : targetId;
+    const repo = this.store.getRepo(repoId);
+    const scopedMetadata = repo && !metadata.repoScope
+      ? mergeMetadataScopes(this.repoScopeMetadata(repo), metadata, this.scopeContextFactory)
+      : metadata;
     return this.store.recordAudit({
       action: `git.${action}`,
       targetType: "git",
       targetId,
-      actorUserId: this.actorId,
-      taskId: typeof metadata.taskId === "string" ? metadata.taskId : undefined,
-      repoId: typeof metadata.repoId === "string" ? metadata.repoId : undefined,
-      metadata: sanitizeMetadata(metadata)
+      actorUserId: typeof scopedMetadata.actorId === "string" ? scopedMetadata.actorId : this.actorId,
+      taskId: typeof scopedMetadata.taskId === "string" ? scopedMetadata.taskId : undefined,
+      repoId: typeof scopedMetadata.repoId === "string" ? scopedMetadata.repoId : undefined,
+      metadata: sanitizeMetadata(scopedMetadata)
     });
   }
 
-  private evaluateRemotePolicy(action: PolicyAction, repoId: string, input: { taskId?: string; taskRunId?: string; branchName?: string }): PolicyDecision {
+  private actorIdFor(input?: GitContextInput): string {
+    return input?.requestContext?.authContext.actor.id ?? input?.authContext?.actor.id ?? input?.actorId ?? this.actorId;
+  }
+
+  private principalIdFor(input?: GitContextInput): string | undefined {
+    return input?.requestContext?.authContext.principal.id ?? input?.authContext?.principal.id ?? input?.principalId;
+  }
+
+  private requestContextMetadata(input?: GitContextInput): Record<string, unknown> {
+    const authContext = input?.requestContext?.authContext ?? input?.authContext;
+    const serviceAccountMetadata = !authContext && !input?.actorId && this.actorId === "git_provider_service"
+      ? serviceAccountAuditMetadata("git_provider_service")
+      : {};
+    return {
+      ...serviceAccountMetadata,
+      actorId: this.actorIdFor(input),
+      principalId: this.principalIdFor(input),
+      requestId: input?.requestContext?.requestId ?? authContext?.requestId,
+      correlationId: input?.requestContext?.correlationId ?? stringMetadata(authContext?.metadata.correlationId),
+      source: input?.requestContext?.source ?? authContext?.source,
+      authMode: authContext?.authMode ?? serviceAccountMetadata.authMode,
+      tenantId: input?.requestContext?.tenantId ?? authContext?.tenantScopes?.[0]?.tenantId,
+      teamId: input?.requestContext?.teamId ?? authContext?.teamScopes?.[0]?.teamId,
+      projectId: input?.requestContext?.projectId ?? authContext?.projectScopes?.[0]?.projectId,
+      resourceScopes: input?.requestContext?.resourceScopes ?? authContext?.resourceScopes
+    };
+  }
+
+  private repoScopeMetadata(repo: Repo, input?: GitContextInput): Record<string, unknown> {
+    const repoScope = this.scopeContextFactory.createRepoScope({
+      tenantId: input?.requestContext?.tenantId,
+      teamId: input?.requestContext?.teamId,
+      projectId: input?.requestContext?.projectId,
+      repoId: repo.id,
+      repoProvider: repoScopeProvider(repo.provider),
+      repoOwner: repo.owner,
+      repoName: repo.name,
+      allowedBranchPrefix: this.githubAllowedBranchPrefix(),
+      metadata: { remoteGitEnabled: this.config.remoteGitEnabled, providerKind: this.provider.getProviderKind() }
+    });
+    const repoPolicyScope = this.scopeContextFactory.toPolicyResourceScope(repoScope);
+    return {
+      repoScope,
+      resourceScopes: this.scopeContextFactory.mergeScopes(repoPolicyScope, ...(input?.requestContext?.resourceScopes ?? []))
+    };
+  }
+
+  private policySubjectFor(input?: GitContextInput) {
+    const authContext = input?.requestContext?.authContext ?? input?.authContext;
+    if (!authContext) {
+      if (!input?.actorId && this.actorId === "git_provider_service") {
+        return createServiceAccountPolicySubject("git_provider_service", {
+          source: "system",
+          metadata: { boundary: "git_integration_service" }
+        });
+      }
+      return createPolicySubject({ actorId: this.actorIdFor(input), actorKind: "service", roles: ["system"] });
+    }
+    return createPolicySubject({
+      actorId: authContext.actor.id,
+      principalId: authContext.principal.id,
+      actorKind: authContext.actor.actorKind,
+      roles: authContext.roles.map((role) => role.name),
+      teams: authContext.teams.map((team) => team.id),
+      authMode: authContext.authMode,
+      serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId),
+      isMockActor: authContext.metadata.isMockActor === true,
+      requestId: authContext.requestId,
+      correlationId: stringMetadata(authContext.metadata.correlationId),
+      source: authContext.source,
+      tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+      teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+      projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+      resourceScopes: input?.requestContext?.resourceScopes ?? authContext.resourceScopes,
+      metadata: {
+        source: authContext.source,
+        requestId: authContext.requestId,
+        correlationId: stringMetadata(authContext.metadata.correlationId),
+        serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId),
+        actorKind: authContext.actor.actorKind,
+        tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+        teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+        projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+        resourceScopes: input?.requestContext?.resourceScopes ?? authContext.resourceScopes,
+        productionAuthEnabled: false
+      }
+    });
+  }
+
+  private evaluateRemotePolicy(action: PolicyAction, repoId: string, input: GitContextInput): PolicyDecision {
     if (this.provider.getProviderKind() !== "github" && !this.config.remoteGitEnabled) {
       return {
         id: "policy_skip_local_git",
@@ -894,10 +1043,10 @@ export class GitIntegrationService {
         decision: "allow",
         reason: "local_or_mock_git_operation",
         matchedRuleIds: [],
-        subject: createPolicySubject({ actorId: this.actorId, actorKind: "service", roles: ["system"] }),
+        subject: this.policySubjectFor(input),
         resource: createPolicyResource({ resourceKind: "git_operation", resourceId: repoId }),
         action,
-        context: createPolicyContext({ taskId: input.taskId, taskRunId: input.taskRunId, repoId, branchName: input.branchName }),
+        context: createPolicyContext({ taskId: input.taskId, taskRunId: input.taskRunId, repoId, branchName: input.branchName, metadata: this.requestContextMetadata(input) }),
         createdAt: new Date()
       };
     }
@@ -915,7 +1064,11 @@ export class GitIntegrationService {
         branchPrefixAllowed: input.branchName ? this.branchPrefixAllowed(input.branchName) : true,
         credentialsConfigured: this.config.githubConfigured
       },
-      metadata: { requestedAction: action }
+      metadata: { requestedAction: action, ...this.requestContextMetadata(input) },
+      authContext: input.authContext,
+      requestContext: input.requestContext,
+      actorId: input.actorId,
+      principalId: input.principalId
     });
   }
 
@@ -940,7 +1093,7 @@ export class GitIntegrationService {
     repo: Repo,
     operation: string,
     gate: { ok: true } | { ok: false; reason: string },
-    input: { taskId?: string; taskRunId?: string; branchName?: string; pullRequestNumber?: number }
+    input: GitContextInput & { pullRequestNumber?: number }
   ): void {
     this.recordAudit("remote_git_config_validated", repo.id, {
       providerKind: "github",
@@ -961,7 +1114,8 @@ export class GitIntegrationService {
       githubCredentialSource: this.config.githubCredentialSource ?? "none",
       githubCredentialStatus: this.config.githubCredentialStatus ?? (this.config.githubConfigured ? "resolved" : "missing"),
       allowedRepoCount: this.githubAllowedRepos().length,
-      allowedBranchPrefix: this.githubAllowedBranchPrefix()
+      allowedBranchPrefix: this.githubAllowedBranchPrefix(),
+      ...this.requestContextMetadata(input)
     });
   }
 
@@ -985,7 +1139,7 @@ export class GitIntegrationService {
   private prepareGitHubAppToken(
     repo: Repo,
     purpose: "branch_create" | "pr_create" | "changed_files_read",
-    input: { taskId?: string; taskRunId?: string; branchName?: string }
+    input: GitContextInput
   ): {
     ok: boolean;
     reason?: string;
@@ -1003,7 +1157,8 @@ export class GitIntegrationService {
     const result = this.githubAppTokenIssuer.createInstallationToken({
       repoRef: repoSlug(repo),
       purpose,
-      actorId: this.actorId,
+      actorId: this.actorIdFor(input),
+      principalId: this.principalIdFor(input),
       policyContext: {
         remoteGitEnabled: this.config.remoteGitEnabled,
         remoteBranchCreateEnabled: this.config.remoteBranchCreateEnabled,
@@ -1017,7 +1172,8 @@ export class GitIntegrationService {
       },
       metadata: {
         operation: purpose,
-        repoId: repo.id
+        repoId: repo.id,
+        ...this.requestContextMetadata(input)
       }
     });
     if (result.status === "issued_mock" || result.status === "issued_gated") {
@@ -1045,16 +1201,36 @@ export class GitIntegrationService {
     providerKind?: string;
     environment?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
+    actorId?: string;
+    principalId?: string;
+    authContext?: AuthContext;
+    requestContext?: RequestContext;
   }): PolicyDecision {
+    const repo = this.store.getRepo(resourceId);
+    const scopeMetadata = repo ? this.repoScopeMetadata(repo, input) : this.requestContextMetadata(input);
+    const resourceScopes = Array.isArray(scopeMetadata.resourceScopes)
+      ? scopeMetadata.resourceScopes as PolicyResourceScope[]
+      : input.requestContext?.resourceScopes;
+    const repoScope = scopeMetadata.repoScope && typeof scopeMetadata.repoScope === "object"
+      ? this.scopeContextFactory.toPolicyResourceScope(scopeMetadata.repoScope)
+      : undefined;
     return this.policyService.evaluate({
-      subject: createPolicySubject({ actorId: this.actorId, actorKind: "service", roles: ["system"] }),
+      subject: this.policySubjectFor(input),
       action,
       resource: createPolicyResource({
         resourceKind,
         resourceId,
+        scopeKind: repoScope?.scopeKind,
+        scopeId: repoScope?.scopeId,
+        tenantId: stringMetadata(repoScope?.metadata.tenantId),
+        teamId: stringMetadata(repoScope?.metadata.teamId),
+        projectId: stringMetadata(repoScope?.metadata.projectId),
+        resourceScopes,
         metadata: {
           providerKind: input.providerKind ?? this.provider.getProviderKind(),
-          ...input.metadata
+          ...input.metadata,
+          ...this.requestContextMetadata(input),
+          ...scopeMetadata
         }
       }),
       context: createPolicyContext({
@@ -1064,7 +1240,11 @@ export class GitIntegrationService {
         branchName: input.branchName,
         providerKind: input.providerKind ?? this.provider.getProviderKind(),
         environment: input.environment ?? {},
-        metadata: input.metadata ?? {}
+        metadata: {
+          ...(input.metadata ?? {}),
+          ...this.requestContextMetadata(input),
+          ...scopeMetadata
+        }
       })
     });
   }
@@ -1104,6 +1284,30 @@ function credentialBlockedReason(status: unknown, fallback: string): string {
   return fallback;
 }
 
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function repoSlug(repo: Repo): string {
   return `${repo.owner}/${repo.name}`.toLowerCase();
+}
+
+function repoScopeProvider(provider: Repo["provider"]): "mock" | "local" | "github" | "gitlab_future" | "bitbucket_future" {
+  if (provider === "github" || provider === "local" || provider === "mock") return provider;
+  if (provider === "bitbucket") return "bitbucket_future";
+  return "gitlab_future";
+}
+
+function mergeMetadataScopes(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+  scopeContextFactory: ScopeContextFactory
+): Record<string, unknown> {
+  const baseScopes = Array.isArray(base.resourceScopes) ? base.resourceScopes as PolicyResourceScope[] : [];
+  const overrideScopes = Array.isArray(override.resourceScopes) ? override.resourceScopes as PolicyResourceScope[] : [];
+  return {
+    ...base,
+    ...override,
+    resourceScopes: scopeContextFactory.mergeScopes(...baseScopes, ...overrideScopes)
+  };
 }

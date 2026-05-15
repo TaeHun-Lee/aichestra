@@ -940,7 +940,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "registry.create",
       resourceKind: "registry_item",
-      conditions: { subjectRolesAny: ["registry_editor", "registry_admin", "system"] },
+      conditions: { subjectRolesAny: ["registry_editor", "registry_admin", "system", "service_account_registry_governance"] },
       priority: 200,
       enabled: true
     },
@@ -951,7 +951,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "registry.update",
       resourceKind: "registry_item",
-      conditions: { subjectRolesAny: ["registry_editor", "registry_admin", "registry_reviewer", "system"] },
+      conditions: { subjectRolesAny: ["registry_editor", "registry_admin", "registry_reviewer", "system", "service_account_registry_governance"] },
       priority: 200,
       enabled: true
     },
@@ -962,7 +962,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "registry.approve",
       resourceKind: "registry_item",
-      conditions: { subjectRolesAny: ["registry_reviewer", "registry_admin", "system"] },
+      conditions: { subjectRolesAny: ["registry_reviewer", "registry_admin", "system", "service_account_registry_governance"] },
       priority: 200,
       enabled: true
     },
@@ -973,7 +973,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "registry.rollback",
       resourceKind: "registry_item",
-      conditions: { subjectRolesAny: ["registry_admin", "system"] },
+      conditions: { subjectRolesAny: ["registry_admin", "system", "service_account_registry_governance"] },
       priority: 200,
       enabled: true
     },
@@ -995,7 +995,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "improvement.proposal.create",
       resourceKind: "improvement_proposal",
-      conditions: { subjectRolesAny: ["system", "registry_admin", "improvement_editor"] },
+      conditions: { subjectRolesAny: ["system", "registry_admin", "improvement_editor", "service_account_improvement_governance"] },
       priority: 200,
       enabled: true
     },
@@ -1006,7 +1006,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "improvement.proposal.approve",
       resourceKind: "improvement_proposal",
-      conditions: { subjectRolesAny: ["system", "system_admin", "platform_admin", "reviewer", "registry_admin", "registry_reviewer", "improvement_reviewer"] },
+      conditions: { subjectRolesAny: ["system", "system_admin", "platform_admin", "reviewer", "registry_admin", "registry_reviewer", "improvement_reviewer", "service_account_improvement_governance"] },
       priority: 200,
       enabled: true
     },
@@ -1017,7 +1017,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "improvement.draft_change.prepare",
       resourceKind: "draft_registry_change",
-      conditions: { subjectRolesAny: ["system", "registry_admin", "improvement_editor"] },
+      conditions: { subjectRolesAny: ["system", "registry_admin", "improvement_editor", "service_account_improvement_governance"] },
       priority: 200,
       enabled: true
     },
@@ -1204,7 +1204,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "local_agent.register",
       resourceKind: "local_agent",
-      conditions: { subjectRolesAny: ["system", "mock_admin", "local_agent_admin"] },
+      conditions: { subjectRolesAny: ["system", "mock_admin", "local_agent_admin", "service_account_local_agent_protocol"] },
       priority: 300,
       enabled: true
     },
@@ -1288,7 +1288,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "allow",
       action: "local_agent.cancel",
       resourceKind: "local_agent",
-      conditions: { subjectRolesAny: ["system", "local_agent_admin"] },
+      conditions: { subjectRolesAny: ["system", "local_agent_admin", "service_account_local_agent_protocol"] },
       priority: 300,
       enabled: true
     },
@@ -1808,7 +1808,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       action: "mcp.tool.invoke.low_risk",
       resourceKind: "mcp_tool",
       conditions: {
-        subjectRolesAny: ["developer", "service_account_runner", "platform_admin", "system_admin", "system"],
+        subjectRolesAny: ["developer", "service_account_runner", "service_account_mcp_gateway", "platform_admin", "system_admin", "system"],
         environmentEquals: {
           serverKind: "mock",
           serverStatus: "active",
@@ -1834,7 +1834,7 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       action: "mcp.tool.invoke",
       resourceKind: "mcp_tool",
       conditions: {
-        subjectRolesAny: ["developer", "service_account_runner", "platform_admin", "system_admin", "system"],
+        subjectRolesAny: ["developer", "service_account_runner", "service_account_mcp_gateway", "platform_admin", "system_admin", "system"],
         environmentEquals: {
           serverKind: "mock",
           serverStatus: "active",

@@ -1,4 +1,10 @@
 import { createId } from "@aichestra/core";
+import {
+  ServiceAccountContextFactory,
+  ScopeContextFactory,
+  createServiceAccountPolicySubject,
+  serviceAccountAuditMetadata
+} from "@aichestra/auth";
 import type { AuthContext, AuthorizationDecision, AuthorizationServiceInterface } from "@aichestra/auth";
 import type { LlmCallInput, LlmCallResult, LlmGateway as LegacyLlmGateway } from "@aichestra/adapters";
 import {
@@ -8,7 +14,7 @@ import {
   createPolicySubject
 } from "@aichestra/policy";
 import { sanitizeSecurityMetadata } from "@aichestra/security";
-import type { PolicyDecision } from "@aichestra/policy";
+import type { PolicyDecision, PolicyResourceScope } from "@aichestra/policy";
 import { ModelCatalogService, type ModelCatalogRepository } from "./catalog.ts";
 import { ProviderCatalogService } from "./enterprise-providers.ts";
 import {
@@ -110,10 +116,12 @@ export class LLMGatewayService implements LegacyLlmGateway {
   private readonly recordLegacyUsage: boolean;
   private readonly policyService: PolicyService;
   private readonly authorizationService?: AuthorizationServiceInterface;
+  private readonly serviceAccountContextFactory?: ServiceAccountContextFactory;
   private readonly enterpriseProviderCatalog: ProviderCatalogService;
   private readonly routeRepository: LLMRouteRepository;
   private readonly fallbackPolicyRepository: LLMFallbackPolicyRepository;
   private readonly routingDecisionRepository: LLMRoutingDecisionRepository;
+  private readonly scopeContextFactory = new ScopeContextFactory();
 
   constructor(input: LLMGatewayServiceInput = {}) {
     const providerConfig = input.config ?? createLlmProviderFromEnv({}).config;
@@ -123,10 +131,13 @@ export class LLMGatewayService implements LegacyLlmGateway {
     this.virtualKeys = new VirtualModelKeyService(input.virtualKeyRepository);
     this.auditRepository = input.auditRepository ?? new InMemoryLLMAuditRepository();
     this.usageRepository = input.usageRepository;
-    this.actorId = input.actorId ?? "mock-llm-actor";
+    this.actorId = input.actorId ?? "llm_gateway_service";
     this.recordLegacyUsage = input.recordLegacyUsage ?? false;
     this.policyService = input.policyService ?? new PolicyService();
     this.authorizationService = input.authorizationService;
+    this.serviceAccountContextFactory = input.authorizationService
+      ? new ServiceAccountContextFactory({ authorizationService: input.authorizationService })
+      : undefined;
     this.enterpriseProviderCatalog = input.enterpriseProviderCatalog ?? new ProviderCatalogService();
     this.routeRepository = input.routeRepository ?? new InMemoryLLMRouteRepository();
     this.fallbackPolicyRepository = input.fallbackPolicyRepository ?? new InMemoryLLMFallbackPolicyRepository();
@@ -663,9 +674,14 @@ export class LLMGatewayService implements LegacyLlmGateway {
   }
 
   recordAuditEvent(input: Omit<LLMAuditEvent, "id" | "createdAt">): LLMAuditEvent {
+    const metadata = sanitizeMetadata(input.metadata);
     return this.auditRepository.appendAuditEvent({
       ...input,
-      metadata: sanitizeMetadata(input.metadata)
+      requestId: input.requestId ?? stringMetadata(metadata.requestId) ?? stringMetadata(metadata.request_id),
+      correlationId: input.correlationId ?? stringMetadata(metadata.correlationId) ?? stringMetadata(metadata.correlation_id),
+      source: input.source ?? stringMetadata(metadata.source),
+      serviceAccountId: input.serviceAccountId ?? stringMetadata(metadata.serviceAccountId),
+      metadata
     });
   }
 
@@ -686,7 +702,11 @@ export class LLMGatewayService implements LegacyLlmGateway {
       eventType: options.fallbackAttempt ? "llm_fallback_started" : "llm_routing_requested",
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId ?? request.authContext?.actor.id ?? this.actorId,
+      actorId: this.actorIdForRequest(request),
+      principalId: this.principalIdForRequest(request),
+      requestId: request.requestContext?.requestId ?? request.authContext?.requestId,
+      correlationId: request.requestContext?.correlationId ?? stringMetadata(request.authContext?.metadata.correlationId),
+      source: request.requestContext?.source ?? request.authContext?.source,
       providerKind: request.providerKind ?? "mock",
       providerId: request.providerId,
       modelId: request.modelRef,
@@ -696,6 +716,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         routing_request_id: routingRequest.id,
         prompt_class: routingRequest.promptClass,
         requested_capabilities: routingRequest.requestedCapabilities,
+        ...this.requestContextMetadata(request),
         fallback_attempt: options.fallbackAttempt ?? 0
       }
     });
@@ -933,15 +954,18 @@ export class LLMGatewayService implements LegacyLlmGateway {
       id: createId("llmroute_req"),
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      actorId: request.actorId ?? request.authContext?.actor.id,
-      principalId: request.principalId ?? request.authContext?.principal.id,
+      actorId: this.actorIdForRequest(request),
+      principalId: this.principalIdForRequest(request),
       requestedModelId: request.modelRef,
       requestedCapabilities: request.requestedCapabilities ?? capabilitiesForPromptClass(request.promptClass ?? inferPromptClass(request.prompt)),
       promptClass: request.promptClass ?? inferPromptClass(request.prompt),
       priority: "normal",
       maxFallbackAttempts: Math.max(0, Math.min(request.maxFallbackAttempts ?? this.config.maxFallbackAttempts, this.config.maxFallbackAttempts)),
       budgetLimitUsd: request.budgetLimitUsd,
-      metadata: sanitizeMetadata(request.metadata ?? {})
+      metadata: sanitizeMetadata({
+        ...(request.metadata ?? {}),
+        ...this.requestContextMetadata(request)
+      })
     };
   }
 
@@ -1042,28 +1066,37 @@ export class LLMGatewayService implements LegacyLlmGateway {
         modelId: model.id,
         providerKind: route.providerKind,
         environment: this.policyEnvironmentFor(model, budgetDecision),
-        metadata: { source: "llm_gateway", routeId: route.id }
+        metadata: { source: "llm_gateway", routeId: route.id, ...this.requestContextMetadata(request) }
       }
     });
   }
 
   private resolveAuthContext(request: LLMCompletionRequest): AuthContext {
+    if (request.requestContext) return request.requestContext.authContext;
     if (request.authContext) return request.authContext;
     if (!this.authorizationService) throw new Error("authorization_service_unavailable");
-    return this.authorizationService.getAuthContext({
-      actorId: "mock-admin",
+    return this.serviceAccountContextFactory?.createServiceAccountAuthContext("llm_gateway_service", {
+      source: "system",
+      metadata: { source: "llm_gateway", mockGatewayDefault: true, requestedActorId: request.actorId }
+    }) ?? this.authorizationService.getAuthContext({
+      actorId: "llm_gateway_service",
       source: "system",
       metadata: { source: "llm_gateway", mockGatewayDefault: true, requestedActorId: request.actorId }
     });
   }
 
   private evaluateRouteSelectPolicy(request: LLMCompletionRequest, route: LLMRoute, model: LLMModel, budgetDecision: BudgetDecision): PolicyDecision {
-    const subject = request.authContext && this.authorizationService
-      ? this.authorizationService.toPolicySubject(request.authContext)
+    const authContext = request.requestContext?.authContext ?? request.authContext;
+    const subject = authContext && this.authorizationService
+      ? this.authorizationService.toPolicySubject(authContext)
       : createPolicySubject({
         actorId: request.actorId ?? this.actorId,
-        actorKind: request.actorId ? "user" : "service",
-        roles: ["system"]
+        actorKind: request.actorId ? "user" : "service_account",
+        roles: request.actorId ? ["system"] : ["service_account_llm_router"],
+        authMode: request.actorId ? undefined : "mock_service_account",
+        serviceAccountId: request.actorId ? undefined : "llm_router_service",
+        isMockActor: request.actorId ? undefined : true,
+        metadata: request.actorId ? undefined : serviceAccountAuditMetadata("llm_router_service", { boundary: "llm_route_select_policy" })
       });
     return this.policyService.evaluate({
       subject,
@@ -1085,7 +1118,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         modelId: model.id,
         providerKind: route.providerKind,
         environment: this.policyEnvironmentFor(model, budgetDecision),
-        metadata: { source: "llm_gateway", routeId: route.id }
+        metadata: { source: "llm_gateway", routeId: route.id, ...this.requestContextMetadata(request) }
       })
     });
   }
@@ -1119,9 +1152,12 @@ export class LLMGatewayService implements LegacyLlmGateway {
       authorizationDecisionId: input.authorizationDecision?.auditEvent?.id,
       metadata: sanitizeMetadata({
         ...input.metadata,
+        ...this.llmScopeMetadata(input.request, input.route, input.model),
         task_id: input.request.taskId,
         task_run_id: input.request.taskRunId,
-        actor_id: input.request.actorId ?? input.request.authContext?.actor.id,
+        actor_id: this.actorIdForRequest(input.request),
+        principal_id: this.principalIdForRequest(input.request),
+        ...this.requestContextMetadata(input.request),
         prompt_class: input.routingRequest.promptClass
       })
     });
@@ -1129,7 +1165,11 @@ export class LLMGatewayService implements LegacyLlmGateway {
       eventType: input.decision === "selected" ? "llm_route_selected" : input.decision === "no_route" ? "llm_no_route_found" : "llm_route_blocked",
       taskId: input.request.taskId,
       taskRunId: input.request.taskRunId,
-      actorId: input.request.actorId ?? input.request.authContext?.actor.id ?? this.actorId,
+      actorId: this.actorIdForRequest(input.request),
+      principalId: this.principalIdForRequest(input.request),
+      requestId: input.request.requestContext?.requestId ?? input.request.authContext?.requestId,
+      correlationId: input.request.requestContext?.correlationId ?? stringMetadata(input.request.authContext?.metadata.correlationId),
+      source: input.request.requestContext?.source ?? input.request.authContext?.source,
       providerKind: input.route?.providerKind ?? input.request.providerKind ?? "mock",
       providerId: input.route?.providerId ?? input.request.providerId,
       modelId: input.model?.id ?? input.request.modelRef,
@@ -1141,10 +1181,85 @@ export class LLMGatewayService implements LegacyLlmGateway {
         policy_decision_id: input.policyDecision?.id,
         authorization_decision_id: input.authorizationDecision?.auditEvent?.id,
         budget_decision_id: input.budgetDecision?.budgetDecisionId ?? input.budgetDecision?.reason,
+        ...this.requestContextMetadata(input.request),
+        ...this.llmScopeMetadata(input.request, input.route, input.model),
         decision: input.decision
       }
     });
     return decision;
+  }
+
+  private actorIdForRequest(request: LLMCompletionRequest): string {
+    return request.requestContext?.authContext.actor.id ?? request.authContext?.actor.id ?? request.actorId ?? this.actorId;
+  }
+
+  private principalIdForRequest(request: LLMCompletionRequest): string | undefined {
+    return request.requestContext?.authContext.principal.id ?? request.authContext?.principal.id ?? request.principalId;
+  }
+
+  private requestContextMetadata(request: LLMCompletionRequest): Record<string, unknown> {
+    const authContext = request.requestContext?.authContext ?? request.authContext;
+    const metadata: Record<string, unknown> = {};
+    const requestId = request.requestContext?.requestId ?? authContext?.requestId;
+    const correlationId = request.requestContext?.correlationId ?? stringMetadata(authContext?.metadata.correlationId);
+    const source = request.requestContext?.source ?? authContext?.source;
+    const actorId = authContext?.actor.id ?? request.actorId;
+    const principalId = authContext?.principal.id ?? request.principalId;
+    if (requestId) metadata.requestId = requestId;
+    if (correlationId) metadata.correlationId = correlationId;
+    if (source) metadata.requestSource = source;
+    if (actorId) metadata.actorId = actorId;
+    if (principalId) metadata.principalId = principalId;
+    if (authContext?.authMode) metadata.authMode = authContext.authMode;
+    const tenantId = request.requestContext?.tenantId ?? authContext?.tenantScopes?.[0]?.tenantId;
+    const teamId = request.requestContext?.teamId ?? authContext?.teamScopes?.[0]?.teamId;
+    const projectId = request.requestContext?.projectId ?? authContext?.projectScopes?.[0]?.projectId;
+    const resourceScopes = request.requestContext?.resourceScopes ?? authContext?.resourceScopes;
+    if (tenantId) metadata.tenantId = tenantId;
+    if (teamId) metadata.teamId = teamId;
+    if (projectId) metadata.projectId = projectId;
+    if (resourceScopes) metadata.resourceScopes = resourceScopes;
+    const serviceAccountId = stringMetadata(authContext?.metadata.serviceAccountId);
+    if (serviceAccountId) metadata.serviceAccountId = serviceAccountId;
+    if (!authContext && !request.actorId && this.actorId === "llm_gateway_service") {
+      Object.assign(metadata, serviceAccountAuditMetadata("llm_gateway_service", { boundary: "llm_gateway_service" }));
+    }
+    return metadata;
+  }
+
+  private llmScopeMetadata(request: LLMCompletionRequest, route?: LLMRoute, model?: LLMModel): Record<string, unknown> {
+    const providerId = route?.providerId ?? request.providerId ?? model?.providerKind ?? request.providerKind ?? this.provider.getProviderKind();
+    const providerKind = route?.providerKind ?? model?.providerKind ?? request.providerKind ?? this.provider.getProviderKind();
+    const tenantId = request.requestContext?.tenantId;
+    const teamId = request.requestContext?.teamId;
+    const projectId = request.requestContext?.projectId;
+    const providerScope = this.scopeContextFactory.createProviderScope({
+      tenantId,
+      teamId,
+      projectId,
+      providerId,
+      providerKind,
+      metadata: { remoteLlmEnabled: this.config.remoteLlmEnabled, completionEnabled: this.config.remoteCompletionEnabled }
+    });
+    const modelScope = model ? this.scopeContextFactory.createModelScope({
+      tenantId,
+      teamId,
+      projectId,
+      providerId,
+      modelId: model.id,
+      modelKind: model.providerKind,
+      metadata: { status: model.status }
+    }) : undefined;
+    const policyScopes: PolicyResourceScope[] = this.scopeContextFactory.mergeScopes(
+      this.scopeContextFactory.toPolicyResourceScope(providerScope),
+      modelScope ? this.scopeContextFactory.toPolicyResourceScope(modelScope) : undefined,
+      ...(request.requestContext?.resourceScopes ?? [])
+    );
+    return {
+      providerScope,
+      modelScope,
+      resourceScopes: policyScopes
+    };
   }
 
   private providerForRoute(route: LLMRoute): LLMProvider {
@@ -1178,11 +1293,20 @@ export class LLMGatewayService implements LegacyLlmGateway {
     if (!failedModel) return undefined;
     if (!fallbackPolicy?.enabled && !this.config.fallbackEnabled) return undefined;
     const policyDecision = this.policyService.evaluate({
-      subject: createPolicySubject({
-        actorId: request.actorId ?? request.authContext?.actor.id ?? this.actorId,
-        actorKind: request.actorId || request.authContext ? "user" : "service",
-        roles: request.authContext?.roles.map((role) => role.name) ?? ["system"]
-      }),
+      subject: request.actorId || request.authContext || request.requestContext
+        ? createPolicySubject({
+          actorId: request.actorId ?? request.requestContext?.authContext.actor.id ?? request.authContext?.actor.id ?? this.actorId,
+          principalId: request.requestContext?.authContext.principal.id ?? request.authContext?.principal.id,
+          actorKind: request.requestContext?.authContext.actor.actorKind ?? request.authContext?.actor.actorKind ?? "user",
+          roles: request.requestContext?.authContext.roles.map((role) => role.name) ?? request.authContext?.roles.map((role) => role.name) ?? ["system"],
+          authMode: request.requestContext?.authContext.authMode ?? request.authContext?.authMode,
+          serviceAccountId: stringMetadata((request.requestContext?.authContext ?? request.authContext)?.metadata.serviceAccountId),
+          isMockActor: (request.requestContext?.authContext ?? request.authContext)?.metadata.isMockActor === true
+        })
+        : createServiceAccountPolicySubject("llm_router_service", {
+          source: "system",
+          metadata: { boundary: "llm_fallback_policy" }
+        }),
       action: "llm.fallback",
       resource: createPolicyResource({
         resourceKind: "llm_fallback_policy",
@@ -1330,7 +1454,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
           modelId: route.model?.id ?? request.modelRef,
           result: "blocked",
           reason: route.reason ?? route.budgetDecision?.reason,
-          metadata: { source: "llm_gateway", legacy_runner_call: request.metadata?.legacy_runner_call === true }
+          metadata: { source: "llm_gateway", ...this.requestContextMetadata(request), legacy_runner_call: request.metadata?.legacy_runner_call === true }
         });
       }
       return { ok: false, reason: route.reason ?? route.budgetDecision?.reason, budgetDecision: route.budgetDecision };
@@ -1347,7 +1471,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         modelId: route.model.id,
         result: "blocked",
         reason,
-        metadata: { source: "llm_gateway", legacy_runner_call: request.metadata?.legacy_runner_call === true }
+        metadata: { source: "llm_gateway", ...this.requestContextMetadata(request), legacy_runner_call: request.metadata?.legacy_runner_call === true }
       });
       return { ok: false, reason, budgetDecision: route.budgetDecision };
     }
@@ -1368,6 +1492,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
           policy_decision_id: policyDecision.id,
           matched_rule_ids: policyDecision.matchedRuleIds,
           provider_id: request.providerId,
+          ...this.requestContextMetadata(request),
           legacy_runner_call: request.metadata?.legacy_runner_call === true
         }
       });
@@ -1385,7 +1510,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         modelId: route.model.id,
         result: route.model.providerKind === "mock" ? "blocked" : "failed",
         reason: providerResult.reason,
-        metadata: { source: "llm_gateway" }
+        metadata: { source: "llm_gateway", ...this.requestContextMetadata(request) }
       });
       return { ok: false, reason: providerResult.reason, budgetDecision: route.budgetDecision };
     }
@@ -1403,6 +1528,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         gateway_request_id: providerResult.result.id,
         provider_id: providerResult.result.providerId ?? request.providerId,
         billing_mode: this.providerMetadataForRequest(request).billingMode,
+        ...this.requestContextMetadata(request),
         persisted_usage: false
       }
     });
@@ -1414,7 +1540,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
     return this.usageRepository.recordUsage({
       taskId: request.taskId,
       taskRunId: request.taskRunId,
-      userId: request.actorId ?? this.actorId,
+      userId: this.actorIdForRequest(request),
       repoId: request.repoId,
       provider: result.providerKind,
       model: result.modelId,
@@ -1431,6 +1557,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         billing_mode: this.providerMetadataForRequest(request).billingMode,
         provider_kind: result.providerKind,
         model_id: result.modelId,
+        ...this.requestContextMetadata(request),
         route_id: typeof request.metadata?.routeId === "string" ? request.metadata.routeId : undefined,
         routing_decision_id: typeof request.metadata?.routingDecisionId === "string" ? request.metadata.routingDecisionId : undefined,
         fallback_attempt: typeof request.metadata?.fallbackAttempt === "number" ? request.metadata.fallbackAttempt : 0
@@ -1460,13 +1587,19 @@ export class LLMGatewayService implements LegacyLlmGateway {
   }
 
   private evaluateCompletionPolicy(request: LLMCompletionRequest, model: LLMModel, budgetDecision: BudgetDecision): PolicyDecision {
-    const subject = request.authContext && this.authorizationService
-      ? this.authorizationService.toPolicySubject(request.authContext)
-      : createPolicySubject({
+    const authContext = request.requestContext?.authContext ?? request.authContext;
+    const subject = authContext && this.authorizationService
+      ? this.authorizationService.toPolicySubject(authContext)
+      : request.actorId
+        ? createPolicySubject({
         actorId: request.actorId ?? this.actorId,
-        actorKind: request.actorId ? "user" : "service",
+        actorKind: "user",
         roles: ["system"]
-      });
+        })
+        : createServiceAccountPolicySubject("llm_gateway_service", {
+          source: "system",
+          metadata: { boundary: "llm_completion_policy" }
+        });
     const environment = this.policyEnvironmentFor(model, budgetDecision);
     const modelUse = this.policyService.evaluate({
       subject,
@@ -1486,9 +1619,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         modelId: model.id,
         providerKind: model.providerKind,
         environment,
-        metadata: {
-          source: "llm_gateway"
-        }
+        metadata: { source: "llm_gateway", ...this.requestContextMetadata(request) }
       })
     });
     if (!modelUse.allowed) return modelUse;
@@ -1511,9 +1642,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
           modelId: model.id,
           providerKind: model.providerKind,
           environment,
-          metadata: {
-            source: "llm_gateway"
-          }
+          metadata: { source: "llm_gateway", ...this.requestContextMetadata(request) }
         })
       });
       if (!credential.allowed) return credential;
@@ -1534,9 +1663,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
           modelId: model.id,
           providerKind: model.providerKind,
           environment,
-          metadata: {
-            source: "llm_gateway"
-          }
+          metadata: { source: "llm_gateway", ...this.requestContextMetadata(request) }
         })
       });
       if (!providerInvoke.allowed) return providerInvoke;
@@ -1557,9 +1684,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
           modelId: model.id,
           providerKind: model.providerKind,
           environment,
-          metadata: {
-            source: "llm_gateway"
-          }
+          metadata: { source: "llm_gateway", ...this.requestContextMetadata(request) }
         })
       });
       if (!remote.allowed) return remote;
@@ -1581,9 +1706,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
         modelId: model.id,
         providerKind: model.providerKind,
         environment,
-        metadata: {
-          source: "llm_gateway"
-        }
+        metadata: { source: "llm_gateway", ...this.requestContextMetadata(request) }
       })
     });
   }
@@ -1665,6 +1788,10 @@ export function createDefaultLlmGatewayService(input: Omit<LLMGatewayServiceInpu
 
 function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
   return sanitizeSecurityMetadata(metadata) as Record<string, unknown>;
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function eventTypeForRemoteProviderFailure(reason: string | undefined): string {

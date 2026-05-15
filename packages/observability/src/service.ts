@@ -356,6 +356,20 @@ function valueFromEventOrMetadata(event: unknown, key: string): string | undefin
   return optionalString(source[key]) ?? optionalString(metadataOf(event)[key]);
 }
 
+function arrayFromEventOrMetadata(event: unknown, key: string): string[] | undefined {
+  const source = record(event);
+  const value = Array.isArray(source[key]) ? source[key] : metadataOf(event)[key];
+  const values = Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+  return values.length > 0 ? values : undefined;
+}
+
+function objectArrayFromEventOrMetadata(event: unknown, key: string): Array<Record<string, unknown>> | undefined {
+  const source = record(event);
+  const value = Array.isArray(source[key]) ? source[key] : metadataOf(event)[key];
+  const values = Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item)) : [];
+  return values.length > 0 ? values : undefined;
+}
+
 function outcomeFrom(event: unknown): AuditOutcome {
   const source = record(event);
   const metadata = metadataOf(event);
@@ -434,6 +448,12 @@ function metadataFor(event: unknown): Record<string, unknown> {
     targetId: source.targetId,
     resourceKind: source.resourceKind,
     resourceId: source.resourceId,
+    scopeKind: source.scopeKind,
+    scopeId: source.scopeId,
+    tenantIds: source.tenantIds,
+    teamIds: source.teamIds,
+    projectIds: source.projectIds,
+    resourceScopes: source.resourceScopes,
     matchedRuleIds: source.matchedRuleIds,
     deliveryId: source.deliveryId,
     repoRef: source.repoRef,
@@ -463,6 +483,7 @@ function normalizeEvent(event: unknown, definition: SourceDefinition, index: num
     outcome,
     actorId: valueFromEventOrMetadata(event, "actorId") ?? valueFromEventOrMetadata(event, "actorUserId"),
     principalId: valueFromEventOrMetadata(event, "principalId"),
+    serviceAccountId: valueFromEventOrMetadata(event, "serviceAccountId"),
     authMode: valueFromEventOrMetadata(event, "authMode"),
     requestId: valueFromEventOrMetadata(event, "requestId"),
     correlationId: valueFromEventOrMetadata(event, "correlationId"),
@@ -476,6 +497,12 @@ function normalizeEvent(event: unknown, definition: SourceDefinition, index: num
     toolId: valueFromEventOrMetadata(event, "toolId"),
     secretRefId: valueFromEventOrMetadata(event, "secretRefId"),
     policyDecisionId: valueFromEventOrMetadata(event, "policyDecisionId"),
+    scopeKind: valueFromEventOrMetadata(event, "scopeKind"),
+    scopeId: valueFromEventOrMetadata(event, "scopeId"),
+    tenantIds: arrayFromEventOrMetadata(event, "tenantIds"),
+    teamIds: arrayFromEventOrMetadata(event, "teamIds"),
+    projectIds: arrayFromEventOrMetadata(event, "projectIds"),
+    resourceScopes: objectArrayFromEventOrMetadata(event, "resourceScopes"),
     sourceModule: definition.sourceModule,
     retentionClass: definition.retentionClass ?? retentionClassFor(category),
     redactionClass: redactionClassFor(category, eventType),

@@ -122,7 +122,20 @@ export class PolicyService implements PolicyEngine {
       action: decision.action,
       resourceKind: decision.resource.resourceKind,
       resourceId: decision.resource.resourceId,
+      scopeKind: decision.resource.scopeKind,
+      scopeId: decision.resource.scopeId,
+      tenantIds: decision.subject.tenantIds ?? (decision.resource.tenantId ? [decision.resource.tenantId] : undefined),
+      teamIds: decision.subject.teamIds ?? (decision.resource.teamId ? [decision.resource.teamId] : undefined),
+      projectIds: decision.subject.projectIds ?? (decision.resource.projectId ? [decision.resource.projectId] : undefined),
+      resourceScopes: decision.subject.resourceScopes ?? decision.resource.resourceScopes,
       actorId: decision.subject.actorId,
+      principalId: decision.subject.principalId,
+      actorKind: decision.subject.actorKind,
+      authMode: decision.subject.authMode,
+      serviceAccountId: decision.subject.serviceAccountId,
+      source: decision.subject.source,
+      requestId: decision.subject.requestId ?? stringMetadata(decision.context.metadata.requestId),
+      correlationId: decision.subject.correlationId ?? stringMetadata(decision.context.metadata.correlationId),
       allowed: decision.allowed,
       decision: decision.decision,
       reason: decision.reason,
@@ -131,6 +144,10 @@ export class PolicyService implements PolicyEngine {
       taskRunId: decision.context.taskRunId
     });
   }
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export function createDefaultPolicyService(): PolicyService {

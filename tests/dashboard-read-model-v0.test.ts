@@ -330,7 +330,10 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(observability.observability.noSecretStatus.noSecretsExposed, true);
     assert.equal(audit.audit.auditGroups.length > 0, true);
     assert.equal(audit.audit.summary.noSecretsExposed, true);
-    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, githubAppIntegration, llm, llmIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, vaultIntegration, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit }), false);
+    const scopes = await getJson(port, "/dashboard/scopes") as { scopes: DashboardReadModels["scopes"] };
+    assert.equal((scopes.scopes.summary as Record<string, unknown>).enforcementStatus, "planning_model_only");
+    assert.equal(scopes.scopes.noSecretStatus.noSecretsExposed, true);
+    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, githubAppIntegration, llm, llmIntegration, agents, policy, policyBundles, auth, authProduction, scopes, providers, security, localAgents, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, vaultIntegration, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit }), false);
   });
 });
 
@@ -369,6 +372,7 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
     ["/dashboard/policy-bundles", { policyBundles: demo.policyBundles }],
     ["/dashboard/auth", { auth: demo.auth }],
     ["/dashboard/auth-production", { authProduction: demo.authProduction }],
+    ["/dashboard/scopes", { scopes: demo.scopes }],
     ["/dashboard/providers", { providers: demo.providers }],
     ["/dashboard/security", { security: demo.security }],
     ["/dashboard/local-agents", { localAgents: demo.localAgents }],

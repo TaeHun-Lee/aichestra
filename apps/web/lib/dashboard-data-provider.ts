@@ -27,6 +27,7 @@ import {
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
+  type ScopeReadinessReadModel,
   type SecretBackendDecisionReadModel,
   type SecretBackendMigrationReadModel,
   type StagingDeploymentDryRunReadModel,
@@ -123,6 +124,11 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       localAgents: sections.localAgents.registrations.length,
       mcpServers: sections.mcp.servers.length,
       mcpTools: sections.mcp.tools.length,
+      scopeTenants: sections.scopes.tenants.length,
+      scopeRepos: sections.scopes.repos.length,
+      scopeProviders: sections.scopes.providers.length,
+      scopeModels: sections.scopes.models.length,
+      scopeSecrets: sections.scopes.secrets.length,
       productionReadinessCriticalBlockers: numeric(sections.readiness.summary.criticalBlockerCount),
       productionReadinessHighRisks: numeric(sections.readiness.summary.highRiskOpenCount),
       databaseOperationsCriticalBlockers: numeric(sections.database.summary.criticalBlockerCount),
@@ -178,6 +184,7 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       security: { status: "available", count: sections.security.auditEvents.length, notes: ["Secrets are metadata-only."] },
       localAgents: { status: "available", count: sections.localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
       mcp: { status: "available", count: sections.mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
+      scopes: { status: "available", count: sections.scopes.tenants.length + sections.scopes.repos.length + sections.scopes.providers.length, notes: ["Tenant/repo/provider scopes are metadata/readiness-only; enforcement and dashboard filtering remain future."] },
       readiness: { status: "available", count: sections.readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       database: { status: "available", count: sections.database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
       secretBackend: { status: "available", count: sections.secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
@@ -2114,6 +2121,64 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     ...localAgents.auditEvents,
     ...registry.auditLogs
   ]);
+  const scopes: ScopeReadinessReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      enforcementStatus: "planning_model_only",
+      tenantFilteringStatus: "future",
+      productionTenantEnforcement: false,
+      noSecretsExposed: true,
+      tenants: 1,
+      teams: 1,
+      projects: 1,
+      repos: 2,
+      providers: 2,
+      models: 2,
+      secrets: 2,
+      mcpTools: 2,
+      registryPackages: 3,
+      localAgentHosts: 1,
+      auditQueries: 1
+    }),
+    tenants: sanitizeDashboardArray([{ tenantId: "mock-tenant", tenantKind: "workspace", status: "active_mock" }]),
+    teams: sanitizeDashboardArray([{ tenantId: "mock-tenant", teamId: "platform-team", status: "active_mock" }]),
+    projects: sanitizeDashboardArray([{ tenantId: "mock-tenant", teamId: "platform-team", projectId: "aichestra-core", status: "active_mock" }]),
+    repos: sanitizeDashboardArray([
+      { repoId: "repo_demo_backend", repoProvider: "mock", tenantId: "mock-tenant", projectId: "aichestra-core" },
+      { repoId: "repo_local_fixture", repoProvider: "local", tenantId: "mock-tenant", projectId: "aichestra-core" }
+    ]),
+    providers: sanitizeDashboardArray([
+      { providerId: "mock-llm-provider", providerKind: "mock", tenantId: "mock-tenant" },
+      { providerId: "openai-compatible", providerKind: "openai_compatible", tenantId: "mock-tenant", liveCallsEnabled: false }
+    ]),
+    models: sanitizeDashboardArray([
+      { providerId: "mock-llm-provider", modelId: "mock-small", modelKind: "mock" },
+      { providerId: "mock-llm-provider", modelId: "mock-coder", modelKind: "mock" }
+    ]),
+    secrets: sanitizeDashboardArray([
+      { secretRefId: "github_token", secretKind: "github_token", provider: "env_or_vault_gated", containsSecretMaterial: false },
+      { secretRefId: "llm_api_key", secretKind: "llm_api_key", provider: "env_or_vault_gated", containsSecretMaterial: false }
+    ]),
+    mcpTools: sanitizeDashboardArray([{ mcpServerId: "mock-github-mcp", mcpToolId: "github.get_issue", riskLevel: "low" }]),
+    registryPackages: sanitizeDashboardArray([
+      { packageId: "skill:code-reviewer", packageKind: "skill" },
+      { packageId: "harness:unit-test", packageKind: "harness" },
+      { packageId: "instruction:default-coding", packageKind: "instruction" }
+    ]),
+    localAgentHosts: sanitizeDashboardArray([{ hostId: "host_demo", agentId: "local-agent-fixture" }]),
+    auditQueries: sanitizeDashboardArray([{ tenantId: "mock-tenant", projectId: "aichestra-core", readOnly: true }]),
+    enforcement: sanitizeDashboardObject({
+      status: "planning_model_only",
+      productionTenantEnforcement: false,
+      tenantFilteringStatus: "future",
+      dashboardFilteringStatus: "future"
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      rawCredentialsExposed: false
+    })
+  };
   const observability: ObservabilityReadModel = {
     config: sanitizeDashboardObject({
       status: "v0_implemented",
@@ -2246,6 +2311,7 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     security,
     localAgents,
     mcp,
+    scopes,
     readiness,
     database,
     secretBackend,
@@ -2314,6 +2380,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         securityResponse,
         localAgentsResponse,
         mcpResponse,
+        scopesResponse,
         readinessResponse,
         databaseResponse,
         secretBackendResponse,
@@ -2347,6 +2414,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         security: objectValue((securityResponse as Record<string, unknown>).security) as unknown as SecurityReadModel,
         localAgents: objectValue((localAgentsResponse as Record<string, unknown>).localAgents) as unknown as LocalAgentReadModel,
         mcp: objectValue((mcpResponse as Record<string, unknown>).mcp) as unknown as MCPGatewayReadModel,
+        scopes: objectValue((scopesResponse as Record<string, unknown>).scopes) as unknown as ScopeReadinessReadModel,
         readiness: objectValue((readinessResponse as Record<string, unknown>).readiness) as unknown as DeploymentReadinessReadModel,
         database: objectValue((databaseResponse as Record<string, unknown>).database) as unknown as DatabaseOperationsReadModel,
         secretBackend: objectValue((secretBackendResponse as Record<string, unknown>).secretBackend) as unknown as SecretBackendMigrationReadModel,

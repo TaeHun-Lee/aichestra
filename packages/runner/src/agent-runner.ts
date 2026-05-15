@@ -178,6 +178,12 @@ export type AgentRunAuditEvent = {
   runnerKind: AgentRunnerKind;
   eventType: string;
   result: "allowed" | "blocked" | "succeeded" | "failed";
+  actorId?: string;
+  principalId?: string;
+  serviceAccountId?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   reason?: string;
   metadata: Record<string, unknown>;
   createdAt: Date;

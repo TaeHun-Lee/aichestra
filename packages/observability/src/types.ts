@@ -37,6 +37,7 @@ export type AuditEventEnvelope = {
   outcome: AuditOutcome;
   actorId?: string;
   principalId?: string;
+  serviceAccountId?: string;
   authMode?: string;
   requestId?: string;
   correlationId?: string;
@@ -50,6 +51,12 @@ export type AuditEventEnvelope = {
   toolId?: string;
   secretRefId?: string;
   policyDecisionId?: string;
+  scopeKind?: string;
+  scopeId?: string;
+  tenantIds?: string[];
+  teamIds?: string[];
+  projectIds?: string[];
+  resourceScopes?: Array<Record<string, unknown>>;
   sourceModule: string;
   retentionClass: AuditRetentionClassName;
   redactionClass: AuditRedactionClassName;

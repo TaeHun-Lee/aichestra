@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { AuthContext, AuthorizationDecision } from "@aichestra/auth";
-import { AuthorizationService } from "@aichestra/auth";
+import { AuthorizationService, ScopeContextFactory, ServiceAccountContextFactory } from "@aichestra/auth";
 import { PolicyService, createPolicyContext, createPolicyResource } from "@aichestra/policy";
-import type { PolicyAction, PolicyDecision } from "@aichestra/policy";
+import type { PolicyAction, PolicyDecision, PolicyResourceScope } from "@aichestra/policy";
 import { SecurityControlService, sanitizeSecurityMetadata } from "@aichestra/security";
 import { createInMemoryMCPGatewayRepositories } from "./repository.ts";
 import type { MCPGatewayRepositories } from "./repository.ts";
@@ -88,11 +88,14 @@ export class MockMCPGateway implements MCPGateway {
   private readonly policyService: PolicyService;
   private readonly authorizationService: AuthorizationService;
   private readonly securityService: SecurityControlService;
+  private readonly serviceAccountContextFactory: ServiceAccountContextFactory;
+  private readonly scopeContextFactory = new ScopeContextFactory();
 
   constructor(input: MCPGatewayInput = {}) {
     this.repositories = input.repositories ?? createInMemoryMCPGatewayRepositories();
     this.policyService = input.policyService ?? new PolicyService();
     this.authorizationService = input.authorizationService ?? new AuthorizationService({ policyService: this.policyService });
+    this.serviceAccountContextFactory = new ServiceAccountContextFactory({ authorizationService: this.authorizationService });
     this.securityService = input.securityService ?? new SecurityControlService({
       policyService: this.policyService,
       authorizationService: this.authorizationService
@@ -134,7 +137,7 @@ export class MockMCPGateway implements MCPGateway {
         principalId: authContext.principal.id,
         result: "denied",
         reason: authorizationDecision.reason,
-        sanitizedMetadata: { action: "mcp.server.list", authorizationDecisionId: authorizationDecision.auditEvent?.id }
+        sanitizedMetadata: this.authContextMetadata(authContext, { action: "mcp.server.list", authorizationDecisionId: authorizationDecision.auditEvent?.id })
       });
       return { allowed: false, items: [], reason: authorizationDecision.reason, authorizationDecision };
     }
@@ -145,7 +148,7 @@ export class MockMCPGateway implements MCPGateway {
       principalId: authContext.principal.id,
       result: "allowed",
       reason: "mcp_server_catalog_listed",
-      sanitizedMetadata: { count: items.length }
+      sanitizedMetadata: this.authContextMetadata(authContext, { count: items.length })
     });
     return { allowed: true, items, authorizationDecision };
   }
@@ -170,7 +173,7 @@ export class MockMCPGateway implements MCPGateway {
         principalId: authContext.principal.id,
         result: "denied",
         reason: authorizationDecision.reason,
-        sanitizedMetadata: { action: "mcp.tool.list", authorizationDecisionId: authorizationDecision.auditEvent?.id }
+        sanitizedMetadata: this.authContextMetadata(authContext, { action: "mcp.tool.list", authorizationDecisionId: authorizationDecision.auditEvent?.id })
       });
       return { allowed: false, items: [], reason: authorizationDecision.reason, authorizationDecision };
     }
@@ -182,7 +185,7 @@ export class MockMCPGateway implements MCPGateway {
       principalId: authContext.principal.id,
       result: "allowed",
       reason: "mcp_tool_catalog_listed",
-      sanitizedMetadata: { count: items.length }
+      sanitizedMetadata: this.authContextMetadata(authContext, { count: items.length })
     });
     return { allowed: true, items, authorizationDecision };
   }
@@ -254,7 +257,13 @@ export class MockMCPGateway implements MCPGateway {
       resource: createPolicyResource({
         resourceKind: "mcp_tool",
         resourceId: tool.id,
-        metadata: { status: tool.status, riskLevel: tool.riskLevel, serverKind: server.serverKind }
+        ...this.policyResourceScopeFields(this.mcpToolScopeMetadata(request, authContext, server, tool)),
+        metadata: {
+          status: tool.status,
+          riskLevel: tool.riskLevel,
+          serverKind: server.serverKind,
+          ...this.mcpToolScopeMetadata(request, authContext, server, tool)
+        }
       }),
       context: createPolicyContext({
         taskId: request.taskId,
@@ -262,7 +271,8 @@ export class MockMCPGateway implements MCPGateway {
         environment,
         metadata: {
           requestId: request.id,
-          purpose: request.purpose
+          purpose: request.purpose,
+          ...this.requestContextMetadata(request, authContext)
         }
       })
     });
@@ -375,7 +385,9 @@ export class MockMCPGateway implements MCPGateway {
       taskRunId: request.taskRunId,
       result: "allowed",
       reason: "mcp_invocation_received",
-      sanitizedMetadata: this.redactedMetadata(request, "input")
+      correlationId: request.requestContext?.correlationId ?? stringMetadata(authContext.metadata.correlationId),
+      source: request.requestContext?.source ?? authContext.source,
+      sanitizedMetadata: this.redactedMetadata(request, "input", authContext)
     });
     const validation = this.validateInvocation(request);
     if (!validation.ok) {
@@ -392,7 +404,8 @@ export class MockMCPGateway implements MCPGateway {
           reason: validation.reason,
           serverStatus: validation.server?.status,
           toolStatus: validation.tool?.status,
-          riskLevel: validation.tool?.riskLevel
+          riskLevel: validation.tool?.riskLevel,
+          ...this.requestContextMetadata(request, authContext)
         }
       });
       this.recordAudit({
@@ -416,7 +429,8 @@ export class MockMCPGateway implements MCPGateway {
         reason: validation.reason,
         sanitizedMetadata: {
           policyDecisionId: validation.policyDecision?.id,
-          authorizationDecisionId: validation.authorizationDecision?.auditEvent?.id
+          authorizationDecisionId: validation.authorizationDecision?.auditEvent?.id,
+          ...this.requestContextMetadata(request, authContext)
         }
       });
       return result;
@@ -446,7 +460,7 @@ export class MockMCPGateway implements MCPGateway {
         taskRunId: request.taskRunId,
         result: "redacted",
         reason: redacted.redactionApplied || outputSanitized || previewSanitized ? "redaction_applied" : "output_preview_truncated",
-        sanitizedMetadata: { previewBytes: redacted.previewBytes, originalBytes: redacted.originalBytes }
+        sanitizedMetadata: { previewBytes: redacted.previewBytes, originalBytes: redacted.originalBytes, ...this.requestContextMetadata(request, authContext) }
       });
     }
     const result = this.recordResult(request, {
@@ -460,7 +474,8 @@ export class MockMCPGateway implements MCPGateway {
         gatewayKind: "mock",
         deterministic: true,
         readOnly: validation.tool?.metadata.readOnly === true,
-        policyDecisionId: validation.policyDecision?.id
+        policyDecisionId: validation.policyDecision?.id,
+        ...this.requestContextMetadata(request, authContext)
       }
     });
     this.recordAudit({
@@ -477,7 +492,8 @@ export class MockMCPGateway implements MCPGateway {
       sanitizedMetadata: {
         outputPreview,
         policyDecisionId: validation.policyDecision?.id,
-        authorizationDecisionId: validation.authorizationDecision?.auditEvent?.id
+        authorizationDecisionId: validation.authorizationDecision?.auditEvent?.id,
+        ...this.requestContextMetadata(request, authContext)
       }
     });
     return result;
@@ -496,11 +512,30 @@ export class MockMCPGateway implements MCPGateway {
   }
 
   recordAudit(event: Omit<MCPToolAuditEvent, "id" | "createdAt"> & { id?: string; createdAt?: Date }): MCPToolAuditEvent {
-    return this.repositories.audit.recordAuditEvent(event);
+    return this.repositories.audit.recordAuditEvent({
+      ...event,
+      correlationId: event.correlationId ?? stringMetadata(event.sanitizedMetadata.correlationId),
+      source: event.source ?? stringMetadata(event.sanitizedMetadata.source),
+      serviceAccountId: event.serviceAccountId ?? stringMetadata(event.sanitizedMetadata.serviceAccountId)
+    });
   }
 
   protected authContextForRequest(request: MCPToolInvocationRequest): AuthContext {
-    return request.authContext ?? this.authorizationService.getAuthContext({
+    if (request.requestContext) return request.requestContext.authContext;
+    if (request.authContext) return request.authContext;
+    if (!request.actorId) {
+      return this.serviceAccountContextFactory.createServiceAccountAuthContext("mcp_gateway_service", {
+        requestId: request.id,
+        correlationId: request.id,
+        source: "system",
+        metadata: {
+          mcpGateway: true,
+          taskId: request.taskId,
+          taskRunId: request.taskRunId
+        }
+      });
+    }
+    return this.authorizationService.getAuthContext({
       actorId: request.actorId,
       source: "api",
       metadata: {
@@ -531,12 +566,13 @@ export class MockMCPGateway implements MCPGateway {
             id: `scope_task_${request.taskId}`,
             scopeKind: "task",
             scopeId: request.taskId,
-            description: "MCP invocation task scope",
+          description: "MCP invocation task scope",
             metadata: { mcpGateway: true }
           }
           : undefined,
         metadata: {
           ...environment,
+          ...(request ? this.mcpToolScopeMetadata(request, authContext) : {}),
           mcpGateway: true
         }
       },
@@ -546,7 +582,10 @@ export class MockMCPGateway implements MCPGateway {
         environment,
         metadata: {
           requestId: request?.id,
-          purpose: request?.purpose
+          correlationId: request?.requestContext?.correlationId ?? stringMetadata(authContext.metadata.correlationId),
+          source: request?.requestContext?.source ?? authContext.source,
+          purpose: request?.purpose,
+          ...(request ? this.mcpToolScopeMetadata(request, authContext) : {})
         }
       }
     });
@@ -600,7 +639,7 @@ export class MockMCPGateway implements MCPGateway {
     });
   }
 
-  private redactedMetadata(request: MCPToolInvocationRequest, label: string): Record<string, unknown> {
+  private redactedMetadata(request: MCPToolInvocationRequest, label: string, authContext?: AuthContext): Record<string, unknown> {
     const redacted = this.securityService.redactText({
       text: toJsonPreview(request.input),
       taskId: request.taskId,
@@ -610,8 +649,94 @@ export class MockMCPGateway implements MCPGateway {
     });
     return {
       purpose: request.purpose,
+      ...this.requestContextMetadata(request, authContext),
       inputPreview: sanitizeMCPString(redacted.preview),
       redactionApplied: redacted.redactionApplied || redacted.truncated || sanitizeMCPString(redacted.preview) !== redacted.preview
+    };
+  }
+
+  private authContextMetadata(authContext: AuthContext, metadata: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ...metadata,
+      requestId: authContext.requestId,
+      correlationId: stringMetadata(authContext.metadata.correlationId),
+      source: authContext.source,
+      actorId: authContext.actor.id,
+      principalId: authContext.principal.id,
+      actorKind: authContext.actor.actorKind,
+      serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId),
+      authMode: authContext.authMode,
+      tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+      teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+      projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+      resourceScopes: authContext.resourceScopes
+    };
+  }
+
+  private requestContextMetadata(request: MCPToolInvocationRequest, authContext?: AuthContext): Record<string, unknown> {
+    const resolvedAuthContext = authContext ?? request.requestContext?.authContext ?? request.authContext;
+    return {
+      requestId: request.requestContext?.requestId ?? resolvedAuthContext?.requestId ?? request.id,
+      correlationId: request.requestContext?.correlationId ?? stringMetadata(resolvedAuthContext?.metadata.correlationId),
+      source: request.requestContext?.source ?? resolvedAuthContext?.source,
+      actorId: resolvedAuthContext?.actor.id ?? request.actorId,
+      principalId: resolvedAuthContext?.principal.id ?? request.principalId,
+      actorKind: resolvedAuthContext?.actor.actorKind,
+      serviceAccountId: stringMetadata(resolvedAuthContext?.metadata.serviceAccountId),
+      authMode: resolvedAuthContext?.authMode,
+      tenantId: request.requestContext?.tenantId ?? resolvedAuthContext?.tenantScopes?.[0]?.tenantId,
+      teamId: request.requestContext?.teamId ?? resolvedAuthContext?.teamScopes?.[0]?.teamId,
+      projectId: request.requestContext?.projectId ?? resolvedAuthContext?.projectScopes?.[0]?.projectId,
+      ...this.mcpToolScopeMetadata(request, resolvedAuthContext)
+    };
+  }
+
+  private mcpToolScopeMetadata(
+    request: MCPToolInvocationRequest,
+    authContext?: AuthContext,
+    server?: MCPServerCatalogEntry,
+    tool?: MCPToolDefinition
+  ): Record<string, unknown> {
+    const resolvedTool = tool ?? this.repositories.tools.getTool(request.toolId);
+    const tenantId = request.requestContext?.tenantId ?? authContext?.tenantScopes?.[0]?.tenantId;
+    const teamId = request.requestContext?.teamId ?? authContext?.teamScopes?.[0]?.teamId;
+    const projectId = request.requestContext?.projectId ?? authContext?.projectScopes?.[0]?.projectId;
+    const mcpToolScope = this.scopeContextFactory.createMcpToolScope({
+      tenantId,
+      teamId,
+      projectId,
+      mcpServerId: server?.id ?? request.serverId,
+      mcpToolId: resolvedTool?.id ?? request.toolId,
+      riskLevel: resolvedTool?.riskLevel ?? "low",
+      allowedResourceScopes: stringArrayMetadata(resolvedTool?.metadata.allowedResourceScopes),
+      metadata: { serverKind: server?.serverKind, toolName: resolvedTool?.name, realTransportEnabled: false }
+    });
+    return {
+      mcpToolScope,
+      resourceScopes: this.scopeContextFactory.mergeScopes(
+        this.scopeContextFactory.toPolicyResourceScope(mcpToolScope),
+        ...(request.requestContext?.resourceScopes ?? authContext?.resourceScopes ?? [])
+      )
+    };
+  }
+
+  private policyResourceScopeFields(metadata: Record<string, unknown>): {
+    scopeKind?: PolicyResourceScope["scopeKind"];
+    scopeId?: string;
+    tenantId?: string;
+    teamId?: string;
+    projectId?: string;
+    resourceScopes?: PolicyResourceScope[];
+  } {
+    const scopes = Array.isArray(metadata.resourceScopes) ? metadata.resourceScopes as PolicyResourceScope[] : undefined;
+    const toolScope = scopes?.find((scope) => scope.scopeKind === "mcp_tool");
+    return {
+      scopeKind: toolScope?.scopeKind,
+      scopeId: toolScope?.scopeId,
+      tenantId: stringMetadata(toolScope?.metadata.tenantId),
+      teamId: stringMetadata(toolScope?.metadata.teamId),
+      projectId: stringMetadata(toolScope?.metadata.projectId),
+      resourceScopes: scopes
     };
   }
 
@@ -736,4 +861,12 @@ export class DisabledRealMCPTransportGateway extends MockMCPGateway {
 
 export function createDefaultMCPGateway(input: MCPGatewayInput = {}): MockMCPGateway {
   return new MockMCPGateway(input);
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function stringArrayMetadata(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
 }

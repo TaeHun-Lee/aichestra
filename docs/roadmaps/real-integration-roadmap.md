@@ -38,7 +38,12 @@
 34. Vault Integration-Test Profile v1 - implemented
 35. Staging Deployment Execution Plan v0 - implemented
 36. Staging Human Signoff Pack v0 - implemented
-37. Phase 5 enterprise planning
+37. RequestContext Propagation v1 - implemented
+38. API AuthContext Middleware Skeleton v1 - implemented
+39. Service Account Actor Boundary v1 - implemented
+40. Registry/Governance RequestContext Migration v1 - implemented
+41. Tenant/Repo/Provider Scope Model v1 - implemented
+42. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -302,7 +307,7 @@ Goals:
 - Apply redaction to input/output/audit previews.
 - Expose `/mcp/*`, `/health`, and `/dashboard/mcp` visibility without secrets or raw output.
 
-Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+Follow-up: RequestContext Propagation v1 is now implemented as a mock-first attribution/correlation layer. It does not implement real auth, sessions, JWTs, API keys, service-account credentials, tenant enforcement, or production auth enablement.
 
 ## 18. Production Deployment Readiness Planning v0
 
@@ -316,7 +321,7 @@ Goals:
 - Expose planning-only readiness API/dashboard read models without external calls or secrets.
 - Keep production deployment, infrastructure manifests, real auth, real secret backends, real MCP transport, real provider calls, and vendor CLI execution out of scope.
 
-Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+Follow-up: RequestContext Propagation v1 is now implemented as a mock-first attribution/correlation layer. It does not implement real auth, sessions, JWTs, API keys, service-account credentials, tenant enforcement, or production auth enablement.
 
 ## 19. Observability / Audit Retention v0
 
@@ -389,7 +394,7 @@ Goals:
 - Plan request context propagation and mock actor deprecation.
 - Keep runtime read-only and mock-first: no real OIDC/SAML/SCIM/SSO, no login/logout/session/JWT/password behavior, no external IdP calls, no service-account credential issuance, no tenant isolation enforcement, and no token/cookie/session/assertion exposure.
 
-Recommended next step: Staging Deployment Execution Plan v0 is implemented. Continue with Staging Go/No-Go Audit v0, or collect real human signoffs before any staging deployment execution.
+Follow-up: RequestContext Propagation v1 is now implemented as a mock-first attribution/correlation layer. It does not implement real auth, sessions, JWTs, API keys, service-account credentials, tenant enforcement, or production auth enablement.
 
 ## 24. Policy Bundle / OPA-Cedar Planning v0
 
@@ -580,7 +585,82 @@ Goals:
 
 Recommended next step: Collect real human signoffs using the signoff pack, then run Staging Deployment Approval Audit v0 before any staging deployment execution.
 
-## 37. Phase 5 Enterprise Planning
+## 37. RequestContext Propagation v1
+
+Implemented with `docs/foundations/auth-rbac/request-context-propagation-v1-plan.md`, `docs/foundations/auth-rbac/request-context-propagation-v1.md`, `docs/reference/request-context-propagation-inventory.md`, `packages/auth`, policy subject updates, selected API/service propagation, audit metadata enrichment, and deterministic tests.
+
+Goals:
+
+- Consolidate RequestContext and CorrelationContext metadata without adding production authentication.
+- Resolve deterministic mock/system/test/webhook/dashboard/readiness contexts.
+- Enrich AuthContext-to-PolicySubject mapping with request id, correlation id, source, actor/principal metadata, roles, teams, and auth mode.
+- Propagate context through selected API, Git, LLM, MCP, Security, dashboard/readiness, and observability paths.
+- Preserve deny-by-default Policy-as-code behavior and existing SecretRef/Git/LLM/MCP/Runner safety gates.
+- Keep runtime safe: no OIDC, SAML, SCIM, SSO, login/logout/session handling, JWTs, API keys, service-account credentials, external IdP calls, credential-cache reads, secret/env exposure, or production-auth ready claim.
+
+Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+
+## 38. API AuthContext Middleware Skeleton v1
+
+Implemented with `docs/foundations/auth-rbac/api-authcontext-middleware-v1-plan.md`, `docs/foundations/auth-rbac/api-authcontext-middleware-v1.md`, `docs/reference/api-authcontext-middleware-inventory.md`, `apps/api/src/request-context-middleware.ts`, API route integration, safe `/health` and `/auth/me` context summaries, and deterministic tests.
+
+Goals:
+
+- Resolve one cached mock-first `RequestContext` at API ingress where practical.
+- Reuse existing `RequestContextResolver`, `MockAuthProvider`, `AuthContext`, and `AuthorizationService` boundaries.
+- Support API, dashboard, readiness, webhook metadata, and reason-tagged system source modes.
+- Pass cached context through representative Auth, Policy, Security, Git, LLM, MCP, Local Agent, Runner, Registry, Governance, Dashboard, Readiness, Observability, provider, and task run-agent routes where service signatures already support it.
+- Preserve deny-by-default Policy-as-code behavior and existing SecretRef/Git/LLM/MCP/Runner/Dashboard/Observability safety gates.
+- Keep runtime safe: no OIDC, SAML, SCIM, SSO, login/logout/session handling, JWTs, API keys, service-account credentials, external IdP calls, Authorization-header auth, cookie auth, credential-cache reads, secret/env exposure, or production-auth ready claim.
+
+Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+
+## 39. Service Account Actor Boundary v1
+
+Implemented with `docs/foundations/auth-rbac/service-account-actor-boundary-v1-plan.md`, `docs/foundations/auth-rbac/service-account-actor-boundary-v1.md`, `docs/reference/service-account-actor-boundary-inventory.md`, `packages/auth`, selected Git/LLM/MCP/Security/Runner/Local Agent service fallbacks, serviceAccountId audit metadata, and deterministic tests.
+
+Goals:
+
+- Define a static mock service-account catalog without issuing credentials.
+- Provide `ServiceAccountContextFactory` for `mock_service_account` AuthContext and RequestContext creation.
+- Enrich PolicySubject and audit metadata with `actorKind=service_account` and `serviceAccountId`.
+- Replace high-value runtime service actor fallbacks in Git, GitHub App token-handle checks, LLM, MCP, Security, Runner, and Local Agent policy paths.
+- Preserve deny-by-default policy behavior, no-secret/no-env behavior, and mock-first runtime defaults.
+- Keep runtime safe: no service-account credentials, JWTs, API keys, sessions, credential rotation, external IdP/provider calls, credential-cache reads, or production-auth ready claim.
+
+Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+
+## 40. Registry/Governance RequestContext Migration v1
+
+Implemented with `docs/foundations/auth-rbac/registry-governance-request-context-migration-v1-plan.md`, `docs/foundations/auth-rbac/registry-governance-request-context-migration-v1.md`, `docs/reference/registry-governance-request-context-inventory.md`, `packages/registry`, `packages/improvement`, representative API route propagation, registry/governance audit metadata enrichment, and deterministic tests.
+
+Goals:
+
+- Propagate `RequestContext`/`AuthContext` through high-value registry mutation and governance decision paths.
+- Use `registry_governance_service` and `improvement_governance_service` service-account attribution where system/service context is appropriate.
+- Enrich registry/governance audit records with request id, correlation id, source, auth mode, principal id, actor kind, and service account id.
+- Preserve registry lifecycle, approval, eval, checksum, package, resolver, and rollback gates.
+- Keep auto-improvement draft/proposal/governance-only; apply remains blocked and active registry entries are not mutated by draft changes.
+- Keep runtime safe: no production auth, real service-account credentials, real eval/canary execution, artifact registry integration, external provider calls, secret/env exposure, or production-governance ready claim.
+
+Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+
+## 41. Tenant/Repo/Provider Scope Model v1
+
+Implemented with `docs/foundations/auth-rbac/tenant-repo-provider-scope-model-v1-plan.md`, `docs/foundations/auth-rbac/tenant-repo-provider-scope-model-v1.md`, `docs/reference/tenant-repo-provider-scope-inventory.md`, `packages/auth` scope models/catalog/helpers, `packages/policy` policy resource scope helpers, selected Git/LLM/MCP/Security/Registry/Governance/Observability metadata, `/readiness/scopes/*`, `/dashboard/scopes`, dashboard rendering, and deterministic tests.
+
+Goals:
+
+- Define common tenant, team, project, repo, provider, model, SecretRef, MCP tool, registry package, Local Agent host, audit query, and policy resource scope metadata.
+- Keep all scope data mock/readiness metadata only.
+- Add optional scope fields to AuthContext, RequestContext, PolicySubject, policy resources, and audit envelopes.
+- Expose safe read-only scope readiness and dashboard summaries.
+- Preserve deny-by-default policy behavior and all provider/secret/runner/registry/governance gates.
+- Keep runtime safe: no production tenant provisioning, tenant isolation enforcement, row-level security, production dashboard filtering, real Auth/RBAC, provider calls, credential issuance, secret/env exposure, or production tenancy claim.
+
+Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+
+## 42. Phase 5 Enterprise Planning
 
 Goals:
 

@@ -5,6 +5,7 @@ import {
   createPolicyResource,
   createPolicySubject
 } from "@aichestra/policy";
+import { createServiceAccountPolicySubject, serviceAccountAuditMetadata } from "@aichestra/auth";
 import type { PolicyAction, PolicyDecision } from "@aichestra/policy";
 import type { SecurityControlService } from "@aichestra/security";
 
@@ -2413,11 +2414,16 @@ export class LocalAgentProtocolService {
     metadata?: Record<string, unknown>;
   }): PolicyDecision {
     return this.policyService.evaluate({
-      subject: createPolicySubject({
-        actorId: input.actorId ?? "mock-local-agent-protocol",
-        actorKind: input.actorId ? "user" : "service",
-        roles: ["system"]
-      }),
+      subject: input.actorId
+        ? createPolicySubject({
+          actorId: input.actorId,
+          actorKind: "user",
+          roles: ["system"]
+        })
+        : createServiceAccountPolicySubject("local_agent_protocol_service", {
+          source: "local_agent",
+          metadata: { boundary: "local_agent_protocol_service" }
+        }),
       action: input.action,
       resource: createPolicyResource({
         resourceKind: input.action.startsWith("local_cli.") ? "local_cli" : "local_agent",
@@ -2438,6 +2444,7 @@ export class LocalAgentProtocolService {
           agentId: input.agentId,
           invocationId: input.invocationId,
           providerId: input.providerId,
+          ...(!input.actorId ? serviceAccountAuditMetadata("local_agent_protocol_service", { boundary: "local_agent_protocol_service" }) : {}),
           ...input.metadata
         })
       })

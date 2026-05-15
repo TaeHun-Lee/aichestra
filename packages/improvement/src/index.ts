@@ -1,4 +1,6 @@
 import { createId, slugify } from "@aichestra/core";
+import { ScopeContextFactory, serviceAccountAuditMetadata } from "@aichestra/auth";
+import type { AuthContext, RequestContext } from "@aichestra/auth";
 import type {
   AutoImprovementSafetyPolicy,
   AutoImprovementAnalysis,
@@ -39,6 +41,7 @@ import type {
   ProposalReviewRecommendedAction
 } from "@aichestra/core";
 import { PolicyService, createPolicyContext, createPolicyResource, createPolicySubject } from "@aichestra/policy";
+import type { PolicyResourceScope } from "@aichestra/policy";
 
 export type CreateFailureSignalInput = Omit<FailureSignal, "id" | "observedAt" | "metadata"> &
   Partial<Pick<FailureSignal, "id" | "observedAt" | "metadata">>;
@@ -70,6 +73,8 @@ export type CreateImprovementProposalInput = {
   rationale?: string;
   safetyNotes?: string[];
   createdBy?: string;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
 };
 
 export type TransitionImprovementProposalInput = {
@@ -99,11 +104,11 @@ export type UpdateSafetyPolicyInput = Partial<
 >;
 
 export type AutoImprovementEngine = {
-  analyzeFailureCluster(clusterId: string): AutoImprovementAnalysis;
-  generateImprovementCandidate(clusterId: string): ImprovementCandidate;
-  generateImprovementProposal(candidateId: string): ImprovementProposal;
-  prepareDraftRegistryChange(proposalId: string): DraftRegistryChange;
-  evaluateProposalReadiness(proposalId: string): ProposalReadiness;
+  analyzeFailureCluster(clusterId: string, context?: ImprovementRequestContextInput): AutoImprovementAnalysis;
+  generateImprovementCandidate(clusterId: string, context?: ImprovementRequestContextInput): ImprovementCandidate;
+  generateImprovementProposal(candidateId: string, context?: ImprovementRequestContextInput): ImprovementProposal;
+  prepareDraftRegistryChange(proposalId: string, context?: ImprovementRequestContextInput): DraftRegistryChange;
+  evaluateProposalReadiness(proposalId: string, context?: ImprovementRequestContextInput): ProposalReadiness;
 };
 
 export type CreateDraftRegistryChangeInput = Omit<DraftRegistryChange, "id" | "status" | "createdAt" | "updatedAt"> &
@@ -112,18 +117,34 @@ export type CreateDraftRegistryChangeInput = Omit<DraftRegistryChange, "id" | "s
 export type TransitionDraftRegistryChangeInput = {
   id: string;
   status: DraftRegistryChangeStatus;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
+  actorId?: string;
 };
 
 export type CreateGovernanceDecisionInput = {
   proposalId: string;
   actorId?: string;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
   decision: ProposalGovernanceDecisionType;
   reason: string;
   createdAt?: Date;
+  metadata?: Record<string, unknown>;
 };
 
 export type CreateProposalEvalRunInput = Omit<ProposalEvalRun, "id" | "attachedAt" | "attachedBy"> &
-  Partial<Pick<ProposalEvalRun, "id" | "attachedAt" | "attachedBy">>;
+  Partial<Pick<ProposalEvalRun, "id" | "attachedAt" | "attachedBy">> & {
+    requestContext?: RequestContext;
+    authContext?: AuthContext;
+  };
+
+export type ImprovementRequestContextInput = {
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
+  actorId?: string;
+  metadata?: Record<string, unknown>;
+};
 
 export type ImprovementPolicyInput = {
   policyService?: PolicyService;
@@ -425,6 +446,7 @@ function cloneDraftRegistryChange(change: DraftRegistryChange): DraftRegistryCha
   return {
     ...change,
     draftPayload: cloneRecord(change.draftPayload),
+    metadata: change.metadata ? cloneRecord(change.metadata) : undefined,
     createdAt: new Date(change.createdAt),
     updatedAt: new Date(change.updatedAt)
   };
@@ -450,7 +472,11 @@ function cloneProposalReviewQueueItem(item: ProposalReviewQueueItem): ProposalRe
 }
 
 function cloneGovernanceDecision(decision: ProposalGovernanceDecision): ProposalGovernanceDecision {
-  return { ...decision, createdAt: new Date(decision.createdAt) };
+  return {
+    ...decision,
+    metadata: decision.metadata ? cloneRecord(decision.metadata) : undefined,
+    createdAt: new Date(decision.createdAt)
+  };
 }
 
 function cloneProposalEvalRun(run: ProposalEvalRun): ProposalEvalRun {
@@ -465,6 +491,7 @@ function cloneCanaryReadiness(readiness: CanaryReadiness): CanaryReadiness {
   return {
     ...readiness,
     blockingReasons: [...readiness.blockingReasons],
+    metadata: readiness.metadata ? cloneRecord(readiness.metadata) : undefined,
     evaluatedAt: new Date(readiness.evaluatedAt)
   };
 }
@@ -473,6 +500,7 @@ function cloneProposalApplyGate(gate: ProposalApplyGate): ProposalApplyGate {
   return {
     ...gate,
     blockingReasons: [...gate.blockingReasons],
+    metadata: gate.metadata ? cloneRecord(gate.metadata) : undefined,
     evaluatedAt: new Date(gate.evaluatedAt)
   };
 }
@@ -699,6 +727,7 @@ export function createDraftRegistryChange(input: CreateDraftRegistryChangeInput)
     targetVersion: requireString(input.targetVersion, "targetVersion"),
     draftPayload: cloneRecord(input.draftPayload),
     status: input.status ?? "draft",
+    metadata: input.metadata ? cloneRecord(input.metadata) : undefined,
     createdAt: input.createdAt ?? now,
     updatedAt: input.updatedAt ?? now
   };
@@ -706,27 +735,50 @@ export function createDraftRegistryChange(input: CreateDraftRegistryChangeInput)
 
 export function createGovernanceDecision(input: CreateGovernanceDecisionInput): ProposalGovernanceDecision {
   if (!governanceDecisionTypes.has(input.decision)) throw new Error("decision is invalid");
+  const context = contextFieldsForGovernance(input, input.actorId ?? "mock-admin");
   return {
     id: createId("proposal_decision"),
     proposalId: requireString(input.proposalId, "proposalId"),
-    actorId: input.actorId ?? "mock-admin",
+    actorId: context.actorId,
+    principalId: context.principalId,
+    actorKind: context.actorKind,
+    serviceAccountId: context.serviceAccountId,
+    authMode: context.authMode,
+    requestId: context.requestId,
+    correlationId: context.correlationId,
+    source: context.source,
     decision: input.decision,
     reason: requireString(input.reason, "reason"),
+    metadata: safeImprovementMetadata({
+      ...context.metadata,
+      ...(input.metadata ?? {})
+    }),
     createdAt: input.createdAt ?? new Date()
   };
 }
 
 export function createProposalEvalRun(input: CreateProposalEvalRunInput): ProposalEvalRun {
   if (!proposalEvalRunStatuses.has(input.status)) throw new Error("status must be pending, passed, failed, or skipped");
+  const context = contextFieldsForGovernance(input, input.attachedBy ?? "mock-admin");
   return {
     ...input,
     id: input.id ?? createId("proposal_eval_run"),
     proposalId: requireString(input.proposalId, "proposalId"),
     evalRequirementId: requireString(input.evalRequirementId, "evalRequirementId"),
     summary: requireString(input.summary, "summary"),
-    attachedBy: input.attachedBy ?? "mock-admin",
+    attachedBy: input.attachedBy ?? context.actorId,
+    principalId: context.principalId,
+    actorKind: context.actorKind,
+    serviceAccountId: context.serviceAccountId,
+    authMode: context.authMode,
+    requestId: context.requestId,
+    correlationId: context.correlationId,
+    source: context.source,
     attachedAt: input.attachedAt ?? new Date(),
-    metadata: input.metadata ? cloneRecord(input.metadata) : undefined
+    metadata: safeImprovementMetadata({
+      ...context.metadata,
+      ...(input.metadata ? cloneRecord(input.metadata) : {})
+    })
   };
 }
 
@@ -738,7 +790,7 @@ function createGovernanceAuditEvent(input: Omit<ImprovementGovernanceAuditEvent,
     id: input.id ?? createGovernanceEventId(input.action, input.proposalId, createdAt),
     actorId: input.actorId,
     message: requireString(input.message, "message"),
-    metadata: input.metadata ? cloneRecord(input.metadata) : undefined,
+    metadata: input.metadata ? safeImprovementMetadata(cloneRecord(input.metadata)) : undefined,
     createdAt
   };
 }
@@ -844,7 +896,93 @@ function validateCanaryStages(stages: CanaryStage[]): void {
   }
 }
 
-function mockImprovementSubject(actorId = "mock-admin") {
+function improvementAttribution(
+  input: ImprovementRequestContextInput = {},
+  fallbackActorId = "mock-admin",
+  options: { serviceAccountFallback?: boolean } = {}
+) {
+  const requestContext = input.requestContext;
+  const authContext = input.authContext ?? requestContext?.authContext;
+  if (authContext) {
+    const roleNames = authContext.roles.map((role) => role.name).concat(authContext.actor.roles);
+    const serviceAccountId = stringMetadata(authContext.metadata.serviceAccountId) ?? stringMetadata(requestContext?.metadata.serviceAccountId);
+    return {
+      actorId: authContext.actor.id,
+      principalId: authContext.principal.id,
+      actorKind: authContext.actor.actorKind,
+      serviceAccountId,
+      authMode: authContext.authMode,
+      requestId: requestContext?.requestId ?? authContext.requestId,
+      correlationId: requestContext?.correlationId ?? stringMetadata(authContext.metadata.correlationId),
+      source: requestContext?.source ?? authContext.source,
+      roles: improvementRolesFromAuthRoles(roleNames, serviceAccountId),
+      metadata: safeImprovementMetadata({
+        ...(requestContext?.metadata ?? {}),
+        ...(authContext.metadata ?? {}),
+        ...(input.metadata ?? {}),
+        tenantId: requestContext?.tenantId ?? authContext.tenantScopes?.[0]?.tenantId,
+        teamId: requestContext?.teamId ?? authContext.teamScopes?.[0]?.teamId,
+        projectId: requestContext?.projectId ?? authContext.projectScopes?.[0]?.projectId,
+        tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+        teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+        projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+        resourceScopes: requestContext?.resourceScopes ?? authContext.resourceScopes,
+        contextDerivedActor: true,
+        productionAuthEnabled: false
+      })
+    };
+  }
+  if (options.serviceAccountFallback) {
+    return {
+      actorId: "improvement_governance_service",
+      principalId: "principal_improvement_governance_service",
+      actorKind: "service_account",
+      serviceAccountId: "improvement_governance_service",
+      authMode: "mock_service_account",
+      requestId: undefined,
+      correlationId: undefined,
+      source: "system",
+      roles: ["system", "service_account_improvement_governance", "improvement_editor", "improvement_reviewer"],
+      metadata: serviceAccountAuditMetadata("improvement_governance_service", {
+        ...(input.metadata ?? {}),
+        serviceFallback: true,
+        requestContextMigration: "registry_governance_v1"
+      })
+    };
+  }
+  const actorId = input.actorId ?? fallbackActorId;
+  return {
+    actorId,
+    principalId: undefined,
+    actorKind: actorId.startsWith("mock") ? "system" : "user",
+    serviceAccountId: undefined,
+    authMode: actorId.startsWith("mock") ? "mock" : undefined,
+    requestId: undefined,
+    correlationId: undefined,
+    source: undefined,
+    roles: improvementRolesFromActorId(actorId),
+    metadata: safeImprovementMetadata({
+      ...(input.metadata ?? {}),
+      compatibilityActorFallback: true
+    })
+  };
+}
+
+function improvementRolesFromAuthRoles(roleNames: string[], serviceAccountId?: string): string[] {
+  const roles = new Set<string>(roleNames);
+  if (serviceAccountId === "improvement_governance_service") {
+    roles.add("system");
+    roles.add("service_account_improvement_governance");
+    roles.add("improvement_editor");
+    roles.add("improvement_reviewer");
+  }
+  if (roles.has("system_admin") || roles.has("platform_admin") || roles.has("mock_admin")) roles.add("registry_admin");
+  if (roles.has("reviewer")) roles.add("registry_reviewer");
+  if (roles.has("developer")) roles.add("improvement_editor");
+  return [...roles];
+}
+
+function improvementRolesFromActorId(actorId = "mock-admin"): string[] {
   const roles = actorId.includes("admin")
     ? ["registry_admin"]
     : actorId.includes("reviewer")
@@ -852,11 +990,125 @@ function mockImprovementSubject(actorId = "mock-admin") {
       : actorId.startsWith("mock")
         ? ["system"]
         : [];
+  return roles;
+}
+
+function mockImprovementSubject(input: ImprovementRequestContextInput | string = "mock-admin", options: { serviceAccountFallback?: boolean } = {}) {
+  const attribution = typeof input === "string"
+    ? improvementAttribution({ actorId: input }, input, options)
+    : improvementAttribution(input, "mock-admin", options);
   return createPolicySubject({
-    actorId,
-    actorKind: actorId.startsWith("mock") ? "system" : "user",
-    roles
+    actorId: attribution.actorId,
+    principalId: attribution.principalId,
+    actorKind: attribution.actorKind === "service_account" ? "service_account" : attribution.actorKind === "system" ? "system" : "user",
+    roles: attribution.roles,
+    authMode: attribution.authMode,
+    serviceAccountId: attribution.serviceAccountId,
+    isMockActor: attribution.authMode === "mock" || attribution.authMode === "mock_service_account" || attribution.metadata.compatibilityActorFallback === true,
+    requestId: attribution.requestId,
+    correlationId: attribution.correlationId,
+    source: attribution.source,
+    tenantIds: stringArrayMetadata(attribution.metadata.tenantIds) ?? (stringMetadata(attribution.metadata.tenantId) ? [stringMetadata(attribution.metadata.tenantId) as string] : undefined),
+    teamIds: stringArrayMetadata(attribution.metadata.teamIds) ?? (stringMetadata(attribution.metadata.teamId) ? [stringMetadata(attribution.metadata.teamId) as string] : undefined),
+    projectIds: stringArrayMetadata(attribution.metadata.projectIds) ?? (stringMetadata(attribution.metadata.projectId) ? [stringMetadata(attribution.metadata.projectId) as string] : undefined),
+    resourceScopes: policyResourceScopesFromMetadata(attribution.metadata),
+    metadata: attribution.metadata
   });
+}
+
+function contextFieldsForGovernance(input: ImprovementRequestContextInput = {}, fallbackActorId = "mock-admin", options: { serviceAccountFallback?: boolean } = {}) {
+  const attribution = improvementAttribution(input, fallbackActorId, options);
+  return {
+    actorId: attribution.actorId,
+    principalId: attribution.principalId,
+    actorKind: attribution.actorKind,
+    serviceAccountId: attribution.serviceAccountId,
+    authMode: attribution.authMode,
+    requestId: attribution.requestId,
+    correlationId: attribution.correlationId,
+    source: attribution.source,
+    metadata: attribution.metadata
+  };
+}
+
+function safeImprovementMetadata(input: Record<string, unknown> = {}): Record<string, unknown> {
+  const output: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue;
+    if (/token|secret|password|cookie|credential|session|apiKey|api_key|authorization/i.test(key)) {
+      output[key] = "[redacted]";
+    } else if (value && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date)) {
+      output[key] = safeImprovementMetadata(value as Record<string, unknown>);
+    } else {
+      output[key] = value;
+    }
+  }
+  return output;
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function stringArrayMetadata(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const values = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  return values.length > 0 ? values : undefined;
+}
+
+function policyResourceScopesFromMetadata(metadata: Record<string, unknown> | undefined): PolicyResourceScope[] {
+  const values = metadata?.resourceScopes;
+  if (!Array.isArray(values)) return [];
+  return values.filter((item): item is PolicyResourceScope =>
+    item !== null &&
+    typeof item === "object" &&
+    typeof (item as PolicyResourceScope).scopeKind === "string" &&
+    typeof (item as PolicyResourceScope).scopeId === "string"
+  );
+}
+
+function registryPackageScopeKindForImprovement(kind: ImprovementTargetKind | undefined): "skill" | "harness" | "instruction" | "unknown" {
+  if (kind === "skill" || kind === "harness" || kind === "instruction") return kind;
+  return "unknown";
+}
+
+function registryPackageScopeMetadataForProposal(proposal: ImprovementProposal, contextMetadata: Record<string, unknown> = {}): Record<string, unknown> {
+  const factory = new ScopeContextFactory();
+  const registryPackageScope = factory.createRegistryPackageScope({
+    tenantId: stringMetadata(contextMetadata.tenantId),
+    teamId: stringMetadata(contextMetadata.teamId),
+    projectId: stringMetadata(contextMetadata.projectId),
+    packageId: `${proposal.targetKind}:${proposal.targetId ?? proposal.id}`,
+    packageKind: registryPackageScopeKindForImprovement(proposal.targetKind),
+    metadata: { proposalId: proposal.id, status: proposal.status }
+  });
+  return {
+    registryPackageScope,
+    resourceScopes: factory.mergeScopes(
+      factory.toPolicyResourceScope(registryPackageScope),
+      ...policyResourceScopesFromMetadata(contextMetadata)
+    )
+  };
+}
+
+function policyResourceScopeFieldsFromMetadata(metadata: Record<string, unknown>): {
+  scopeKind?: PolicyResourceScope["scopeKind"];
+  scopeId?: string;
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  resourceScopes?: PolicyResourceScope[];
+} {
+  const scopes = policyResourceScopesFromMetadata(metadata);
+  const registryScope = scopes.find((scope) => scope.scopeKind === "registry_package");
+  return {
+    scopeKind: registryScope?.scopeKind,
+    scopeId: registryScope?.scopeId,
+    tenantId: stringMetadata(registryScope?.metadata.tenantId),
+    teamId: stringMetadata(registryScope?.metadata.teamId),
+    projectId: stringMetadata(registryScope?.metadata.projectId),
+    resourceScopes: scopes.length > 0 ? scopes : undefined
+  };
 }
 
 export class InMemoryImprovementRepository implements ImprovementRepository {
@@ -1335,6 +1587,7 @@ export class ImprovementProposalService {
     if (candidate.status === "dismissed") throw new Error("Dismissed candidates cannot create proposals");
     const proposedChangeType = input.proposedChangeType ?? defaultChangeType(candidate.candidateType);
     if (!proposalChangeTypes.has(proposedChangeType)) throw new Error("proposedChangeType is invalid");
+    const context = contextFieldsForGovernance(input, input.createdBy ?? "mock-admin");
     const now = new Date();
     const proposal = this.repository.createImprovementProposal({
       id: createId("improvement_proposal"),
@@ -1352,7 +1605,7 @@ export class ImprovementProposalService {
         "No registry entry is mutated or activated by this proposal."
       ],
       status: "draft",
-      createdBy: input.createdBy ?? "mock-admin",
+      createdBy: input.createdBy ?? context.actorId,
       createdAt: now,
       updatedAt: now
     });
@@ -1457,7 +1710,16 @@ export class DraftRegistryChangeService {
     if (!draftRegistryChangeTransitions[change.status].includes(input.status)) {
       throw new Error(`Invalid draft registry change status transition: ${change.status} -> ${input.status}`);
     }
-    return this.repository.updateDraftRegistryChange(input.id, { status: input.status });
+    const context = contextFieldsForGovernance(input, input.actorId ?? change.actorId ?? "mock-admin");
+    return this.repository.updateDraftRegistryChange(input.id, {
+      status: input.status,
+      ...context,
+      metadata: safeImprovementMetadata({
+        ...(change.metadata ?? {}),
+        ...(context.metadata ?? {}),
+        statusTransition: `${change.status}->${input.status}`
+      })
+    });
   }
 }
 
@@ -1500,22 +1762,32 @@ export class ProposalGovernanceService {
 
   recordDecision(input: CreateGovernanceDecisionInput): ProposalGovernanceDecision {
     const proposal = this.requireProposal(input.proposalId);
+    const context = contextFieldsForGovernance(input, input.actorId ?? "mock-admin");
+    const scopeMetadata = registryPackageScopeMetadataForProposal(proposal, context.metadata);
+    let policyDecisionId: string | undefined;
     if (input.decision === "approve") {
       const policyDecision = this.policyService.evaluate({
-        subject: mockImprovementSubject(input.actorId),
+        subject: mockImprovementSubject(input),
         action: "improvement.proposal.approve",
         resource: createPolicyResource({
           resourceKind: "improvement_proposal",
           resourceId: proposal.id,
-          metadata: { status: proposal.status, targetKind: proposal.targetKind }
+          ...policyResourceScopeFieldsFromMetadata(scopeMetadata),
+          metadata: {
+            status: proposal.status,
+            targetKind: proposal.targetKind,
+            ...scopeMetadata
+          }
         }),
         context: createPolicyContext({
           metadata: {
             source: "improvement_governance",
-            decision: input.decision
+            decision: input.decision,
+            ...scopeMetadata
           }
         })
       });
+      policyDecisionId = policyDecision.id;
       if (!policyDecision.allowed) throw new Error(policyDecision.reason);
     }
     const decision = this.repository.createProposalGovernanceDecision(createGovernanceDecision(input));
@@ -1523,17 +1795,18 @@ export class ProposalGovernanceService {
     if (nextStatus !== proposal.status) {
       this.repository.updateImprovementProposal(proposal.id, { status: nextStatus });
     }
-    this.appendAudit("proposal_decision_recorded", proposal.id, decision.actorId, `Recorded ${decision.decision} decision for ${proposal.id}.`, {
+    this.appendAudit("proposal_decision_recorded", proposal.id, decision.actorId, `Recorded ${decision.decision} decision for ${proposal.id}.`, context, {
+      ...scopeMetadata,
       decision: decision.decision
     });
     if (decision.decision === "approve") {
-      this.appendAudit("proposal_approved", proposal.id, decision.actorId, `Approved proposal ${proposal.id} for the next governance gate.`);
+      this.appendAudit("proposal_approved", proposal.id, decision.actorId, `Approved proposal ${proposal.id} for the next governance gate.`, { ...context, policyDecisionId });
     }
     if (decision.decision === "reject") {
-      this.appendAudit("proposal_rejected", proposal.id, decision.actorId, `Rejected proposal ${proposal.id}.`);
+      this.appendAudit("proposal_rejected", proposal.id, decision.actorId, `Rejected proposal ${proposal.id}.`, context);
     }
     if (decision.decision === "request_changes") {
-      this.appendAudit("proposal_changes_requested", proposal.id, decision.actorId, `Requested changes for proposal ${proposal.id}.`);
+      this.appendAudit("proposal_changes_requested", proposal.id, decision.actorId, `Requested changes for proposal ${proposal.id}.`, context);
     }
     return decision;
   }
@@ -1586,13 +1859,32 @@ export class ProposalGovernanceService {
     return proposal.status;
   }
 
-  private appendAudit(action: ImprovementGovernanceAuditAction, proposalId: string, actorId: string, message: string, metadata?: Record<string, unknown>): void {
+  private appendAudit(
+    action: ImprovementGovernanceAuditAction,
+    proposalId: string,
+    actorId: string,
+    message: string,
+    context: ReturnType<typeof contextFieldsForGovernance> & { policyDecisionId?: string; authorizationDecisionId?: string },
+    metadata?: Record<string, unknown>
+  ): void {
     this.repository.appendImprovementGovernanceAuditEvent(createGovernanceAuditEvent({
       action,
       proposalId,
       actorId,
+      principalId: context.principalId,
+      actorKind: context.actorKind,
+      serviceAccountId: context.serviceAccountId,
+      authMode: context.authMode,
+      requestId: context.requestId,
+      correlationId: context.correlationId,
+      source: context.source,
+      policyDecisionId: context.policyDecisionId,
+      authorizationDecisionId: context.authorizationDecisionId,
       message,
-      metadata
+      metadata: safeImprovementMetadata({
+        ...(context.metadata ?? {}),
+        ...(metadata ?? {})
+      })
     }));
   }
 
@@ -1623,8 +1915,19 @@ export class ProposalEvalRunService {
       action: "proposal_eval_attached",
       proposalId: proposal.id,
       actorId: run.attachedBy,
+      principalId: run.principalId,
+      actorKind: run.actorKind,
+      serviceAccountId: run.serviceAccountId,
+      authMode: run.authMode,
+      requestId: run.requestId,
+      correlationId: run.correlationId,
+      source: run.source,
       message: `Attached ${run.status} eval run ${run.id} to proposal ${proposal.id}.`,
-      metadata: { evalRequirementId: run.evalRequirementId, status: run.status }
+      metadata: safeImprovementMetadata({
+        ...(run.metadata ?? {}),
+        evalRequirementId: run.evalRequirementId,
+        status: run.status
+      })
     }));
     return run;
   }
@@ -1643,25 +1946,38 @@ export class CanaryReadinessService {
     this.repository = repository;
   }
 
-  evaluate(proposalId: string): CanaryReadiness {
+  evaluate(proposalId: string, contextInput: ImprovementRequestContextInput = {}): CanaryReadiness {
     const proposal = this.repository.getImprovementProposal(proposalId);
     if (!proposal) throw new Error(`Improvement proposal not found: ${proposalId}`);
     const policy = activeSafetyPolicy(this.repository);
     const ready = !policy.requireCanary || canaryReadyForProposal(this.repository, proposal.id);
+    const context = contextFieldsForGovernance(contextInput, contextInput.actorId ?? "mock-admin");
     const readiness: CanaryReadiness = {
       proposalId: proposal.id,
       required: policy.requireCanary,
       ready,
       blockingReasons: policy.requireCanary && !ready ? ["canary_required"] : [],
+      ...context,
       evaluatedAt: new Date()
     };
     const result = this.repository.upsertCanaryReadiness(readiness);
     this.repository.appendImprovementGovernanceAuditEvent(createGovernanceAuditEvent({
       action: "proposal_canary_readiness_checked",
       proposalId: proposal.id,
-      actorId: "mock-admin",
+      actorId: context.actorId,
+      principalId: context.principalId,
+      actorKind: context.actorKind,
+      serviceAccountId: context.serviceAccountId,
+      authMode: context.authMode,
+      requestId: context.requestId,
+      correlationId: context.correlationId,
+      source: context.source,
       message: `Checked canary readiness for proposal ${proposal.id}.`,
-      metadata: { ready: result.ready, required: result.required }
+      metadata: safeImprovementMetadata({
+        ...(context.metadata ?? {}),
+        ready: result.ready,
+        required: result.required
+      })
     }));
     return result;
   }
@@ -1676,26 +1992,31 @@ export class ProposalApplyGateService {
     this.policyService = input.policyService ?? new PolicyService();
   }
 
-  evaluate(proposalId: string): ProposalApplyGate {
+  evaluate(proposalId: string, contextInput: ImprovementRequestContextInput = {}): ProposalApplyGate {
     const proposal = this.repository.getImprovementProposal(proposalId);
     if (!proposal) throw new Error(`Improvement proposal not found: ${proposalId}`);
     const policy = activeSafetyPolicy(this.repository);
     const readiness = evaluateReadinessSnapshot(this.repository, proposal);
     const blockingReasons = new Set<string>(["active_apply_not_implemented"]);
+    const context = contextFieldsForGovernance(contextInput, contextInput.actorId ?? "mock-admin");
+    const scopeMetadata = registryPackageScopeMetadataForProposal(proposal, context.metadata);
     const policyDecision = this.policyService.evaluate({
-      subject: mockImprovementSubject("mock-admin"),
+      subject: mockImprovementSubject(contextInput),
       action: "improvement.apply",
       resource: createPolicyResource({
         resourceKind: "draft_registry_change",
         resourceId: this.repository.getDraftRegistryChangeForProposal(proposal.id)?.id,
+        ...policyResourceScopeFieldsFromMetadata(scopeMetadata),
         metadata: {
           proposalId: proposal.id,
-          targetKind: proposal.targetKind
+          targetKind: proposal.targetKind,
+          ...scopeMetadata
         }
       }),
       context: createPolicyContext({
         metadata: {
-          source: "proposal_apply_gate"
+          source: "proposal_apply_gate",
+          ...scopeMetadata
         }
       })
     });
@@ -1709,30 +2030,56 @@ export class ProposalApplyGateService {
       requiredEvalPassed: policy.requireEvalPassed,
       requiredCanaryReady: policy.requireCanary,
       safetyPolicyId: policy.id,
+      policyDecisionId: policyDecision.id,
+      ...context,
       evaluatedAt: new Date()
     };
     const result = this.repository.upsertProposalApplyGate(gate);
     this.repository.appendImprovementGovernanceAuditEvent(createGovernanceAuditEvent({
       action: "proposal_apply_gate_checked",
       proposalId: proposal.id,
-      actorId: "mock-admin",
+      actorId: context.actorId,
+      principalId: context.principalId,
+      actorKind: context.actorKind,
+      serviceAccountId: context.serviceAccountId,
+      authMode: context.authMode,
+      requestId: context.requestId,
+      correlationId: context.correlationId,
+      source: context.source,
+      policyDecisionId: policyDecision.id,
       message: `Checked apply gate for proposal ${proposal.id}.`,
-      metadata: { canApply: result.canApply, blockingReasons: result.blockingReasons, policyDecisionId: policyDecision.id }
+      metadata: safeImprovementMetadata({
+        ...(context.metadata ?? {}),
+        canApply: result.canApply,
+        blockingReasons: result.blockingReasons,
+        policyDecisionId: policyDecision.id
+      })
     }));
     if (!result.canApply) {
       this.repository.appendImprovementGovernanceAuditEvent(createGovernanceAuditEvent({
         action: "proposal_apply_blocked",
         proposalId: proposal.id,
-        actorId: "mock-admin",
+        actorId: context.actorId,
+        principalId: context.principalId,
+        actorKind: context.actorKind,
+        serviceAccountId: context.serviceAccountId,
+        authMode: context.authMode,
+        requestId: context.requestId,
+        correlationId: context.correlationId,
+        source: context.source,
+        policyDecisionId: policyDecision.id,
         message: `Blocked apply for proposal ${proposal.id}; apply is not implemented in Governance v1.`,
-        metadata: { blockingReasons: result.blockingReasons }
+        metadata: safeImprovementMetadata({
+          ...(context.metadata ?? {}),
+          blockingReasons: result.blockingReasons
+        })
       }));
     }
     return result;
   }
 
-  blockApplyAttempt(proposalId: string): ProposalApplyGate {
-    return this.evaluate(proposalId);
+  blockApplyAttempt(proposalId: string, context: ImprovementRequestContextInput = {}): ProposalApplyGate {
+    return this.evaluate(proposalId, context);
   }
 }
 
@@ -1745,7 +2092,7 @@ export class MockAutoImprovementEngine implements AutoImprovementEngine {
     this.policyService = input.policyService ?? new PolicyService();
   }
 
-  analyzeFailureCluster(clusterId: string): AutoImprovementAnalysis {
+  analyzeFailureCluster(clusterId: string, _context: ImprovementRequestContextInput = {}): AutoImprovementAnalysis {
     const existing = this.repository.getAutoImprovementAnalysisForCluster(clusterId);
     if (existing) return existing;
     const cluster = this.requireCluster(clusterId);
@@ -1772,8 +2119,8 @@ export class MockAutoImprovementEngine implements AutoImprovementEngine {
     });
   }
 
-  generateImprovementCandidate(clusterId: string): ImprovementCandidate {
-    const analysis = this.analyzeFailureCluster(clusterId);
+  generateImprovementCandidate(clusterId: string, context: ImprovementRequestContextInput = {}): ImprovementCandidate {
+    const analysis = this.analyzeFailureCluster(clusterId, context);
     const target = parseTargetRef(analysis.targetRef, analysis.targetKind);
     const id = stableCandidateId(clusterId, analysis.recommendedCandidateType);
     const existing = this.repository.getImprovementCandidate(id);
@@ -1795,7 +2142,7 @@ export class MockAutoImprovementEngine implements AutoImprovementEngine {
     });
   }
 
-  generateImprovementProposal(candidateId: string): ImprovementProposal {
+  generateImprovementProposal(candidateId: string, contextInput: ImprovementRequestContextInput = {}): ImprovementProposal {
     const candidate = this.repository.getImprovementCandidate(candidateId);
     if (!candidate) throw new Error(`Improvement candidate not found: ${candidateId}`);
     if (candidate.status === "dismissed") throw new Error("Dismissed candidates cannot create proposals");
@@ -1804,6 +2151,7 @@ export class MockAutoImprovementEngine implements AutoImprovementEngine {
     if (existing) return existing;
     const cluster = this.repository.getFailureCluster(candidate.sourceClusterId);
     const proposedChangeType = proposalChangeTypeForCandidate(candidate, cluster);
+    const context = contextFieldsForGovernance(contextInput, "improvement_governance_service", { serviceAccountFallback: true });
     const proposal = this.repository.createImprovementProposal({
       id,
       candidateId: candidate.id,
@@ -1826,7 +2174,7 @@ export class MockAutoImprovementEngine implements AutoImprovementEngine {
         "Future approval, eval, and canary gates must be satisfied separately."
       ],
       status: "draft",
-      createdBy: "mock-auto-improvement-engine",
+      createdBy: context.actorId,
       createdAt: new Date(),
       updatedAt: new Date()
     });
@@ -1835,12 +2183,13 @@ export class MockAutoImprovementEngine implements AutoImprovementEngine {
     return proposal;
   }
 
-  prepareDraftRegistryChange(proposalId: string): DraftRegistryChange {
+  prepareDraftRegistryChange(proposalId: string, contextInput: ImprovementRequestContextInput = {}): DraftRegistryChange {
     const proposal = this.requireProposal(proposalId);
     const existing = this.repository.getDraftRegistryChangeForProposal(proposal.id);
     if (existing) return existing;
+    const context = contextFieldsForGovernance(contextInput, "improvement_governance_service", { serviceAccountFallback: true });
     const policyDecision = this.policyService.evaluate({
-      subject: mockImprovementSubject("mock-auto-improvement"),
+      subject: mockImprovementSubject(contextInput, { serviceAccountFallback: true }),
       action: "improvement.draft_change.prepare",
       resource: createPolicyResource({
         resourceKind: "draft_registry_change",
@@ -1878,11 +2227,23 @@ export class MockAutoImprovementEngine implements AutoImprovementEngine {
         proposedChangeType: proposal.proposedChangeType,
         proposedPatch: proposal.proposedPatch,
         proposedSummary: proposal.proposedSummary
-      }
+      },
+      actorId: context.actorId,
+      principalId: context.principalId,
+      actorKind: context.actorKind,
+      serviceAccountId: context.serviceAccountId,
+      authMode: context.authMode,
+      requestId: context.requestId,
+      correlationId: context.correlationId,
+      source: context.source,
+      metadata: safeImprovementMetadata({
+        ...(context.metadata ?? {}),
+        policyDecisionId: policyDecision.id
+      })
     }));
   }
 
-  evaluateProposalReadiness(proposalId: string): ProposalReadiness {
+  evaluateProposalReadiness(proposalId: string, _context: ImprovementRequestContextInput = {}): ProposalReadiness {
     const proposal = this.requireProposal(proposalId);
     return this.repository.upsertProposalReadiness(evaluateReadinessSnapshot(this.repository, proposal));
   }

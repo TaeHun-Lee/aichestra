@@ -1,3 +1,4 @@
+import { listMockScopeCatalog, scopeSummary } from "@aichestra/auth";
 import type { AuthorizationService } from "@aichestra/auth";
 import type { InMemoryAichestraStore } from "@aichestra/db";
 import type { DeploymentReadinessService } from "@aichestra/deployment-readiness";
@@ -38,6 +39,7 @@ import {
   type PolicyReadModel,
   type RegistryReadModel,
   type SecurityReadModel,
+  type ScopeReadinessReadModel,
   type SecretBackendDecisionReadModel,
   type SecretBackendMigrationReadModel,
   type StagingDeploymentDryRunReadModel,
@@ -1240,6 +1242,36 @@ function buildMcp(context: DashboardReadModelContext): MCPGatewayReadModel {
   };
 }
 
+function buildScopes(): ScopeReadinessReadModel {
+  const catalog = listMockScopeCatalog();
+  return {
+    summary: sanitizeDashboardObject(scopeSummary(catalog)),
+    tenants: sanitizeDashboardArray(catalog.tenants),
+    teams: sanitizeDashboardArray(catalog.teams),
+    projects: sanitizeDashboardArray(catalog.projects),
+    repos: sanitizeDashboardArray(catalog.repos),
+    providers: sanitizeDashboardArray(catalog.providers),
+    models: sanitizeDashboardArray(catalog.models),
+    secrets: sanitizeDashboardArray(catalog.secrets),
+    mcpTools: sanitizeDashboardArray(catalog.mcpTools),
+    registryPackages: sanitizeDashboardArray(catalog.registryPackages),
+    localAgentHosts: sanitizeDashboardArray(catalog.localAgentHosts),
+    auditQueries: sanitizeDashboardArray(catalog.auditQueries),
+    enforcement: sanitizeDashboardObject({
+      status: "planning_model_only",
+      productionTenantEnforcement: false,
+      tenantFilteringStatus: "future",
+      dashboardFilteringStatus: "future",
+      externalScopeLookupEnabled: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      rawCredentialsExposed: false
+    })
+  };
+}
+
 function buildReadiness(context: DashboardReadModelContext): DeploymentReadinessReadModel {
   const summary = context.deploymentReadinessService.getSummary();
   const checks = context.deploymentReadinessService.listChecks();
@@ -1333,6 +1365,7 @@ function buildOverview(
   security: SecurityReadModel,
   localAgents: LocalAgentReadModel,
   mcp: MCPGatewayReadModel,
+  scopes: ScopeReadinessReadModel,
   readiness: DeploymentReadinessReadModel,
   database: DatabaseOperationsReadModel,
   secretBackend: SecretBackendMigrationReadModel,
@@ -1396,6 +1429,11 @@ function buildOverview(
       localAgents: localAgents.registrations.length,
       mcpServers: mcp.servers.length,
       mcpTools: mcp.tools.length,
+      scopeTenants: scopes.tenants.length,
+      scopeRepos: scopes.repos.length,
+      scopeProviders: scopes.providers.length,
+      scopeModels: scopes.models.length,
+      scopeSecrets: scopes.secrets.length,
       productionReadinessCriticalBlockers: readiness.summary.criticalBlockerCount ?? 0,
       productionReadinessHighRisks: readiness.summary.highRiskOpenCount ?? 0,
       databaseOperationsCriticalBlockers: database.summary.criticalBlockerCount ?? database.blockers.length,
@@ -1449,6 +1487,7 @@ function buildOverview(
       security: { status: "available", count: security.auditEvents.length, notes: ["Secrets are metadata-only."] },
       localAgents: { status: "available", count: localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
       mcp: { status: "available", count: mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
+      scopes: { status: "available", count: scopes.tenants.length + scopes.repos.length + scopes.providers.length, notes: ["Tenant/repo/provider scopes are metadata/readiness-only; tenant enforcement and dashboard filtering remain future."] },
       readiness: { status: "available", count: readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       database: { status: "available", count: database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
       secretBackend: { status: "available", count: secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
@@ -1504,6 +1543,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const security = buildSecurity(context);
   const localAgents = buildLocalAgents(context);
   const mcp = buildMcp(context);
+  const scopes = buildScopes();
   const readiness = buildReadiness(context);
   const database = buildDatabase(context);
   const secretBackend = buildSecretBackend(context);
@@ -1516,7 +1556,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const cicd = buildCicd(context);
   const observability = buildObservability(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, mcp, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
+  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, mcp, scopes, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
 
   return {
     overview,
@@ -1538,6 +1578,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     security,
     localAgents,
     mcp,
+    scopes,
     readiness,
     database,
     secretBackend,

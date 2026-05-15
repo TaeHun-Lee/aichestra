@@ -2,8 +2,10 @@ import { createId } from "@aichestra/core";
 import type {
   AuthContext,
   AuthorizationDecision,
-  AuthorizationServiceInterface
+  AuthorizationServiceInterface,
+  RequestContext
 } from "@aichestra/auth";
+import { ScopeContextFactory, ServiceAccountContextFactory, createServiceAccountPolicySubject, serviceAccountAuditMetadata } from "@aichestra/auth";
 import {
   PolicyService,
   createPolicyContext,
@@ -49,6 +51,7 @@ export type SecurityControlServiceInput = {
   authorizationService?: AuthorizationServiceInterface;
   envSecretProvider?: EnvSecretProvider;
   vaultSecretProvider?: VaultSecretProvider;
+  serviceAccountContextFactory?: ServiceAccountContextFactory;
   env?: Record<string, string | undefined>;
 };
 
@@ -56,13 +59,18 @@ export class SecurityControlService implements SecretManager {
   private readonly repositories: SecurityRepositories;
   private readonly policyService: PolicyService;
   private readonly authorizationService?: AuthorizationServiceInterface;
+  private readonly serviceAccountContextFactory?: ServiceAccountContextFactory;
   private readonly envSecretProvider: EnvSecretProvider;
   private readonly vaultSecretProvider: VaultSecretProvider;
+  private readonly scopeContextFactory = new ScopeContextFactory();
 
   constructor(input: SecurityControlServiceInput = {}) {
     this.repositories = input.repositories ?? createInMemorySecurityRepositories();
     this.policyService = input.policyService ?? new PolicyService();
     this.authorizationService = input.authorizationService;
+    this.serviceAccountContextFactory = input.serviceAccountContextFactory ?? (input.authorizationService
+      ? new ServiceAccountContextFactory({ authorizationService: input.authorizationService })
+      : undefined);
     this.envSecretProvider = input.envSecretProvider ?? createEnvSecretProviderFromEnv(input.env);
     this.vaultSecretProvider = input.vaultSecretProvider ?? createVaultSecretProviderFromEnv(input.env);
   }
@@ -779,6 +787,7 @@ export class SecurityControlService implements SecretManager {
     const authContext = this.resolveCredentialAuthContext(request);
     const actorId = authContext?.actor.id ?? request.actorId;
     const principalId = authContext?.principal.id ?? request.principalId;
+    const requestMetadata = this.requestContextMetadata(request, authContext);
     const secretRef = this.repositories.secretRefs.getSecretRef(request.secretRefId);
     this.recordAudit({
       targetKind: "secret",
@@ -795,6 +804,7 @@ export class SecurityControlService implements SecretManager {
         providerId: request.providerId,
         providerKind,
         authMode: authContext?.authMode,
+        ...requestMetadata,
         secretRefExists: Boolean(secretRef)
       }
     });
@@ -1018,6 +1028,7 @@ export class SecurityControlService implements SecretManager {
           providerKind,
           clientKind: this.vaultSecretProvider.getClientKind(),
           selectedProvider: this.vaultSecretProvider.getConfig().selectedProvider,
+          ...requestMetadata,
           containsSecretMaterial: false
         }
       });
@@ -1038,6 +1049,7 @@ export class SecurityControlService implements SecretManager {
           vaultMountConfigured: Boolean(vaultMetadata.vaultMount),
           vaultPathConfigured: Boolean(vaultMetadata.vaultPath),
           vaultKeyConfigured: Boolean(vaultMetadata.vaultKey),
+          ...requestMetadata,
           containsSecretMaterial: false
         }
       });
@@ -1068,6 +1080,7 @@ export class SecurityControlService implements SecretManager {
           providerKind,
           secretKind: secretRef.secretKind,
           clientKind: this.vaultSecretProvider.getClientKind(),
+          ...requestMetadata,
           containsSecretMaterial: false
         }
       });
@@ -1115,6 +1128,7 @@ export class SecurityControlService implements SecretManager {
           providerKind,
           secretKind: secretRef.secretKind,
           clientKind: this.vaultSecretProvider.getClientKind(),
+          ...requestMetadata,
           containsSecretMaterial: false
         }
       });
@@ -1207,6 +1221,7 @@ export class SecurityControlService implements SecretManager {
         authorizationDecisionId: authorizationDecision?.auditEvent?.id,
         policyDecisionId: credentialPolicy.id,
         purposePolicyDecisionId: purposePolicy?.id,
+        ...requestMetadata,
         leasePolicyDecisionId: leaseIssuePolicy.id
       }
     });
@@ -1222,6 +1237,7 @@ export class SecurityControlService implements SecretManager {
       metadata: {
         resolutionId,
         handleId: handle.id,
+        ...requestMetadata,
         containsSecretMaterial: false
       }
     });
@@ -1247,6 +1263,7 @@ export class SecurityControlService implements SecretManager {
   ): InternalCredentialResolutionResult {
     const actorId = authContext?.actor.id ?? request.actorId;
     const principalId = authContext?.principal.id ?? request.principalId;
+    const requestMetadata = this.requestContextMetadata(request, authContext);
     if (secretRef?.provider === "vault" && eventType === "credential_resolution_authorization_denied") {
       this.recordAudit({
         targetKind: "secret",
@@ -1264,6 +1281,7 @@ export class SecurityControlService implements SecretManager {
           providerId: request.providerId,
           providerKind: providerKindForCredentialRequest(request),
           authorizationDecisionId: result.authorizationDecisionId,
+          ...requestMetadata,
           containsSecretMaterial: false
         }
       });
@@ -1285,6 +1303,7 @@ export class SecurityControlService implements SecretManager {
           providerId: request.providerId,
           providerKind: providerKindForCredentialRequest(request),
           policyDecisionId: result.policyDecisionId,
+          ...requestMetadata,
           containsSecretMaterial: false
         }
       });
@@ -1308,6 +1327,7 @@ export class SecurityControlService implements SecretManager {
         authMode: authContext?.authMode,
         policyDecisionId: result.policyDecisionId,
         authorizationDecisionId: result.authorizationDecisionId,
+        ...requestMetadata,
         envKeyConfigured: Boolean(secretRef?.envKey),
         vaultMountConfigured: secretRef?.provider === "vault" ? Boolean(vaultMetadataFromSecretRef(secretRef).vaultMount) : undefined,
         vaultPathConfigured: secretRef?.provider === "vault" ? Boolean(vaultMetadataFromSecretRef(secretRef).vaultPath) : undefined,
@@ -1343,11 +1363,16 @@ export class SecurityControlService implements SecretManager {
     return this.policyService.evaluate({
       subject: input.authContext && this.authorizationService
         ? this.authorizationService.toPolicySubject(input.authContext)
-        : createPolicySubject({
+        : input.actorId
+          ? createPolicySubject({
           actorId: input.actorId ?? "mock-security-actor",
           actorKind: "service",
           roles: ["system"]
-        }),
+          })
+          : createServiceAccountPolicySubject("secretref_credential_service", {
+            source: "system",
+            metadata: { boundary: "security_control_service" }
+          }),
       action: input.action,
       resource: createPolicyResource({
         resourceKind: input.resourceKind,
@@ -1360,7 +1385,10 @@ export class SecurityControlService implements SecretManager {
         runnerKind: input.runnerKind,
         environment: input.environment ?? {},
         metadata: {
-          source: "security_control_service"
+          source: "security_control_service",
+          requestId: input.authContext?.requestId,
+          correlationId: stringMetadata(input.authContext?.metadata.correlationId),
+          authSource: input.authContext?.source
         }
       })
     });
@@ -1368,10 +1396,34 @@ export class SecurityControlService implements SecretManager {
 
   private resolveCredentialAuthContext(request: CredentialResolutionRequest): AuthContext | undefined {
     if (!this.authorizationService) return request.authContext;
+    if (request.requestContext) return request.requestContext.authContext;
     if (request.authContext) return request.authContext;
+    if (!request.actorId) {
+      const serviceAccountId = this.repositories.secretRefs.getSecretRef(request.secretRefId)?.provider === "vault"
+        ? "vault_credential_resolver_service"
+        : "secretref_credential_service";
+      return this.serviceAccountContextFactory?.createServiceAccountAuthContext(serviceAccountId, {
+        source: "system",
+        metadata: {
+          credentialResolution: true,
+          purpose: request.purpose,
+          providerId: request.providerId,
+          principalId: request.principalId
+        }
+      }) ?? this.authorizationService.getAuthContext({
+        actorId: serviceAccountId,
+        source: "system",
+        metadata: {
+          credentialResolution: true,
+          purpose: request.purpose,
+          providerId: request.providerId,
+          principalId: request.principalId
+        }
+      });
+    }
     return this.authorizationService.getAuthContext({
-      actorId: request.actorId ?? "mock-admin",
-      source: request.actorId ? "api" : "system",
+      actorId: request.actorId,
+      source: "api",
       metadata: {
         credentialResolution: true,
         purpose: request.purpose,
@@ -1411,10 +1463,66 @@ export class SecurityControlService implements SecretManager {
         metadata: {
           source: "security_control_service",
           credentialResolution: true,
-          purpose: request.purpose
+          purpose: request.purpose,
+          requestId: authContext.requestId,
+          correlationId: stringMetadata(authContext.metadata.correlationId),
+          authSource: authContext.source
         }
       }
     });
+  }
+
+  private requestContextMetadata(request: { requestContext?: RequestContext; authContext?: AuthContext }, authContext?: AuthContext): Record<string, unknown> {
+    const context = request.requestContext;
+    const resolvedAuth = context?.authContext ?? authContext ?? request.authContext;
+    const secretRefId = stringMetadata((request as { secretRefId?: unknown }).secretRefId);
+    const secretRef = secretRefId ? this.repositories.secretRefs.getSecretRef(secretRefId) : undefined;
+    return {
+      requestId: context?.requestId ?? resolvedAuth?.requestId,
+      correlationId: context?.correlationId ?? stringMetadata(resolvedAuth?.metadata.correlationId),
+      source: context?.source ?? resolvedAuth?.source,
+      actorId: resolvedAuth?.actor.id,
+      principalId: resolvedAuth?.principal.id,
+      serviceAccountId: stringMetadata(resolvedAuth?.metadata.serviceAccountId),
+      authMode: resolvedAuth?.authMode,
+      tenantId: context?.tenantId ?? resolvedAuth?.tenantScopes?.[0]?.tenantId,
+      teamId: context?.teamId ?? resolvedAuth?.teamScopes?.[0]?.teamId,
+      projectId: context?.projectId ?? resolvedAuth?.projectScopes?.[0]?.projectId,
+      ...(secretRef ? this.secretScopeMetadata(secretRef, request, resolvedAuth) : { resourceScopes: context?.resourceScopes ?? resolvedAuth?.resourceScopes }),
+      ...(!resolvedAuth && !request.authContext && !request.requestContext ? serviceAccountAuditMetadata("secretref_credential_service", { boundary: "security_control_service" }) : {})
+    };
+  }
+
+  private secretScopeMetadata(
+    secretRef: SecretRef,
+    request: { requestContext?: RequestContext; authContext?: AuthContext; purpose?: string; providerId?: string },
+    authContext?: AuthContext
+  ): Record<string, unknown> {
+    const tenantId = request.requestContext?.tenantId ?? authContext?.tenantScopes?.[0]?.tenantId;
+    const teamId = request.requestContext?.teamId ?? authContext?.teamScopes?.[0]?.teamId;
+    const projectId = request.requestContext?.projectId ?? authContext?.projectScopes?.[0]?.projectId;
+    const secretScopeBinding = this.scopeContextFactory.createSecretScope({
+      tenantId,
+      teamId,
+      projectId,
+      secretRefId: secretRef.id,
+      secretKind: secretRef.secretKind,
+      provider: secretRef.provider,
+      allowedPurposes: request.purpose ? [request.purpose] : [],
+      metadata: {
+        providerId: request.providerId,
+        scopeId: secretRef.scope,
+        containsSecretMaterial: false
+      }
+    });
+    const resourceScopes = this.scopeContextFactory.mergeScopes(
+      this.scopeContextFactory.toPolicyResourceScope(secretScopeBinding),
+      ...(request.requestContext?.resourceScopes ?? authContext?.resourceScopes ?? [])
+    );
+    return {
+      scopeBinding: secretScopeBinding,
+      resourceScopes
+    };
   }
 
   private credentialPolicyEnvironment(request: CredentialResolutionRequest, secretRef: SecretRef): Record<string, unknown> {
@@ -1449,13 +1557,22 @@ export class SecurityControlService implements SecretManager {
   }
 
   private recordAudit(input: Omit<SecurityAuditEvent, "id" | "createdAt">): SecurityAuditEvent {
+    const metadata = sanitizeMetadata(input.metadata);
     return this.repositories.audit.appendSecurityAuditEvent({
       id: createId("secaudit"),
       createdAt: new Date(),
       ...input,
-      metadata: sanitizeMetadata(input.metadata)
+      requestId: input.requestId ?? stringMetadata(metadata.requestId),
+      correlationId: input.correlationId ?? stringMetadata(metadata.correlationId),
+      source: input.source ?? stringMetadata(metadata.source),
+      serviceAccountId: input.serviceAccountId ?? stringMetadata(metadata.serviceAccountId),
+      metadata
     });
   }
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export class MockSecretManager extends SecurityControlService {}

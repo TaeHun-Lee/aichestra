@@ -126,16 +126,19 @@ import {
   InMemoryAuthRepository,
   MockAuthProvider,
   RequestContextResolver,
+  ServiceAccountContextFactory,
   actorToDto,
   authAuditEventToDto,
   authContextToDto,
   authorizationDecisionToDto,
   identityProviderToDto,
+  listMockScopeCatalog,
   permissionToDto,
   principalToDto,
   roleBindingToDto,
   roleToDto,
   serviceAccountToDto,
+  scopeSummary,
   teamToDto
 } from "@aichestra/auth";
 import type { AuthorizationResource, RequestSource, ResourceScope } from "@aichestra/auth";
@@ -310,6 +313,8 @@ import {
 import type { SecretKind, SecretProviderKind, SecretRefStatus } from "@aichestra/security";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
 import { buildDashboardReadModels } from "./dashboard-read-model.ts";
+import { ApiRequestContextMiddleware } from "./request-context-middleware.ts";
+export { ApiRequestContextMiddleware } from "./request-context-middleware.ts";
 
 type RouteContext = {
   store: InMemoryAichestraStore;
@@ -328,6 +333,7 @@ type RouteContext = {
   policyService: PolicyService;
   authorizationService: AuthorizationService;
   requestContextResolver: RequestContextResolver;
+  apiRequestContextMiddleware: ApiRequestContextMiddleware;
   providerAbstractionService: ProviderAbstractionService;
   securityService: SecurityControlService;
   localAgentProtocolService: LocalAgentProtocolService;
@@ -643,7 +649,7 @@ function policyActorKindValue(value: unknown): PolicyActorKind | undefined {
 }
 
 function requestSourceValue(value: unknown): RequestSource | undefined {
-  return value === "api" || value === "worker" || value === "dashboard" || value === "test" || value === "system"
+  return value === "api" || value === "worker" || value === "dashboard" || value === "readiness" || value === "test" || value === "system" || value === "webhook" || value === "local_agent"
     ? value
     : undefined;
 }
@@ -1047,6 +1053,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     const store = context.store;
     const registryService = context.registryService;
     const improvementServices = context.improvementServices;
+    const apiRequestContext = context.apiRequestContextMiddleware.resolveApiContext(request, {
+      route: url.pathname,
+      method,
+      metadata: { apiIngress: true }
+    });
 
     if (method === "GET" && url.pathname === "/health") {
       const storage = await context.storageProvider.healthCheck();
@@ -1467,6 +1478,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           secretsExposed: false,
           tokensExposed: false
         },
+        requestContext: context.apiRequestContextMiddleware.getSafeRequestContextSummary(apiRequestContext, { includeIds: false }) as unknown as JsonValue,
         authReadiness: {
           status: authRbacProduction.status,
           planningOnly: authRbacProduction.planningOnly,
@@ -1571,7 +1583,77 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "scopes") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Scope readiness endpoints are read-only metadata models." });
+        return;
+      }
+      const catalog = listMockScopeCatalog();
+      const safeContextSummary = context.apiRequestContextMiddleware.getSafeRequestContextSummary(apiRequestContext, { includeIds: false });
+      const envelope = (payload: Record<string, unknown>): Record<string, unknown> => ({
+        ...payload,
+        enforcementStatus: "planning_model_only",
+        productionTenantEnforcement: false,
+        productionAuthEnabled: false,
+        tenantFilteringStatus: "future",
+        noSecretsExposed: true,
+        requestContext: safeContextSummary
+      });
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, envelope({ summary: scopeSummary(catalog) }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "tenants") {
+        sendJson(response, 200, envelope({ tenants: catalog.tenants }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "teams") {
+        sendJson(response, 200, envelope({ teams: catalog.teams }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "projects") {
+        sendJson(response, 200, envelope({ projects: catalog.projects }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "repos") {
+        sendJson(response, 200, envelope({ repos: catalog.repos }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "providers") {
+        sendJson(response, 200, envelope({ providers: catalog.providers }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "models") {
+        sendJson(response, 200, envelope({ models: catalog.models }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "secrets") {
+        sendJson(response, 200, envelope({ secrets: catalog.secrets }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "mcp-tools") {
+        sendJson(response, 200, envelope({ mcpTools: catalog.mcpTools }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "registry-packages") {
+        sendJson(response, 200, envelope({ registryPackages: catalog.registryPackages }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "local-agents") {
+        sendJson(response, 200, envelope({ localAgentHosts: catalog.localAgentHosts }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "audit-queries") {
+        sendJson(response, 200, envelope({ auditQueries: catalog.auditQueries }));
+        return;
+      }
+      sendJson(response, 404, { error: "scope_readiness_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "deployment") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Deployment readiness endpoints are read-only planning models." });
         return;
@@ -2207,6 +2289,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
 
     if (segments[0] === "observability") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Observability endpoints are read-only." });
         return;
@@ -2278,6 +2361,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
 
     if (segments[0] === "dashboard") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Dashboard read models are read-only." });
         return;
@@ -2354,6 +2438,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (section === "mcp") {
         sendJson(response, 200, { mcp: dashboard.mcp });
+        return;
+      }
+      if (section === "scopes") {
+        sendJson(response, 200, { scopes: dashboard.scopes });
         return;
       }
       if (section === "readiness") {
@@ -2513,7 +2601,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
 
     if (segments[0] === "mcp") {
-      const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+      const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
       const mcp = context.mcpGatewayService;
 
       if (method === "GET" && segments[1] === "config") {
@@ -2597,9 +2685,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           taskRunId: stringValue(body.taskRunId),
           agentRunId: stringValue(body.agentRunId),
           authContext: requestContext.authContext,
+          requestContext,
           input,
           purpose: stringValue(body.purpose) ?? "api_mcp_tool_invoke",
-          metadata: recordValue(body.metadata),
+          metadata: {
+            ...recordValue(body.metadata),
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            source: requestContext.source
+          },
           createdAt: new Date()
         });
         sendJson(response, mcpInvocationStatusCode(result.status), { result: mcpToolInvocationResultToDto(result) });
@@ -2687,7 +2781,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 
     if (segments[0] === "auth") {
       const authService = context.authorizationService;
-      const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+      const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
 
       if (method === "GET") {
         const readDecision = authService.hasPermission(requestContext.authContext, "auth.read", {
@@ -2710,7 +2804,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           return;
         }
         if (segments[1] === "me") {
-          sendJson(response, 200, { authContext: authContextToDto(requestContext.authContext) as JsonValue });
+          sendJson(response, 200, {
+            authContext: authContextToDto(requestContext.authContext) as JsonValue,
+            requestContext: context.apiRequestContextMiddleware.getSafeRequestContextSummary(requestContext) as unknown as JsonValue
+          });
           return;
         }
         if (segments[1] === "roles") {
@@ -2830,17 +2927,34 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
 
       if (method === "POST" && segments[1] === "evaluate") {
+        const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
         const body = await readJson(request) as Record<string, unknown>;
         const parsed = policyEvaluationRequestFromBody(body);
         if (!parsed.ok) {
           sendJson(response, 400, { error: parsed.error, message: parsed.message });
           return;
         }
-        sendJson(response, 200, { decision: policyDecisionToDto(policyService.evaluate(parsed.request)) });
+        const subjectProvided = Object.keys(recordValue(body.subject)).length > 0;
+        sendJson(response, 200, {
+          decision: policyDecisionToDto(policyService.evaluate({
+            ...parsed.request,
+            subject: subjectProvided ? parsed.request.subject : context.authorizationService.toPolicySubject(requestContext.authContext),
+            context: createPolicyContext({
+              ...parsed.request.context,
+              metadata: {
+                ...parsed.request.context.metadata,
+                requestId: requestContext.requestId,
+                correlationId: requestContext.correlationId,
+                source: requestContext.source
+              }
+            })
+          }))
+        });
         return;
       }
 
       if (method === "POST" && segments[1] === "evaluate-many") {
+        const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
         const body = await readJson(request) as Record<string, unknown>;
         const requests = Array.isArray(body.requests) ? body.requests : undefined;
         if (!requests) {
@@ -2853,7 +2967,23 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           sendJson(response, 400, { error: invalid.error, message: invalid.message });
           return;
         }
-        const decisions = policyService.evaluateMany(parsed.filter((item): item is Extract<typeof item, { ok: true }> => item.ok).map((item) => item.request));
+        const decisions = policyService.evaluateMany(parsed.filter((item): item is Extract<typeof item, { ok: true }> => item.ok).map((item, index) => {
+          const original = recordValue(requests[index]);
+          const subjectProvided = Object.keys(recordValue(original.subject)).length > 0;
+          return {
+            ...item.request,
+            subject: subjectProvided ? item.request.subject : context.authorizationService.toPolicySubject(requestContext.authContext),
+            context: createPolicyContext({
+              ...item.request.context,
+              metadata: {
+                ...item.request.context.metadata,
+                requestId: requestContext.requestId,
+                correlationId: requestContext.correlationId,
+                source: requestContext.source
+              }
+            })
+          };
+        }));
         sendJson(response, 200, { decisions: decisions.map(policyDecisionToDto) });
         return;
       }
@@ -2939,18 +3069,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             sendJson(response, 400, { error: "invalid_credential_resolution_check", message: "secretRefId and purpose are required." });
             return;
           }
-          const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
           const result = securityService.resolveCredential({
             secretRefId,
             purpose,
             actorId: requestContext.authContext.actor.id,
             principalId: requestContext.authContext.principal.id,
             authContext: requestContext.authContext,
+            requestContext,
             taskId: stringValue(body.taskId),
             taskRunId: stringValue(body.taskRunId),
             providerId: stringValue(body.providerId),
             policyContext: {
               ...recordValue(body.policyContext),
+              requestId: requestContext.requestId,
+              correlationId: requestContext.correlationId,
+              source: requestContext.source,
               requestedActorId: stringValue(body.actorId)
             }
           });
@@ -2994,18 +3128,22 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
               sendJson(response, 409, { result: { allowed: false, status: "blocked", blockedReason: "secret_ref_provider_not_vault", containsSecretMaterial: false } });
               return;
             }
-            const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+            const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
             const result = securityService.resolveCredential({
               secretRefId,
               purpose,
               actorId: requestContext.authContext.actor.id,
               principalId: requestContext.authContext.principal.id,
               authContext: requestContext.authContext,
+              requestContext,
               taskId: stringValue(body.taskId),
               taskRunId: stringValue(body.taskRunId),
               providerId: stringValue(body.providerId),
               policyContext: {
                 ...recordValue(body.policyContext),
+                requestId: requestContext.requestId,
+                correlationId: requestContext.correlationId,
+                source: requestContext.source,
                 requestedActorId: stringValue(body.actorId)
               }
             });
@@ -3310,6 +3448,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "POST" && segments.length === 2) {
           try {
+            const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
             const body = await readJson(request) as Record<string, unknown>;
             const providerId = stringValue(body.providerId);
             const localAgentId = stringValue(body.localAgentId);
@@ -3324,7 +3463,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
               workspaceRef,
               taskId: stringValue(body.taskId),
               taskRunId: stringValue(body.taskRunId),
-              actorId: stringValue(body.actorId),
+              actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
               instructionSetHash: stringValue(body.instructionSetHash),
               promptRef: stringValue(body.promptRef),
               requiredConsentLevel: body.requiredConsentLevel,
@@ -3333,7 +3472,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
               redactionPolicyId: stringValue(body.redactionPolicyId),
               secretScopeIds: stringArrayValue(body.secretScopeIds),
               timeoutMs: typeof body.timeoutMs === "number" ? body.timeoutMs : undefined,
-              metadata: recordValue(body.metadata)
+              metadata: {
+                ...recordValue(body.metadata),
+                requestId: requestContext.requestId,
+                correlationId: requestContext.correlationId,
+                principalId: requestContext.authContext.principal.id,
+                authMode: requestContext.authContext.authMode,
+                source: requestContext.source
+              }
             });
             const consentRequest = body.requestConsent === false ? undefined : localAgentService.requestConsent(result.invocation.id);
             sendJson(response, 201, {
@@ -3646,6 +3792,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
 
       if (method === "POST" && segments[1] === "invoke") {
+        const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
         const body = await readJson(request) as Record<string, unknown>;
         const providerId = stringValue(body.providerId);
         const prompt = stringValue(body.prompt);
@@ -3658,12 +3805,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           prompt,
           taskId: stringValue(body.taskId),
           taskRunId: stringValue(body.taskRunId),
-          actorId: stringValue(body.actorId),
+          actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
           modelId: stringValue(body.modelId),
           context: recordValue(body.context),
           instructionSetHash: stringValue(body.instructionSetHash),
           workspaceRef: stringValue(body.workspaceRef),
-          metadata: recordValue(body.metadata)
+          metadata: {
+            ...recordValue(body.metadata),
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            principalId: requestContext.authContext.principal.id,
+            authMode: requestContext.authContext.authMode,
+            source: requestContext.source
+          }
         });
         sendJson(response, result.status === "completed" ? 201 : 409, { result: providerInvocationResultToDto(result) });
         return;
@@ -3739,6 +3893,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
 
         if (method === "POST" && segments.length === 2) {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
           const body = await readJson(request) as Record<string, unknown>;
           const taskId = stringValue(body.taskId);
           const taskRunId = stringValue(body.taskRunId);
@@ -3751,7 +3906,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           const run = await agentService.runAgent({
             taskId,
             taskRunId,
-            actorId: stringValue(body.actorId) ?? "mock-agent-actor",
+            actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
             repoRef: {
               repoId: stringValue(body.repoId) ?? "repo_demo_backend",
               localPath: stringValue(body.localPath)
@@ -3770,7 +3925,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             maxRuntimeMs: typeof body.maxRuntimeMs === "number" ? body.maxRuntimeMs : context.agentRunnerConfig.maxRuntimeMs,
             metadata: {
               budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined,
-              source: "api"
+              source: "api",
+              requestId: requestContext.requestId,
+              correlationId: requestContext.correlationId,
+              principalId: requestContext.authContext.principal.id,
+              authMode: requestContext.authContext.authMode
             }
           });
           sendJson(response, run.status === "blocked" ? 409 : 201, { agentRun: agentRunToDto(run) });
@@ -3872,7 +4031,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const analysis = improvementServices.autoImprovement.analyzeFailureCluster(clusterId);
+            const analysis = improvementServices.autoImprovement.analyzeFailureCluster(clusterId, { requestContext: apiRequestContext });
             sendJson(response, 201, { analysis: autoImprovementAnalysisToDto(analysis) });
           } catch (error) {
             sendJson(response, 404, { error: "cluster_analysis_failed", message: error instanceof Error ? error.message : "Cluster analysis failed" });
@@ -3885,7 +4044,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const candidate = improvementServices.autoImprovement.generateImprovementCandidate(clusterId);
+            const candidate = improvementServices.autoImprovement.generateImprovementCandidate(clusterId, { requestContext: apiRequestContext });
             sendJson(response, 201, { candidate: improvementCandidateToDto(candidate) });
           } catch (error) {
             sendJson(response, 404, { error: "candidate_generation_failed", message: error instanceof Error ? error.message : "Candidate generation failed" });
@@ -3921,7 +4080,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const proposal = improvementServices.autoImprovement.generateImprovementProposal(segments[2]);
+            const proposal = improvementServices.autoImprovement.generateImprovementProposal(segments[2], { requestContext: apiRequestContext });
             sendJson(response, 201, { proposal: improvementProposalToDto(proposal) });
           } catch (error) {
             sendJson(response, 404, { error: "proposal_generation_failed", message: error instanceof Error ? error.message : "Proposal generation failed" });
@@ -3983,7 +4142,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "POST" && segments.length === 2) {
           try {
-            const proposal = improvementServices.proposals.createDraftProposal(await readJson(request) as Parameters<ImprovementServices["proposals"]["createDraftProposal"]>[0]);
+            const body = await readJson(request) as Parameters<ImprovementServices["proposals"]["createDraftProposal"]>[0];
+            const proposal = improvementServices.proposals.createDraftProposal({ ...body, requestContext: apiRequestContext });
             sendJson(response, 201, { proposal: improvementProposalToDto(proposal) });
           } catch (error) {
             sendJson(response, 400, { error: "invalid_improvement_proposal", message: error instanceof Error ? error.message : "Invalid improvement proposal" });
@@ -3996,7 +4156,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const draftChange = improvementServices.autoImprovement.prepareDraftRegistryChange(segments[2]);
+            const draftChange = improvementServices.autoImprovement.prepareDraftRegistryChange(segments[2], { requestContext: apiRequestContext });
             sendJson(response, 201, { draftRegistryChange: draftRegistryChangeToDto(draftChange) });
           } catch (error) {
             sendJson(response, 404, { error: "draft_change_preparation_failed", message: error instanceof Error ? error.message : "Draft registry change preparation failed" });
@@ -4022,8 +4182,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             const decision = improvementServices.governance.recordDecision({
               proposalId: segments[2],
               actorId: typeof body.actorId === "string" ? body.actorId : "mock-admin",
+              requestContext: apiRequestContext,
               decision: body.decision,
-              reason: typeof body.reason === "string" ? body.reason : ""
+              reason: typeof body.reason === "string" ? body.reason : "",
+              metadata: {
+                apiRoute: "/improvement/proposals/:id/decisions"
+              }
             });
             sendJson(response, 201, { decision: proposalGovernanceDecisionToDto(decision) });
           } catch (error) {
@@ -4050,7 +4214,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             const run = improvementServices.proposalEvalRuns.attachEvalRun({
               ...body,
               proposalId: segments[2],
-              status: body.status
+              status: body.status,
+              requestContext: apiRequestContext
             } as Parameters<ImprovementServices["proposalEvalRuns"]["attachEvalRun"]>[0]);
             sendJson(response, 201, { evalRun: proposalEvalRunToDto(run) });
           } catch (error) {
@@ -4060,7 +4225,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "GET" && segments.length === 4 && segments[3] === "canary-readiness") {
           try {
-            const readiness = improvementServices.canaryReadiness.evaluate(segments[2]);
+            const readiness = improvementServices.canaryReadiness.evaluate(segments[2], { requestContext: apiRequestContext });
             sendJson(response, 200, { canaryReadiness: canaryReadinessToDto(readiness) });
           } catch (error) {
             sendJson(response, 404, { error: "canary_readiness_failed", message: error instanceof Error ? error.message : "Canary readiness failed" });
@@ -4069,7 +4234,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "GET" && segments.length === 4 && segments[3] === "apply-gate") {
           try {
-            const gate = improvementServices.applyGate.evaluate(segments[2]);
+            const gate = improvementServices.applyGate.evaluate(segments[2], { requestContext: apiRequestContext });
             sendJson(response, 200, { applyGate: proposalApplyGateToDto(gate) });
           } catch (error) {
             sendJson(response, 404, { error: "apply_gate_failed", message: error instanceof Error ? error.message : "Apply gate failed" });
@@ -4078,7 +4243,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "POST" && segments.length === 4 && segments[3] === "apply") {
           try {
-            const gate = improvementServices.applyGate.blockApplyAttempt(segments[2]);
+            const gate = improvementServices.applyGate.blockApplyAttempt(segments[2], { requestContext: apiRequestContext });
             sendJson(response, 403, {
               error: "apply_not_implemented",
               message: "Applying draft registry changes is not implemented in Phase 4 Governance v1.",
@@ -4095,7 +4260,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const readiness = improvementServices.autoImprovement.evaluateProposalReadiness(segments[2]);
+            const readiness = improvementServices.autoImprovement.evaluateProposalReadiness(segments[2], { requestContext: apiRequestContext });
             sendJson(response, 200, { readiness: proposalReadinessToDto(readiness) });
           } catch (error) {
             sendJson(response, 404, { error: "proposal_readiness_failed", message: error instanceof Error ? error.message : "Proposal readiness failed" });
@@ -4147,7 +4312,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const draftChange = improvementServices.draftRegistryChanges.transitionDraftChange({ id: segments[2], status: body.status });
+            const draftChange = improvementServices.draftRegistryChanges.transitionDraftChange({ id: segments[2], status: body.status, requestContext: apiRequestContext });
             sendJson(response, 200, { draftRegistryChange: draftRegistryChangeToDto(draftChange) });
           } catch (error) {
             sendJson(response, 400, { error: "invalid_draft_registry_change_transition", message: error instanceof Error ? error.message : "Invalid draft registry change transition" });
@@ -4215,7 +4380,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         const targetKind = targetKindParam;
         sendJson(response, 200, {
-          auditLogs: registryService.listAuditLogs({ targetKind, targetId }).map(registryAuditLogToDto)
+          auditLogs: registryService.listAuditLogs({ targetKind, targetId, requestContext: apiRequestContext }).map(registryAuditLogToDto)
         });
         return;
       }
@@ -4236,7 +4401,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             targetKind: targetKindParam,
             approvalStatus: approvalStatusParam,
             owner: url.searchParams.get("owner") ?? undefined,
-            includeArchived: url.searchParams.get("includeArchived") === "true"
+            includeArchived: url.searchParams.get("includeArchived") === "true",
+            requestContext: apiRequestContext
           }).map(registryApprovalQueueItemToDto)
         });
         return;
@@ -4255,7 +4421,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         if (method === "POST" && segments[2] === "export") {
           try {
             const body = await readJson(request) as Parameters<RegistryService["exportPackageManifest"]>[0];
-            const manifest = registryService.exportPackageManifest(body);
+            const manifest = registryService.exportPackageManifest({ ...body, requestContext: apiRequestContext });
             sendJson(response, 201, { package: registryPackageManifestToDto(manifest) });
           } catch (error) {
             sendJson(response, 400, { error: "package_export_failed", message: error instanceof Error ? error.message : "Package export failed" });
@@ -4266,7 +4432,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           const body = await readJson(request) as Parameters<RegistryService["importPackageManifest"]>[0];
           const result = registryService.importPackageManifest({
             ...body,
-            dryRun: segments[3] === "dry-run" ? true : body.dryRun
+            dryRun: segments[3] === "dry-run" ? true : body.dryRun,
+            requestContext: apiRequestContext
           });
           sendJson(response, result.errors.length > 0 ? 400 : result.dryRun ? 200 : 201, { importResult: registryImportResultToDto(result) });
           return;
@@ -4288,14 +4455,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const body = await readJson(request) as Parameters<RegistryService["importPackageManifest"]>[0];
         const result = registryService.importPackageManifest({
           ...body,
-          dryRun: url.pathname.endsWith("/dry-run") ? true : body.dryRun
+          dryRun: url.pathname.endsWith("/dry-run") ? true : body.dryRun,
+          requestContext: apiRequestContext
         });
         sendJson(response, result.errors.length > 0 ? 400 : result.dryRun ? 200 : 201, { importResult: registryImportResultToDto(result) });
         return;
       }
 
       if (method === "GET" && url.pathname === "/registry/bundle/manifest") {
-        const manifest = registryService.exportPackageManifest({ packageKind: "bundle", name: "registry-bundle", version: "1.0.0" });
+        const manifest = registryService.exportPackageManifest({ packageKind: "bundle", name: "registry-bundle", version: "1.0.0", requestContext: apiRequestContext });
         sendJson(response, 200, { package: registryPackageManifestToDto(manifest) });
         return;
       }
@@ -4307,7 +4475,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "POST" && segments.length === 2) {
           try {
-            sendJson(response, 201, { skill: skillToDto(registryService.createSkill(await readJson(request) as Parameters<RegistryService["createSkill"]>[0])) });
+            const body = await readJson(request) as Parameters<RegistryService["createSkill"]>[0];
+            sendJson(response, 201, { skill: skillToDto(registryService.createSkill(body, { requestContext: apiRequestContext })) });
           } catch (error) {
             sendJson(response, 400, { error: "invalid_skill", message: error instanceof Error ? error.message : "Invalid skill" });
           }
@@ -4322,7 +4491,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "GET" && segments[3] === "manifest") {
           if (!registryService.getSkill(skillId)) notFound("skill", skillId);
-          const manifest = registryService.exportPackageManifest({ packageKind: "skill", targetId: skillId });
+          const manifest = registryService.exportPackageManifest({ packageKind: "skill", targetId: skillId, requestContext: apiRequestContext });
           sendJson(response, 200, { package: registryPackageManifestToDto(manifest) });
           return;
         }
@@ -4339,7 +4508,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const result = registryService.rollback({ targetKind: "skill", targetId: skillId, targetRevisionId: body.targetRevisionId, revisionNumber: body.revisionNumber, reason: body.reason });
+            const result = registryService.rollback({ targetKind: "skill", targetId: skillId, targetRevisionId: body.targetRevisionId, revisionNumber: body.revisionNumber, reason: body.reason, requestContext: apiRequestContext });
             sendJson(response, 200, { rollback: registryRollbackResultToDto(result), skill: skillToDto(registryService.getSkill(skillId) ?? notFound("skill", skillId)) });
           } catch (error) {
             sendJson(response, 400, { error: "rollback_failed", message: error instanceof Error ? error.message : "Rollback failed" });
@@ -4358,7 +4527,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             sendJson(response, 400, { error: "invalid_eval_result", message: "evalName, evalType, status, summary, and source are required." });
             return;
           }
-          const result = registryService.attachEvalResult("skill", skillId, body as Parameters<RegistryService["attachEvalResult"]>[2]);
+          const result = registryService.attachEvalResult("skill", skillId, { ...body, requestContext: apiRequestContext } as Parameters<RegistryService["attachEvalResult"]>[2]);
           sendJson(response, 201, { evalResult: registryEvalResultToDto(result), skill: skillToDto(registryService.getSkill(skillId) ?? notFound("skill", skillId)) });
           return;
         }
@@ -4369,7 +4538,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getSkill(skillId)) notFound("skill", skillId);
-          sendJson(response, 200, { skill: skillToDto(registryService.updateSkillStatus(skillId, { status: body.status })) });
+          sendJson(response, 200, { skill: skillToDto(registryService.updateSkillStatus(skillId, { status: body.status, requestContext: apiRequestContext })) });
           return;
         }
         if (method === "PATCH" && segments[3] === "approval") {
@@ -4379,7 +4548,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getSkill(skillId)) notFound("skill", skillId);
-          sendJson(response, 200, { skill: skillToDto(registryService.updateSkillApproval(skillId, { approvalStatus: body.approvalStatus, reason: body.reason })) });
+          sendJson(response, 200, { skill: skillToDto(registryService.updateSkillApproval(skillId, { approvalStatus: body.approvalStatus, reason: body.reason, requestContext: apiRequestContext })) });
           return;
         }
         if (method === "PATCH" && segments[3] === "eval") {
@@ -4389,7 +4558,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getSkill(skillId)) notFound("skill", skillId);
-          sendJson(response, 200, { skill: skillToDto(registryService.updateSkillEval(skillId, { evalStatus: body.evalStatus, reason: body.reason })) });
+          sendJson(response, 200, { skill: skillToDto(registryService.updateSkillEval(skillId, { evalStatus: body.evalStatus, reason: body.reason, requestContext: apiRequestContext })) });
           return;
         }
       }
@@ -4401,7 +4570,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "POST" && segments.length === 2) {
           try {
-            sendJson(response, 201, { harness: harnessToDto(registryService.createHarness(await readJson(request) as Parameters<RegistryService["createHarness"]>[0])) });
+            const body = await readJson(request) as Parameters<RegistryService["createHarness"]>[0];
+            sendJson(response, 201, { harness: harnessToDto(registryService.createHarness(body, { requestContext: apiRequestContext })) });
           } catch (error) {
             sendJson(response, 400, { error: "invalid_harness", message: error instanceof Error ? error.message : "Invalid harness" });
           }
@@ -4416,7 +4586,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "GET" && segments[3] === "manifest") {
           if (!registryService.getHarness(harnessId)) notFound("harness", harnessId);
-          const manifest = registryService.exportPackageManifest({ packageKind: "harness", targetId: harnessId });
+          const manifest = registryService.exportPackageManifest({ packageKind: "harness", targetId: harnessId, requestContext: apiRequestContext });
           sendJson(response, 200, { package: registryPackageManifestToDto(manifest) });
           return;
         }
@@ -4433,7 +4603,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const result = registryService.rollback({ targetKind: "harness", targetId: harnessId, targetRevisionId: body.targetRevisionId, revisionNumber: body.revisionNumber, reason: body.reason });
+            const result = registryService.rollback({ targetKind: "harness", targetId: harnessId, targetRevisionId: body.targetRevisionId, revisionNumber: body.revisionNumber, reason: body.reason, requestContext: apiRequestContext });
             sendJson(response, 200, { rollback: registryRollbackResultToDto(result), harness: harnessToDto(registryService.getHarness(harnessId) ?? notFound("harness", harnessId)) });
           } catch (error) {
             sendJson(response, 400, { error: "rollback_failed", message: error instanceof Error ? error.message : "Rollback failed" });
@@ -4452,7 +4622,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             sendJson(response, 400, { error: "invalid_eval_result", message: "evalName, evalType, status, summary, and source are required." });
             return;
           }
-          const result = registryService.attachEvalResult("harness", harnessId, body as Parameters<RegistryService["attachEvalResult"]>[2]);
+          const result = registryService.attachEvalResult("harness", harnessId, { ...body, requestContext: apiRequestContext } as Parameters<RegistryService["attachEvalResult"]>[2]);
           sendJson(response, 201, { evalResult: registryEvalResultToDto(result), harness: harnessToDto(registryService.getHarness(harnessId) ?? notFound("harness", harnessId)) });
           return;
         }
@@ -4463,7 +4633,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getHarness(harnessId)) notFound("harness", harnessId);
-          sendJson(response, 200, { harness: harnessToDto(registryService.updateHarnessStatus(harnessId, { status: body.status })) });
+          sendJson(response, 200, { harness: harnessToDto(registryService.updateHarnessStatus(harnessId, { status: body.status, requestContext: apiRequestContext })) });
           return;
         }
         if (method === "PATCH" && segments[3] === "approval") {
@@ -4473,7 +4643,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getHarness(harnessId)) notFound("harness", harnessId);
-          sendJson(response, 200, { harness: harnessToDto(registryService.updateHarnessApproval(harnessId, { approvalStatus: body.approvalStatus, reason: body.reason })) });
+          sendJson(response, 200, { harness: harnessToDto(registryService.updateHarnessApproval(harnessId, { approvalStatus: body.approvalStatus, reason: body.reason, requestContext: apiRequestContext })) });
           return;
         }
         if (method === "PATCH" && segments[3] === "eval") {
@@ -4483,7 +4653,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getHarness(harnessId)) notFound("harness", harnessId);
-          sendJson(response, 200, { harness: harnessToDto(registryService.updateHarnessEval(harnessId, { evalStatus: body.evalStatus, reason: body.reason })) });
+          sendJson(response, 200, { harness: harnessToDto(registryService.updateHarnessEval(harnessId, { evalStatus: body.evalStatus, reason: body.reason, requestContext: apiRequestContext })) });
           return;
         }
       }
@@ -4495,7 +4665,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "POST" && segments.length === 2) {
           try {
-            sendJson(response, 201, { instruction: instructionToDto(registryService.createInstruction(await readJson(request) as Parameters<RegistryService["createInstruction"]>[0])) });
+            const body = await readJson(request) as Parameters<RegistryService["createInstruction"]>[0];
+            sendJson(response, 201, { instruction: instructionToDto(registryService.createInstruction(body, { requestContext: apiRequestContext })) });
           } catch (error) {
             sendJson(response, 400, { error: "invalid_instruction", message: error instanceof Error ? error.message : "Invalid instruction" });
           }
@@ -4510,7 +4681,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
         if (method === "GET" && segments[3] === "manifest") {
           if (!registryService.getInstruction(instructionId)) notFound("instruction", instructionId);
-          const manifest = registryService.exportPackageManifest({ packageKind: "instruction", targetId: instructionId });
+          const manifest = registryService.exportPackageManifest({ packageKind: "instruction", targetId: instructionId, requestContext: apiRequestContext });
           sendJson(response, 200, { package: registryPackageManifestToDto(manifest) });
           return;
         }
@@ -4527,7 +4698,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           try {
-            const result = registryService.rollback({ targetKind: "instruction", targetId: instructionId, targetRevisionId: body.targetRevisionId, revisionNumber: body.revisionNumber, reason: body.reason });
+            const result = registryService.rollback({ targetKind: "instruction", targetId: instructionId, targetRevisionId: body.targetRevisionId, revisionNumber: body.revisionNumber, reason: body.reason, requestContext: apiRequestContext });
             sendJson(response, 200, { rollback: registryRollbackResultToDto(result), instruction: instructionToDto(registryService.getInstruction(instructionId) ?? notFound("instruction", instructionId)) });
           } catch (error) {
             sendJson(response, 400, { error: "rollback_failed", message: error instanceof Error ? error.message : "Rollback failed" });
@@ -4546,7 +4717,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             sendJson(response, 400, { error: "invalid_eval_result", message: "evalName, evalType, status, summary, and source are required." });
             return;
           }
-          const result = registryService.attachEvalResult("instruction", instructionId, body as Parameters<RegistryService["attachEvalResult"]>[2]);
+          const result = registryService.attachEvalResult("instruction", instructionId, { ...body, requestContext: apiRequestContext } as Parameters<RegistryService["attachEvalResult"]>[2]);
           sendJson(response, 201, { evalResult: registryEvalResultToDto(result), instruction: instructionToDto(registryService.getInstruction(instructionId) ?? notFound("instruction", instructionId)) });
           return;
         }
@@ -4557,7 +4728,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getInstruction(instructionId)) notFound("instruction", instructionId);
-          sendJson(response, 200, { instruction: instructionToDto(registryService.updateInstructionStatus(instructionId, { status: body.status })) });
+          sendJson(response, 200, { instruction: instructionToDto(registryService.updateInstructionStatus(instructionId, { status: body.status, requestContext: apiRequestContext })) });
           return;
         }
         if (method === "PATCH" && segments[3] === "approval") {
@@ -4567,7 +4738,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getInstruction(instructionId)) notFound("instruction", instructionId);
-          sendJson(response, 200, { instruction: instructionToDto(registryService.updateInstructionApproval(instructionId, { approvalStatus: body.approvalStatus, reason: body.reason })) });
+          sendJson(response, 200, { instruction: instructionToDto(registryService.updateInstructionApproval(instructionId, { approvalStatus: body.approvalStatus, reason: body.reason, requestContext: apiRequestContext })) });
           return;
         }
         if (method === "PATCH" && segments[3] === "eval") {
@@ -4577,12 +4748,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             return;
           }
           if (!registryService.getInstruction(instructionId)) notFound("instruction", instructionId);
-          sendJson(response, 200, { instruction: instructionToDto(registryService.updateInstructionEval(instructionId, { evalStatus: body.evalStatus, reason: body.reason })) });
+          sendJson(response, 200, { instruction: instructionToDto(registryService.updateInstructionEval(instructionId, { evalStatus: body.evalStatus, reason: body.reason, requestContext: apiRequestContext })) });
           return;
         }
         if (method === "POST" && segments[3] === "verify-checksum") {
           if (!registryService.getInstruction(instructionId)) notFound("instruction", instructionId);
-          sendJson(response, 200, { instruction: instructionToDto(registryService.verifyInstructionChecksum(instructionId, { repoRoot: process.cwd() })) });
+          sendJson(response, 200, { instruction: instructionToDto(registryService.verifyInstructionChecksum(instructionId, { repoRoot: process.cwd(), requestContext: apiRequestContext })) });
           return;
         }
       }
@@ -4598,7 +4769,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const resolution = registryService.resolveRegistryContextForTask({
           task,
           agent: (stringValue(body.agent) ?? task.selectedAgent ?? "codex") as NonNullable<Task["selectedAgent"]>,
-          repo: store.getRepo(task.repoId)
+          repo: store.getRepo(task.repoId),
+          requestContext: apiRequestContext
         });
         sendJson(response, 200, { resolution: registryResolutionToDto(resolution) });
         return;
@@ -4640,6 +4812,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       if (method === "POST" && segments[2] === "run-agent") {
+        const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
         const activeRun = store.listTaskRuns(task.id).find((run) => run.status === "queued" || run.status === "running");
         if (activeRun) {
           sendJson(response, 409, { error: "conflict", message: `Task ${task.id} already has active run ${activeRun.id}` });
@@ -4649,7 +4822,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const registryResolution = registryService.resolveRegistryContextForTask({
           task,
           agent,
-          repo: store.getRepo(task.repoId)
+          repo: store.getRepo(task.repoId),
+          requestContext
         });
         const selectedHarness = registryResolution.selectedHarness.id ? store.getHarness(registryResolution.selectedHarness.id) : undefined;
         const taskRun = store.createTaskRun({
@@ -4671,7 +4845,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         const agentRun = await context.agentRunnerService.runAgent({
           taskId: task.id,
           taskRunId: taskRun.id,
-          actorId: task.requesterUserId,
+          actorId: requestContext.authContext.actor.id,
           repoRef: {
             repoId: task.repoId,
             provider: store.getRepo(task.repoId)?.provider,
@@ -4693,7 +4867,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           metadata: {
             budgetLimitUsd: task.budgetLimitUsd,
             gitProviderKind: context.gitProviderConfig.providerKind,
-            source: "task_run_agent_endpoint"
+            source: "task_run_agent_endpoint",
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            principalId: requestContext.authContext.principal.id,
+            authMode: requestContext.authContext.authMode,
+            taskRequesterUserId: task.requesterUserId
           }
         });
         store.updateTaskRun(taskRun.id, {
@@ -4852,6 +5031,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
 
     if (segments[0] === "git") {
+      const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
       const gitService = context.gitIntegrationService;
       const webhookService = context.gitWebhookReceiverService;
       const githubAppService = context.githubAppRuntimeService;
@@ -4881,13 +5061,17 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             installationId: segments[3],
             repoRef: stringValue(body.repoRef),
             purpose,
-            actorId: stringValue(body.actorId),
-            principalId: stringValue(body.principalId),
+            actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
+            principalId: stringValue(body.principalId) ?? requestContext.authContext.principal.id,
             policyContext: typeof body.policyContext === "object" && body.policyContext !== null && !Array.isArray(body.policyContext)
               ? body.policyContext as Record<string, unknown>
               : {},
             metadata: {
-              source: "api_token_check"
+              source: "api_token_check",
+              requestId: requestContext.requestId,
+              correlationId: requestContext.correlationId,
+              actorId: requestContext.authContext.actor.id,
+              principalId: requestContext.authContext.principal.id
             }
           });
           sendJson(response, 200, { result });
@@ -5043,6 +5227,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
               baseBranch: stringValue(body.baseBranch),
               taskId: stringValue(body.taskId),
               taskRunId: stringValue(body.taskRunId),
+              actorId: requestContext.authContext.actor.id,
+              principalId: requestContext.authContext.principal.id,
+              authContext: requestContext.authContext,
+              requestContext,
               branchLeaseId: stringValue(body.branchLeaseId),
               localPath: stringValue(body.localPath),
               files: Array.isArray(body.files) ? body.files.filter((file): file is string => typeof file === "string") : undefined,
@@ -5087,7 +5275,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             sendJson(response, 200, await gitService.getPullRequestChangedFiles(repoId, {
               pullRequestNumber,
               taskId: url.searchParams.get("taskId") ?? undefined,
-              taskRunId: url.searchParams.get("taskRunId") ?? undefined
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+              actorId: requestContext.authContext.actor.id,
+              principalId: requestContext.authContext.principal.id,
+              authContext: requestContext.authContext,
+              requestContext
             }) as unknown as JsonValue);
             return;
           }
@@ -5107,6 +5299,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             const input = {
               taskId,
               taskRunId: stringValue(body.taskRunId),
+              actorId: requestContext.authContext.actor.id,
+              principalId: requestContext.authContext.principal.id,
+              authContext: requestContext.authContext,
+              requestContext,
               branchLeaseId: stringValue(body.branchLeaseId),
               branchName,
               baseBranch: stringValue(body.baseBranch),
@@ -5144,7 +5340,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           sendJson(response, 200, await gitService.getChangedFiles(pullRequest.repoId, {
             branchName,
             baseBranch: url.searchParams.get("baseBranch") ?? undefined,
-            localPath: url.searchParams.get("localPath") ?? undefined
+            localPath: url.searchParams.get("localPath") ?? undefined,
+            actorId: requestContext.authContext.actor.id,
+            principalId: requestContext.authContext.principal.id,
+            authContext: requestContext.authContext,
+            requestContext
           }) as unknown as JsonValue);
           return;
         }
@@ -5387,13 +5587,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           sendJson(response, 400, { error: "invalid_llm_route", message: "taskId, taskRunId, and prompt are required." });
           return;
         }
-        const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+        const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
         const route = llmService.routeRequest({
           taskId,
           taskRunId,
           actorId: requestContext.authContext.actor.id,
           principalId: requestContext.authContext.principal.id,
           authContext: requestContext.authContext,
+          requestContext,
           modelRef: stringValue(body.modelRef),
           providerId: stringValue(body.providerId),
           providerKind: isLlmProviderKind(body.providerKind) ? body.providerKind : undefined,
@@ -5402,7 +5603,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           requestedCapabilities: Array.isArray(body.requestedCapabilities) ? body.requestedCapabilities.filter((value): value is string => typeof value === "string") : undefined,
           maxFallbackAttempts: typeof body.maxFallbackAttempts === "number" ? body.maxFallbackAttempts : undefined,
           prompt,
-          budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined
+          budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined,
+          metadata: {
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            source: requestContext.source
+          }
         });
         sendJson(response, route.ok ? 200 : 409, {
           ok: route.ok,
@@ -5424,13 +5630,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           sendJson(response, 400, { error: "invalid_llm_completion", message: "taskId, taskRunId, and prompt are required." });
           return;
         }
-        const requestContext = context.requestContextResolver.resolveFromApiRequest(request);
+        const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
         const result = await llmService.routeCompletion({
           taskId,
           taskRunId,
           actorId: requestContext.authContext.actor.id,
           principalId: requestContext.authContext.principal.id,
           authContext: requestContext.authContext,
+          requestContext,
           modelRef: stringValue(body.modelRef),
           providerId: stringValue(body.providerId),
           providerKind: isLlmProviderKind(body.providerKind) ? body.providerKind : undefined,
@@ -5444,7 +5651,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           temperature: typeof body.temperature === "number" ? body.temperature : undefined,
           budgetLimitUsd: typeof body.budgetLimitUsd === "number" ? body.budgetLimitUsd : undefined,
           repoId: stringValue(body.repoId),
-          metadata: typeof body.metadata === "object" && body.metadata !== null ? body.metadata as Record<string, unknown> : undefined
+          metadata: {
+            ...recordValue(body.metadata),
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            source: requestContext.source
+          }
         });
         sendJson(response, result.ok ? 201 : 409, {
           ok: result.ok,
@@ -5559,7 +5771,9 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     policyService
   });
   const requestContextResolver = new RequestContextResolver(authorizationService);
-  const securityService = new SecurityControlService({ policyService, authorizationService });
+  const apiRequestContextMiddleware = new ApiRequestContextMiddleware({ resolver: requestContextResolver });
+  const serviceAccountContextFactory = new ServiceAccountContextFactory({ authorizationService });
+  const securityService = new SecurityControlService({ policyService, authorizationService, serviceAccountContextFactory });
   const localAgentProtocolService = new LocalAgentProtocolService({ policyService, securityService });
   const providerAbstractionService = new ProviderAbstractionService({ policyService, localAgentProtocolService });
   const registryService = createRegistryService({
@@ -5604,12 +5818,17 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     store,
     config: git.config.githubApp ?? createGitHubAppRuntimeConfigFromEnv(process.env),
     policyService,
-    actorId: "mock-admin",
+    actorId: "github_app_token_service",
     authorizationChecker: (authorizationRequest) => {
       const actorId = authorizationRequest.actorId && authorizationRequest.actorId !== "mock-git-actor"
         ? authorizationRequest.actorId
-        : "mock-admin";
-      const authContext = authorizationService.getAuthContext({ actorId, source: "system" });
+        : "github_app_token_service";
+      const authContext = actorId === "github_app_token_service"
+        ? serviceAccountContextFactory.createServiceAccountAuthContext("github_app_token_service", {
+          source: "system",
+          metadata: { source: "github_app_runtime_service" }
+        })
+        : authorizationService.getAuthContext({ actorId, source: "system" });
       const decision = authorizationService.check({
         authContext,
         action: authorizationRequest.action,
@@ -5754,6 +5973,7 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       policyService,
       authorizationService,
       requestContextResolver,
+      apiRequestContextMiddleware,
       providerAbstractionService,
       securityService,
       localAgentProtocolService,

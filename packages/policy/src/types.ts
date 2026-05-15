@@ -15,9 +15,16 @@ export type PolicySubject = {
   actorKind: PolicyActorKind;
   roles: string[];
   teams?: string[];
+  tenantIds?: string[];
+  teamIds?: string[];
+  projectIds?: string[];
+  resourceScopes?: PolicyResourceScope[];
   authMode?: string;
   serviceAccountId?: string;
   isMockActor?: boolean;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -61,9 +68,41 @@ export type PolicyResourceKind =
   | "dashboard"
   | "auth";
 
+export type PolicyResourceScopeKind =
+  | "global"
+  | "tenant"
+  | "team"
+  | "project"
+  | "repo"
+  | "provider"
+  | "model"
+  | "secret"
+  | "mcp_tool"
+  | "registry_package"
+  | "local_agent_host"
+  | "audit_query";
+
+export type PolicyResourceScopeParent = {
+  scopeKind: PolicyResourceScopeKind;
+  scopeId: string;
+};
+
+export type PolicyResourceScope = {
+  scopeKind: PolicyResourceScopeKind;
+  scopeId: string;
+  parentScopes?: PolicyResourceScopeParent[];
+  metadata: Record<string, unknown>;
+};
+
 export type PolicyResource = {
   resourceKind: PolicyResourceKind;
   resourceId?: string;
+  scopeKind?: PolicyResourceScopeKind;
+  scopeId?: string;
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  resourceScopes?: PolicyResourceScope[];
   metadata: Record<string, unknown>;
 };
 
@@ -245,7 +284,20 @@ export type PolicyDecisionAuditEntry = {
   action: PolicyAction;
   resourceKind: PolicyResourceKind;
   resourceId?: string;
+  scopeKind?: PolicyResourceScopeKind;
+  scopeId?: string;
+  tenantIds?: string[];
+  teamIds?: string[];
+  projectIds?: string[];
+  resourceScopes?: PolicyResourceScope[];
   actorId?: string;
+  principalId?: string;
+  actorKind?: PolicyActorKind;
+  authMode?: string;
+  serviceAccountId?: string;
+  source?: string;
+  requestId?: string;
+  correlationId?: string;
   allowed: boolean;
   decision: PolicyDecisionValue;
   reason: string;
@@ -412,9 +464,16 @@ export function createPolicySubject(input: {
   actorKind?: PolicyActorKind;
   roles?: string[];
   teams?: string[];
+  tenantIds?: string[];
+  teamIds?: string[];
+  projectIds?: string[];
+  resourceScopes?: PolicyResourceScope[];
   authMode?: string;
   serviceAccountId?: string;
   isMockActor?: boolean;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   metadata?: Record<string, unknown>;
 } = {}): PolicySubject {
   return {
@@ -423,9 +482,16 @@ export function createPolicySubject(input: {
     actorKind: input.actorKind ?? "system",
     roles: input.roles ?? ["system"],
     teams: input.teams,
+    tenantIds: input.tenantIds,
+    teamIds: input.teamIds,
+    projectIds: input.projectIds,
+    resourceScopes: input.resourceScopes,
     authMode: input.authMode,
     serviceAccountId: input.serviceAccountId,
     isMockActor: input.isMockActor,
+    requestId: input.requestId,
+    correlationId: input.correlationId,
+    source: input.source,
     metadata: input.metadata
   };
 }
@@ -433,11 +499,23 @@ export function createPolicySubject(input: {
 export function createPolicyResource(input: {
   resourceKind: PolicyResourceKind;
   resourceId?: string;
+  scopeKind?: PolicyResourceScopeKind;
+  scopeId?: string;
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  resourceScopes?: PolicyResourceScope[];
   metadata?: Record<string, unknown>;
 }): PolicyResource {
   return {
     resourceKind: input.resourceKind,
     resourceId: input.resourceId,
+    scopeKind: input.scopeKind,
+    scopeId: input.scopeId,
+    tenantId: input.tenantId,
+    teamId: input.teamId,
+    projectId: input.projectId,
+    resourceScopes: input.resourceScopes,
     metadata: input.metadata ?? {}
   };
 }

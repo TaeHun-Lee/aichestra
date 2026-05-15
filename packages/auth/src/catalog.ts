@@ -9,6 +9,7 @@ import type {
   ServiceAccount,
   Team
 } from "./types.ts";
+import { serviceAccountActorCatalog } from "./service-account-catalog.ts";
 
 const createdAt = new Date("2026-05-12T00:00:00.000Z");
 
@@ -52,7 +53,11 @@ export const defaultAuthPermissions: Permission[] = [
   { id: "perm_git_changed_files_read", action: "git.changed_files.read", resourceKind: "git_operation", description: "Read changed files through gated GitHub provider boundary.", riskLevel: "medium" },
   { id: "perm_git_remote_operation", action: "git.remote_operation", resourceKind: "git_operation", description: "Use remote Git operation boundary.", riskLevel: "high" },
   { id: "perm_git_credential_resolve", action: "git.credential.resolve", resourceKind: "provider_credential", description: "Resolve Git provider credentials through the security boundary.", riskLevel: "critical" },
+  { id: "perm_git_webhook_receive", action: "git.webhook.receive", resourceKind: "git_operation", description: "Receive GitHub webhook metadata through the gated receiver.", riskLevel: "medium" },
+  { id: "perm_git_webhook_verify", action: "git.webhook.verify", resourceKind: "git_operation", description: "Verify GitHub webhook metadata through the gated verifier.", riskLevel: "medium" },
   { id: "perm_git_webhook_process", action: "git.webhook.process", resourceKind: "git_operation", description: "Process verified webhook metadata.", riskLevel: "medium" },
+  { id: "perm_git_pull_request_sync", action: "git.pull_request.sync", resourceKind: "pull_request", description: "Synchronize pull-request read models from verified metadata.", riskLevel: "medium" },
+  { id: "perm_git_branch_sync", action: "git.branch.sync", resourceKind: "branch", description: "Synchronize branch read models from verified metadata.", riskLevel: "medium" },
   { id: "perm_git_audit_read", action: "git.audit.read", resourceKind: "git_operation", description: "Read Git audit events.", riskLevel: "low" },
   { id: "perm_git_merge", action: "git.merge", resourceKind: "git_operation", description: "Future provider merge boundary; policy denied by default.", riskLevel: "critical" },
   { id: "perm_git_rebase", action: "git.rebase", resourceKind: "git_operation", description: "Future provider rebase boundary; policy denied by default.", riskLevel: "critical" },
@@ -84,6 +89,7 @@ export const defaultAuthPermissions: Permission[] = [
   { id: "perm_secret_ref_update", action: "secret.ref.update", resourceKind: "secret_ref", description: "Update SecretRef metadata without raw values.", riskLevel: "high" },
   { id: "perm_secret_ref_disable", action: "secret.ref.disable", resourceKind: "secret_ref", description: "Disable SecretRef metadata.", riskLevel: "high" },
   { id: "perm_secret_ref_revoke", action: "secret.ref.revoke", resourceKind: "secret_ref", description: "Revoke SecretRef metadata.", riskLevel: "critical" },
+  { id: "perm_secret_metadata_read", action: "secret.metadata.read", resourceKind: "secret_ref", description: "Read sanitized SecretRef metadata.", riskLevel: "medium" },
   { id: "perm_secret_read", action: "secret.read", resourceKind: "secret_scope", description: "Future direct secret read; policy denied by default.", riskLevel: "critical" },
   { id: "perm_secret_lease_request", action: "secret.lease.request", resourceKind: "secret_lease", description: "Request secret lease metadata.", riskLevel: "high" },
   { id: "perm_secret_lease_issue", action: "secret.lease.issue", resourceKind: "secret_lease", description: "Issue secret lease metadata.", riskLevel: "critical" },
@@ -91,8 +97,19 @@ export const defaultAuthPermissions: Permission[] = [
   { id: "perm_security_audit_read", action: "security.audit.read", resourceKind: "secret_scope", description: "Read security audit.", riskLevel: "medium" },
   { id: "perm_policy_evaluate", action: "policy.evaluate", resourceKind: "policy", description: "Evaluate policy.", riskLevel: "medium" },
   { id: "perm_policy_audit_read", action: "policy.audit.read", resourceKind: "policy", description: "Read policy audit.", riskLevel: "medium" },
+  { id: "perm_observability_audit_read", action: "observability.audit.read", resourceKind: "audit", description: "Read sanitized observability audit metadata.", riskLevel: "medium" },
+  { id: "perm_readiness_read", action: "readiness.read", resourceKind: "readiness", description: "Read planning-only readiness metadata.", riskLevel: "low" },
+  { id: "perm_local_agent_register", action: "local_agent.register", resourceKind: "local_agent", description: "Register mock Local Agent metadata.", riskLevel: "medium" },
+  { id: "perm_local_agent_channel_create", action: "local_agent.channel.create", resourceKind: "local_agent", description: "Create mock Local Agent channel metadata.", riskLevel: "medium" },
+  { id: "perm_local_agent_handshake_verify", action: "local_agent.handshake.verify", resourceKind: "local_agent", description: "Verify mock Local Agent handshake metadata.", riskLevel: "medium" },
+  { id: "perm_local_agent_capability_advertise", action: "local_agent.capability.advertise", resourceKind: "local_agent", description: "Advertise Local Agent capability metadata.", riskLevel: "medium" },
+  { id: "perm_local_agent_compatibility_check", action: "local_agent.compatibility.check", resourceKind: "local_agent", description: "Check Local Agent compatibility metadata.", riskLevel: "medium" },
   { id: "perm_local_agent_invoke", action: "local_agent.invoke", resourceKind: "local_agent", description: "Invoke Local Agent protocol boundary.", riskLevel: "high" },
   { id: "perm_local_agent_consent_approve", action: "local_agent.consent.approve", resourceKind: "local_agent", description: "Approve Local Agent consent metadata.", riskLevel: "high" },
+  { id: "perm_local_agent_cancel", action: "local_agent.cancel", resourceKind: "local_agent", description: "Cancel Local Agent invocation metadata.", riskLevel: "medium" },
+  { id: "perm_local_agent_event_receive", action: "local_agent.event.receive", resourceKind: "local_agent", description: "Receive Local Agent event metadata.", riskLevel: "medium" },
+  { id: "perm_local_agent_stream_receive", action: "local_agent.stream.receive", resourceKind: "local_agent", description: "Receive Local Agent stream metadata.", riskLevel: "medium" },
+  { id: "perm_improvement_draft_change_prepare", action: "improvement.draft_change.prepare", resourceKind: "draft_registry_change", description: "Prepare draft registry change metadata.", riskLevel: "medium" },
   { id: "perm_dashboard_read", action: "dashboard.read", resourceKind: "dashboard", description: "Read dashboard read models.", riskLevel: "low" },
   { id: "perm_mcp_server_list", action: "mcp.server.list", resourceKind: "mcp_server", description: "List MCP server catalog metadata.", riskLevel: "low" },
   { id: "perm_mcp_tool_list", action: "mcp.tool.list", resourceKind: "mcp_tool", description: "List MCP tool catalog metadata.", riskLevel: "low" },
@@ -219,7 +236,40 @@ export const defaultAuthRoles: Role[] = [
   }
 ];
 
+const serviceAccountBoundaryRoles: Role[] = serviceAccountActorCatalog.map((account) => ({
+  id: `role_${account.roleName}`,
+  name: account.roleName,
+  description: `Mock service-account role for ${account.displayName}.`,
+  permissions: permissions(...account.allowedActions),
+  status: account.status === "active_mock" ? "active" : "disabled",
+  metadata: {
+    serviceAccountId: account.id,
+    serviceAccountKind: account.serviceAccountKind,
+    riskLevel: account.riskLevel,
+    localRuntimeOnly: true,
+    productionAuthEnabled: false
+  }
+}));
+
 export function createDefaultAuthCatalog(): AuthCatalog {
+  const serviceAccountPrincipals: Principal[] = serviceAccountActorCatalog.map((account) => ({
+    id: account.principalId,
+    principalKind: "service_account",
+    displayName: account.displayName,
+    status: account.status === "active_mock" ? "active" : "disabled",
+    identityProviderId: "idp_mock",
+    externalSubject: account.actorId,
+    createdAt,
+    updatedAt: createdAt,
+    metadata: {
+      mock: true,
+      serviceAccountId: account.id,
+      serviceAccountKind: account.serviceAccountKind,
+      serviceAccountStatus: account.status,
+      localRuntimeOnly: true,
+      productionAuthEnabled: false
+    }
+  }));
   const principals: Principal[] = [
     { id: "principal_mock_admin", principalKind: "system", displayName: "Mock Admin Principal", status: "active", identityProviderId: "idp_mock", externalSubject: "mock-admin", createdAt, updatedAt: createdAt, metadata: { mock: true } },
     { id: "principal_demo_developer", principalKind: "user", displayName: "Demo Developer", email: "developer@example.com", status: "active", identityProviderId: "idp_mock", externalSubject: "user_demo_developer", createdAt, updatedAt: createdAt, metadata: { mock: true } },
@@ -227,13 +277,33 @@ export function createDefaultAuthCatalog(): AuthCatalog {
     { id: "principal_demo_reviewer", principalKind: "user", displayName: "Demo Reviewer", email: "reviewer@example.com", status: "active", identityProviderId: "idp_mock", externalSubject: "user_demo_reviewer", createdAt, updatedAt: createdAt, metadata: { mock: true } },
     { id: "principal_security_admin", principalKind: "user", displayName: "Demo Security Admin", email: "security@example.com", status: "active", identityProviderId: "idp_mock", externalSubject: "user_security_admin", createdAt, updatedAt: createdAt, metadata: { mock: true } },
     { id: "principal_runner_service", principalKind: "service_account", displayName: "Runner Service Account", status: "active", identityProviderId: "idp_mock", externalSubject: "svc_runner", createdAt, updatedAt: createdAt, metadata: { mock: true } },
-    { id: "principal_anonymous_mock", principalKind: "system", displayName: "Anonymous Mock Principal", status: "disabled", identityProviderId: "idp_mock", externalSubject: "anonymous", createdAt, updatedAt: createdAt, metadata: { mock: true, authenticated: false } }
+    { id: "principal_anonymous_mock", principalKind: "system", displayName: "Anonymous Mock Principal", status: "disabled", identityProviderId: "idp_mock", externalSubject: "anonymous", createdAt, updatedAt: createdAt, metadata: { mock: true, authenticated: false } },
+    ...serviceAccountPrincipals
   ];
   const teams: Team[] = [
     { id: "team_platform", name: "platform", displayName: "Platform", status: "active", metadata: {} },
     { id: "team_security", name: "security", displayName: "Security", status: "active", metadata: {} },
     { id: "team_development", name: "development", displayName: "Development", status: "active", metadata: {} }
   ];
+  const serviceAccountActors: Actor[] = serviceAccountActorCatalog.map((account) => ({
+    id: account.actorId,
+    principalId: account.principalId,
+    actorKind: "service_account",
+    displayName: account.displayName,
+    roles: [account.roleName],
+    teams: account.ownerTeamId ? [account.ownerTeamId] : [],
+    status: account.status === "active_mock" ? "active" : "disabled",
+    createdAt,
+    updatedAt: createdAt,
+    metadata: {
+      mock: true,
+      serviceAccountId: account.id,
+      serviceAccountKind: account.serviceAccountKind,
+      serviceAccountStatus: account.status,
+      localRuntimeOnly: true,
+      productionAuthEnabled: false
+    }
+  }));
   const actors: Actor[] = [
     { id: "mock-admin", principalId: "principal_mock_admin", actorKind: "anonymous_mock", displayName: "Mock Admin", roles: ["system_admin", "platform_admin"], teams: ["team_platform"], status: "active", createdAt, updatedAt: createdAt, metadata: { mock: true, productionAuth: false } },
     { id: "user_demo_developer", principalId: "principal_demo_developer", actorKind: "human_user", displayName: "Demo Developer", roles: ["developer"], teams: ["team_development"], status: "active", createdAt, updatedAt: createdAt, metadata: { mock: true } },
@@ -241,8 +311,18 @@ export function createDefaultAuthCatalog(): AuthCatalog {
     { id: "user_demo_reviewer", principalId: "principal_demo_reviewer", actorKind: "human_user", displayName: "Demo Reviewer", roles: ["reviewer"], teams: ["team_development"], status: "active", createdAt, updatedAt: createdAt, metadata: { mock: true } },
     { id: "user_security_admin", principalId: "principal_security_admin", actorKind: "human_user", displayName: "Demo Security Admin", roles: ["security_admin"], teams: ["team_security"], status: "active", createdAt, updatedAt: createdAt, metadata: { mock: true } },
     { id: "svc_runner", principalId: "principal_runner_service", actorKind: "service_account", displayName: "Runner Service", roles: ["service_account_runner"], teams: ["team_development"], status: "active", createdAt, updatedAt: createdAt, metadata: { mock: true } },
-    { id: "anonymous-mock", principalId: "principal_anonymous_mock", actorKind: "anonymous_mock", displayName: "Anonymous Mock", roles: [], teams: [], status: "disabled", createdAt, updatedAt: createdAt, metadata: { mock: true, authenticated: false } }
+    { id: "anonymous-mock", principalId: "principal_anonymous_mock", actorKind: "anonymous_mock", displayName: "Anonymous Mock", roles: [], teams: [], status: "disabled", createdAt, updatedAt: createdAt, metadata: { mock: true, authenticated: false } },
+    ...serviceAccountActors
   ];
+  const serviceAccountRoleBindings: RoleBinding[] = serviceAccountActorCatalog.map((account) => ({
+    id: `binding_${account.id}`,
+    principalId: account.principalId,
+    roleId: `role_${account.roleName}`,
+    scope: globalScope(`scope_${account.id}`),
+    status: account.status === "active_mock" ? "active" : "disabled",
+    createdAt,
+    updatedAt: createdAt
+  }));
   const roleBindings: RoleBinding[] = [
     { id: "binding_mock_admin_system_admin", principalId: "principal_mock_admin", roleId: "role_system_admin", scope: globalScope(), status: "active", createdAt, updatedAt: createdAt },
     { id: "binding_mock_admin_platform_admin", principalId: "principal_mock_admin", roleId: "role_platform_admin", scope: globalScope(), status: "active", createdAt, updatedAt: createdAt },
@@ -250,13 +330,48 @@ export function createDefaultAuthCatalog(): AuthCatalog {
     { id: "binding_viewer", principalId: "principal_demo_viewer", roleId: "role_viewer", scope: globalScope(), status: "active", createdAt, updatedAt: createdAt },
     { id: "binding_reviewer", principalId: "principal_demo_reviewer", roleId: "role_reviewer", scope: globalScope(), status: "active", createdAt, updatedAt: createdAt },
     { id: "binding_security_admin", principalId: "principal_security_admin", roleId: "role_security_admin", scope: globalScope(), status: "active", createdAt, updatedAt: createdAt },
-    { id: "binding_runner_task_demo", principalId: "principal_runner_service", roleId: "role_service_account_runner", scope: taskScope("task_demo_backend"), status: "active", createdAt, updatedAt: createdAt }
+    { id: "binding_runner_task_demo", principalId: "principal_runner_service", roleId: "role_service_account_runner", scope: taskScope("task_demo_backend"), status: "active", createdAt, updatedAt: createdAt },
+    ...serviceAccountRoleBindings
   ];
+  const serviceAccountModels: ServiceAccount[] = serviceAccountActorCatalog.map((account) => ({
+    id: account.id,
+    principalId: account.principalId,
+    name: account.id,
+    ownerTeamId: account.ownerTeamId,
+    allowedScopes: account.allowedResourceScopes.map((allowedScope, index) => ({
+      id: `scope_${account.id}_${index}`,
+      scopeKind: allowedScope.scopeKind,
+      scopeId: allowedScope.scopeId,
+      description: allowedScope.description,
+      metadata: {
+        serviceAccountId: account.id,
+        serviceAccountKind: account.serviceAccountKind,
+        localRuntimeOnly: true,
+        productionAuthEnabled: false
+      }
+    })),
+    status: account.status === "active_mock" ? "active" : "disabled",
+    createdAt,
+    updatedAt: createdAt,
+    metadata: {
+      mock: true,
+      displayName: account.displayName,
+      serviceAccountKind: account.serviceAccountKind,
+      serviceAccountStatus: account.status,
+      allowedActions: account.allowedActions,
+      forbiddenActions: account.forbiddenActions,
+      riskLevel: account.riskLevel,
+      auditRequirements: account.auditRequirements,
+      localRuntimeOnly: true,
+      productionAuthEnabled: false,
+      ...account.metadata
+    }
+  }));
   return {
     principals,
     actors,
     teams,
-    roles: defaultAuthRoles,
+    roles: [...defaultAuthRoles, ...serviceAccountBoundaryRoles],
     permissions: defaultAuthPermissions,
     roleBindings,
     serviceAccounts: [
@@ -270,7 +385,8 @@ export function createDefaultAuthCatalog(): AuthCatalog {
         createdAt,
         updatedAt: createdAt,
         metadata: { mock: true, rawCredentialStored: false }
-      }
+      },
+      ...serviceAccountModels
     ],
     identityProviders: [
       { id: "idp_mock", providerKind: "mock", displayName: "Mock Auth Provider", status: "active", metadata: { productionAuth: false } },

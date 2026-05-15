@@ -18,6 +18,10 @@ import {
 } from "@aichestra/policy";
 import type { PolicyAction, PolicyDecision } from "@aichestra/policy";
 import type { GitIntegrationService } from "./service.ts";
+import {
+  createServiceAccountPolicySubject,
+  serviceAccountAuditMetadata
+} from "@aichestra/auth";
 
 export type GitWebhookReceiverServiceInput = {
   store: InMemoryAichestraStore;
@@ -64,13 +68,13 @@ export class GitWebhookReceiverService {
     this.store = input.store;
     this.config = input.config;
     this.verifier = input.verifier;
-    this.actorId = input.actorId ?? "github-webhook-receiver";
+    this.actorId = input.actorId ?? "git_webhook_service";
     this.policyService = input.policyService ?? new PolicyService();
     this.syncService = new GitHubSyncService({
       store: input.store,
       gitIntegrationService: input.gitIntegrationService,
       config: input.config,
-      actorId: this.actorId,
+      actorId: input.actorId ?? "git_sync_service",
       policyService: this.policyService
     });
   }
@@ -446,7 +450,12 @@ export class GitWebhookReceiverService {
     }
   ): PolicyDecision {
     return this.policyService.evaluate({
-      subject: createPolicySubject({ actorId: this.actorId, actorKind: "service", roles: ["system"] }),
+      subject: this.actorId === "git_webhook_service"
+        ? createServiceAccountPolicySubject("git_webhook_service", {
+          source: "webhook",
+          metadata: { boundary: "git_webhook_receiver_service" }
+        })
+        : createPolicySubject({ actorId: this.actorId, actorKind: "service", roles: ["system"] }),
       action,
       resource: createPolicyResource({
         resourceKind,
@@ -502,7 +511,7 @@ export class GitHubSyncService {
     this.store = input.store;
     this.gitIntegrationService = input.gitIntegrationService;
     this.config = input.config;
-    this.actorId = input.actorId ?? "github-sync-service";
+    this.actorId = input.actorId ?? "git_sync_service";
     this.policyService = input.policyService ?? new PolicyService();
   }
 
@@ -826,7 +835,12 @@ export class GitHubSyncService {
     }
   ): PolicyDecision {
     return this.policyService.evaluate({
-      subject: createPolicySubject({ actorId: this.actorId, actorKind: "service", roles: ["system"] }),
+      subject: this.actorId === "git_sync_service"
+        ? createServiceAccountPolicySubject("git_sync_service", {
+          source: "worker",
+          metadata: { boundary: "github_sync_service" }
+        })
+        : createPolicySubject({ actorId: this.actorId, actorKind: "service", roles: ["system"] }),
       action,
       resource: createPolicyResource({
         resourceKind,
@@ -861,7 +875,15 @@ function recordWebhookAudit(
     sanitizedMetadata?: Record<string, unknown>;
   }
 ): void {
-  const metadata = sanitizeMetadata(input.sanitizedMetadata ?? {});
+  const serviceMetadata = actorId === "git_webhook_service"
+    ? serviceAccountAuditMetadata("git_webhook_service", { boundary: "git_webhook_receiver_service" })
+    : actorId === "git_sync_service"
+      ? serviceAccountAuditMetadata("git_sync_service", { boundary: "github_sync_service" })
+      : {};
+  const metadata = sanitizeMetadata({
+    ...serviceMetadata,
+    ...(input.sanitizedMetadata ?? {})
+  });
   store.recordGitWebhookAuditEvent({
     eventType,
     deliveryId: input.deliveryId,

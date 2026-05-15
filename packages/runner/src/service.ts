@@ -6,6 +6,7 @@ import {
   createPolicySubject
 } from "@aichestra/policy";
 import type { PolicyDecision } from "@aichestra/policy";
+import { createServiceAccountPolicySubject, serviceAccountAuditMetadata } from "@aichestra/auth";
 import type { SecurityControlService } from "@aichestra/security";
 import { BlockedCommandExecutor } from "./command-executor.ts";
 import type {
@@ -546,6 +547,7 @@ export class AgentRunnerService {
     reason?: string;
     metadata: Record<string, unknown>;
   }) {
+    const metadata = sanitizeMetadata(input.metadata);
     return this.auditRepository.appendAuditEvent({
       taskId: input.taskId,
       taskRunId: input.taskRunId,
@@ -553,7 +555,13 @@ export class AgentRunnerService {
       eventType: input.eventType,
       result: input.result,
       reason: input.reason,
-      metadata: sanitizeMetadata(input.metadata)
+      actorId: stringMetadata(metadata.actorId),
+      principalId: stringMetadata(metadata.principalId),
+      serviceAccountId: stringMetadata(metadata.serviceAccountId),
+      requestId: stringMetadata(metadata.requestId),
+      correlationId: stringMetadata(metadata.correlationId),
+      source: stringMetadata(metadata.source),
+      metadata
     });
   }
 
@@ -563,11 +571,16 @@ export class AgentRunnerService {
     environment?: Record<string, unknown>;
   }): PolicyDecision {
     return this.policyService.evaluate({
-      subject: createPolicySubject({
-        actorId: "actorId" in input && input.actorId ? input.actorId : "mock-runner-actor",
-        actorKind: "service",
-        roles: ["system"]
-      }),
+      subject: "actorId" in input && input.actorId
+        ? createPolicySubject({
+          actorId: input.actorId,
+          actorKind: "service",
+          roles: ["system"]
+        })
+        : createServiceAccountPolicySubject("runner_service", {
+          source: "worker",
+          metadata: { boundary: "agent_runner_service" }
+        }),
       action,
       resource: createPolicyResource({
         resourceKind,
@@ -589,7 +602,8 @@ export class AgentRunnerService {
         instructionRefs: "selectedInstructionRefs" in input ? input.selectedInstructionRefs : undefined,
         environment: options.environment ?? {},
         metadata: {
-          source: "agent_runner_service"
+          source: "agent_runner_service",
+          ...(!("actorId" in input) || !input.actorId ? serviceAccountAuditMetadata("runner_service", { boundary: "agent_runner_service" }) : {})
         }
       })
     });
@@ -608,4 +622,8 @@ function sanitizeMetadata(metadata: Record<string, unknown>): Record<string, unk
     }
   }
   return clone;
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

@@ -1,4 +1,4 @@
-import type { AuthContext } from "@aichestra/auth";
+import type { AuthContext, RequestContext } from "@aichestra/auth";
 import type { ModelProvider, UsageEvent } from "@aichestra/core";
 import type { ProviderBillingMode, ProviderKind } from "./enterprise-providers.ts";
 
@@ -58,6 +58,7 @@ export type LLMCompletionRequest = {
   actorId?: string;
   principalId?: string;
   authContext?: AuthContext;
+  requestContext?: RequestContext;
   modelRef?: string;
   providerId?: string;
   virtualKeyId?: string;
@@ -114,6 +115,11 @@ export type LLMAuditEvent = {
   taskId?: string;
   taskRunId?: string;
   actorId?: string;
+  principalId?: string;
+  serviceAccountId?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   providerKind: LLMProviderKind;
   providerId?: string;
   modelId?: string;

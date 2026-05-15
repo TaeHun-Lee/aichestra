@@ -1,4 +1,4 @@
-import type { PolicyAction, PolicyDecision, PolicyResourceKind, PolicySubject } from "@aichestra/policy";
+import type { PolicyAction, PolicyDecision, PolicyResourceKind, PolicyResourceScope, PolicySubject } from "@aichestra/policy";
 
 export type PrincipalKind = "user" | "service_account" | "system" | "local_agent" | "external_integration";
 export type PrincipalStatus = "active" | "disabled" | "suspended" | "deleted";
@@ -20,10 +20,137 @@ export type IdentityProviderKind =
   | "microsoft_future"
   | "custom_future";
 export type IdentityProviderStatus = "active" | "disabled";
-export type AuthMode = "mock" | "future_oidc" | "future_saml" | "future_service_account" | "system";
+export type AuthMode = "mock" | "mock_service_account" | "future_oidc" | "future_saml" | "future_service_account" | "system";
 export type AuthProviderKind = AuthMode | "scim_future";
-export type RequestSource = "api" | "worker" | "dashboard" | "test" | "system";
+export type RequestSource = "api" | "worker" | "dashboard" | "readiness" | "test" | "system" | "webhook" | "local_agent";
 export type AuthAuditResult = "allowed" | "denied" | "resolved" | "missing" | "blocked" | "disabled";
+export type ScopeModelStatus = "active_mock" | "disabled" | "future";
+export type TenantKind = "organization" | "workspace" | "enterprise" | "personal" | "unknown";
+export type RepoScopeProvider = "mock" | "local" | "github" | "gitlab_future" | "bitbucket_future";
+export type RegistryPackageScopeKind = "skill" | "harness" | "instruction" | "bundle" | "unknown";
+export type ScopeRiskLevel = "low" | "medium" | "high" | "critical";
+
+export type TenantScope = {
+  tenantId: string;
+  tenantKind: TenantKind;
+  displayName?: string;
+  status: ScopeModelStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type TeamScope = {
+  tenantId: string;
+  teamId: string;
+  displayName?: string;
+  status: ScopeModelStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type ProjectScope = {
+  tenantId: string;
+  teamId?: string;
+  projectId: string;
+  displayName?: string;
+  status: ScopeModelStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type RepoScope = {
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  repoId: string;
+  repoProvider: RepoScopeProvider;
+  repoOwner?: string;
+  repoName?: string;
+  allowedBranchPrefix?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ProviderScope = {
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  providerId: string;
+  providerKind: string;
+  billingMode?: string;
+  allowedModelIds?: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type ModelScope = {
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  providerId: string;
+  modelId: string;
+  modelKind?: string;
+  capabilities?: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type SecretScopeBinding = {
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  secretRefId: string;
+  secretKind: string;
+  provider: string;
+  allowedPurposes: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type MCPToolScope = {
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  mcpServerId: string;
+  mcpToolId: string;
+  riskLevel: ScopeRiskLevel;
+  allowedResourceScopes: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type RegistryPackageScope = {
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  packageId: string;
+  packageKind: RegistryPackageScopeKind;
+  metadata: Record<string, unknown>;
+};
+
+export type LocalAgentHostScope = {
+  tenantId?: string;
+  teamId?: string;
+  userId?: string;
+  hostId: string;
+  agentId?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type AuditQueryScope = {
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  actorId?: string;
+  resourceKinds?: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type ScopeCatalog = {
+  tenants: TenantScope[];
+  teams: TeamScope[];
+  projects: ProjectScope[];
+  repos: RepoScope[];
+  providers: ProviderScope[];
+  models: ModelScope[];
+  secrets: SecretScopeBinding[];
+  mcpTools: MCPToolScope[];
+  registryPackages: RegistryPackageScope[];
+  localAgentHosts: LocalAgentHostScope[];
+  auditQueries: AuditQueryScope[];
+};
 
 export type Principal = {
   id: string;
@@ -123,6 +250,10 @@ export type AuthContext = {
   roles: Role[];
   permissions: Permission[];
   roleBindings: RoleBinding[];
+  tenantScopes?: TenantScope[];
+  teamScopes?: TeamScope[];
+  projectScopes?: ProjectScope[];
+  resourceScopes?: PolicyResourceScope[];
   authMode: AuthMode;
   authenticated: boolean;
   source: RequestSource;
@@ -135,7 +266,22 @@ export type RequestContext = {
   authContext: AuthContext;
   correlationId?: string;
   source: RequestSource;
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  resourceScopes?: PolicyResourceScope[];
   createdAt: Date;
+  metadata: Record<string, unknown>;
+};
+
+export type CorrelationContext = {
+  requestId: string;
+  correlationId: string;
+  traceId?: string;
+  taskId?: string;
+  taskRunId?: string;
+  actorId?: string;
+  source: RequestSource;
   metadata: Record<string, unknown>;
 };
 
@@ -153,12 +299,15 @@ export type AuthAuditEvent = {
     | "future_provider_disabled";
   actorId?: string;
   principalId?: string;
+  serviceAccountId?: string;
   action?: string;
   resourceKind?: string;
   resourceId?: string;
   result: AuthAuditResult;
   reason?: string;
   requestId?: string;
+  correlationId?: string;
+  source?: RequestSource;
   policyDecisionId?: string;
   createdAt: Date;
   metadata: Record<string, unknown>;
@@ -169,6 +318,10 @@ export type AuthProviderResolveRequest = {
   actorId?: string;
   correlationId?: string;
   source?: RequestSource;
+  tenantScopes?: TenantScope[];
+  teamScopes?: TeamScope[];
+  projectScopes?: ProjectScope[];
+  resourceScopes?: PolicyResourceScope[];
   metadata?: Record<string, unknown>;
 };
 

@@ -7,6 +7,7 @@ import {
   isPolicyResourceKind
 } from "@aichestra/policy";
 import type { PolicyAction, PolicyResourceKind, PolicySubject } from "@aichestra/policy";
+import type { PolicyResourceScopeKind } from "@aichestra/policy";
 import type { AuthRepository } from "./repository.ts";
 import { InMemoryAuthRepository } from "./repository.ts";
 import { MockAuthProvider } from "./providers.ts";
@@ -93,6 +94,13 @@ export class AuthorizationService {
 
   toPolicySubject(authContext: AuthContext): PolicySubject {
     const serviceAccount = this.repository.getServiceAccount(authContext.principal.id);
+    const serviceAccountId = stringMetadata(authContext.metadata.serviceAccountId) ?? serviceAccount?.id;
+    const tenantIds = uniqueStrings(authContext.tenantScopes?.map((scope) => scope.tenantId));
+    const teamIds = uniqueStrings([
+      ...(authContext.teams.map((team) => team.id) ?? []),
+      ...(authContext.teamScopes?.map((scope) => scope.teamId) ?? [])
+    ]);
+    const projectIds = uniqueStrings(authContext.projectScopes?.map((scope) => scope.projectId));
     return createPolicySubject({
       actorId: authContext.actor.id,
       principalId: authContext.principal.id,
@@ -100,11 +108,26 @@ export class AuthorizationService {
       roles: authContext.roles.map((role) => role.name),
       teams: authContext.teams.map((team) => team.id),
       authMode: authContext.authMode,
-      serviceAccountId: serviceAccount?.id,
+      serviceAccountId,
       isMockActor: authContext.metadata.isMockActor === true,
+      requestId: authContext.requestId,
+      correlationId: stringMetadata(authContext.metadata.correlationId),
+      source: authContext.source,
+      tenantIds,
+      teamIds,
+      projectIds,
+      resourceScopes: authContext.resourceScopes,
       metadata: {
         source: authContext.source,
+        requestId: authContext.requestId,
+        correlationId: stringMetadata(authContext.metadata.correlationId),
         authenticated: authContext.authenticated,
+        actorKind: authContext.actor.actorKind,
+        serviceAccountId,
+        tenantIds,
+        teamIds,
+        projectIds,
+        resourceScopes: authContext.resourceScopes,
         productionAuthEnabled: false
       }
     });
@@ -172,6 +195,12 @@ export class AuthorizationService {
         resource: createPolicyResource({
           resourceKind: resource.resourceKind as PolicyResourceKind,
           resourceId: resource.resourceId,
+          scopeKind: toPolicyScopeKind(resource.scope?.scopeKind),
+          scopeId: resource.scope?.scopeId,
+          tenantId: stringMetadata(resource.scope?.metadata.tenantId),
+          teamId: resource.scope?.scopeKind === "team" ? resource.scope.scopeId : stringMetadata(resource.scope?.metadata.teamId),
+          projectId: resource.scope?.scopeKind === "project" ? resource.scope.scopeId : stringMetadata(resource.scope?.metadata.projectId),
+          resourceScopes: authContext.resourceScopes,
           metadata: resource.metadata
         }),
         context: createPolicyContext({
@@ -184,7 +213,13 @@ export class AuthorizationService {
           },
           metadata: {
             ...(request.policyContext?.metadata ?? {}),
-            requestId: authContext.requestId
+            requestId: authContext.requestId,
+            correlationId: stringMetadata(authContext.metadata.correlationId),
+            source: authContext.source,
+            tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+            teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+            projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+            resourceScopes: authContext.resourceScopes
           }
         })
       });
@@ -197,17 +232,28 @@ export class AuthorizationService {
       eventType: "authorization_allowed",
       actorId: authContext.actor.id,
       principalId: authContext.principal.id,
+      serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId) ?? this.repository.getServiceAccount(authContext.principal.id)?.id,
       action: request.action,
       resourceKind: resource.resourceKind,
       resourceId: resource.resourceId,
       result: "allowed",
       reason: "rbac_and_policy_allowed",
       requestId: authContext.requestId,
+      correlationId: stringMetadata(authContext.metadata.correlationId),
+      source: authContext.source,
       policyDecisionId: policyDecision?.id,
       metadata: {
         authMode: authContext.authMode,
+        source: authContext.source,
+        correlationId: stringMetadata(authContext.metadata.correlationId),
+        actorKind: authContext.actor.actorKind,
+        serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId) ?? this.repository.getServiceAccount(authContext.principal.id)?.id,
         roles: authContext.roles.map((role) => role.name),
-        teams: authContext.teams.map((team) => team.id)
+        teams: authContext.teams.map((team) => team.id),
+        tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+        teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+        projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+        resourceScopes: authContext.resourceScopes
       }
     });
     return {
@@ -235,17 +281,28 @@ export class AuthorizationService {
       eventType: "authorization_denied",
       actorId: authContext.actor.id,
       principalId: authContext.principal.id,
+      serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId) ?? this.repository.getServiceAccount(authContext.principal.id)?.id,
       action: request.action,
       resourceKind: request.resource.resourceKind,
       resourceId: request.resource.resourceId,
       result: "denied",
       reason,
       requestId: authContext.requestId,
+      correlationId: stringMetadata(authContext.metadata.correlationId),
+      source: authContext.source,
       policyDecisionId: policyDecision?.id,
       metadata: {
         authMode: authContext.authMode,
+        source: authContext.source,
+        correlationId: stringMetadata(authContext.metadata.correlationId),
         authenticated: authContext.authenticated,
-        roles: authContext.roles.map((role) => role.name)
+        actorKind: authContext.actor.actorKind,
+        serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId) ?? this.repository.getServiceAccount(authContext.principal.id)?.id,
+        roles: authContext.roles.map((role) => role.name),
+        tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+        teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+        projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+        resourceScopes: authContext.resourceScopes
       }
     });
     return {
@@ -273,21 +330,53 @@ export class AuthorizationService {
         eventType: "role_binding_evaluated",
         actorId: authContext.actor.id,
         principalId: authContext.principal.id,
+        serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId) ?? this.repository.getServiceAccount(authContext.principal.id)?.id,
         action: permission.action,
         resourceKind: resource.resourceKind,
         resourceId: resource.resourceId,
         result: scopeMatches(binding.scope, resource.scope, resource.resourceKind, resource.resourceId) ? "allowed" : "denied",
         reason: `role_binding:${binding.id}`,
         requestId: authContext.requestId,
+        correlationId: stringMetadata(authContext.metadata.correlationId),
+        source: authContext.source,
         metadata: {
+          source: authContext.source,
+          correlationId: stringMetadata(authContext.metadata.correlationId),
+          actorKind: authContext.actor.actorKind,
+          serviceAccountId: stringMetadata(authContext.metadata.serviceAccountId) ?? this.repository.getServiceAccount(authContext.principal.id)?.id,
           bindingScopeKind: binding.scope.scopeKind,
           bindingScopeId: binding.scope.scopeId,
-          role: role.name
+          role: role.name,
+          tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+          teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+          projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+          resourceScopes: authContext.resourceScopes
         }
       });
       return scopeMatches(binding.scope, resource.scope, resource.resourceKind, resource.resourceId);
     });
   }
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function uniqueStrings(values: Array<string | undefined> | undefined): string[] | undefined {
+  if (!values) return undefined;
+  const unique = [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
+  return unique.length > 0 ? unique : undefined;
+}
+
+function toPolicyScopeKind(scopeKind: ResourceScope["scopeKind"] | undefined): PolicyResourceScopeKind | undefined {
+  if (!scopeKind) return undefined;
+  if (scopeKind === "org") return "tenant";
+  if (scopeKind === "registry") return "registry_package";
+  if (scopeKind === "local_agent") return "local_agent_host";
+  if (scopeKind === "global" || scopeKind === "team" || scopeKind === "repo" || scopeKind === "project" || scopeKind === "provider") {
+    return scopeKind;
+  }
+  return undefined;
 }
 
 function scopeMatches(bindingScope: ResourceScope, requestedScope: ResourceScope | undefined, resourceKind: string, resourceId?: string): boolean {

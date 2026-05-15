@@ -457,6 +457,15 @@ export type InstructionArtifact = {
 export type RegistryAuditLogEntry = {
   id: string;
   actorId: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
+  policyDecisionId?: string;
+  authorizationDecisionId?: string;
   action: RegistryAuditAction;
   targetKind: RegistryKind;
   targetId: string;
@@ -465,6 +474,7 @@ export type RegistryAuditLogEntry = {
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;
   reason?: string;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
 };
 
@@ -479,6 +489,13 @@ export type RegistryRevision = {
   snapshotChecksum: string;
   changeReason?: string;
   createdBy: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   createdAt: Date;
   sourceAuditLogId?: string;
 };
@@ -533,9 +550,17 @@ export type RegistryEvalResult = {
   summary: string;
   details?: string;
   attachedBy: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  requestSource?: string;
   attachedAt: Date;
   source: RegistryEvalResultSource;
   artifactRef?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type RegistryActor = {
@@ -543,6 +568,14 @@ export type RegistryActor = {
   displayName: string;
   roles: RegistryRole[];
   teams?: string[];
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type MutationAuthorizationDecision = {
@@ -550,6 +583,9 @@ export type MutationAuthorizationDecision = {
   reason: string;
   requiredPermission: RegistryPermission;
   actorId: string;
+  principalId?: string;
+  serviceAccountId?: string;
+  policyDecisionId?: string;
   targetKind?: RegistryKind;
   targetId?: string;
 };
@@ -772,6 +808,15 @@ export type DraftRegistryChange = {
   changeType: DraftRegistryChangeType;
   draftPayload: Record<string, unknown>;
   status: DraftRegistryChangeStatus;
+  actorId?: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -832,8 +877,16 @@ export type ProposalGovernanceDecision = {
   id: string;
   proposalId: string;
   actorId: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   decision: ProposalGovernanceDecisionType;
   reason: string;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
 };
 
@@ -848,6 +901,13 @@ export type ProposalEvalRun = {
   score?: number;
   maxScore?: number;
   attachedBy: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   attachedAt: Date;
   metadata?: Record<string, unknown>;
 };
@@ -857,6 +917,15 @@ export type CanaryReadiness = {
   required: boolean;
   ready: boolean;
   blockingReasons: string[];
+  actorId?: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
   evaluatedAt: Date;
 };
 
@@ -868,6 +937,16 @@ export type ProposalApplyGate = {
   requiredEvalPassed: boolean;
   requiredCanaryReady: boolean;
   safetyPolicyId: string;
+  actorId?: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
+  policyDecisionId?: string;
+  metadata?: Record<string, unknown>;
   evaluatedAt: Date;
 };
 
@@ -887,6 +966,15 @@ export type ImprovementGovernanceAuditEvent = {
   proposalId?: string;
   draftRegistryChangeId?: string;
   actorId: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
+  policyDecisionId?: string;
+  authorizationDecisionId?: string;
   message: string;
   metadata?: Record<string, unknown>;
   createdAt: Date;

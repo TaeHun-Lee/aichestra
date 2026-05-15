@@ -233,6 +233,23 @@ export type MCPGatewayReadModel = {
   integration: DashboardJsonObject;
 };
 
+export type ScopeReadinessReadModel = {
+  summary: DashboardJsonObject;
+  tenants: DashboardJsonObject[];
+  teams: DashboardJsonObject[];
+  projects: DashboardJsonObject[];
+  repos: DashboardJsonObject[];
+  providers: DashboardJsonObject[];
+  models: DashboardJsonObject[];
+  secrets: DashboardJsonObject[];
+  mcpTools: DashboardJsonObject[];
+  registryPackages: DashboardJsonObject[];
+  localAgentHosts: DashboardJsonObject[];
+  auditQueries: DashboardJsonObject[];
+  enforcement: DashboardJsonObject;
+  noSecretStatus: DashboardJsonObject;
+};
+
 export type DeploymentReadinessReadModel = {
   summary: DashboardJsonObject;
   profiles: DashboardJsonObject[];
@@ -491,6 +508,7 @@ export type DashboardReadModels = {
   security: SecurityReadModel;
   localAgents: LocalAgentReadModel;
   mcp: MCPGatewayReadModel;
+  scopes: ScopeReadinessReadModel;
   readiness: DeploymentReadinessReadModel;
   database: DatabaseOperationsReadModel;
   secretBackend: SecretBackendMigrationReadModel;
@@ -525,6 +543,7 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/security",
   "/dashboard/local-agents",
   "/dashboard/mcp",
+  "/dashboard/scopes",
   "/dashboard/readiness",
   "/dashboard/database",
   "/dashboard/secret-backend",

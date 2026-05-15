@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { AuthContext, RequestContext } from "@aichestra/auth";
+import { ScopeContextFactory } from "@aichestra/auth";
 import { createId, seedHarnesses, seedInstructions, seedRepos, seedSkills } from "@aichestra/core";
 import {
   PolicyService,
@@ -8,7 +10,7 @@ import {
   createPolicyResource,
   createPolicySubject
 } from "@aichestra/policy";
-import type { PolicyAction } from "@aichestra/policy";
+import type { PolicyAction, PolicyResourceScope } from "@aichestra/policy";
 import type {
   AgentKind,
   ApprovalStatus,
@@ -113,10 +115,21 @@ export type RegistryServiceInput = {
 
 export type RegistryAuditInput = Omit<RegistryAuditLogEntry, "id" | "createdAt">;
 
+export type RegistryRequestContextInput = {
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
+  actor?: RegistryActor;
+  actorId?: string;
+};
+
+export type RegistryActorLikeInput = RegistryActor | string | RegistryRequestContextInput;
+
 export type RegistryStatusUpdateInput = {
   status: RegistryStatus;
   actorId?: string;
   actor?: RegistryActor;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
   reason?: string;
 };
 
@@ -124,6 +137,8 @@ export type RegistryApprovalUpdateInput = {
   approvalStatus: ApprovalStatus;
   actorId?: string;
   actor?: RegistryActor;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
   reason?: string;
 };
 
@@ -131,12 +146,16 @@ export type RegistryEvalUpdateInput = {
   evalStatus: EvalStatus;
   actorId?: string;
   actor?: RegistryActor;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
   reason?: string;
 };
 
 export type VerifyInstructionChecksumInput = {
   actorId?: string;
   actor?: RegistryActor;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
   repoRoot?: string;
   reason?: string;
 };
@@ -144,6 +163,8 @@ export type VerifyInstructionChecksumInput = {
 export type RegistryRollbackServiceInput = Omit<RegistryRollbackRequest, "actorId"> & {
   actor?: RegistryActor;
   actorId?: string;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
 };
 
 export type RegistryApprovalQueueFilter = {
@@ -151,6 +172,10 @@ export type RegistryApprovalQueueFilter = {
   approvalStatus?: ApprovalStatus;
   owner?: string;
   includeArchived?: boolean;
+  actor?: RegistryActor;
+  actorId?: string;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
 };
 
 export type RegistryEvalResultInput = {
@@ -167,7 +192,10 @@ export type RegistryEvalResultInput = {
   updateEvalStatus?: boolean;
   actor?: RegistryActor;
   actorId?: string;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
   reason?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type RegistryPackageExportInput = {
@@ -179,6 +207,8 @@ export type RegistryPackageExportInput = {
   description?: string;
   owner?: string;
   createdBy?: string;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
   tags?: string[];
   metadata?: Record<string, unknown>;
 };
@@ -191,6 +221,8 @@ export type RegistryPackageImportInput = {
   dryRun?: boolean;
   actor?: RegistryActor;
   actorId?: string;
+  requestContext?: RequestContext;
+  authContext?: AuthContext;
   reason?: string;
 };
 
@@ -284,6 +316,9 @@ export type RegistryMutationAuthorizer = {
     reason: string;
     requiredPermission: RegistryPermission;
     actorId: string;
+    principalId?: string;
+    serviceAccountId?: string;
+    policyDecisionId?: string;
     targetKind?: RegistryKind;
     targetId?: string;
   };
@@ -397,6 +432,15 @@ export type RegistryResolutionDto = {
 export type RegistryAuditLogDto = {
   id: string;
   actorId: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
+  policyDecisionId?: string;
+  authorizationDecisionId?: string;
   action: RegistryAuditAction;
   targetKind: RegistryKind;
   targetId: string;
@@ -405,6 +449,7 @@ export type RegistryAuditLogDto = {
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;
   reason?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -419,6 +464,13 @@ export type RegistryRevisionDto = {
   snapshotChecksum: string;
   changeReason?: string;
   createdBy: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  source?: string;
   createdAt: string;
   sourceAuditLogId?: string;
 };
@@ -471,9 +523,17 @@ export type RegistryEvalResultDto = {
   summary: string;
   details?: string;
   attachedBy: string;
+  principalId?: string;
+  actorKind?: string;
+  serviceAccountId?: string;
+  authMode?: string;
+  requestId?: string;
+  correlationId?: string;
+  requestSource?: string;
   attachedAt: string;
   source: RegistryEvalResultSource;
   artifactRef?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type RegistryActorDto = {
@@ -557,6 +617,9 @@ function cloneInstruction(instruction: InstructionArtifact): InstructionArtifact
 function cloneAuditLog(log: RegistryAuditLogEntry): RegistryAuditLogEntry {
   return {
     ...log,
+    before: log.before ? structuredClone(log.before) : undefined,
+    after: log.after ? structuredClone(log.after) : undefined,
+    metadata: log.metadata ? structuredClone(log.metadata) : undefined,
     createdAt: new Date(log.createdAt)
   };
 }
@@ -572,6 +635,7 @@ function cloneRevision(revision: RegistryRevision): RegistryRevision {
 function cloneEvalResult(result: RegistryEvalResult): RegistryEvalResult {
   return {
     ...result,
+    metadata: result.metadata ? structuredClone(result.metadata) : undefined,
     attachedAt: new Date(result.attachedAt)
   };
 }
@@ -1391,6 +1455,15 @@ export function registryAuditLogToDto(log: RegistryAuditLogEntry): RegistryAudit
   return {
     id: log.id,
     actorId: log.actorId,
+    principalId: log.principalId,
+    actorKind: log.actorKind,
+    serviceAccountId: log.serviceAccountId,
+    authMode: log.authMode,
+    requestId: log.requestId,
+    correlationId: log.correlationId,
+    source: log.source,
+    policyDecisionId: log.policyDecisionId,
+    authorizationDecisionId: log.authorizationDecisionId,
     action: log.action,
     targetKind: log.targetKind,
     targetId: log.targetId,
@@ -1399,6 +1472,7 @@ export function registryAuditLogToDto(log: RegistryAuditLogEntry): RegistryAudit
     before: log.before,
     after: log.after,
     reason: log.reason,
+    metadata: log.metadata,
     createdAt: log.createdAt.toISOString()
   };
 }
@@ -1415,6 +1489,13 @@ export function registryRevisionToDto(revision: RegistryRevision): RegistryRevis
     snapshotChecksum: revision.snapshotChecksum,
     changeReason: revision.changeReason,
     createdBy: revision.createdBy,
+    principalId: revision.principalId,
+    actorKind: revision.actorKind,
+    serviceAccountId: revision.serviceAccountId,
+    authMode: revision.authMode,
+    requestId: revision.requestId,
+    correlationId: revision.correlationId,
+    source: revision.source,
     createdAt: revision.createdAt.toISOString(),
     sourceAuditLogId: revision.sourceAuditLogId
   };
@@ -1466,9 +1547,17 @@ export function registryEvalResultToDto(result: RegistryEvalResult): RegistryEva
     summary: result.summary,
     details: result.details,
     attachedBy: result.attachedBy,
+    principalId: result.principalId,
+    actorKind: result.actorKind,
+    serviceAccountId: result.serviceAccountId,
+    authMode: result.authMode,
+    requestId: result.requestId,
+    correlationId: result.correlationId,
+    requestSource: result.requestSource,
     attachedAt: result.attachedAt.toISOString(),
     source: result.source,
-    artifactRef: result.artifactRef
+    artifactRef: result.artifactRef,
+    metadata: result.metadata
   };
 }
 
@@ -1997,6 +2086,8 @@ export class MockRegistryMutationAuthorizer implements RegistryMutationAuthorize
       reason: allowed ? "allowed by mock registry role" : `missing permission ${permission}`,
       requiredPermission: permission,
       actorId: actor.id,
+      principalId: actor.principalId,
+      serviceAccountId: actor.serviceAccountId,
       targetKind: target.targetKind,
       targetId: target.targetId
     };
@@ -2014,6 +2105,7 @@ function registryPermissionToPolicyAction(permission: RegistryPermission): Polic
 export class PolicyBackedRegistryMutationAuthorizer implements RegistryMutationAuthorizer {
   private readonly fallback: RegistryMutationAuthorizer;
   private readonly policyService: PolicyService;
+  private readonly scopeContextFactory = new ScopeContextFactory();
 
   constructor(input: { policyService: PolicyService; fallback?: RegistryMutationAuthorizer }) {
     this.policyService = input.policyService;
@@ -2025,26 +2117,60 @@ export class PolicyBackedRegistryMutationAuthorizer implements RegistryMutationA
     if (!fallbackDecision.allowed) return fallbackDecision;
     const action = registryPermissionToPolicyAction(permission);
     if (!action) return fallbackDecision;
+    const packageScope = target.targetId
+      ? this.scopeContextFactory.createRegistryPackageScope({
+        packageId: `${target.targetKind ?? "registry"}:${target.targetId}`,
+        packageKind: registryPackageScopeKind(target.targetKind),
+        metadata: { permission }
+      })
+      : undefined;
+    const policyResourceScope = packageScope ? this.scopeContextFactory.toPolicyResourceScope(packageScope) : undefined;
+    const resourceScopes = this.scopeContextFactory.mergeScopes(
+      policyResourceScope,
+      ...policyResourceScopesFromMetadata(actor.metadata)
+    );
     const policyDecision = this.policyService.evaluate({
       subject: createPolicySubject({
         actorId: actor.id,
-        actorKind: actor.roles.includes("system") ? "system" : "user",
+        principalId: actor.principalId,
+        actorKind: actor.actorKind === "service_account" ? "service_account" : actor.roles.includes("system") ? "system" : "user",
         roles: actor.roles,
-        teams: actor.teams
+        teams: actor.teams,
+        authMode: actor.authMode,
+        serviceAccountId: actor.serviceAccountId,
+        isMockActor: actor.authMode === "mock" || actor.authMode === "mock_service_account" || actor.metadata?.compatibilityActorFallback === true,
+        requestId: actor.requestId,
+        correlationId: actor.correlationId,
+        source: actor.source,
+        tenantIds: stringArrayMetadata(actor.metadata?.tenantIds) ?? (stringMetadata(actor.metadata?.tenantId) ? [stringMetadata(actor.metadata?.tenantId) as string] : undefined),
+        teamIds: stringArrayMetadata(actor.metadata?.teamIds) ?? (stringMetadata(actor.metadata?.teamId) ? [stringMetadata(actor.metadata?.teamId) as string] : undefined),
+        projectIds: stringArrayMetadata(actor.metadata?.projectIds) ?? (stringMetadata(actor.metadata?.projectId) ? [stringMetadata(actor.metadata?.projectId) as string] : undefined),
+        resourceScopes: resourceScopes.length > 0 ? resourceScopes : policyResourceScopesFromMetadata(actor.metadata),
+        metadata: safeRegistryMetadata(actor.metadata ?? {})
       }),
       action,
       resource: createPolicyResource({
         resourceKind: "registry_item",
         resourceId: target.targetId,
+        scopeKind: policyResourceScope?.scopeKind,
+        scopeId: policyResourceScope?.scopeId,
+        tenantId: stringMetadata(policyResourceScope?.metadata.tenantId),
+        teamId: stringMetadata(policyResourceScope?.metadata.teamId),
+        projectId: stringMetadata(policyResourceScope?.metadata.projectId),
+        resourceScopes: resourceScopes.length > 0 ? resourceScopes : undefined,
         metadata: {
-          targetKind: target.targetKind
+          targetKind: target.targetKind,
+          registryPackageScope: packageScope,
+          resourceScopes: resourceScopes.length > 0 ? resourceScopes : undefined
         }
       }),
       context: createPolicyContext({
         metadata: {
           permission,
           targetKind: target.targetKind,
-          targetId: target.targetId
+          targetId: target.targetId,
+          registryPackageScope: packageScope,
+          resourceScopes: resourceScopes.length > 0 ? resourceScopes : undefined
         }
       })
     });
@@ -2053,6 +2179,9 @@ export class PolicyBackedRegistryMutationAuthorizer implements RegistryMutationA
       reason: policyDecision.allowed ? fallbackDecision.reason : policyDecision.reason,
       requiredPermission: permission,
       actorId: actor.id,
+      principalId: actor.principalId,
+      serviceAccountId: actor.serviceAccountId,
+      policyDecisionId: policyDecision.id,
       targetKind: target.targetKind,
       targetId: target.targetId
     };
@@ -2069,16 +2198,149 @@ export class RegistryAuthorizationError extends Error {
   }
 }
 
-function actorFromInput(defaultActor: RegistryActor, actor?: RegistryActor, actorId?: string): RegistryActor {
+function actorFromInput(defaultActor: RegistryActor, actor?: RegistryActor, actorId?: string, context?: RegistryRequestContextInput): RegistryActor {
   if (actor) return actor;
+  const requestContext = context?.requestContext;
+  const authContext = context?.authContext ?? requestContext?.authContext;
+  if (authContext) return registryActorFromAuthContext(defaultActor, authContext, requestContext);
   if (actorId && actorId !== defaultActor.id) {
     return {
       id: actorId,
       displayName: actorId,
-      roles: defaultActor.roles
+      roles: defaultActor.roles,
+      metadata: { compatibilityActorFallback: true }
     };
   }
   return defaultActor;
+}
+
+function actorFromActorLike(defaultActor: RegistryActor, input: RegistryActorLikeInput | undefined): RegistryActor {
+  if (input === undefined) return defaultActor;
+  if (typeof input === "string") return actorFromInput(defaultActor, undefined, input);
+  if (isRegistryActor(input)) return input;
+  return actorFromInput(defaultActor, input.actor, input.actorId, input);
+}
+
+function isRegistryActor(value: RegistryActorLikeInput): value is RegistryActor {
+  return typeof value === "object" && value !== null && "roles" in value && Array.isArray((value as RegistryActor).roles);
+}
+
+function registryActorFromAuthContext(defaultActor: RegistryActor, authContext: AuthContext, requestContext?: RequestContext): RegistryActor {
+  const roles = registryRolesFromAuthContext(authContext, defaultActor);
+  const serviceAccountId = stringMetadata(authContext.metadata.serviceAccountId) ?? stringMetadata(requestContext?.metadata.serviceAccountId);
+  const metadata = safeRegistryMetadata({
+    ...(requestContext?.metadata ?? {}),
+    ...(authContext.metadata ?? {}),
+    tenantId: requestContext?.tenantId ?? authContext.tenantScopes?.[0]?.tenantId,
+    teamId: requestContext?.teamId ?? authContext.teamScopes?.[0]?.teamId,
+    projectId: requestContext?.projectId ?? authContext.projectScopes?.[0]?.projectId,
+    tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
+    teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
+    projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
+    resourceScopes: requestContext?.resourceScopes ?? authContext.resourceScopes,
+    contextDerivedActor: true,
+    compatibilityActorFallback: false
+  });
+  return {
+    id: authContext.actor.id,
+    displayName: authContext.actor.displayName,
+    roles,
+    teams: authContext.actor.teams,
+    principalId: authContext.principal.id,
+    actorKind: authContext.actor.actorKind,
+    serviceAccountId,
+    authMode: authContext.authMode,
+    requestId: requestContext?.requestId ?? authContext.requestId,
+    correlationId: requestContext?.correlationId ?? stringMetadata(authContext.metadata.correlationId),
+    source: requestContext?.source ?? authContext.source,
+    metadata
+  };
+}
+
+function registryRolesFromAuthContext(authContext: AuthContext, defaultActor: RegistryActor): RegistryRole[] {
+  const roleNames = new Set(authContext.roles.map((role) => role.name).concat(authContext.actor.roles));
+  const serviceAccountId = stringMetadata(authContext.metadata.serviceAccountId);
+  if (serviceAccountId === "registry_governance_service") return ["registry_admin", "system"];
+  if (serviceAccountId === "improvement_governance_service") return ["registry_reviewer", "registry_viewer"];
+  if (authContext.actor.actorKind === "system") return ["system"];
+  if (roleNames.has("system_admin") || roleNames.has("platform_admin") || roleNames.has("mock_admin")) return ["registry_admin"];
+  if (roleNames.has("reviewer")) return ["registry_reviewer"];
+  if (roleNames.has("developer")) return ["registry_editor"];
+  if (roleNames.has("security_admin") || roleNames.has("viewer")) return ["registry_viewer"];
+  return defaultActor.roles;
+}
+
+function registryContextFields(actor: RegistryActor): Pick<
+  RegistryAuditLogEntry,
+  "principalId" | "actorKind" | "serviceAccountId" | "authMode" | "requestId" | "correlationId" | "source" | "metadata"
+> {
+  return {
+    principalId: actor.principalId,
+    actorKind: actor.actorKind,
+    serviceAccountId: actor.serviceAccountId,
+    authMode: actor.authMode,
+    requestId: actor.requestId,
+    correlationId: actor.correlationId,
+    source: actor.source,
+    metadata: safeRegistryMetadata({
+      ...(actor.metadata ?? {}),
+      actorKind: actor.actorKind,
+      principalId: actor.principalId,
+      serviceAccountId: actor.serviceAccountId,
+      authMode: actor.authMode,
+      requestId: actor.requestId,
+      correlationId: actor.correlationId,
+      source: actor.source,
+      tenantId: stringMetadata(actor.metadata?.tenantId),
+      teamId: stringMetadata(actor.metadata?.teamId),
+      projectId: stringMetadata(actor.metadata?.projectId),
+      tenantIds: stringArrayMetadata(actor.metadata?.tenantIds),
+      teamIds: stringArrayMetadata(actor.metadata?.teamIds),
+      projectIds: stringArrayMetadata(actor.metadata?.projectIds),
+      resourceScopes: policyResourceScopesFromMetadata(actor.metadata)
+    })
+  };
+}
+
+function safeRegistryMetadata(input: Record<string, unknown> = {}): Record<string, unknown> {
+  const output: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue;
+    if (/token|secret|password|cookie|credential|session|apiKey|api_key|authorization/i.test(key)) {
+      output[key] = "[redacted]";
+    } else if (value && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date)) {
+      output[key] = safeRegistryMetadata(value as Record<string, unknown>);
+    } else {
+      output[key] = value;
+    }
+  }
+  return output;
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function stringArrayMetadata(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const values = value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  return values.length > 0 ? values : undefined;
+}
+
+function policyResourceScopesFromMetadata(metadata: Record<string, unknown> | undefined): PolicyResourceScope[] {
+  const values = metadata?.resourceScopes;
+  if (!Array.isArray(values)) return [];
+  return values.filter((item): item is PolicyResourceScope =>
+    item !== null &&
+    typeof item === "object" &&
+    typeof (item as PolicyResourceScope).scopeKind === "string" &&
+    typeof (item as PolicyResourceScope).scopeId === "string"
+  );
+}
+
+function registryPackageScopeKind(kind: RegistryKind | undefined): "skill" | "harness" | "instruction" | "unknown" {
+  if (kind === "skill" || kind === "harness" || kind === "instruction") return kind;
+  return "unknown";
 }
 
 export class RegistryService {
@@ -2122,9 +2384,9 @@ export class RegistryService {
     return this.skillRepository.getSkillById(id);
   }
 
-  createSkill(input: CreateSkillPackageInput, actor: RegistryActor | string = this.defaultActor): SkillPackage {
-    const registryActor = typeof actor === "string" ? actorFromInput(this.defaultActor, undefined, actor) : actor;
-    this.authorize(registryActor, "registry.create", { targetKind: "skill" });
+  createSkill(input: CreateSkillPackageInput, actor: RegistryActorLikeInput = this.defaultActor): SkillPackage {
+    const registryActor = actorFromActorLike(this.defaultActor, actor);
+    const decision = this.authorize(registryActor, "registry.create", { targetKind: "skill" });
     const skill = createSkillPackage(input);
     const created = this.skillRepository.createSkill(skill);
     const audit = this.appendAudit({
@@ -2134,15 +2396,17 @@ export class RegistryService {
       targetId: created.id,
       targetName: created.name,
       targetVersion: created.version,
-      after: registryEntitySnapshot(created)
+      after: registryEntitySnapshot(created),
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(registryActor)
     });
-    this.appendRevisionForEntity("skill", created, registryActor.id, "create", audit.id);
+    this.appendRevisionForEntity("skill", created, registryActor, "create", audit.id);
     return created;
   }
 
   updateSkillStatus(id: string, input: RegistryStatusUpdateInput): SkillPackage {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.status.change", { targetKind: "skill", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.status.change", { targetKind: "skill", targetId: id });
     const before = this.requireSkill(id);
     this.ensureInitialRevision("skill", before, actor.id);
     const updated = this.skillRepository.updateSkillStatus(id, input.status);
@@ -2155,15 +2419,17 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("skill", updated, actor.id, input.reason ?? "status_change", audit.id);
+    this.appendRevisionForEntity("skill", updated, actor, input.reason ?? "status_change", audit.id);
     return updated;
   }
 
   updateSkillApproval(id: string, input: RegistryApprovalUpdateInput): SkillPackage {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.approval.change", { targetKind: "skill", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.approval.change", { targetKind: "skill", targetId: id });
     const before = this.requireSkill(id);
     this.ensureInitialRevision("skill", before, actor.id);
     const updated = this.skillRepository.updateSkill(id, { approvalStatus: input.approvalStatus });
@@ -2176,15 +2442,17 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("skill", updated, actor.id, input.reason ?? "approval_change", audit.id);
+    this.appendRevisionForEntity("skill", updated, actor, input.reason ?? "approval_change", audit.id);
     return updated;
   }
 
   updateSkillEval(id: string, input: RegistryEvalUpdateInput): SkillPackage {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.eval.change", { targetKind: "skill", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.eval.change", { targetKind: "skill", targetId: id });
     const before = this.requireSkill(id);
     this.ensureInitialRevision("skill", before, actor.id);
     const updated = this.skillRepository.updateSkill(id, { evalStatus: input.evalStatus });
@@ -2197,9 +2465,11 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("skill", updated, actor.id, input.reason ?? "eval_status_change", audit.id);
+    this.appendRevisionForEntity("skill", updated, actor, input.reason ?? "eval_status_change", audit.id);
     return updated;
   }
 
@@ -2212,9 +2482,9 @@ export class RegistryService {
     return this.harnessRepository.getHarnessById(id);
   }
 
-  createHarness(input: CreateHarnessDefinitionInput, actor: RegistryActor | string = this.defaultActor): HarnessPackage {
-    const registryActor = typeof actor === "string" ? actorFromInput(this.defaultActor, undefined, actor) : actor;
-    this.authorize(registryActor, "registry.create", { targetKind: "harness" });
+  createHarness(input: CreateHarnessDefinitionInput, actor: RegistryActorLikeInput = this.defaultActor): HarnessPackage {
+    const registryActor = actorFromActorLike(this.defaultActor, actor);
+    const decision = this.authorize(registryActor, "registry.create", { targetKind: "harness" });
     const harness = createHarnessDefinition(input);
     const created = this.harnessRepository.createHarness(harness);
     const audit = this.appendAudit({
@@ -2224,15 +2494,17 @@ export class RegistryService {
       targetId: created.id,
       targetName: created.name,
       targetVersion: created.version,
-      after: registryEntitySnapshot(created)
+      after: registryEntitySnapshot(created),
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(registryActor)
     });
-    this.appendRevisionForEntity("harness", created, registryActor.id, "create", audit.id);
+    this.appendRevisionForEntity("harness", created, registryActor, "create", audit.id);
     return created;
   }
 
   updateHarnessStatus(id: string, input: RegistryStatusUpdateInput): HarnessPackage {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.status.change", { targetKind: "harness", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.status.change", { targetKind: "harness", targetId: id });
     const before = this.requireHarness(id);
     this.ensureInitialRevision("harness", before, actor.id);
     const updated = this.harnessRepository.updateHarnessStatus(id, input.status);
@@ -2245,15 +2517,17 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("harness", updated, actor.id, input.reason ?? "status_change", audit.id);
+    this.appendRevisionForEntity("harness", updated, actor, input.reason ?? "status_change", audit.id);
     return updated;
   }
 
   updateHarnessApproval(id: string, input: RegistryApprovalUpdateInput): HarnessPackage {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.approval.change", { targetKind: "harness", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.approval.change", { targetKind: "harness", targetId: id });
     const before = this.requireHarness(id);
     this.ensureInitialRevision("harness", before, actor.id);
     const updated = this.harnessRepository.updateHarness(id, { approvalStatus: input.approvalStatus });
@@ -2266,15 +2540,17 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("harness", updated, actor.id, input.reason ?? "approval_change", audit.id);
+    this.appendRevisionForEntity("harness", updated, actor, input.reason ?? "approval_change", audit.id);
     return updated;
   }
 
   updateHarnessEval(id: string, input: RegistryEvalUpdateInput): HarnessPackage {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.eval.change", { targetKind: "harness", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.eval.change", { targetKind: "harness", targetId: id });
     const before = this.requireHarness(id);
     this.ensureInitialRevision("harness", before, actor.id);
     const updated = this.harnessRepository.updateHarness(id, { evalStatus: input.evalStatus });
@@ -2287,9 +2563,11 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("harness", updated, actor.id, input.reason ?? "eval_status_change", audit.id);
+    this.appendRevisionForEntity("harness", updated, actor, input.reason ?? "eval_status_change", audit.id);
     return updated;
   }
 
@@ -2302,9 +2580,9 @@ export class RegistryService {
     return this.instructionRepository.getInstructionById(id);
   }
 
-  createInstruction(input: CreateInstructionArtifactInput, actor: RegistryActor | string = this.defaultActor): InstructionArtifact {
-    const registryActor = typeof actor === "string" ? actorFromInput(this.defaultActor, undefined, actor) : actor;
-    this.authorize(registryActor, "registry.create", { targetKind: "instruction" });
+  createInstruction(input: CreateInstructionArtifactInput, actor: RegistryActorLikeInput = this.defaultActor): InstructionArtifact {
+    const registryActor = actorFromActorLike(this.defaultActor, actor);
+    const decision = this.authorize(registryActor, "registry.create", { targetKind: "instruction" });
     const instruction = createInstructionArtifact(input);
     const created = this.instructionRepository.createInstruction(instruction);
     const audit = this.appendAudit({
@@ -2314,15 +2592,17 @@ export class RegistryService {
       targetId: created.id,
       targetName: created.name,
       targetVersion: created.version,
-      after: registryEntitySnapshot(created)
+      after: registryEntitySnapshot(created),
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(registryActor)
     });
-    this.appendRevisionForEntity("instruction", created, registryActor.id, "create", audit.id);
+    this.appendRevisionForEntity("instruction", created, registryActor, "create", audit.id);
     return created;
   }
 
   updateInstructionStatus(id: string, input: RegistryStatusUpdateInput): InstructionArtifact {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.status.change", { targetKind: "instruction", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.status.change", { targetKind: "instruction", targetId: id });
     const before = this.requireInstruction(id);
     this.ensureInitialRevision("instruction", before, actor.id);
     const updated = this.instructionRepository.updateInstructionStatus(id, input.status);
@@ -2335,15 +2615,17 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("instruction", updated, actor.id, input.reason ?? "status_change", audit.id);
+    this.appendRevisionForEntity("instruction", updated, actor, input.reason ?? "status_change", audit.id);
     return updated;
   }
 
   updateInstructionApproval(id: string, input: RegistryApprovalUpdateInput): InstructionArtifact {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.approval.change", { targetKind: "instruction", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.approval.change", { targetKind: "instruction", targetId: id });
     const before = this.requireInstruction(id);
     this.ensureInitialRevision("instruction", before, actor.id);
     const updated = this.instructionRepository.updateInstruction(id, { approvalStatus: input.approvalStatus });
@@ -2356,15 +2638,17 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("instruction", updated, actor.id, input.reason ?? "approval_change", audit.id);
+    this.appendRevisionForEntity("instruction", updated, actor, input.reason ?? "approval_change", audit.id);
     return updated;
   }
 
   updateInstructionEval(id: string, input: RegistryEvalUpdateInput): InstructionArtifact {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.eval.change", { targetKind: "instruction", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.eval.change", { targetKind: "instruction", targetId: id });
     const before = this.requireInstruction(id);
     this.ensureInitialRevision("instruction", before, actor.id);
     const updated = this.instructionRepository.updateInstruction(id, { evalStatus: input.evalStatus });
@@ -2377,15 +2661,17 @@ export class RegistryService {
       targetVersion: updated.version,
       before: registryEntitySnapshot(before),
       after: registryEntitySnapshot(updated),
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    this.appendRevisionForEntity("instruction", updated, actor.id, input.reason ?? "eval_status_change", audit.id);
+    this.appendRevisionForEntity("instruction", updated, actor, input.reason ?? "eval_status_change", audit.id);
     return updated;
   }
 
   verifyInstructionChecksum(id: string, input: VerifyInstructionChecksumInput = {}): InstructionArtifact {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.checksum.verify", { targetKind: "instruction", targetId: id });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.checksum.verify", { targetKind: "instruction", targetId: id });
     const before = this.requireInstruction(id);
     this.ensureInitialRevision("instruction", before, actor.id);
     const verification = verifyInstructionChecksum(before, { repoRoot: input.repoRoot ?? this.repoRoot });
@@ -2403,10 +2689,12 @@ export class RegistryService {
         checksumStatus: updated.checksumStatus,
         checksumVerifiedAt: toIso(updated.checksumVerifiedAt)
       },
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
     if (before.checksumStatus !== updated.checksumStatus || before.checksumVerifiedAt?.getTime() !== updated.checksumVerifiedAt?.getTime()) {
-      this.appendRevisionForEntity("instruction", updated, actor.id, input.reason ?? "checksum_verification", audit.id);
+      this.appendRevisionForEntity("instruction", updated, actor, input.reason ?? "checksum_verification", audit.id);
     }
     return updated;
   }
@@ -2418,8 +2706,8 @@ export class RegistryService {
 
   rollback(input: RegistryRollbackServiceInput): RegistryRollbackResult {
     const targetKind = assertRegistryKind(input.targetKind, "rollback.targetKind");
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.rollback", { targetKind, targetId: input.targetId });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.rollback", { targetKind, targetId: input.targetId });
     const current = this.requireRegistryEntity(targetKind, input.targetId);
     this.ensureInitialRevision(targetKind, current, actor.id);
     const latest = this.historyRepository.getLatestRevisionForTarget(targetKind, input.targetId);
@@ -2446,9 +2734,11 @@ export class RegistryService {
       targetVersion: restored.version,
       before: registryEntitySnapshot(current),
       after: registryEntitySnapshot(restored),
-      reason
+      reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
-    const newRevision = this.appendRevisionForEntity(targetKind, restored, actor.id, `rollback: ${reason}`, audit.id);
+    const newRevision = this.appendRevisionForEntity(targetKind, restored, actor, `rollback: ${reason}`, audit.id);
     return {
       targetKind,
       targetId: restored.id,
@@ -2460,8 +2750,11 @@ export class RegistryService {
     };
   }
 
-  listApprovalQueue(filter: RegistryApprovalQueueFilter = {}, actor = this.defaultActor): RegistryApprovalQueueItem[] {
-    this.authorize(actor, "registry.read");
+  listApprovalQueue(filter: RegistryApprovalQueueFilter = {}, actor: RegistryActorLikeInput = this.defaultActor): RegistryApprovalQueueItem[] {
+    const registryActor = filter.requestContext || filter.authContext || filter.actor || filter.actorId
+      ? actorFromInput(this.defaultActor, filter.actor, filter.actorId, filter)
+      : actorFromActorLike(this.defaultActor, actor);
+    this.authorize(registryActor, "registry.read");
     const status = filter.approvalStatus ?? "pending";
     const entries = [
       ...this.skillRepository.listSkills().map((entry) => this.approvalQueueItemForEntity("skill", entry)),
@@ -2478,8 +2771,8 @@ export class RegistryService {
 
   attachEvalResult(targetKind: RegistryKind, targetId: string, input: RegistryEvalResultInput): RegistryEvalResult {
     const kind = assertRegistryKind(targetKind, "evalResult.targetKind");
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.eval.change", { targetKind: kind, targetId });
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.eval.change", { targetKind: kind, targetId });
     const entity = this.requireRegistryEntity(kind, targetId);
     const result = this.evalResultRepository.appendEvalResult({
       targetKind: kind,
@@ -2494,8 +2787,19 @@ export class RegistryService {
       summary: requireString(input.summary, "evalResult.summary"),
       details: input.details,
       attachedBy: input.attachedBy ?? actor.id,
+      principalId: actor.principalId,
+      actorKind: actor.actorKind,
+      serviceAccountId: actor.serviceAccountId,
+      authMode: actor.authMode,
+      requestId: actor.requestId,
+      correlationId: actor.correlationId,
+      requestSource: actor.source,
       source: assertRegistryEvalResultSource(input.source, "evalResult.source"),
-      artifactRef: input.artifactRef
+      artifactRef: input.artifactRef,
+      metadata: safeRegistryMetadata({
+        ...(input.metadata ?? {}),
+        ...(registryContextFields(actor).metadata ?? {})
+      })
     });
 
     const audit = this.appendAudit({
@@ -2511,7 +2815,9 @@ export class RegistryService {
         evalResultId: result.id,
         evalResultStatus: result.status
       },
-      reason: input.reason
+      reason: input.reason,
+      policyDecisionId: decision.policyDecisionId,
+      ...registryContextFields(actor)
     });
 
     if (input.updateEvalStatus) {
@@ -2519,7 +2825,7 @@ export class RegistryService {
       const evalStatus = evalStatusFromResult(result.status);
       if (evalStatus) {
         const updated = this.updateEntityEvalStatus(kind, entity.id, evalStatus);
-        this.appendRevisionForEntity(kind, updated, actor.id, input.reason ?? "eval_result_attached", audit.id);
+        this.appendRevisionForEntity(kind, updated, actor, input.reason ?? "eval_result_attached", audit.id);
       }
     }
 
@@ -2541,8 +2847,11 @@ export class RegistryService {
     return this.packageRepository.getPackageManifestById(id);
   }
 
-  exportPackageManifest(input: RegistryPackageExportInput, actor = this.defaultActor): RegistryPackageManifest {
-    this.authorize(actor, "registry.read");
+  exportPackageManifest(input: RegistryPackageExportInput, actor: RegistryActorLikeInput = this.defaultActor): RegistryPackageManifest {
+    const registryActor = input.requestContext || input.authContext
+      ? actorFromInput(this.defaultActor, undefined, undefined, input)
+      : actorFromActorLike(this.defaultActor, actor);
+    this.authorize(registryActor, "registry.read");
     const packageKind = normalizePackageKind(input.packageKind);
     const entries = packageKind === "bundle"
       ? this.bundleEntries(input.entryRefs)
@@ -2562,7 +2871,7 @@ export class RegistryService {
       manifestVersion: "1.0.0",
       entries,
       dependencies: input.metadata?.dependencies as RegistryPackageDependency[] | undefined ?? [],
-      createdBy: input.createdBy ?? actor.id,
+      createdBy: input.createdBy ?? registryActor.id,
       tags: input.tags ?? [],
       metadata
     });
@@ -2571,8 +2880,8 @@ export class RegistryService {
   }
 
   importPackageManifest(input: RegistryPackageImportInput): RegistryPackageImportResult {
-    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId);
-    this.authorize(actor, "registry.create");
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    const decision = this.authorize(actor, "registry.create");
     const rawManifest = input.manifest;
     const emptyResult = (manifest: RegistryPackageManifest): RegistryPackageImportResult => ({
       dryRun: input.dryRun ?? false,
@@ -2642,9 +2951,11 @@ export class RegistryService {
           targetVersion: updated.version,
           before: registryEntitySnapshot(existing),
           after: registryEntitySnapshot(updated),
-          reason: input.reason ?? "package import"
+          reason: input.reason ?? "package import",
+          policyDecisionId: decision.policyDecisionId,
+          ...registryContextFields(actor)
         });
-        const revision = this.appendRevisionForEntity(entry.kind, updated, actor.id, input.reason ?? "package import", audit.id);
+        const revision = this.appendRevisionForEntity(entry.kind, updated, actor, input.reason ?? "package import", audit.id);
         result.replacedEntries.push(this.refForEntity(entry.kind, updated));
         result.auditLogIds.push(audit.id);
         result.revisionIds.push(revision.id);
@@ -2658,9 +2969,11 @@ export class RegistryService {
           targetName: created.name,
           targetVersion: created.version,
           after: registryEntitySnapshot(created),
-          reason: input.reason ?? "package import"
+          reason: input.reason ?? "package import",
+          policyDecisionId: decision.policyDecisionId,
+          ...registryContextFields(actor)
         });
-        const revision = this.appendRevisionForEntity(entry.kind, created, actor.id, input.reason ?? "package import", audit.id);
+        const revision = this.appendRevisionForEntity(entry.kind, created, actor, input.reason ?? "package import", audit.id);
         result.createdEntries.push(this.refForEntity(entry.kind, created));
         result.auditLogIds.push(audit.id);
         result.revisionIds.push(revision.id);
@@ -2704,17 +3017,20 @@ export class RegistryService {
     };
   }
 
-  resolveRegistryContextForTask(input: Omit<ResolveRegistryContextInput, "skills" | "harnesses" | "instructions">): RegistryResolution {
+  resolveRegistryContextForTask(input: Omit<ResolveRegistryContextInput, "skills" | "harnesses" | "instructions"> & RegistryRequestContextInput): RegistryResolution {
+    const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
+    this.authorize(actor, "registry.read");
     return resolveRegistryContextForTask({
       ...input,
-      skills: this.listSkills(),
-      harnesses: this.listHarnesses(),
-      instructions: this.listInstructions()
+      skills: this.skillRepository.listSkills(),
+      harnesses: this.harnessRepository.listHarnesses(),
+      instructions: this.instructionRepository.listInstructions()
     });
   }
 
-  listAuditLogs(filter: { targetKind?: RegistryKind; targetId?: string; actor?: RegistryActor } = {}): RegistryAuditLogEntry[] {
-    this.authorize(filter.actor ?? this.defaultActor, "registry.audit.read", { targetKind: filter.targetKind, targetId: filter.targetId });
+  listAuditLogs(filter: { targetKind?: RegistryKind; targetId?: string; actor?: RegistryActor; actorId?: string; requestContext?: RequestContext; authContext?: AuthContext } = {}): RegistryAuditLogEntry[] {
+    const actor = actorFromInput(this.defaultActor, filter.actor, filter.actorId, filter);
+    this.authorize(actor, "registry.audit.read", { targetKind: filter.targetKind, targetId: filter.targetId });
     if (filter.targetKind && filter.targetId) {
       return this.auditRepository.listAuditLogsForTarget(filter.targetKind, filter.targetId);
     }
@@ -2838,12 +3154,13 @@ export class RegistryService {
   private appendRevisionForEntity(
     kind: RegistryKind,
     entity: SkillPackage | HarnessPackage | InstructionArtifact,
-    actorId: string,
+    actor: RegistryActor | string,
     changeReason?: string,
     sourceAuditLogId?: string
   ): RegistryRevision {
     const latest = this.historyRepository.getLatestRevisionForTarget(kind, entity.id);
     const snapshot = registryEntityFullSnapshot(entity);
+    const actorId = typeof actor === "string" ? actor : actor.id;
     return this.historyRepository.appendRevision({
       targetKind: kind,
       targetId: entity.id,
@@ -2854,15 +3171,23 @@ export class RegistryService {
       snapshotChecksum: registrySnapshotChecksum(snapshot),
       changeReason,
       createdBy: actorId,
+      principalId: typeof actor === "string" ? undefined : actor.principalId,
+      actorKind: typeof actor === "string" ? undefined : actor.actorKind,
+      serviceAccountId: typeof actor === "string" ? undefined : actor.serviceAccountId,
+      authMode: typeof actor === "string" ? undefined : actor.authMode,
+      requestId: typeof actor === "string" ? undefined : actor.requestId,
+      correlationId: typeof actor === "string" ? undefined : actor.correlationId,
+      source: typeof actor === "string" ? undefined : actor.source,
       sourceAuditLogId
     });
   }
 
-  private authorize(actor: RegistryActor, permission: RegistryPermission, target: RegistryMutationTarget = {}): void {
+  private authorize(actor: RegistryActor, permission: RegistryPermission, target: RegistryMutationTarget = {}): ReturnType<RegistryMutationAuthorizer["authorize"]> {
     const decision = this.authorizer.authorize(actor, permission, target);
     if (!decision.allowed) {
       throw new RegistryAuthorizationError(decision);
     }
+    return decision;
   }
 
   private appendAudit(input: RegistryAuditInput): RegistryAuditLogEntry {

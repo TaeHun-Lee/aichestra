@@ -36,6 +36,16 @@
 - [auth-rbac/v0-plan.md](foundations/auth-rbac/v0-plan.md)
 - [auth-rbac/v0.md](foundations/auth-rbac/v0.md)
 - [auth-rbac/v1-plan.md](foundations/auth-rbac/v1-plan.md)
+- [auth-rbac/request-context-propagation-v1-plan.md](foundations/auth-rbac/request-context-propagation-v1-plan.md)
+- [auth-rbac/request-context-propagation-v1.md](foundations/auth-rbac/request-context-propagation-v1.md)
+- [auth-rbac/api-authcontext-middleware-v1-plan.md](foundations/auth-rbac/api-authcontext-middleware-v1-plan.md)
+- [auth-rbac/api-authcontext-middleware-v1.md](foundations/auth-rbac/api-authcontext-middleware-v1.md)
+- [auth-rbac/service-account-actor-boundary-v1-plan.md](foundations/auth-rbac/service-account-actor-boundary-v1-plan.md)
+- [auth-rbac/service-account-actor-boundary-v1.md](foundations/auth-rbac/service-account-actor-boundary-v1.md)
+- [auth-rbac/registry-governance-request-context-migration-v1-plan.md](foundations/auth-rbac/registry-governance-request-context-migration-v1-plan.md)
+- [auth-rbac/registry-governance-request-context-migration-v1.md](foundations/auth-rbac/registry-governance-request-context-migration-v1.md)
+- [auth-rbac/tenant-repo-provider-scope-model-v1-plan.md](foundations/auth-rbac/tenant-repo-provider-scope-model-v1-plan.md)
+- [auth-rbac/tenant-repo-provider-scope-model-v1.md](foundations/auth-rbac/tenant-repo-provider-scope-model-v1.md)
 - [secretref-provider-credentials/v1.md](foundations/secretref-provider-credentials/v1.md) (+ plan; Auth/RBAC + Policy-backed credential checks)
 - [vault-secret-backend/v1.md](foundations/vault-secret-backend/v1.md) (+ plan; gated non-default Vault SecretRef provider boundary)
 - [observability-audit-retention/v0.md](foundations/observability-audit-retention/v0.md) (+ plan; common audit envelope, retention/redaction classes, metric/trace skeletons)
@@ -73,7 +83,7 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 - [persistent-db-production-operations/](roadmaps/persistent-db-production-operations/) - Persistent DB Production Operations v1: DB operations runbook, migration readiness, index review, retention/audit growth, webhook persistence, backup/restore, and pooling planning.
 - [secret-backend-migration/](roadmaps/secret-backend-migration/) - Secret Backend Migration Planning v0: backend options, SecretRef provider migration, credential kind migration, lease/rotation, env fallback deprecation, readiness APIs, health, and dashboard planning.
 - [production-secret-backend-option-decision/](roadmaps/production-secret-backend-option-decision/) - Production Secret Backend Implementation Option Decision v0: decision criteria, backend evaluation, Vault-first recommendation, SecretRef provider mapping, v1 implementation scope, env migration plan, test strategy, risk register, readiness APIs, health, and dashboard planning. Vault-backed Secret Backend v1 now implements the selected gated `vault` provider boundary under foundations.
-- [auth-rbac-production/](roadmaps/auth-rbac-production/) - Production Auth/RBAC v1 Planning and Implementation Plan v1: IdP options, provider selection, role/permission matrix, tenant/scope model, service accounts/system actors, session/token boundary, request context propagation, mock actor deprecation, security/audit requirements, implementation phases, blockers/risks, readiness APIs, health, and dashboard planning.
+- [auth-rbac-production/](roadmaps/auth-rbac-production/) - Production Auth/RBAC v1 Planning and Implementation Plan v1: IdP options, provider selection, role/permission matrix, tenant/scope model, service accounts/system actors, session/token boundary, request context propagation, API AuthContext middleware skeleton, service-account actor boundary, registry/governance request-context migration, tenant/repo/provider scope model, mock actor deprecation, security/audit requirements, implementation phases, blockers/risks, readiness APIs, health, and dashboard planning.
 - [policy-bundle-opa-cedar/](roadmaps/policy-bundle-opa-cedar/) - Policy Bundle / OPA-Cedar Planning v0: engine comparison, bundle schema, domain mapping, review workflow, tests, rollout/rollback, break-glass, readiness APIs, health, and dashboard planning.
 - [staging-deployment-profile/](roadmaps/staging-deployment-profile/) - Staging Deployment Profile v0: non-production profile contract, staging gate matrix, integration-test policy, promotion/rollback criteria, risk register, readiness APIs, health, and dashboard planning.
 - [staging-deployment-dry-run/](roadmaps/staging-deployment-dry-run/) - Staging Deployment Dry-run Profile v0: read-only readiness aggregation, blocker taxonomy, report format, staging dry-run APIs, health metadata, and dashboard planning.
@@ -111,6 +121,11 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 
 - [dashboard-read-model-inventory.md](reference/dashboard-read-model-inventory.md)
 - [audit-source-inventory.md](reference/audit-source-inventory.md)
+- [request-context-propagation-inventory.md](reference/request-context-propagation-inventory.md)
+- [api-authcontext-middleware-inventory.md](reference/api-authcontext-middleware-inventory.md)
+- [service-account-actor-boundary-inventory.md](reference/service-account-actor-boundary-inventory.md)
+- [registry-governance-request-context-inventory.md](reference/registry-governance-request-context-inventory.md)
+- [tenant-repo-provider-scope-inventory.md](reference/tenant-repo-provider-scope-inventory.md)
 - [github-app-permission-matrix.md](reference/github-app-permission-matrix.md)
 - [github-webhook-event-allowlist.md](reference/github-webhook-event-allowlist.md)
 - [production-rbac-permission-matrix.md](reference/production-rbac-permission-matrix.md)
