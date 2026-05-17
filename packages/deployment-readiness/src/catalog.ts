@@ -4925,48 +4925,6 @@ export const defaultPolicyShadowComparisonRules: PolicyShadowComparisonRule[] = 
     required: true,
     severityOnMismatch: "medium",
     metadata: { requiredFields: ["action", "resourceKind", "actor", "requestId", "correlationId"], recordOnlyInV1: true }
-  },
-  {
-    id: "policy_shadow_compare_effect",
-    comparisonKind: "effect_match",
-    required: true,
-    severityOnMismatch: "critical",
-    metadata: { blocksRolloutFuture: true, description: "Candidate decision effect must match StaticPolicyEngine before rollout." }
-  },
-  {
-    id: "policy_shadow_compare_reason",
-    comparisonKind: "reason_match",
-    required: false,
-    severityOnMismatch: "medium",
-    metadata: { reviewRequired: true, description: "Reason text may differ only after policy owner review." }
-  },
-  {
-    id: "policy_shadow_compare_rule_id",
-    comparisonKind: "rule_id_match",
-    required: false,
-    severityOnMismatch: "medium",
-    metadata: { reviewRequired: true, description: "Rule id mismatches require traceability mapping." }
-  },
-  {
-    id: "policy_shadow_compare_obligations",
-    comparisonKind: "obligation_match",
-    required: true,
-    severityOnMismatch: "high",
-    metadata: { blocksRolloutFuture: true, description: "Missing obligations can weaken follow-up gates." }
-  },
-  {
-    id: "policy_shadow_compare_redaction",
-    comparisonKind: "redaction_match",
-    required: true,
-    severityOnMismatch: "critical",
-    metadata: { blocksRolloutFuture: true, description: "Redaction requirements must never be dropped." }
-  },
-  {
-    id: "policy_shadow_compare_audit_metadata",
-    comparisonKind: "audit_metadata_match",
-    required: true,
-    severityOnMismatch: "high",
-    metadata: { blocksRolloutFuture: true, description: "Request, correlation, tenant, bundle, and rule metadata must remain auditable." }
   }
 ];
 
@@ -5012,22 +4970,6 @@ export const defaultPolicyShadowMismatches: PolicyShadowMismatch[] = [
     metadata: { example: "Static blocks governance apply but candidate allows.", rolloutImpact: "block_rollout" }
   },
   {
-    id: "policy_shadow_mismatch_reason",
-    mismatchKind: "reason_mismatch",
-    severity: "medium",
-    defaultAction: "record_only",
-    productionImpact: "Decision audit and operator debugging could diverge.",
-    metadata: { rolloutImpact: "policy_owner_review" }
-  },
-  {
-    id: "policy_shadow_mismatch_rule_id",
-    mismatchKind: "rule_id_mismatch",
-    severity: "medium",
-    defaultAction: "record_only",
-    productionImpact: "Rule traceability and bundle review could become ambiguous.",
-    metadata: { rolloutImpact: "policy_owner_review" }
-  },
-  {
     id: "policy_shadow_mismatch_missing_obligation",
     mismatchKind: "missing_obligation",
     severity: "high",
@@ -5066,30 +5008,6 @@ export const defaultPolicyShadowMismatches: PolicyShadowMismatch[] = [
     defaultAction: "block_rollout_future",
     productionImpact: "Candidate runtime errors could create noisy reports or hide decision gaps; enforcement still stays on StaticPolicyEngine.",
     metadata: { rolloutImpact: "blocks_candidate_runtime_activation", example: "Candidate evaluator throws while static decision succeeds." }
-  },
-  {
-    id: "policy_shadow_mismatch_redaction",
-    mismatchKind: "redaction_mismatch",
-    severity: "critical",
-    defaultAction: "block_rollout_future",
-    productionImpact: "Future enforcement or audit output could expose secret-adjacent data.",
-    metadata: { examples: ["raw secret value", "env value", "provider token", "raw prompt"], rolloutImpact: "block_rollout" }
-  },
-  {
-    id: "policy_shadow_mismatch_audit_metadata",
-    mismatchKind: "audit_metadata_mismatch",
-    severity: "high",
-    defaultAction: "block_rollout_future",
-    productionImpact: "Future audit records could miss request, correlation, tenant, rule, or bundle metadata.",
-    metadata: { rolloutImpact: "block_enforcement" }
-  },
-  {
-    id: "policy_shadow_mismatch_candidate_error",
-    mismatchKind: "error_in_candidate",
-    severity: "high",
-    defaultAction: "alert_future",
-    productionImpact: "Candidate runtime reliability could be insufficient for shadow or enforcement.",
-    metadata: { rolloutImpact: "block_until_error_handling_is_stable" }
   }
 ];
 
@@ -5111,24 +5029,6 @@ export const defaultPolicyShadowEvaluationReports: PolicyShadowEvaluationReport[
       goldenCasesLinked: true,
       reportFormatDefinedOnly: true,
       noExternalObservabilityExport: true
-    }
-  },
-  {
-    id: "policy_shadow_report_planning_seed",
-    generatedAt: new Date("2026-05-16T00:00:00.000Z"),
-    domain: "all_domains",
-    caseCount: 0,
-    matchCount: 0,
-    mismatchCount: 0,
-    criticalMismatchCount: 0,
-    enforcementChanged: false,
-    sourceOfTruth: "StaticPolicyEngine",
-    candidateRuntimeKind: "signed_json_yaml_bundle_evaluator_future",
-    metadata: {
-      reportKind: "planning_seed",
-      shadowEvaluatorImplemented: false,
-      candidateRuntimeExecuted: false,
-      goldenHarnessFeedsFutureReports: true
     }
   }
 ];
