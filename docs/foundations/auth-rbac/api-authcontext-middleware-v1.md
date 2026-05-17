@@ -1,6 +1,6 @@
 # API AuthContext Middleware Skeleton v1
 
-Status: `v1_implemented`. Service Account Actor Boundary v1 and Tenant/Repo/Provider Scope Model v1 are also `v1_implemented`.
+Status: `v1_implemented`. Service Account Actor Boundary v1, Tenant/Repo/Provider Scope Model v1, and Production Auth Provider Skeleton v1 are also `v1_implemented`.
 
 API AuthContext Middleware Skeleton v1 adds a single mock-first API ingress boundary for resolving `RequestContext` and `AuthContext` consistently across HTTP routes. It builds on RequestContext Propagation v1 and does not implement production authentication.
 
@@ -13,6 +13,7 @@ API AuthContext Middleware Skeleton v1 adds a single mock-first API ingress boun
 - Dashboard and readiness source modes that use read-only viewer contexts.
 - Explicit reason-tagged system context helper.
 - Safe request context summaries for `/health` and `/auth/me`.
+- Safe production auth provider skeleton metadata in request summaries: provider kind/status, `productionAuthEnabled=false`, `tokenValidationEnabled=false`, session boundary status, and identity mapping status.
 - Optional tenant/team/project/resource scope metadata carried through API `RequestContext` values when supplied by mock/readiness helpers.
 - API route integration in `apps/api/src/main.ts` for representative Auth, Policy, Security, Git, LLM, MCP, Local Agent, Dashboard, Readiness, Observability, provider, task run-agent, agent, Registry, and Governance routes where context is already practical.
 - Deterministic tests in `tests/api-authcontext-middleware-v1.test.ts`.
@@ -53,7 +54,7 @@ System contexts are explicit and reason-tagged. They remain mock/system metadata
 
 ## Future Real Auth Integration Point
 
-The middleware is the intended place for a future production `AuthProvider` and route permission matrix to attach after a separately reviewed auth implementation. Future work must keep session/token parsing, IdP calls, cookie handling, and service-account credential handling behind explicit gates and SecretRef/policy boundaries.
+The middleware is the intended place for a future production `AuthProvider` and route permission matrix to attach after a separately reviewed auth implementation. Production Auth Provider Skeleton v1 only reports disabled provider selection metadata; it does not parse tokens, cookies, sessions, or IdP assertions. Future work must keep session/token parsing, IdP calls, cookie handling, and service-account credential handling behind explicit gates and SecretRef/policy boundaries.
 
 ## Policy Integration
 
@@ -78,6 +79,9 @@ Safe summaries may expose:
 - source;
 - request id/correlation id only where useful and not noisy;
 - `productionAuthEnabled=false`.
+- `authProviderKind` and `authProviderStatus`;
+- `tokenValidationEnabled=false`;
+- disabled/future session boundary and identity mapping status.
 
 Safe summaries must never expose Authorization headers, cookies, bearer tokens, session ids, JWTs, API keys, secret values, SecretRef values, provider credentials, raw env values, or credential-cache paths.
 
@@ -113,6 +117,8 @@ Covered or partially covered:
 - Dashboard, readiness, and observability are not tenant scoped.
 - Production route permission enforcement is still future work.
 
+Dashboard/Readiness Tenant Scope Planning v1 records the current dashboard/readiness route inventory and target scope/role requirements. It does not change API AuthContext Middleware behavior, does not treat Authorization headers or cookies as production auth, and does not enforce tenant filtering.
+
 ## Test Strategy
 
 `tests/api-authcontext-middleware-v1.test.ts` covers:
@@ -128,6 +134,8 @@ Covered or partially covered:
 
 Regression coverage remains in RequestContext Propagation v1, Auth/RBAC, Policy, SecretRef/Vault, Git, LLM, MCP, Dashboard, Observability, and staging/readiness tests.
 
+`tests/production-auth-provider-skeleton-v1.test.ts` adds regression coverage that `Authorization` headers and cookies are not stored and future provider selection does not change the mock-first request context.
+
 ## Known Limitations
 
 - Middleware is a skeleton, not an auth enforcement layer.
@@ -138,4 +146,4 @@ Regression coverage remains in RequestContext Propagation v1, Auth/RBAC, Policy,
 
 ## Recommended Next Task
 
-Recommended next task: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.

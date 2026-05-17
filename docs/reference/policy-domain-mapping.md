@@ -21,3 +21,9 @@ This document maps current static TypeScript policy domains to future policy bun
 | Deployment readiness | `readiness.read` | profile, check, risk | `packages/deployment-readiness` | actor, principal, roles | profile, category | read-only deterministic data | readiness metadata | `readiness-access` | production profile enforcement future |
 
 All future bundles must preserve deny-by-default behavior and must not bypass Auth/RBAC, SecretRef, Git, LLM, MCP, Runner, Local Agent, Dashboard, Observability, or Secrets/Sandbox gates.
+
+## Shadow Evaluation Planning v1
+
+Policy Runtime Shadow Evaluation Planning v1 uses this mapping as the domain inventory for future static-vs-candidate comparisons. Shadow comparison must preserve `StaticPolicyEngine` as source of truth, compare effect/reason/rule id/obligation/redaction/audit metadata, record mismatches only, and keep `enforcementChanged: false`.
+
+No candidate runtime, OPA/Rego runtime, Cedar runtime, signed bundle verification runtime, dynamic policy execution, remote bundle loading, external policy service call, or production policy enforcement exists in v1.

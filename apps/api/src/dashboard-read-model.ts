@@ -1,7 +1,8 @@
 import { listMockScopeCatalog, scopeSummary } from "@aichestra/auth";
 import type { AuthorizationService } from "@aichestra/auth";
+import type { TenantScopeEnforcementService } from "@aichestra/auth";
 import type { InMemoryAichestraStore } from "@aichestra/db";
-import type { DeploymentReadinessService } from "@aichestra/deployment-readiness";
+import type { DashboardReadinessTenantScopePlanningService, DeploymentReadinessService } from "@aichestra/deployment-readiness";
 import type { GitHubAppRuntimeService, GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
 import type { ImprovementServices } from "@aichestra/improvement";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
@@ -22,8 +23,11 @@ import {
   type ConflictManagerReadModel,
   type DashboardJsonObject,
   type DashboardOverviewReadModel,
+  type DashboardPanelScopeSummary,
   type DashboardReadModels,
   type DashboardReadModelSource,
+  type DashboardTenantScopePlanningReadModel,
+  type TenantScopeEnforcementReadModel,
   type DatabaseOperationsReadModel,
   type DeploymentReadinessReadModel,
   type EnterpriseProviderReadModel,
@@ -37,7 +41,11 @@ import {
   type ObservabilityReadModel,
   type PolicyBundleReadinessReadModel,
   type PolicyReadModel,
+  type PolicyShadowEvaluationReadModel,
+  type ProductionAuthProviderSkeletonReadModel,
+  type ReadinessEndpointScopeSummary,
   type RegistryReadModel,
+  type ScopedReadModelMetadata,
   type SecurityReadModel,
   type ScopeReadinessReadModel,
   type SecretBackendDecisionReadModel,
@@ -69,6 +77,8 @@ export type DashboardReadModelContext = {
   localAgentProtocolService: LocalAgentProtocolService;
   mcpGatewayService: MCPGateway;
   deploymentReadinessService: DeploymentReadinessService;
+  tenantScopePlanningService: DashboardReadinessTenantScopePlanningService;
+  tenantScopeEnforcementService: TenantScopeEnforcementService;
   observabilityService: ObservabilityService;
 };
 
@@ -82,6 +92,69 @@ function unique<T>(items: T[]): T[] {
 
 function statusForCount(count: number): "available" | "empty" {
   return count > 0 ? "available" : "empty";
+}
+
+function fallbackScopeMetadata(surfaceId: string): ScopedReadModelMetadata {
+  return {
+    scopeStatus: "metadata_only",
+    appliedScopes: [],
+    requiredScopes: [],
+    missingScopes: [],
+    sensitivity: "internal_metadata",
+    roleVisibility: sanitizeDashboardObject({
+      allowedRoles: ["platform_admin"],
+      hint: "No explicit tenant scope plan was found for this surface."
+    }),
+    redactionStatus: "metadata_only",
+    tenantFilteringImplemented: false,
+    productionEnforcementImplemented: false,
+    warnings: [
+      "scope_plan_not_found",
+      "tenant_filtering_implemented:false",
+      "production_tenant_enforcement:false"
+    ],
+    metadata: sanitizeDashboardObject({
+      surfaceId,
+      planningOnly: true,
+      noSecretsOrEnvValues: true,
+      productionReady: false
+    })
+  };
+}
+
+function dashboardScopeMetadata(context: DashboardReadModelContext, panelId: string): ScopedReadModelMetadata {
+  const baseMetadata = context.tenantScopePlanningService.getDashboardPanelScopeMetadata(panelId) ?? fallbackScopeMetadata(panelId);
+  const panelSummary = context.tenantScopePlanningService.getDashboardPanelScopeSummary(panelId);
+  const decision = panelSummary
+    ? context.tenantScopeEnforcementService.evaluateDashboardPanelAccess(undefined, panelSummary, { source: `dashboard:${panelId}` })
+    : context.tenantScopeEnforcementService.evaluateScopeAccess(undefined, undefined, { source: `dashboard:${panelId}` });
+  const decisionSummary = context.tenantScopeEnforcementService.summarizeDecision(decision);
+  return sanitizeDashboardObject({
+    ...baseMetadata,
+    tenantScopeEnforcementImplemented: "partial",
+    enforcementMode: decision.enforcementMode,
+    scopeDecisionSummary: decisionSummary,
+    warnings: unique([
+      ...baseMetadata.warnings,
+      ...decisionSummary.warnings
+    ]),
+    metadata: {
+      ...baseMetadata.metadata,
+      tenantScopeEnforcementStatus: "v1_implemented_partial",
+      representativeEnforcementOnly: true,
+      productionTenantEnforcement: false
+    }
+  }) as unknown as ScopedReadModelMetadata;
+}
+
+function withScopeMetadata<T extends { scopeMetadata?: ScopedReadModelMetadata }>(
+  readModel: T,
+  scopeMetadata: ScopedReadModelMetadata
+): T {
+  return {
+    ...readModel,
+    scopeMetadata
+  };
 }
 
 function remoteGitAuditEvent(event: { action?: string }): boolean {
@@ -1014,6 +1087,49 @@ function buildPolicyBundles(context: DashboardReadModelContext): PolicyBundleRea
   };
 }
 
+function buildPolicyShadow(context: DashboardReadModelContext): PolicyShadowEvaluationReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getPolicyShadowEvaluationSummary();
+  const plan = readiness.getPolicyShadowEvaluationPlan();
+  const mismatches = readiness.listPolicyShadowMismatches();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    plan: sanitizeDashboardObject(plan),
+    comparisonRules: sanitizeDashboardArray(readiness.listPolicyShadowComparisonRules()),
+    mismatchTaxonomy: sanitizeDashboardArray(mismatches),
+    readinessChecks: sanitizeDashboardArray(readiness.listPolicyShadowReadinessChecks()),
+    reports: sanitizeDashboardArray(readiness.listPolicyShadowEvaluationReports()),
+    criticalMismatchExamples: sanitizeDashboardArray(mismatches.filter((mismatch) => mismatch.severity === "critical")),
+    rollout: sanitizeDashboardObject({
+      currentStage: plan.rolloutStages[0] ?? "docs_planning",
+      rolloutStages: plan.rolloutStages,
+      liveShadowEvaluationEnabled: false,
+      alertingOnCriticalMismatchEnabled: false,
+      selectedNonCriticalEnforcementEnabled: false,
+      productionEnforcementEnabled: false,
+      rollbackActions: ["disable_shadow_evaluator_future", "fall_back_to_StaticPolicyEngine", "invalidate_candidate_bundle_future", "record_audit_event_future"]
+    }),
+    noExecutionStatus: sanitizeDashboardObject({
+      sourceOfTruth: summary.sourceOfTruth,
+      enforcementMode: summary.enforcementMode,
+      enforcementChanged: summary.enforcementChanged,
+      staticPolicyEngineAuthoritative: summary.staticPolicyEngineAuthoritative,
+      shadowEvaluatorImplemented: summary.shadowEvaluatorImplemented,
+      candidateRuntimeImplemented: summary.candidateRuntimeImplemented,
+      candidateRuntimeExecuted: summary.candidateRuntimeExecuted,
+      dynamicPolicyExecutionEnabled: summary.dynamicPolicyExecutionEnabled,
+      externalPolicyServiceCallsEnabled: summary.externalPolicyServiceCallsEnabled,
+      remotePolicyBundleLoadingEnabled: summary.remotePolicyBundleLoadingEnabled,
+      signedBundleVerificationRuntimeEnabled: summary.signedBundleVerificationRuntimeEnabled,
+      opaRuntimeEnabled: summary.opaRuntimeEnabled,
+      cedarRuntimeEnabled: summary.cedarRuntimeEnabled,
+      policyCodeExecuted: summary.policyCodeExecuted,
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed
+    })
+  };
+}
+
 function buildAuth(context: DashboardReadModelContext): AuthReadModel {
   const currentContext = context.authorizationService.getAuthContext({
     source: "dashboard",
@@ -1098,6 +1214,37 @@ function buildAuthProduction(context: DashboardReadModelContext): AuthRbacProduc
       externalIdpCallsEnabled: summary.externalIdpCallsEnabled,
       realSessionsImplemented: summary.realSessionsImplemented,
       realJwtIssuanceImplemented: summary.realJwtIssuanceImplemented
+    })
+  };
+}
+
+function buildAuthProviders(context: DashboardReadModelContext): ProductionAuthProviderSkeletonReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getProductionAuthProviderSkeletonSummary();
+  const configs = readiness.listProductionAuthProviderConfigs();
+  const checks = readiness.listProductionAuthProviderReadiness();
+  const selectedProvider = configs.find((config) => config.providerKind === summary.selectedProviderKind) ?? configs[0];
+  return {
+    summary: sanitizeDashboardObject(summary),
+    configs: sanitizeDashboardArray(configs),
+    readiness: sanitizeDashboardArray(checks),
+    sessionBoundary: sanitizeDashboardArray(readiness.listSessionTokenBoundaryPlans()),
+    identityMapping: sanitizeDashboardArray(readiness.listIdentityMappingPlans()),
+    selectedProvider: sanitizeDashboardObject(selectedProvider),
+    blockers: sanitizeDashboardArray(checks.flatMap((check) => check.blockers.map((blocker) => ({
+      providerKind: check.providerKind,
+      blocker
+    })))),
+    noTokenStatus: sanitizeDashboardObject({
+      noTokensExposed: summary.noTokensExposed,
+      authorizationHeadersStored: summary.authorizationHeadersStored,
+      cookiesStored: summary.cookiesStored,
+      sessionIdsExposed: summary.sessionIdsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      secretsExposed: summary.secretsExposed,
+      tokenValidationEnabled: summary.tokenValidationEnabled,
+      sessionBoundaryEnabled: summary.sessionBoundaryEnabled,
+      externalCallsEnabled: summary.externalCallsEnabled
     })
   };
 }
@@ -1242,8 +1389,14 @@ function buildMcp(context: DashboardReadModelContext): MCPGatewayReadModel {
   };
 }
 
-function buildScopes(): ScopeReadinessReadModel {
+function buildScopes(context: DashboardReadModelContext): ScopeReadinessReadModel {
   const catalog = listMockScopeCatalog();
+  const enforcementSummary = context.tenantScopeEnforcementService.getSummary();
+  const scopeDecision = context.tenantScopeEnforcementService.evaluateDashboardPanelAccess(
+    undefined,
+    context.tenantScopePlanningService.getDashboardPanelScopeSummary("scope_model") ?? { panelId: "scope_model", requiredScopes: ["tenant", "team", "project", "audit_query"], redactionClass: "sensitive_metadata" },
+    { source: "dashboard:scope_model" }
+  );
   return {
     summary: sanitizeDashboardObject(scopeSummary(catalog)),
     tenants: sanitizeDashboardArray(catalog.tenants),
@@ -1258,8 +1411,14 @@ function buildScopes(): ScopeReadinessReadModel {
     localAgentHosts: sanitizeDashboardArray(catalog.localAgentHosts),
     auditQueries: sanitizeDashboardArray(catalog.auditQueries),
     enforcement: sanitizeDashboardObject({
-      status: "planning_model_only",
+      status: "v1_implemented_partial",
+      planningStatus: "planning_model_only",
+      enforcementMode: scopeDecision.enforcementMode,
+      scopeDecisionSummary: context.tenantScopeEnforcementService.summarizeDecision(scopeDecision),
+      tenantScopeEnforcementImplemented: "partial",
+      representativeEnforcementOnly: enforcementSummary.representativeEnforcementOnly,
       productionTenantEnforcement: false,
+      tenantFilteringImplemented: false,
       tenantFilteringStatus: "future",
       dashboardFilteringStatus: "future",
       externalScopeLookupEnabled: false
@@ -1268,6 +1427,49 @@ function buildScopes(): ScopeReadinessReadModel {
       noSecretsExposed: true,
       envValuesExposed: false,
       rawCredentialsExposed: false
+    })
+  };
+}
+
+function buildTenantScopePlanning(context: DashboardReadModelContext): DashboardTenantScopePlanningReadModel {
+  const planning = context.tenantScopePlanningService;
+  const summary = planning.getSummary();
+  const enforcement = context.tenantScopeEnforcementService.getSummary();
+  return {
+    scopeMetadata: dashboardScopeMetadata(context, "tenant_scope_planning"),
+    summary: sanitizeDashboardObject(summary),
+    dashboardPlans: sanitizeDashboardArray(planning.listDashboardPlans()),
+    readinessPlans: sanitizeDashboardArray(planning.listReadinessPlans()),
+    panelScopeSummaries: sanitizeDashboardArray(planning.listDashboardPanelScopeSummaries()) as unknown as DashboardPanelScopeSummary[],
+    readinessScopeSummaries: sanitizeDashboardArray(planning.listReadinessEndpointScopeSummaries()) as unknown as ReadinessEndpointScopeSummary[],
+    enforcementSummary: sanitizeDashboardObject(enforcement),
+    enforcementModes: sanitizeDashboardArray(context.tenantScopeEnforcementService.listModes()),
+    enforcementMismatches: sanitizeDashboardArray(context.tenantScopeEnforcementService.listMismatches()),
+    roleVisibility: sanitizeDashboardArray(planning.getRoleVisibilityMatrix()),
+    fallbackBehavior: sanitizeDashboardArray(planning.getFallbackBehavior()),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      tenantFilteringImplemented: summary.tenantFilteringImplemented,
+      productionTenantEnforcement: summary.productionTenantEnforcement,
+      productionReady: summary.productionReady
+    })
+  };
+}
+
+function buildTenantScopeEnforcement(context: DashboardReadModelContext): TenantScopeEnforcementReadModel {
+  const summary = context.tenantScopeEnforcementService.getSummary();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    modes: sanitizeDashboardArray(context.tenantScopeEnforcementService.listModes()),
+    mismatches: sanitizeDashboardArray(context.tenantScopeEnforcementService.listMismatches()),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      tenantFilteringImplemented: summary.tenantFilteringImplemented,
+      productionTenantEnforcement: summary.productionTenantEnforcement,
+      productionAuthImplemented: summary.productionAuthImplemented,
+      rowLevelSecurityImplemented: summary.rowLevelSecurityImplemented
     })
   };
 }
@@ -1359,13 +1561,17 @@ function buildOverview(
   agents: AgentRunnerReadModel,
   policy: PolicyReadModel,
   policyBundles: PolicyBundleReadinessReadModel,
+  policyShadow: PolicyShadowEvaluationReadModel,
   auth: AuthReadModel,
   authProduction: AuthRbacProductionReadinessReadModel,
+  authProviders: ProductionAuthProviderSkeletonReadModel,
   providers: EnterpriseProviderReadModel,
   security: SecurityReadModel,
   localAgents: LocalAgentReadModel,
   mcp: MCPGatewayReadModel,
   scopes: ScopeReadinessReadModel,
+  tenantScopePlanning: DashboardTenantScopePlanningReadModel,
+  tenantScopeEnforcement: TenantScopeEnforcementReadModel,
   readiness: DeploymentReadinessReadModel,
   database: DatabaseOperationsReadModel,
   secretBackend: SecretBackendMigrationReadModel,
@@ -1419,10 +1625,15 @@ function buildOverview(
       policyBundleReadinessBlockers: policyBundles.blockers.length,
       policyBundleDomainsMapped: policyBundles.domainMappings.filter((mapping) => mapping.migrationStatus === "mapped").length,
       policyEngineOptions: policyBundles.engineOptions.length,
+      policyShadowComparisonRules: policyShadow.comparisonRules.length,
+      policyShadowMismatchKinds: policyShadow.mismatchTaxonomy.length,
+      policyShadowCriticalMismatchKinds: policyShadow.criticalMismatchExamples.length,
       authRoles: auth.roles.length,
       authActors: auth.actors.length,
       authProductionReadinessBlockers: authProduction.blockers.length,
       authProviderOptions: authProduction.providerOptions.length,
+      productionAuthProviderConfigs: authProviders.configs.length,
+      productionAuthProviderBlockers: authProviders.blockers.length,
       authServiceAccountPlans: authProduction.serviceAccountPlans.length,
       providerCatalogEntries: providers.catalog.length,
       securityAuditEvents: security.auditEvents.length,
@@ -1434,6 +1645,12 @@ function buildOverview(
       scopeProviders: scopes.providers.length,
       scopeModels: scopes.models.length,
       scopeSecrets: scopes.secrets.length,
+      tenantScopePlanningPanels: tenantScopePlanning.dashboardPlans.length,
+      tenantScopePlanningReadinessEndpoints: tenantScopePlanning.readinessPlans.length,
+      tenantScopePlanningProductionBlockers: tenantScopePlanning.summary.productionBlockerCount ?? 0,
+      tenantScopePlanningSecretAdjacentSurfaces: tenantScopePlanning.summary.secretAdjacentSurfaces ?? 0,
+      tenantScopeEnforcementModes: tenantScopeEnforcement.modes.length,
+      tenantScopeEnforcementMismatches: tenantScopeEnforcement.mismatches.length,
       productionReadinessCriticalBlockers: readiness.summary.criticalBlockerCount ?? 0,
       productionReadinessHighRisks: readiness.summary.highRiskOpenCount ?? 0,
       databaseOperationsCriticalBlockers: database.summary.criticalBlockerCount ?? database.blockers.length,
@@ -1481,13 +1698,17 @@ function buildOverview(
       agents: { status: "available", count: agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: policy.rules.length, notes: [] },
       policyBundles: { status: "available", count: policyBundles.blockers.length, notes: ["Policy Bundle / OPA-Cedar v0 is planning-only; StaticPolicyEngine remains the runtime and no external policy engine is enabled."] },
+      policyShadow: { status: "available", count: policyShadow.mismatchTaxonomy.length, notes: ["Policy Runtime Shadow Evaluation Planning v1 is planning-only; no shadow evaluator or candidate runtime is running."] },
       auth: { status: "available", count: auth.actors.length, notes: ["Mock auth is not production authentication."] },
       authProduction: { status: "available", count: authProduction.blockers.length, notes: ["Production Auth/RBAC v1 is planning-only; no real IdP, sessions, JWTs, cookies, or login flow is implemented."] },
+      authProviders: { status: "available", count: authProviders.configs.length, notes: ["Production Auth Provider Skeleton v1 is disabled-by-default; MockAuthProvider remains active and no token/session validation is running."] },
       providers: { status: "available", count: providers.catalog.length, notes: ["Provider adapters remain skeleton/mock-first."] },
       security: { status: "available", count: security.auditEvents.length, notes: ["Secrets are metadata-only."] },
       localAgents: { status: "available", count: localAgents.registrations.length, notes: ["Protocol is mock/fixture-only."] },
       mcp: { status: "available", count: mcp.tools.length, notes: ["MCP Gateway v0 is mock-first; real transport is disabled."] },
       scopes: { status: "available", count: scopes.tenants.length + scopes.repos.length + scopes.providers.length, notes: ["Tenant/repo/provider scopes are metadata/readiness-only; tenant enforcement and dashboard filtering remain future."] },
+      tenantScopePlanning: { status: "available", count: tenantScopePlanning.dashboardPlans.length + tenantScopePlanning.readinessPlans.length, notes: ["Dashboard/Readiness Tenant Scope Planning v1 is planning-only; tenant filtering and production enforcement remain false."] },
+      tenantScopeEnforcement: { status: "available", count: tenantScopeEnforcement.modes.length, notes: ["Tenant Scope Enforcement v1 is partial/representative metadata; tenant filtering and production enforcement remain false."] },
       readiness: { status: "available", count: readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       database: { status: "available", count: database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
       secretBackend: { status: "available", count: secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
@@ -1537,13 +1758,17 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const agents = buildAgents(context);
   const policy = buildPolicy(context);
   const policyBundles = buildPolicyBundles(context);
+  const policyShadow = buildPolicyShadow(context);
   const auth = buildAuth(context);
   const authProduction = buildAuthProduction(context);
+  const authProviders = buildAuthProviders(context);
   const providers = buildProviders(context);
   const security = buildSecurity(context);
   const localAgents = buildLocalAgents(context);
   const mcp = buildMcp(context);
-  const scopes = buildScopes();
+  const scopes = buildScopes(context);
+  const tenantScopePlanning = buildTenantScopePlanning(context);
+  const tenantScopeEnforcement = buildTenantScopeEnforcement(context);
   const readiness = buildReadiness(context);
   const database = buildDatabase(context);
   const secretBackend = buildSecretBackend(context);
@@ -1556,40 +1781,44 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const cicd = buildCicd(context);
   const observability = buildObservability(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, agents, policy, policyBundles, auth, authProduction, providers, security, localAgents, mcp, scopes, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
+  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, agents, policy, policyBundles, policyShadow, auth, authProduction, authProviders, providers, security, localAgents, mcp, scopes, tenantScopePlanning, tenantScopeEnforcement, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
 
   return {
-    overview,
-    tasks,
-    git,
-    githubApp,
-    githubAppIntegration,
-    conflicts,
-    registry,
-    llm,
-    llmIntegration,
-    vaultIntegration,
-    agents,
-    policy,
-    policyBundles,
-    auth,
-    authProduction,
-    providers,
-    security,
-    localAgents,
-    mcp,
-    scopes,
-    readiness,
-    database,
-    secretBackend,
-    secretBackendDecision,
-    vaultSecretBackend,
-    staging,
-    stagingDryRun,
-    stagingReleaseCandidate,
-    stagingExecution,
-    cicd,
-    observability,
-    audit
+    overview: withScopeMetadata(overview, dashboardScopeMetadata(context, "overview")),
+    tasks: withScopeMetadata(tasks, dashboardScopeMetadata(context, "tasks")),
+    git: withScopeMetadata(git, dashboardScopeMetadata(context, "git")),
+    githubApp: withScopeMetadata(githubApp, dashboardScopeMetadata(context, "github_app")),
+    githubAppIntegration: withScopeMetadata(githubAppIntegration, dashboardScopeMetadata(context, "github_app_integration")),
+    conflicts: withScopeMetadata(conflicts, dashboardScopeMetadata(context, "conflict_risks")),
+    registry: withScopeMetadata(registry, dashboardScopeMetadata(context, "registry")),
+    llm: withScopeMetadata(llm, dashboardScopeMetadata(context, "llm_gateway")),
+    llmIntegration: withScopeMetadata(llmIntegration, dashboardScopeMetadata(context, "llm_integration")),
+    vaultIntegration: withScopeMetadata(vaultIntegration, dashboardScopeMetadata(context, "vault_integration")),
+    agents: withScopeMetadata(agents, dashboardScopeMetadata(context, "local_agent_runner")),
+    policy: withScopeMetadata(policy, dashboardScopeMetadata(context, "policy")),
+    policyBundles: withScopeMetadata(policyBundles, dashboardScopeMetadata(context, "policy_bundles")),
+    policyShadow: withScopeMetadata(policyShadow, dashboardScopeMetadata(context, "policy_shadow")),
+    auth: withScopeMetadata(auth, dashboardScopeMetadata(context, "auth")),
+    authProduction: withScopeMetadata(authProduction, dashboardScopeMetadata(context, "auth_production")),
+    authProviders: withScopeMetadata(authProviders, dashboardScopeMetadata(context, "auth_provider_skeleton")),
+    providers: withScopeMetadata(providers, dashboardScopeMetadata(context, "providers")),
+    security: withScopeMetadata(security, dashboardScopeMetadata(context, "security")),
+    localAgents: withScopeMetadata(localAgents, dashboardScopeMetadata(context, "local_agent_protocol")),
+    mcp: withScopeMetadata(mcp, dashboardScopeMetadata(context, "mcp_gateway")),
+    scopes: withScopeMetadata(scopes, dashboardScopeMetadata(context, "scope_model")),
+    tenantScopePlanning,
+    tenantScopeEnforcement,
+    readiness: withScopeMetadata(readiness, dashboardScopeMetadata(context, "production_readiness")),
+    database: withScopeMetadata(database, dashboardScopeMetadata(context, "database")),
+    secretBackend: withScopeMetadata(secretBackend, dashboardScopeMetadata(context, "secret_backend")),
+    secretBackendDecision: withScopeMetadata(secretBackendDecision, dashboardScopeMetadata(context, "secret_backend_decision")),
+    vaultSecretBackend: withScopeMetadata(vaultSecretBackend, dashboardScopeMetadata(context, "vault_secret_backend")),
+    staging: withScopeMetadata(staging, dashboardScopeMetadata(context, "staging")),
+    stagingDryRun: withScopeMetadata(stagingDryRun, dashboardScopeMetadata(context, "staging_dry_run")),
+    stagingReleaseCandidate: withScopeMetadata(stagingReleaseCandidate, dashboardScopeMetadata(context, "staging_rc")),
+    stagingExecution: withScopeMetadata(stagingExecution, dashboardScopeMetadata(context, "staging_execution")),
+    cicd: withScopeMetadata(cicd, dashboardScopeMetadata(context, "ci_cd")),
+    observability: withScopeMetadata(observability, dashboardScopeMetadata(context, "observability")),
+    audit: withScopeMetadata(audit, dashboardScopeMetadata(context, "audit"))
   };
 }

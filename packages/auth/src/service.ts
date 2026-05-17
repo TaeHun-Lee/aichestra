@@ -11,6 +11,7 @@ import type { PolicyResourceScopeKind } from "@aichestra/policy";
 import type { AuthRepository } from "./repository.ts";
 import { InMemoryAuthRepository } from "./repository.ts";
 import { MockAuthProvider } from "./providers.ts";
+import { ProductionAuthProviderRegistry } from "./production-provider-skeleton.ts";
 import type {
   AuthAuditEvent,
   AuthContext,
@@ -19,10 +20,15 @@ import type {
   AuthorizationCheckRequest,
   AuthorizationDecision,
   AuthorizationResource,
+  IdentityMappingPlan,
   Permission,
+  ProductionAuthProviderConfig,
+  ProductionAuthProviderReadiness,
+  ProductionAuthProviderSkeletonSummary,
   ResourceScope,
   Role,
-  RoleBinding
+  RoleBinding,
+  SessionTokenBoundaryPlan
 } from "./types.ts";
 
 export class AuthorizationError extends Error {
@@ -39,24 +45,41 @@ export type AuthorizationServiceInput = {
   provider?: AuthProvider;
   repository?: AuthRepository;
   policyService?: PolicyService;
+  productionAuthProviderRegistry?: ProductionAuthProviderRegistry;
 };
 
 export class AuthorizationService {
   private readonly repository: AuthRepository;
   private readonly provider: AuthProvider;
   private readonly policyService: PolicyService;
+  private readonly productionAuthProviderRegistry: ProductionAuthProviderRegistry;
 
   constructor(input: AuthorizationServiceInput = {}) {
     this.repository = input.repository ?? new InMemoryAuthRepository();
     this.provider = input.provider ?? new MockAuthProvider({ repository: this.repository });
     this.policyService = input.policyService ?? new PolicyService();
+    this.productionAuthProviderRegistry = input.productionAuthProviderRegistry ?? new ProductionAuthProviderRegistry({ repository: this.repository });
   }
 
   getConfig() {
+    const productionAuthProvider = this.productionAuthProviderRegistry.getSummary();
     return {
       providerKind: this.provider.getProviderKind(),
       authMode: this.provider.getProviderKind() === "mock" ? "mock" : "future_provider_disabled",
       productionAuthEnabled: false,
+      selectedAuthProviderKind: productionAuthProvider.selectedProviderKind,
+      activeAuthProviderKind: productionAuthProvider.activeProviderKind,
+      authProviderKind: productionAuthProvider.activeProviderKind,
+      authProviderStatus: productionAuthProvider.selectedProviderStatus,
+      productionAuthProviderStatus: productionAuthProvider.selectedProviderStatus,
+      futureProviderSelected: productionAuthProvider.futureProviderSelected,
+      futureProviderBlocked: productionAuthProvider.futureProviderBlocked,
+      requireAuthForApi: false,
+      tokenValidationEnabled: false,
+      sessionBoundaryStatus: productionAuthProvider.sessionBoundaryStatus,
+      sessionBoundaryEnabled: false,
+      identityMappingStatus: productionAuthProvider.identityMappingStatus,
+      externalAuthCallsEnabled: false,
       mockActorEnabled: this.provider.getProviderKind() === "mock",
       defaultMockActorId: "mock-admin",
       roleCatalogCount: this.repository.listRoles().length,
@@ -64,10 +87,37 @@ export class AuthorizationService {
       teamCount: this.repository.listTeams().length,
       serviceAccountCount: this.repository.listServiceAccounts().length,
       identityProviderCount: this.repository.listIdentityProviders().length,
+      productionAuthProviderOptionCount: productionAuthProvider.providerOptionCount,
+      productionAuthProviderMissingConfigCount: productionAuthProvider.missingConfigCount,
+      productionAuthProviderBlockerCount: productionAuthProvider.blockerCount,
       futureProvidersDisabled: true,
+      authorizationHeadersStored: false,
+      cookiesStored: false,
+      sessionIdsExposed: false,
       secretsExposed: false,
-      tokensExposed: false
+      tokensExposed: false,
+      envValuesExposed: false
     };
+  }
+
+  getProductionAuthProviderSummary(): ProductionAuthProviderSkeletonSummary {
+    return this.productionAuthProviderRegistry.getSummary();
+  }
+
+  listProductionAuthProviderConfigs(): ProductionAuthProviderConfig[] {
+    return this.productionAuthProviderRegistry.listProviderConfigs();
+  }
+
+  listProductionAuthProviderReadiness(): ProductionAuthProviderReadiness[] {
+    return this.productionAuthProviderRegistry.listProviderReadiness();
+  }
+
+  listSessionTokenBoundaryPlans(): SessionTokenBoundaryPlan[] {
+    return this.productionAuthProviderRegistry.listSessionTokenBoundaryPlans();
+  }
+
+  listIdentityMappingPlans(): IdentityMappingPlan[] {
+    return this.productionAuthProviderRegistry.listIdentityMappingPlans();
   }
 
   getAuthContext(request?: AuthProviderResolveRequest): AuthContext {
@@ -128,7 +178,12 @@ export class AuthorizationService {
         teamIds,
         projectIds,
         resourceScopes: authContext.resourceScopes,
-        productionAuthEnabled: false
+        authProviderKind: stringMetadata(authContext.metadata.authProviderKind) ?? "mock",
+        authProviderStatus: stringMetadata(authContext.metadata.authProviderStatus) ?? "active_mock",
+        productionAuthEnabled: false,
+        tokenValidationEnabled: false,
+        sessionBoundaryStatus: stringMetadata(authContext.metadata.sessionBoundaryStatus) ?? "disabled",
+        identityMappingStatus: stringMetadata(authContext.metadata.identityMappingStatus) ?? "not_configured"
       }
     });
   }
@@ -209,7 +264,12 @@ export class AuthorizationService {
             ...(request.policyContext?.environment ?? {}),
             authMode: authContext.authMode,
             authenticated: authContext.authenticated,
-            productionAuthEnabled: false
+            authProviderKind: stringMetadata(authContext.metadata.authProviderKind) ?? "mock",
+            authProviderStatus: stringMetadata(authContext.metadata.authProviderStatus) ?? "active_mock",
+            productionAuthEnabled: false,
+            tokenValidationEnabled: false,
+            sessionBoundaryStatus: stringMetadata(authContext.metadata.sessionBoundaryStatus) ?? "disabled",
+            identityMappingStatus: stringMetadata(authContext.metadata.identityMappingStatus) ?? "not_configured"
           },
           metadata: {
             ...(request.policyContext?.metadata ?? {}),
@@ -219,7 +279,10 @@ export class AuthorizationService {
             tenantIds: authContext.tenantScopes?.map((scope) => scope.tenantId),
             teamIds: authContext.teamScopes?.map((scope) => scope.teamId),
             projectIds: authContext.projectScopes?.map((scope) => scope.projectId),
-            resourceScopes: authContext.resourceScopes
+            resourceScopes: authContext.resourceScopes,
+            authProviderKind: stringMetadata(authContext.metadata.authProviderKind) ?? "mock",
+            authProviderStatus: stringMetadata(authContext.metadata.authProviderStatus) ?? "active_mock",
+            productionAuthEnabled: false
           }
         })
       });

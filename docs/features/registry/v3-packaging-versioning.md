@@ -200,4 +200,4 @@ v3 tests cover:
 
 ## Next Recommended Task
 
-Recommended next task: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.

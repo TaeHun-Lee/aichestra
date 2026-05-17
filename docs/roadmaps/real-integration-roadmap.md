@@ -43,7 +43,12 @@
 39. Service Account Actor Boundary v1 - implemented
 40. Registry/Governance RequestContext Migration v1 - implemented
 41. Tenant/Repo/Provider Scope Model v1 - implemented
-42. Phase 5 enterprise planning
+42. Dashboard/Readiness Tenant Scope Planning v1 - implemented
+43. Dashboard/Readiness Tenant Scope Implementation v1 - implemented
+44. Tenant Scope Enforcement v1 - implemented
+45. Policy Runtime Shadow Evaluation Planning v1 - implemented
+46. Production Auth Provider Skeleton v1 - implemented
+47. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -598,7 +603,7 @@ Goals:
 - Preserve deny-by-default Policy-as-code behavior and existing SecretRef/Git/LLM/MCP/Runner safety gates.
 - Keep runtime safe: no OIDC, SAML, SCIM, SSO, login/logout/session handling, JWTs, API keys, service-account credentials, external IdP calls, credential-cache reads, secret/env exposure, or production-auth ready claim.
 
-Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## 38. API AuthContext Middleware Skeleton v1
 
@@ -613,7 +618,7 @@ Goals:
 - Preserve deny-by-default Policy-as-code behavior and existing SecretRef/Git/LLM/MCP/Runner/Dashboard/Observability safety gates.
 - Keep runtime safe: no OIDC, SAML, SCIM, SSO, login/logout/session handling, JWTs, API keys, service-account credentials, external IdP calls, Authorization-header auth, cookie auth, credential-cache reads, secret/env exposure, or production-auth ready claim.
 
-Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## 39. Service Account Actor Boundary v1
 
@@ -628,7 +633,7 @@ Goals:
 - Preserve deny-by-default policy behavior, no-secret/no-env behavior, and mock-first runtime defaults.
 - Keep runtime safe: no service-account credentials, JWTs, API keys, sessions, credential rotation, external IdP/provider calls, credential-cache reads, or production-auth ready claim.
 
-Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## 40. Registry/Governance RequestContext Migration v1
 
@@ -643,7 +648,7 @@ Goals:
 - Keep auto-improvement draft/proposal/governance-only; apply remains blocked and active registry entries are not mutated by draft changes.
 - Keep runtime safe: no production auth, real service-account credentials, real eval/canary execution, artifact registry integration, external provider calls, secret/env exposure, or production-governance ready claim.
 
-Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## 41. Tenant/Repo/Provider Scope Model v1
 
@@ -658,9 +663,80 @@ Goals:
 - Preserve deny-by-default policy behavior and all provider/secret/runner/registry/governance gates.
 - Keep runtime safe: no production tenant provisioning, tenant isolation enforcement, row-level security, production dashboard filtering, real Auth/RBAC, provider calls, credential issuance, secret/env exposure, or production tenancy claim.
 
-Recommended next step: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
 
-## 42. Phase 5 Enterprise Planning
+## 42. Dashboard/Readiness Tenant Scope Planning v1
+
+Implemented with `docs/roadmaps/dashboard-readiness-tenant-scope/v1.md`, dashboard and readiness tenant-scope inventories, role visibility matrices, fallback behavior, future filtering architecture, deterministic read-only planning models, `/readiness/tenant-scope/*`, `/dashboard/tenant-scope`, health metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Inventory dashboard panels and readiness endpoint groups.
+- Define target tenant/team/project/repo/provider/model/secret/MCP/registry/local-agent/audit scope dimensions.
+- Define role visibility and fallback behavior.
+- Expose read-only planning metadata for future implementation.
+- Preserve mock-first runtime, no-secret/no-env behavior, and production tenant enforcement false status.
+
+Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+
+## 43. Dashboard/Readiness Tenant Scope Implementation v1
+
+Implemented with `docs/roadmaps/dashboard-readiness-tenant-scope/implementation-v1-plan.md`, `docs/roadmaps/dashboard-readiness-tenant-scope/implementation-v1.md`, scope-aware shared DTOs, deterministic planning service scope metadata derivation, dashboard/readiness API metadata, dashboard UI scope/visibility/redaction rendering, health metadata, and tests.
+
+Goals:
+
+- Add `ScopedReadModelMetadata`, `DashboardPanelScopeSummary`, and `ReadinessEndpointScopeSummary`.
+- Attach safe scope metadata to major dashboard read-model sections.
+- Expose readiness endpoint scope summaries and representative readiness summary metadata.
+- Render missing-scope warnings, role visibility hints, redaction labels, tenant filtering false, production enforcement false, and no-secret/no-env status.
+- Preserve current behavior without hiding panels, filtering data, enforcing tenant isolation, implementing production Auth/RBAC, calling providers, or exposing secrets/env values.
+
+Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+
+## 44. Tenant Scope Enforcement v1
+
+Implemented with `docs/foundations/auth-rbac/tenant-scope-enforcement-v1-plan.md`, `docs/foundations/auth-rbac/tenant-scope-enforcement-v1.md`, `docs/reference/tenant-scope-enforcement-inventory.md`, `packages/auth/src/tenant-scope-enforcement.ts`, representative dashboard/readiness metadata, `/readiness/tenant-enforcement/*`, `/dashboard/tenant-enforcement`, dashboard rendering, and deterministic tests.
+
+Goals:
+
+- Define reusable tenant scope enforcement decision, mode, and mismatch models.
+- Compare subject and resource scope metadata deterministically.
+- Surface representative dashboard/readiness enforcement metadata, missing-scope warnings, audit-query warnings, and secret-adjacent warnings.
+- Preserve `tenantFilteringImplemented: false`, `productionTenantEnforcement: false`, and no-secret/no-env guarantees.
+- Keep `StaticPolicyEngine` authoritative; policy deny remains authoritative and scope allow cannot override policy deny.
+- Keep runtime safe: no production tenant provisioning, production Auth/RBAC, row-level security, DB tenant partitioning, external IdP/provider calls, remote Git, real LLM/MCP calls, credential-cache reads, or secret/env exposure.
+
+Recommended next step: Policy Runtime Shadow Evaluation Planning v1 is implemented as planning/readiness metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+
+## 45. Policy Runtime Shadow Evaluation Planning v1
+
+Implemented with `docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1-plan.md`, `docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1.md`, candidate runtime interface planning, mismatch taxonomy, reporting plan, rollout/rollback plan, read-only deployment-readiness models, `/readiness/policy-shadow/*`, `/dashboard/policy-shadow`, health metadata, dashboard rendering, and deterministic tests.
+
+Goals:
+
+- Define future shadow evaluator architecture without implementing the evaluator.
+- Keep `StaticPolicyEngine` as source of truth and `enforcementChanged: false`.
+- Define candidate runtime interface expectations for future signed JSON/YAML, OPA/Rego, Cedar, and custom candidates.
+- Define static-vs-candidate comparison rules, mismatch severity taxonomy, audit/reporting metadata, dashboard/readiness behavior, and rollout/rollback stages.
+- Preserve runtime safety: no candidate runtime execution, no OPA/Rego or Cedar runtime, no signed bundle verification runtime, no dynamic policy execution, no remote bundle loading, no external policy service calls, no production Auth/RBAC, no credential issuance, and no secret/env exposure.
+
+Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1, or OIDC Provider Skeleton Hardening v1.
+
+## 46. Production Auth Provider Skeleton v1
+
+Implemented with `docs/foundations/auth-rbac/production-auth-provider-skeleton-v1-plan.md`, `docs/foundations/auth-rbac/production-auth-provider-skeleton-v1.md`, disabled future provider skeletons and provider registry in `packages/auth`, read-only deployment-readiness models, `/readiness/auth-providers/*`, `/dashboard/auth-providers`, `/auth/config`, `/health` auth-provider metadata, dashboard rendering, and deterministic tests.
+
+Goals:
+
+- Keep `MockAuthProvider` as the only active default provider.
+- Define disabled future OIDC, SAML, SCIM, Microsoft Entra, Okta, Auth0, Google Workspace, GitHub Enterprise, and custom provider boundaries.
+- Add provider-selection/readiness metadata, session/token boundary plans, and identity-mapping plans.
+- Add safe RequestContext/AuthContext/PolicySubject metadata for provider kind/status without trusting real tokens.
+- Preserve runtime safety: no real OIDC/SAML/SCIM/SSO/login/logout/session handling, no JWT or token validation, no cookie parsing as auth, no API-key/session/JWT/service-account credential issuance, no SCIM sync, no external IdP calls, no credential-cache reads, no env value exposure, and no production-auth enabled claim.
+
+Recommended next step: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+
+## 47. Phase 5 Enterprise Planning
 
 Goals:
 

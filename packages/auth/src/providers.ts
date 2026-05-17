@@ -112,7 +112,12 @@ export class MockAuthProvider implements AuthProvider {
       metadata: {
         ...request.metadata,
         isMockActor: true,
+        authProviderKind: "mock",
+        authProviderStatus: "active_mock",
         productionAuthEnabled: false,
+        tokenValidationEnabled: false,
+        sessionBoundaryStatus: "disabled",
+        identityMappingStatus: "not_configured",
         correlationId: request.correlationId
       }
     };
@@ -130,7 +135,13 @@ export class MockAuthProvider implements AuthProvider {
         authMode: "mock",
         source: context.source,
         correlationId: request.correlationId,
-        authenticated
+        authenticated,
+        authProviderKind: "mock",
+        authProviderStatus: "active_mock",
+        productionAuthEnabled: false,
+        tokenValidationEnabled: false,
+        sessionBoundaryStatus: "disabled",
+        identityMappingStatus: "not_configured"
       }
     });
     if (!missing) {
@@ -144,6 +155,27 @@ export class MockAuthProvider implements AuthProvider {
         correlationId: request.correlationId,
         source: context.source,
         metadata: { authMode: "mock", source: context.source, correlationId: request.correlationId, productionAuthEnabled: false }
+      });
+      this.repository.recordAuthAuditEvent({
+        eventType: "mock_auth_provider_used",
+        actorId: resolvedActor.id,
+        principalId: principal.id,
+        result: "resolved",
+        reason: "MockAuthProvider remains the default runtime provider.",
+        requestId,
+        correlationId: request.correlationId,
+        source: context.source,
+        metadata: {
+          authMode: "mock",
+          source: context.source,
+          correlationId: request.correlationId,
+          authProviderKind: "mock",
+          authProviderStatus: "active_mock",
+          productionAuthEnabled: false,
+          tokenValidationEnabled: false,
+          sessionBoundaryStatus: "disabled",
+          identityMappingStatus: "not_configured"
+        }
       });
     }
     if (resolvedActor.actorKind === "service_account") {

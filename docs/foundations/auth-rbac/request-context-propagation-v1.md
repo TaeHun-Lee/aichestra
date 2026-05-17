@@ -11,6 +11,7 @@ Status:
 - Service Account Actor Boundary: `v1_implemented`
 - Tenant/Repo/Provider Scope Model: `v1_implemented`
 - Production Auth/RBAC Planning: `v1_implemented`
+- Production Auth Provider Skeleton: `v1_implemented`
 - Phase 5: `preparation_started`
 
 This is not production authentication.
@@ -28,6 +29,7 @@ This is not production authentication.
 - Service Account Actor Boundary v1 now provides explicit mock service-account contexts for system/service-initiated fallbacks and adds serviceAccountId audit/policy metadata where migrated.
 - Registry/Governance RequestContext Migration v1 now propagates RequestContext/AuthContext through representative registry mutation and governance/apply-gate paths.
 - Tenant/Repo/Provider Scope Model v1 now adds optional tenant/team/project/resource scope metadata to RequestContext/AuthContext/PolicySubject and selected policy/audit/readiness/dashboard paths.
+- Production Auth Provider Skeleton v1 now adds safe provider-selection metadata to AuthContext, RequestContext, and PolicySubject while keeping `MockAuthProvider` as the source of runtime auth.
 - Deterministic tests in `tests/request-context-propagation-v1.test.ts`.
 
 ## What v1 Does Not Implement
@@ -47,7 +49,7 @@ v1 does not implement OIDC, SAML, SCIM, SSO, login/logout, sessions, JWTs, API k
 
 `CorrelationContext` carries request/correlation ids plus optional trace, task, task run, actor, source, and sanitized metadata.
 
-Neither context stores raw headers, cookies, tokens, session ids, passwords, API keys, provider credentials, secret values, or credential-cache paths.
+Neither context stores raw headers, Authorization headers, cookies, tokens, session ids, passwords, API keys, provider credentials, secret values, raw IdP claims, or credential-cache paths.
 
 ## RequestContextResolver
 
@@ -62,6 +64,8 @@ Neither context stores raw headers, cookies, tokens, session ids, passwords, API
 - `toCorrelationContext`
 
 API contexts still use `MockAuthProvider` by default. Header actor override remains a local/test-only convenience and is not production authentication. System contexts require an explicit reason. Dashboard/readiness contexts use safe read-only mock metadata.
+
+Future provider selection from Production Auth Provider Skeleton v1 is metadata only. Selecting a future provider reports blocked readiness but does not change `RequestContextResolver` authentication behavior from mock-first.
 
 ## API Propagation Strategy
 
@@ -116,6 +120,7 @@ Existing callers that do not pass request context keep deterministic mock/system
 - `correlationId`
 - `source`
 - sanitized metadata
+- safe production auth provider skeleton metadata (`authProviderKind`, `authProviderStatus`, `productionAuthEnabled=false`, `tokenValidationEnabled=false`, session boundary status, and identity mapping status)
 
 Policy deny still wins. Admin-like mock roles do not bypass deny-by-default rules.
 
@@ -144,6 +149,9 @@ Known partial areas:
 - Runner command execution metadata is partially propagated through API metadata, not a full typed `RequestContext`.
 - Dashboard/readiness do not implement tenant/team query scoping.
 - API route permission matrix and production auth enforcement remain future work.
+- Future provider hooks are explicit but disabled; no OIDC/SAML/SCIM token/session parsing is implemented.
+
+Dashboard/Readiness Tenant Scope Planning v1 now inventories the dashboard and readiness surfaces that will need RequestContext tenant/team/project/repo/provider/model/secret/tool/package/host/audit scope fields. It exposes planning-only `/readiness/tenant-scope/*` and `/dashboard/tenant-scope` surfaces and keeps tenant filtering implemented false.
 
 ## Test Strategy
 
@@ -159,7 +167,8 @@ Coverage includes:
 - API AuthContext Middleware Skeleton v1 coverage in `tests/api-authcontext-middleware-v1.test.ts`.
 - Service Account Actor Boundary v1 catalog/context/policy/audit coverage in `tests/service-account-actor-boundary-v1.test.ts`.
 - Registry/Governance RequestContext Migration v1 coverage in `tests/registry-governance-request-context-migration-v1.test.ts`.
+- Production Auth Provider Skeleton v1 metadata/no-token regression coverage in `tests/production-auth-provider-skeleton-v1.test.ts`.
 
 ## Recommended Next Task
 
-Recommended next task: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.

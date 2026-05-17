@@ -259,7 +259,12 @@ export class RequestContextResolver {
         resourceScopes,
         source,
         correlationId,
+        authProviderKind: stringMetadata(authContext.metadata.authProviderKind) ?? "mock",
+        authProviderStatus: stringMetadata(authContext.metadata.authProviderStatus) ?? "active_mock",
         productionAuthEnabled: false,
+        tokenValidationEnabled: false,
+        sessionBoundaryStatus: stringMetadata(authContext.metadata.sessionBoundaryStatus) ?? "disabled",
+        identityMappingStatus: stringMetadata(authContext.metadata.identityMappingStatus) ?? "not_configured",
         mockContext: authContext.authMode === "mock" || authContext.authMode === "mock_service_account" || source === "system"
       }
     };

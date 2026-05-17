@@ -56,6 +56,15 @@ import type {
   PolicyBundleRisk,
   PolicyDomainMapping,
   PolicyEngineOption,
+  PolicyShadowComparisonRule,
+  PolicyShadowEvaluationPlan,
+  PolicyShadowEvaluationReport,
+  PolicyShadowEvaluationSummary,
+  PolicyShadowMismatch,
+  PolicyShadowReadinessCheck,
+  ProductionAuthProviderConfig,
+  ProductionAuthProviderReadiness,
+  ProductionAuthProviderSkeletonSummary,
   ProductionRisk,
   ReadinessCheck,
   SecretBackendDecisionCriterion,
@@ -72,6 +81,7 @@ import type {
   SecretBackendRisk,
   SecretLeasePolicy,
   SecretRotationPlan,
+  SessionTokenBoundaryPlan,
   ServiceAccountPlan,
   StagingDeploymentDryRunBlocker,
   StagingDeploymentDryRunCheck,
@@ -101,7 +111,8 @@ import type {
   StagingPromotionCriterion,
   StagingReadinessCheck,
   StagingRollbackCriterion,
-  TenantBoundaryPlan
+  TenantBoundaryPlan,
+  IdentityMappingPlan
 } from "./types.ts";
 
 const sensitiveKeyPattern = /^(token|accessToken|refreshToken|apiKey|api_key|authorization|password|rawSecret|secretValue|credentialValue|privateKey|private_key|webhookSecret|session|cookie|databaseUrl|database_url|connectionString|postgresUrl|clientSecret|vaultToken|secretAccessKey)$/i;
@@ -349,6 +360,26 @@ export function authProviderOptionToDto(option: AuthProviderOption) {
   return sanitize(option);
 }
 
+export function productionAuthProviderConfigToDto(config: ProductionAuthProviderConfig) {
+  return sanitize(config);
+}
+
+export function productionAuthProviderReadinessToDto(readiness: ProductionAuthProviderReadiness) {
+  return sanitize(readiness);
+}
+
+export function sessionTokenBoundaryPlanToDto(plan: SessionTokenBoundaryPlan) {
+  return sanitize(plan);
+}
+
+export function identityMappingPlanToDto(plan: IdentityMappingPlan) {
+  return sanitize(plan);
+}
+
+export function productionAuthProviderSkeletonSummaryToDto(summary: ProductionAuthProviderSkeletonSummary) {
+  return sanitize(summary);
+}
+
 export function authRbacMigrationPhaseToDto(phase: AuthRbacMigrationPhase) {
   return sanitize(phase);
 }
@@ -402,6 +433,30 @@ export function policyBundleMigrationPhaseToDto(phase: PolicyBundleMigrationPhas
 }
 
 export function policyBundleReadinessSummaryToDto(summary: PolicyBundleReadinessSummary) {
+  return sanitize(summary);
+}
+
+export function policyShadowEvaluationPlanToDto(plan: PolicyShadowEvaluationPlan) {
+  return sanitize(plan);
+}
+
+export function policyShadowComparisonRuleToDto(rule: PolicyShadowComparisonRule) {
+  return sanitize(rule);
+}
+
+export function policyShadowMismatchToDto(mismatch: PolicyShadowMismatch) {
+  return sanitize(mismatch);
+}
+
+export function policyShadowEvaluationReportToDto(report: PolicyShadowEvaluationReport) {
+  return sanitize(report);
+}
+
+export function policyShadowReadinessCheckToDto(check: PolicyShadowReadinessCheck) {
+  return sanitize(check);
+}
+
+export function policyShadowEvaluationSummaryToDto(summary: PolicyShadowEvaluationSummary) {
   return sanitize(summary);
 }
 

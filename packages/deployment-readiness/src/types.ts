@@ -85,6 +85,34 @@ export type AuthProviderOptionKind =
   | "custom"
   | "mock";
 export type AuthProviderOptionStatus = "planned" | "recommended" | "future" | "not_recommended" | "disabled";
+export type ProductionAuthProviderKind =
+  | "mock"
+  | "oidc_future"
+  | "saml_future"
+  | "scim_future"
+  | "microsoft_entra_future"
+  | "okta_future"
+  | "auth0_future"
+  | "google_workspace_future"
+  | "github_enterprise_future"
+  | "custom_future";
+export type ProductionAuthProviderStatus = "active_mock" | "disabled" | "not_configured" | "future";
+export type ProductionAuthProviderReadinessStatus = "ready_mock" | "disabled" | "missing_config" | "blocked" | "future";
+export type SessionTokenBoundaryKind =
+  | "cookie_session_future"
+  | "bearer_jwt_future"
+  | "api_key_future"
+  | "service_account_token_future"
+  | "local_agent_pairing_future";
+export type SessionTokenBoundaryStatus = "planned" | "disabled" | "future";
+export type IdentityMappingKind =
+  | "subject_to_principal"
+  | "group_to_team"
+  | "role_claim_to_role"
+  | "tenant_claim_to_tenant_scope"
+  | "repo_claim_to_repo_scope"
+  | "service_account_mapping";
+export type IdentityMappingStatus = "planned" | "future" | "not_configured";
 export type AuthRbacOperationalComplexity = "low" | "medium" | "high";
 export type AuthRbacMigrationPhaseStatus = "planned" | "ready_for_design" | "blocked" | "future";
 export type AuthRbacReadinessCategory =
@@ -170,6 +198,42 @@ export type PolicyBundleReadinessCategory =
   | "provider_policy"
   | "dashboard";
 export type PolicyBundleMigrationPhaseStatus = "planned" | "ready_for_design" | "blocked" | "future";
+export type PolicyShadowEvaluationPlanStatus = "planned" | "ready_for_design" | "blocked" | "future";
+export type PolicyShadowSourceOfTruth = "StaticPolicyEngine";
+export type PolicyShadowCandidateRuntimeKind = "signed_json_yaml_bundle" | "opa_rego" | "cedar" | "custom_future";
+export type PolicyShadowEnforcementMode = "shadow_only";
+export type PolicyShadowComparisonKind =
+  | "effect_match"
+  | "reason_match"
+  | "rule_id_match"
+  | "obligation_match"
+  | "redaction_match"
+  | "audit_metadata_match";
+export type PolicyShadowMismatchKind =
+  | "static_allow_candidate_deny"
+  | "static_deny_candidate_allow"
+  | "static_block_candidate_allow"
+  | "reason_mismatch"
+  | "rule_id_mismatch"
+  | "missing_obligation"
+  | "extra_obligation"
+  | "redaction_mismatch"
+  | "audit_metadata_mismatch"
+  | "error_in_candidate";
+export type PolicyShadowMismatchSeverity = "info" | "low" | "medium" | "high" | "critical";
+export type PolicyShadowMismatchDefaultAction = "record_only" | "alert_future" | "block_rollout_future";
+export type PolicyShadowReadinessCategory =
+  | "input_contract"
+  | "golden_cases"
+  | "candidate_runtime"
+  | "comparison_rules"
+  | "audit"
+  | "observability"
+  | "dashboard"
+  | "rollout"
+  | "rollback"
+  | "safety";
+export type PolicyShadowReadinessStatus = "pass" | "warning" | "fail" | "not_checked" | "future";
 export type StagingDeploymentStatus = "planned" | "ready_for_internal_validation" | "blocked" | "not_ready";
 export type StagingIntegrationKind =
   | "postgres"
@@ -1387,6 +1451,39 @@ export type AuthRbacProductionSummary = {
   metadata: Record<string, unknown>;
 };
 
+export type ProductionAuthProviderSkeletonSummary = {
+  generatedAt: Date;
+  status: "v1_implemented";
+  planningOnly: true;
+  activeProviderKind: "mock";
+  selectedProviderKind: ProductionAuthProviderKind;
+  selectedProviderStatus: ProductionAuthProviderStatus;
+  productionAuthEnabled: false;
+  requireAuthForApi: false;
+  futureProviderSelected: boolean;
+  futureProviderBlocked: boolean;
+  tokenValidationEnabled: false;
+  sessionBoundaryEnabled: false;
+  sessionBoundaryStatus: "disabled" | "future";
+  identityMappingStatus: "not_configured" | "future";
+  externalCallsEnabled: false;
+  externalIdpCallsEnabled: false;
+  missingConfigCount: number;
+  blockerCount: number;
+  providerOptionCount: number;
+  readinessCheckCount: number;
+  sessionBoundaryPlanCount: number;
+  identityMappingPlanCount: number;
+  noTokensExposed: true;
+  authorizationHeadersStored: false;
+  cookiesStored: false;
+  sessionIdsExposed: false;
+  envValuesExposed: false;
+  secretsExposed: false;
+  productionReady: false;
+  metadata: Record<string, unknown>;
+};
+
 export type PolicyEngineOption = {
   id: string;
   engineKind: PolicyEngineOptionKind;
@@ -1504,6 +1601,151 @@ export type PolicyBundleReadinessSummary = {
   noSecretsExposed: true;
   policyCodeExecuted: false;
   externalCallsEnabled: false;
+  metadata: Record<string, unknown>;
+};
+
+export type ProductionAuthProviderConfig = {
+  id: string;
+  providerKind: ProductionAuthProviderKind;
+  status: ProductionAuthProviderStatus;
+  displayName: string;
+  issuerConfigured: boolean;
+  audienceConfigured: boolean;
+  jwksConfigured: boolean;
+  metadataUrlConfigured: boolean;
+  scimEndpointConfigured: boolean;
+  groupMappingConfigured: boolean;
+  tenantMappingConfigured: boolean;
+  sessionBoundaryConfigured: boolean;
+  tokenValidationEnabled: false;
+  externalCallsEnabled: false;
+  productionReady: false;
+  metadata: Record<string, unknown>;
+};
+
+export type ProductionAuthProviderReadiness = {
+  id: string;
+  providerKind: ProductionAuthProviderKind;
+  status: ProductionAuthProviderReadinessStatus;
+  requiredConfig: string[];
+  missingConfig: string[];
+  warnings: string[];
+  blockers: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type SessionTokenBoundaryPlan = {
+  id: string;
+  boundaryKind: SessionTokenBoundaryKind;
+  status: SessionTokenBoundaryStatus;
+  tokenIssued: false;
+  validationEnabled: false;
+  storageStrategy: string;
+  rotationStrategy: string;
+  revocationStrategy: string;
+  auditRequirements: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type IdentityMappingPlan = {
+  id: string;
+  mappingKind: IdentityMappingKind;
+  status: IdentityMappingStatus;
+  requiredClaims: string[];
+  targetModel: string;
+  risks: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyShadowEvaluationPlan = {
+  id: string;
+  status: PolicyShadowEvaluationPlanStatus;
+  sourceOfTruth: PolicyShadowSourceOfTruth;
+  candidateRuntimeKinds: PolicyShadowCandidateRuntimeKind[];
+  domains: PolicyDomainName[];
+  rolloutStages: string[];
+  enforcementMode: PolicyShadowEnforcementMode;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyShadowComparisonRule = {
+  id: string;
+  comparisonKind: PolicyShadowComparisonKind;
+  required: boolean;
+  severityOnMismatch: PolicyShadowMismatchSeverity;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyShadowMismatch = {
+  id: string;
+  mismatchKind: PolicyShadowMismatchKind;
+  severity: PolicyShadowMismatchSeverity;
+  defaultAction: PolicyShadowMismatchDefaultAction;
+  productionImpact: string;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyShadowEvaluationReport = {
+  id: string;
+  generatedAt: Date;
+  domain: PolicyDomainName;
+  caseCount: number;
+  matchCount: number;
+  mismatchCount: number;
+  criticalMismatchCount: number;
+  enforcementChanged: false;
+  sourceOfTruth: PolicyShadowSourceOfTruth;
+  candidateRuntimeKind: PolicyShadowCandidateRuntimeKind;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyShadowReadinessCheck = {
+  id: string;
+  category: PolicyShadowReadinessCategory;
+  status: PolicyShadowReadinessStatus;
+  severity: PolicyShadowMismatchSeverity;
+  description: string;
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyShadowEvaluationSummary = {
+  generatedAt: Date;
+  status: "v1_implemented";
+  planningOnly: true;
+  productionReady: false;
+  sourceOfTruth: PolicyShadowSourceOfTruth;
+  enforcementMode: PolicyShadowEnforcementMode;
+  enforcementChanged: false;
+  staticPolicyEngineAuthoritative: true;
+  shadowEvaluatorImplemented: false;
+  candidateRuntimeImplemented: false;
+  candidateRuntimeExecuted: false;
+  candidateBundleValidated: false;
+  dynamicPolicyExecutionEnabled: false;
+  externalPolicyServiceCallsEnabled: false;
+  remotePolicyBundleLoadingEnabled: false;
+  signedBundleVerificationRuntimeEnabled: false;
+  opaRuntimeEnabled: false;
+  cedarRuntimeEnabled: false;
+  policyCodeExecuted: false;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  planStatus: PolicyShadowEvaluationPlanStatus;
+  candidateRuntimeKindCount: number;
+  domainCount: number;
+  rolloutStageCount: number;
+  comparisonRuleCount: number;
+  requiredComparisonRuleCount: number;
+  mismatchTaxonomyCount: number;
+  criticalMismatchKindCount: number;
+  readinessCheckCount: number;
+  readinessFutureCount: number;
+  readinessWarningCount: number;
+  readinessFailCount: number;
+  reportCount: number;
+  goldenCaseSource: "Policy Runtime PoC Golden Test Harness v1";
+  recommendedNextTask: string;
   metadata: Record<string, unknown>;
 };
 

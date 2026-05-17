@@ -34,7 +34,71 @@ export type DashboardSafetyFlags = {
   noSecretsExposed: true;
 };
 
+export type ScopedReadModelScopeStatus =
+  | "metadata_only"
+  | "missing_scope_warning"
+  | "scoped_future"
+  | "enforcement_future";
+
+export type ScopedReadModelSensitivity =
+  | "public_metadata"
+  | "internal_metadata"
+  | "sensitive_metadata"
+  | "secret_adjacent"
+  | "never_store_raw";
+
+export type ScopedReadModelMetadata = {
+  scopeStatus: ScopedReadModelScopeStatus;
+  appliedScopes: string[];
+  requiredScopes: string[];
+  missingScopes: string[];
+  sensitivity: ScopedReadModelSensitivity;
+  roleVisibility: DashboardJsonObject;
+  redactionStatus: string;
+  tenantFilteringImplemented: false;
+  productionEnforcementImplemented: false;
+  tenantScopeEnforcementImplemented?: false | "partial";
+  enforcementMode?: string;
+  scopeDecisionSummary?: DashboardJsonObject;
+  warnings: string[];
+  metadata: DashboardJsonObject;
+};
+
+export type DashboardPanelScopeSummary = {
+  panelId: string;
+  panelName: string;
+  requiredScopes: string[];
+  availableScopes: string[];
+  missingScopes: string[];
+  allowedRoles: string[];
+  redactionClass: ScopedReadModelSensitivity;
+  enforcementStatus: string;
+  fallbackBehavior: string;
+  warnings: string[];
+};
+
+export type ReadinessEndpointScopeSummary = {
+  endpointGroup: string;
+  endpointPattern: string;
+  requiredScopes: string[];
+  availableScopes: string[];
+  missingScopes: string[];
+  allowedRoles: string[];
+  redactionClass: ScopedReadModelSensitivity;
+  enforcementStatus: string;
+  fallbackBehavior: string;
+  warnings: string[];
+};
+
+export type TenantScopeEnforcementReadModel = {
+  summary: DashboardJsonObject;
+  modes: DashboardJsonObject[];
+  mismatches: DashboardJsonObject[];
+  noSecretStatus: DashboardJsonObject;
+};
+
 export type DashboardOverviewReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   generatedAt: string;
   source: DashboardReadModelSource;
   status: "available";
@@ -45,6 +109,7 @@ export type DashboardOverviewReadModel = {
 };
 
 export type TaskRunSummaryReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   tasks: DashboardJsonObject[];
   taskRuns: DashboardJsonObject[];
   recentTasks: DashboardJsonObject[];
@@ -53,6 +118,7 @@ export type TaskRunSummaryReadModel = {
 };
 
 export type GitIntegrationReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   webhookConfig: DashboardJsonObject;
   providers: DashboardJsonObject[];
@@ -73,6 +139,7 @@ export type GitIntegrationReadModel = {
 };
 
 export type ConflictManagerReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   branchLeases: DashboardJsonObject[];
   conflictRisks: DashboardJsonObject[];
   mergeQueue: DashboardJsonObject[];
@@ -81,6 +148,7 @@ export type ConflictManagerReadModel = {
 };
 
 export type RegistryReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   skills: DashboardJsonObject[];
   harnesses: DashboardJsonObject[];
@@ -94,6 +162,7 @@ export type RegistryReadModel = {
 };
 
 export type LLMGatewayReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   providers: DashboardJsonObject[];
   routes: DashboardJsonObject[];
@@ -111,6 +180,7 @@ export type LLMGatewayReadModel = {
 };
 
 export type AgentRunnerReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   runners: DashboardJsonObject[];
   executors: DashboardJsonObject[];
@@ -123,6 +193,7 @@ export type AgentRunnerReadModel = {
 };
 
 export type PolicyReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   rules: DashboardJsonObject[];
   auditEntries: DashboardJsonObject[];
@@ -130,6 +201,7 @@ export type PolicyReadModel = {
 };
 
 export type PolicyBundleReadinessReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   engineOptions: DashboardJsonObject[];
   bundlePlans: DashboardJsonObject[];
@@ -146,7 +218,21 @@ export type PolicyBundleReadinessReadModel = {
   noExecutionStatus: DashboardJsonObject;
 };
 
+export type PolicyShadowEvaluationReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  plan: DashboardJsonObject;
+  comparisonRules: DashboardJsonObject[];
+  mismatchTaxonomy: DashboardJsonObject[];
+  readinessChecks: DashboardJsonObject[];
+  reports: DashboardJsonObject[];
+  criticalMismatchExamples: DashboardJsonObject[];
+  rollout: DashboardJsonObject;
+  noExecutionStatus: DashboardJsonObject;
+};
+
 export type AuthReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   currentActor: DashboardJsonObject;
   principals: DashboardJsonObject[];
@@ -163,6 +249,7 @@ export type AuthReadModel = {
 };
 
 export type AuthRbacProductionReadinessReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   providerOptions: DashboardJsonObject[];
   migrationPhases: DashboardJsonObject[];
@@ -176,7 +263,20 @@ export type AuthRbacProductionReadinessReadModel = {
   noTokenStatus: DashboardJsonObject;
 };
 
+export type ProductionAuthProviderSkeletonReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  configs: DashboardJsonObject[];
+  readiness: DashboardJsonObject[];
+  sessionBoundary: DashboardJsonObject[];
+  identityMapping: DashboardJsonObject[];
+  selectedProvider: DashboardJsonObject;
+  blockers: DashboardJsonObject[];
+  noTokenStatus: DashboardJsonObject;
+};
+
 export type EnterpriseProviderReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   catalog: DashboardJsonObject[];
   authTypes: string[];
@@ -188,6 +288,7 @@ export type EnterpriseProviderReadModel = {
 };
 
 export type SecurityReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   secretRefs: DashboardJsonObject[];
   secretScopes: DashboardJsonObject[];
@@ -204,6 +305,7 @@ export type SecurityReadModel = {
 };
 
 export type LocalAgentReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   registrations: DashboardJsonObject[];
   sessions: DashboardJsonObject[];
@@ -223,6 +325,7 @@ export type LocalAgentReadModel = {
 };
 
 export type MCPGatewayReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   servers: DashboardJsonObject[];
   tools: DashboardJsonObject[];
@@ -234,6 +337,7 @@ export type MCPGatewayReadModel = {
 };
 
 export type ScopeReadinessReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   tenants: DashboardJsonObject[];
   teams: DashboardJsonObject[];
@@ -250,7 +354,23 @@ export type ScopeReadinessReadModel = {
   noSecretStatus: DashboardJsonObject;
 };
 
+export type DashboardTenantScopePlanningReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  dashboardPlans: DashboardJsonObject[];
+  readinessPlans: DashboardJsonObject[];
+  panelScopeSummaries: DashboardPanelScopeSummary[];
+  readinessScopeSummaries: ReadinessEndpointScopeSummary[];
+  enforcementSummary?: DashboardJsonObject;
+  enforcementModes?: DashboardJsonObject[];
+  enforcementMismatches?: DashboardJsonObject[];
+  roleVisibility: DashboardJsonObject[];
+  fallbackBehavior: DashboardJsonObject[];
+  noSecretStatus: DashboardJsonObject;
+};
+
 export type DeploymentReadinessReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   profiles: DashboardJsonObject[];
   checks: DashboardJsonObject[];
@@ -262,6 +382,7 @@ export type DeploymentReadinessReadModel = {
 };
 
 export type DatabaseOperationsReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   profiles: DashboardJsonObject[];
   checks: DashboardJsonObject[];
@@ -278,6 +399,7 @@ export type DatabaseOperationsReadModel = {
 };
 
 export type SecretBackendMigrationReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   backendOptions: DashboardJsonObject[];
   migrationPhases: DashboardJsonObject[];
@@ -292,6 +414,7 @@ export type SecretBackendMigrationReadModel = {
 };
 
 export type SecretBackendDecisionReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   decision: DashboardJsonObject;
   criteria: DashboardJsonObject[];
@@ -305,6 +428,7 @@ export type SecretBackendDecisionReadModel = {
 };
 
 export type VaultSecretBackendReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   config: DashboardJsonObject;
   health: DashboardJsonObject;
@@ -316,6 +440,7 @@ export type VaultSecretBackendReadModel = {
 };
 
 export type StagingDeploymentReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   profile: DashboardJsonObject;
   integrationGates: DashboardJsonObject[];
@@ -328,6 +453,7 @@ export type StagingDeploymentReadModel = {
 };
 
 export type StagingDeploymentDryRunReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   profile: DashboardJsonObject;
   sources: DashboardJsonObject[];
@@ -347,6 +473,7 @@ export type StagingDeploymentDryRunReadModel = {
 };
 
 export type StagingReleaseCandidateReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   checklist: DashboardJsonObject;
   gates: DashboardJsonObject[];
@@ -365,6 +492,7 @@ export type StagingReleaseCandidateReadModel = {
 };
 
 export type StagingDeploymentExecutionReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   plan: DashboardJsonObject;
   steps: DashboardJsonObject[];
@@ -383,6 +511,7 @@ export type StagingDeploymentExecutionReadModel = {
 };
 
 export type CICDPipelineReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   profiles: DashboardJsonObject[];
   jobs: DashboardJsonObject[];
@@ -400,6 +529,7 @@ export type CICDPipelineReadModel = {
 };
 
 export type GitHubAppHardeningReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   runtimeConfig: DashboardJsonObject;
   runtimeInstallations: DashboardJsonObject[];
@@ -425,6 +555,7 @@ export type GitHubAppHardeningReadModel = {
 };
 
 export type GitHubAppIntegrationTestReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   profile: DashboardJsonObject;
   testCases: DashboardJsonObject[];
@@ -438,6 +569,7 @@ export type GitHubAppIntegrationTestReadModel = {
 };
 
 export type LLMIntegrationTestReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   profile: DashboardJsonObject;
   testCases: DashboardJsonObject[];
@@ -451,6 +583,7 @@ export type LLMIntegrationTestReadModel = {
 };
 
 export type VaultIntegrationTestReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
   profile: DashboardJsonObject;
   testCases: DashboardJsonObject[];
@@ -465,6 +598,7 @@ export type VaultIntegrationTestReadModel = {
 };
 
 export type ObservabilityReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
   auditSummary: DashboardJsonObject;
   recentEvents: DashboardJsonObject[];
@@ -483,6 +617,7 @@ export type ObservabilityReadModel = {
 };
 
 export type AuditSummaryReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
   auditGroups: DashboardJsonObject[];
   recentEvents: DashboardJsonObject[];
   summary: DashboardJsonObject;
@@ -502,13 +637,17 @@ export type DashboardReadModels = {
   agents: AgentRunnerReadModel;
   policy: PolicyReadModel;
   policyBundles: PolicyBundleReadinessReadModel;
+  policyShadow: PolicyShadowEvaluationReadModel;
   auth: AuthReadModel;
   authProduction: AuthRbacProductionReadinessReadModel;
+  authProviders: ProductionAuthProviderSkeletonReadModel;
   providers: EnterpriseProviderReadModel;
   security: SecurityReadModel;
   localAgents: LocalAgentReadModel;
   mcp: MCPGatewayReadModel;
   scopes: ScopeReadinessReadModel;
+  tenantScopePlanning: DashboardTenantScopePlanningReadModel;
+  tenantScopeEnforcement: TenantScopeEnforcementReadModel;
   readiness: DeploymentReadinessReadModel;
   database: DatabaseOperationsReadModel;
   secretBackend: SecretBackendMigrationReadModel;
@@ -537,13 +676,17 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/agents",
   "/dashboard/policy",
   "/dashboard/policy-bundles",
+  "/dashboard/policy-shadow",
   "/dashboard/auth",
   "/dashboard/auth-production",
+  "/dashboard/auth-providers",
   "/dashboard/providers",
   "/dashboard/security",
   "/dashboard/local-agents",
   "/dashboard/mcp",
   "/dashboard/scopes",
+  "/dashboard/tenant-scope",
+  "/dashboard/tenant-enforcement",
   "/dashboard/readiness",
   "/dashboard/database",
   "/dashboard/secret-backend",

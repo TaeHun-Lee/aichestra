@@ -21,6 +21,11 @@ export type SafeRequestContextSummary = {
   actorKind: string;
   isMockActor: boolean;
   productionAuthEnabled: false;
+  authProviderKind: string;
+  authProviderStatus: string;
+  tokenValidationEnabled: false;
+  sessionBoundaryStatus: string;
+  identityMappingStatus: string;
 };
 
 export type ApiRequestContextMiddlewareInput = {
@@ -62,6 +67,11 @@ export class ApiRequestContextMiddleware {
       method: routeMetadata.method,
       apiAuthContextMiddleware: "v1",
       productionAuthEnabled: false,
+      authProviderKind: "mock",
+      authProviderStatus: "active_mock",
+      tokenValidationEnabled: false,
+      sessionBoundaryStatus: "disabled",
+      identityMappingStatus: "not_configured",
       requestIdHeaderAccepted: headers.requestIdHeaderAccepted,
       correlationIdHeaderAccepted: headers.correlationIdHeaderAccepted,
       mockActorHeaderAccepted: headers.actorHeaderAccepted,
@@ -93,7 +103,12 @@ export class ApiRequestContextMiddleware {
       metadata: safeMetadata({
         ...(options.metadata ?? {}),
         apiAuthContextMiddleware: "v1",
-        productionAuthEnabled: false
+        productionAuthEnabled: false,
+        authProviderKind: "mock",
+        authProviderStatus: "active_mock",
+        tokenValidationEnabled: false,
+        sessionBoundaryStatus: "disabled",
+        identityMappingStatus: "not_configured"
       })
     });
   }
@@ -125,7 +140,12 @@ export class ApiRequestContextMiddleware {
       authModeCategory: authModeCategory(context),
       actorKind: context.authContext.actor.actorKind,
       isMockActor: context.authContext.metadata.isMockActor === true || context.metadata.mockContext === true,
-      productionAuthEnabled: false
+      productionAuthEnabled: false,
+      authProviderKind: stringMetadata(context.metadata.authProviderKind) ?? stringMetadata(context.authContext.metadata.authProviderKind) ?? "mock",
+      authProviderStatus: stringMetadata(context.metadata.authProviderStatus) ?? stringMetadata(context.authContext.metadata.authProviderStatus) ?? "active_mock",
+      tokenValidationEnabled: false,
+      sessionBoundaryStatus: stringMetadata(context.metadata.sessionBoundaryStatus) ?? stringMetadata(context.authContext.metadata.sessionBoundaryStatus) ?? "disabled",
+      identityMappingStatus: stringMetadata(context.metadata.identityMappingStatus) ?? stringMetadata(context.authContext.metadata.identityMappingStatus) ?? "not_configured"
     };
   }
 
@@ -220,6 +240,10 @@ function authModeCategory(context: RequestContext): SafeRequestContextSummary["a
   if (context.source === "system" || context.authContext.authMode === "system") return "system";
   if (context.authContext.authMode === "mock" || context.authContext.authMode === "mock_service_account") return "mock";
   return "future";
+}
+
+function stringMetadata(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function safeMetadata(input: Record<string, unknown>): Record<string, unknown> {

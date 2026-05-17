@@ -49,6 +49,13 @@ import {
   defaultPolicyBundleRisks,
   defaultPolicyDomainMappings,
   defaultPolicyEngineOptions,
+  defaultPolicyShadowComparisonRules,
+  defaultPolicyShadowEvaluationPlan,
+  defaultPolicyShadowEvaluationReports,
+  defaultPolicyShadowMismatches,
+  defaultPolicyShadowReadinessChecks,
+  defaultProductionAuthProviderConfigs,
+  defaultProductionAuthProviderReadiness,
   defaultProductionRisks,
   defaultReadinessChecks,
   defaultSecretBackendDecisionCriteria,
@@ -62,6 +69,7 @@ import {
   defaultSecretBackendReadinessChecks,
   defaultSecretBackendRisks,
   defaultServiceAccountPlans,
+  defaultSessionTokenBoundaryPlans,
   defaultStagingDeploymentProfile,
   defaultStagingDeploymentDryRunProfile,
   defaultStagingDeploymentExecutionPlan,
@@ -72,7 +80,8 @@ import {
   defaultStagingRollbackCriteria,
   defaultTenantBoundaryPlans,
   defaultSecretLeasePolicies,
-  defaultSecretRotationPlans
+  defaultSecretRotationPlans,
+  defaultIdentityMappingPlans
 } from "./catalog.ts";
 import { signoffEvidenceHasScope, signoffEvidenceScopeMatches } from "./signoff-scope.ts";
 import type {
@@ -146,6 +155,17 @@ import type {
   PolicyBundleRisk,
   PolicyDomainMapping,
   PolicyEngineOption,
+  PolicyShadowComparisonRule,
+  PolicyShadowEvaluationPlan,
+  PolicyShadowEvaluationReport,
+  PolicyShadowEvaluationSummary,
+  PolicyShadowMismatch,
+  PolicyShadowReadinessCategory,
+  PolicyShadowReadinessCheck,
+  ProductionAuthProviderConfig,
+  ProductionAuthProviderKind,
+  ProductionAuthProviderReadiness,
+  ProductionAuthProviderSkeletonSummary,
   ProductionRisk,
   ReadinessCheck,
   ReadinessCheckStatus,
@@ -165,6 +185,7 @@ import type {
   SecretBackendRisk,
   SecretLeasePolicy,
   SecretRotationPlan,
+  SessionTokenBoundaryPlan,
   ServiceAccountPlan,
   StagingDeploymentDryRunBlocker,
   StagingDeploymentDryRunCheck,
@@ -217,7 +238,8 @@ import type {
   StagingReadinessCategory,
   StagingReadinessCheck,
   StagingRollbackCriterion,
-  TenantBoundaryPlan
+  TenantBoundaryPlan,
+  IdentityMappingPlan
 } from "./types.ts";
 
 const checkStatuses: ReadinessCheckStatus[] = ["pass", "fail", "warning", "not_applicable", "not_checked"];
@@ -273,12 +295,21 @@ export type DeploymentReadinessServiceInput = {
   tenantBoundaryPlans?: TenantBoundaryPlan[];
   serviceAccountPlans?: ServiceAccountPlan[];
   authRbacPermissionMatrix?: AuthRbacPermissionMatrixEntry[];
+  productionAuthProviderConfigs?: ProductionAuthProviderConfig[];
+  productionAuthProviderReadiness?: ProductionAuthProviderReadiness[];
+  sessionTokenBoundaryPlans?: SessionTokenBoundaryPlan[];
+  identityMappingPlans?: IdentityMappingPlan[];
   policyEngineOptions?: PolicyEngineOption[];
   policyBundlePlans?: PolicyBundlePlan[];
   policyDomainMappings?: PolicyDomainMapping[];
   policyBundleReadinessChecks?: PolicyBundleReadinessCheck[];
   policyBundleRisks?: PolicyBundleRisk[];
   policyBundleMigrationPhases?: PolicyBundleMigrationPhase[];
+  policyShadowEvaluationPlan?: PolicyShadowEvaluationPlan;
+  policyShadowComparisonRules?: PolicyShadowComparisonRule[];
+  policyShadowMismatches?: PolicyShadowMismatch[];
+  policyShadowEvaluationReports?: PolicyShadowEvaluationReport[];
+  policyShadowReadinessChecks?: PolicyShadowReadinessCheck[];
   stagingDeploymentProfile?: StagingDeploymentProfile;
   stagingIntegrationGates?: StagingIntegrationGate[];
   stagingReadinessChecks?: StagingReadinessCheck[];
@@ -360,6 +391,21 @@ function positiveNumber(value: string | undefined): number | undefined {
 
 function stringConfigured(value: string | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function normalizeProductionAuthProviderKind(value: string | undefined): ProductionAuthProviderKind {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === "mock") return "mock";
+  if (normalized === "oidc" || normalized === "oidc_future" || normalized === "future_oidc") return "oidc_future";
+  if (normalized === "saml" || normalized === "saml_future" || normalized === "future_saml") return "saml_future";
+  if (normalized === "scim" || normalized === "scim_future") return "scim_future";
+  if (normalized === "microsoft_entra" || normalized === "microsoft_entra_future" || normalized === "microsoft_future" || normalized === "entra") return "microsoft_entra_future";
+  if (normalized === "okta" || normalized === "okta_future") return "okta_future";
+  if (normalized === "auth0" || normalized === "auth0_future") return "auth0_future";
+  if (normalized === "google_workspace" || normalized === "google_workspace_future" || normalized === "google_future") return "google_workspace_future";
+  if (normalized === "github_enterprise" || normalized === "github_enterprise_future" || normalized === "github_future") return "github_enterprise_future";
+  if (normalized === "custom" || normalized === "custom_future") return "custom_future";
+  return "mock";
 }
 
 function nonEmptyText(value: string | undefined): boolean {
@@ -508,12 +554,21 @@ export class DeploymentReadinessService {
   private readonly tenantBoundaryPlans: TenantBoundaryPlan[];
   private readonly serviceAccountPlans: ServiceAccountPlan[];
   private readonly authRbacPermissionMatrix: AuthRbacPermissionMatrixEntry[];
+  private readonly productionAuthProviderConfigs: ProductionAuthProviderConfig[];
+  private readonly productionAuthProviderReadiness: ProductionAuthProviderReadiness[];
+  private readonly sessionTokenBoundaryPlans: SessionTokenBoundaryPlan[];
+  private readonly identityMappingPlans: IdentityMappingPlan[];
   private readonly policyEngineOptions: PolicyEngineOption[];
   private readonly policyBundlePlans: PolicyBundlePlan[];
   private readonly policyDomainMappings: PolicyDomainMapping[];
   private readonly policyBundleReadinessChecks: PolicyBundleReadinessCheck[];
   private readonly policyBundleRisks: PolicyBundleRisk[];
   private readonly policyBundleMigrationPhases: PolicyBundleMigrationPhase[];
+  private readonly policyShadowEvaluationPlan: PolicyShadowEvaluationPlan;
+  private readonly policyShadowComparisonRules: PolicyShadowComparisonRule[];
+  private readonly policyShadowMismatches: PolicyShadowMismatch[];
+  private readonly policyShadowEvaluationReports: PolicyShadowEvaluationReport[];
+  private readonly policyShadowReadinessChecks: PolicyShadowReadinessCheck[];
   private readonly stagingDeploymentProfile: StagingDeploymentProfile;
   private readonly stagingIntegrationGates: StagingIntegrationGate[];
   private readonly stagingReadinessChecks: StagingReadinessCheck[];
@@ -591,12 +646,21 @@ export class DeploymentReadinessService {
     this.tenantBoundaryPlans = clone(input.tenantBoundaryPlans ?? defaultTenantBoundaryPlans);
     this.serviceAccountPlans = clone(input.serviceAccountPlans ?? defaultServiceAccountPlans);
     this.authRbacPermissionMatrix = clone(input.authRbacPermissionMatrix ?? defaultAuthRbacPermissionMatrix);
+    this.productionAuthProviderConfigs = clone(input.productionAuthProviderConfigs ?? defaultProductionAuthProviderConfigs);
+    this.productionAuthProviderReadiness = clone(input.productionAuthProviderReadiness ?? defaultProductionAuthProviderReadiness);
+    this.sessionTokenBoundaryPlans = clone(input.sessionTokenBoundaryPlans ?? defaultSessionTokenBoundaryPlans);
+    this.identityMappingPlans = clone(input.identityMappingPlans ?? defaultIdentityMappingPlans);
     this.policyEngineOptions = clone(input.policyEngineOptions ?? defaultPolicyEngineOptions);
     this.policyBundlePlans = clone(input.policyBundlePlans ?? defaultPolicyBundlePlans);
     this.policyDomainMappings = clone(input.policyDomainMappings ?? defaultPolicyDomainMappings);
     this.policyBundleReadinessChecks = clone(input.policyBundleReadinessChecks ?? defaultPolicyBundleReadinessChecks);
     this.policyBundleRisks = clone(input.policyBundleRisks ?? defaultPolicyBundleRisks);
     this.policyBundleMigrationPhases = clone(input.policyBundleMigrationPhases ?? defaultPolicyBundleMigrationPhases);
+    this.policyShadowEvaluationPlan = clone(input.policyShadowEvaluationPlan ?? defaultPolicyShadowEvaluationPlan);
+    this.policyShadowComparisonRules = clone(input.policyShadowComparisonRules ?? defaultPolicyShadowComparisonRules);
+    this.policyShadowMismatches = clone(input.policyShadowMismatches ?? defaultPolicyShadowMismatches);
+    this.policyShadowEvaluationReports = clone(input.policyShadowEvaluationReports ?? defaultPolicyShadowEvaluationReports);
+    this.policyShadowReadinessChecks = clone(input.policyShadowReadinessChecks ?? defaultPolicyShadowReadinessChecks);
     this.stagingDeploymentProfile = clone(input.stagingDeploymentProfile ?? defaultStagingDeploymentProfile);
     this.stagingIntegrationGates = clone(input.stagingIntegrationGates ?? defaultStagingIntegrationGates);
     this.stagingReadinessChecks = clone(input.stagingReadinessChecks ?? defaultStagingReadinessChecks);
@@ -838,6 +902,159 @@ export class DeploymentReadinessService {
     return clone(this.authRbacPermissionMatrix);
   }
 
+  listProductionAuthProviderConfigs(): ProductionAuthProviderConfig[] {
+    return clone(this.productionAuthProviderConfigs).map((config) => this.applyProductionAuthProviderEnvStatus(config));
+  }
+
+  listProductionAuthProviderReadiness(): ProductionAuthProviderReadiness[] {
+    const selected = this.selectedProductionAuthProviderKind();
+    return clone(this.productionAuthProviderReadiness).map((readiness) => this.applyProductionAuthProviderReadinessStatus(readiness, selected));
+  }
+
+  listSessionTokenBoundaryPlans(): SessionTokenBoundaryPlan[] {
+    return clone(this.sessionTokenBoundaryPlans);
+  }
+
+  listIdentityMappingPlans(): IdentityMappingPlan[] {
+    return clone(this.identityMappingPlans);
+  }
+
+  getProductionAuthProviderSkeletonSummary(): ProductionAuthProviderSkeletonSummary {
+    const selected = this.selectedProductionAuthProviderKind();
+    const configs = this.listProductionAuthProviderConfigs();
+    const selectedConfig = configs.find((config) => config.providerKind === selected) ?? configs[0];
+    const readiness = this.listProductionAuthProviderReadiness();
+    const selectedReadiness = readiness.find((check) => check.providerKind === selected);
+    return {
+      generatedAt: this.now(),
+      status: "v1_implemented",
+      planningOnly: true,
+      activeProviderKind: "mock",
+      selectedProviderKind: selected,
+      selectedProviderStatus: selectedConfig?.status ?? "active_mock",
+      productionAuthEnabled: false,
+      requireAuthForApi: false,
+      futureProviderSelected: selected !== "mock",
+      futureProviderBlocked: selected !== "mock",
+      tokenValidationEnabled: false,
+      sessionBoundaryEnabled: false,
+      sessionBoundaryStatus: selected === "mock" ? "disabled" : "future",
+      identityMappingStatus: selected === "mock" ? "not_configured" : "future",
+      externalCallsEnabled: false,
+      externalIdpCallsEnabled: false,
+      missingConfigCount: selectedReadiness?.missingConfig.length ?? 0,
+      blockerCount: selectedReadiness?.blockers.length ?? 0,
+      providerOptionCount: configs.length,
+      readinessCheckCount: readiness.length,
+      sessionBoundaryPlanCount: this.sessionTokenBoundaryPlans.length,
+      identityMappingPlanCount: this.identityMappingPlans.length,
+      noTokensExposed: true,
+      authorizationHeadersStored: false,
+      cookiesStored: false,
+      sessionIdsExposed: false,
+      envValuesExposed: false,
+      secretsExposed: false,
+      productionReady: false,
+      metadata: {
+        docs: "docs/foundations/auth-rbac/production-auth-provider-skeleton-v1.md",
+        planDocs: "docs/foundations/auth-rbac/production-auth-provider-skeleton-v1-plan.md",
+        mockProviderDefault: true,
+        enableProductionAuthRequested: flag(this.env.AICHESTRA_ENABLE_PRODUCTION_AUTH),
+        requireAuthForApiRequested: flag(this.env.AICHESTRA_REQUIRE_AUTH_FOR_API),
+        productionAuthProviderSkeleton: "v1",
+        rawEnvValuesReturned: false,
+        rawHeadersStored: false,
+        cookiesStored: false,
+        sessionsIssued: false,
+        jwtIssued: false,
+        apiKeysIssued: false,
+        serviceAccountCredentialsIssued: false,
+        externalIdentityProviderCallsEnabled: false
+      }
+    };
+  }
+
+  private selectedProductionAuthProviderKind(): ProductionAuthProviderKind {
+    return normalizeProductionAuthProviderKind(this.env.AICHESTRA_AUTH_PROVIDER);
+  }
+
+  private applyProductionAuthProviderEnvStatus(config: ProductionAuthProviderConfig): ProductionAuthProviderConfig {
+    const selected = this.selectedProductionAuthProviderKind() === config.providerKind;
+    const requiredConfig = this.productionAuthProviderRequiredConfig(config);
+    const missingConfig = requiredConfig.filter((key) => !stringConfigured(this.env[key]));
+    const status = config.providerKind === "mock"
+      ? "active_mock"
+      : selected && missingConfig.length > 0
+        ? "not_configured"
+        : selected
+          ? "disabled"
+          : "future";
+    return {
+      ...config,
+      status,
+      issuerConfigured: stringConfigured(this.env.AICHESTRA_AUTH_OIDC_ISSUER),
+      audienceConfigured: stringConfigured(this.env.AICHESTRA_AUTH_OIDC_AUDIENCE),
+      jwksConfigured: stringConfigured(this.env.AICHESTRA_AUTH_OIDC_JWKS_URI),
+      metadataUrlConfigured: stringConfigured(this.env.AICHESTRA_AUTH_SAML_METADATA_URL),
+      scimEndpointConfigured: stringConfigured(this.env.AICHESTRA_AUTH_SCIM_ENDPOINT),
+      groupMappingConfigured: stringConfigured(this.env.AICHESTRA_AUTH_GROUP_MAPPING),
+      tenantMappingConfigured: stringConfigured(this.env.AICHESTRA_AUTH_TENANT_MAPPING),
+      sessionBoundaryConfigured: false,
+      tokenValidationEnabled: false,
+      externalCallsEnabled: false,
+      productionReady: false,
+      metadata: {
+        ...config.metadata,
+        selected,
+        requiredConfig,
+        missingConfig,
+        rawEnvValuesReturned: false,
+        noTokenValidation: true,
+        noSessionIssuance: true,
+        noExternalCalls: true
+      }
+    };
+  }
+
+  private applyProductionAuthProviderReadinessStatus(readiness: ProductionAuthProviderReadiness, selected: ProductionAuthProviderKind): ProductionAuthProviderReadiness {
+    if (readiness.providerKind === "mock") {
+      return {
+        ...readiness,
+        status: "ready_mock",
+        missingConfig: [],
+        metadata: {
+          ...readiness.metadata,
+          selected: selected === "mock",
+          productionReady: false,
+          rawEnvValuesReturned: false
+        }
+      };
+    }
+    const selectedFuture = selected === readiness.providerKind;
+    const requiredConfig = [...readiness.requiredConfig];
+    const missingConfig = selectedFuture ? requiredConfig.filter((key) => !stringConfigured(this.env[key])) : [];
+    return {
+      ...readiness,
+      status: selectedFuture && missingConfig.length > 0 ? "missing_config" : selectedFuture ? "blocked" : "future",
+      missingConfig,
+      blockers: selectedFuture ? ["provider_not_implemented", "production_auth_enabled:false"] : [],
+      metadata: {
+        ...readiness.metadata,
+        selected: selectedFuture,
+        rawEnvValuesReturned: false,
+        noTokenValidation: true,
+        noSessionIssuance: true,
+        noExternalCalls: true
+      }
+    };
+  }
+
+  private productionAuthProviderRequiredConfig(config: ProductionAuthProviderConfig): string[] {
+    return Array.isArray(config.metadata.requiredConfig)
+      ? config.metadata.requiredConfig.filter((item): item is string => typeof item === "string")
+      : [];
+  }
+
   listPolicyEngineOptions(): PolicyEngineOption[] {
     return clone(this.policyEngineOptions);
   }
@@ -860,6 +1077,26 @@ export class DeploymentReadinessService {
 
   listPolicyBundleMigrationPhases(): PolicyBundleMigrationPhase[] {
     return clone(this.policyBundleMigrationPhases);
+  }
+
+  getPolicyShadowEvaluationPlan(): PolicyShadowEvaluationPlan {
+    return clone(this.policyShadowEvaluationPlan);
+  }
+
+  listPolicyShadowComparisonRules(): PolicyShadowComparisonRule[] {
+    return clone(this.policyShadowComparisonRules);
+  }
+
+  listPolicyShadowMismatches(): PolicyShadowMismatch[] {
+    return clone(this.policyShadowMismatches);
+  }
+
+  listPolicyShadowEvaluationReports(): PolicyShadowEvaluationReport[] {
+    return clone(this.policyShadowEvaluationReports);
+  }
+
+  listPolicyShadowReadinessChecks(filter: { category?: PolicyShadowReadinessCategory } = {}): PolicyShadowReadinessCheck[] {
+    return clone(this.policyShadowReadinessChecks.filter((check) => filter.category === undefined || check.category === filter.category));
   }
 
   getStagingDeploymentProfile(): StagingDeploymentProfile {
@@ -3899,6 +4136,64 @@ export class DeploymentReadinessService {
         remotePolicyBundleLoadingImplemented: false,
         policyHotReloadImplemented: false,
         productionPolicyReady: false
+      }
+    };
+  }
+
+  getPolicyShadowEvaluationSummary(): PolicyShadowEvaluationSummary {
+    const warningCount = this.policyShadowReadinessChecks.filter((check) => check.status === "warning").length;
+    const futureCount = this.policyShadowReadinessChecks.filter((check) => check.status === "future").length;
+    const failCount = this.policyShadowReadinessChecks.filter((check) => check.status === "fail").length;
+    return {
+      generatedAt: this.now(),
+      status: "v1_implemented",
+      planningOnly: true,
+      productionReady: false,
+      sourceOfTruth: "StaticPolicyEngine",
+      enforcementMode: "shadow_only",
+      enforcementChanged: false,
+      staticPolicyEngineAuthoritative: true,
+      shadowEvaluatorImplemented: false,
+      candidateRuntimeImplemented: false,
+      candidateRuntimeExecuted: false,
+      candidateBundleValidated: false,
+      dynamicPolicyExecutionEnabled: false,
+      externalPolicyServiceCallsEnabled: false,
+      remotePolicyBundleLoadingEnabled: false,
+      signedBundleVerificationRuntimeEnabled: false,
+      opaRuntimeEnabled: false,
+      cedarRuntimeEnabled: false,
+      policyCodeExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      planStatus: this.policyShadowEvaluationPlan.status,
+      candidateRuntimeKindCount: this.policyShadowEvaluationPlan.candidateRuntimeKinds.length,
+      domainCount: this.policyShadowEvaluationPlan.domains.length,
+      rolloutStageCount: this.policyShadowEvaluationPlan.rolloutStages.length,
+      comparisonRuleCount: this.policyShadowComparisonRules.length,
+      requiredComparisonRuleCount: this.policyShadowComparisonRules.filter((rule) => rule.required).length,
+      mismatchTaxonomyCount: this.policyShadowMismatches.length,
+      criticalMismatchKindCount: this.policyShadowMismatches.filter((mismatch) => mismatch.severity === "critical").length,
+      readinessCheckCount: this.policyShadowReadinessChecks.length,
+      readinessFutureCount: futureCount,
+      readinessWarningCount: warningCount,
+      readinessFailCount: failCount,
+      reportCount: this.policyShadowEvaluationReports.length,
+      goldenCaseSource: "Policy Runtime PoC Golden Test Harness v1",
+      recommendedNextTask: "Policy Runtime Shadow Evaluator Skeleton v1",
+      metadata: {
+        docs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1.md",
+        planDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1-plan.md",
+        candidateRuntimeInterfaceDocs: "docs/roadmaps/policy-bundle-runtime-poc/candidate-runtime-interface-v1.md",
+        mismatchTaxonomyDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-mismatch-taxonomy-v1.md",
+        reportingDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-reporting-v1.md",
+        rolloutRollbackDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-rollout-rollback-v1.md",
+        goldenHarnessDocs: "docs/roadmaps/policy-bundle-runtime-poc/golden-test-harness-v1.md",
+        staticPolicyEngineAuthoritative: true,
+        noEnforcementChange: true,
+        noDynamicPolicyExecution: true,
+        noExternalPolicyServiceCalls: true,
+        noSecretsOrEnvValues: true
       }
     };
   }

@@ -11,6 +11,7 @@ Status:
 - API AuthContext Middleware Skeleton: `v1_implemented`
 - Tenant/Repo/Provider Scope Model: `v1_implemented`
 - Production Auth/RBAC Planning: `v1_implemented`
+- Production Auth Provider Skeleton: `v1_implemented`
 - Phase 5: `preparation_started`
 
 This is not production service-account authentication.
@@ -148,6 +149,8 @@ Observability normalization now surfaces `serviceAccountId` from top-level field
 - Some compatibility actor fields remain for old API/body callers and fixtures.
 - Production tenant/team/project/repo scoping remains future work.
 
+Dashboard/Readiness Tenant Scope Planning v1 treats `service_account_runner` as a service attribution role, not a default human dashboard role. The new planning matrices keep service-account credentials out of scope and do not grant dashboard access or bypass policy.
+
 ## Test Strategy
 
 `tests/service-account-actor-boundary-v1.test.ts` covers:
@@ -163,6 +166,8 @@ Observability normalization now surfaces `serviceAccountId` from top-level field
 
 Existing RequestContext, API middleware, MCP, Auth/RBAC, Policy, SecretRef/Vault, Git, LLM, Dashboard, and Observability suites remain regression coverage.
 
+Production Auth Provider Skeleton v1 keeps service-account credential issuance disabled. Future service-account token/session boundary rows are read-only metadata with `tokenIssued: false` and `validationEnabled: false`.
+
 ## Known Limitations
 
 - This is an attribution boundary, not production service-account authentication.
@@ -173,4 +178,4 @@ Existing RequestContext, API middleware, MCP, Auth/RBAC, Policy, SecretRef/Vault
 
 ## Recommended Next Task
 
-Recommended next task: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.

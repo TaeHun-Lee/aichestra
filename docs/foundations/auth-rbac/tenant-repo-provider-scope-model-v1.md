@@ -9,6 +9,10 @@ Status:
 - API AuthContext Middleware Skeleton: `v1_implemented`
 - Service Account Actor Boundary: `v1_implemented`
 - Registry/Governance RequestContext Migration: `v1_implemented`
+- Dashboard/Readiness Tenant Scope Planning: `v1_implemented`
+- Dashboard/Readiness Tenant Scope Implementation: `v1_implemented`
+- Tenant Scope Enforcement: `v1_implemented_partial`
+- Production Auth Provider Skeleton: `v1_implemented`
 - Production tenant enforcement: not implemented
 - Production Auth/RBAC: not implemented
 
@@ -22,10 +26,15 @@ Status:
 - Representative scope metadata propagation through Git, LLM, MCP, Security/SecretRef, Registry/Governance, Policy audit, Observability, Dashboard, and Readiness paths.
 - Read-only `/readiness/scopes/*` endpoints and a `/dashboard/scopes` read model.
 - Dashboard rendering for a Scope Model / Tenant Readiness panel.
+- Dashboard/Readiness Tenant Scope Planning v1 inventory and read-only planning surfaces for future dashboard/readiness filtering.
+- Dashboard/Readiness Tenant Scope Implementation v1 safe read-model metadata: `ScopedReadModelMetadata`, `DashboardPanelScopeSummary`, `ReadinessEndpointScopeSummary`, missing-scope warnings, role hints, and redaction labels.
+- Tenant Scope Enforcement v1 partial helper metadata: `TenantScopeEnforcementDecision`, `TenantScopeEnforcementMode`, `TenantScopeMismatch`, and `TenantScopeEnforcementService` for deterministic scope comparison and representative dashboard/readiness warnings.
 
 ## What v1 Does Not Implement
 
-v1 does not implement production tenant provisioning, tenant isolation enforcement, row-level security, production dashboard filtering, durable tenant repositories, production Auth/RBAC, real OIDC/SAML/SCIM/SSO, login/logout/session handling, JWTs, API keys, service-account credentials, external identity-provider calls, provider calls, artifact registry integration, or active registry mutation through auto-improvement.
+v1 does not implement production tenant provisioning, tenant isolation enforcement, row-level security, production dashboard filtering, durable tenant repositories, production Auth/RBAC, real OIDC/SAML/SCIM/SSO, login/logout/session handling, JWTs, API keys, service-account credentials, token validation, session cookies, external identity-provider calls, provider calls, artifact registry integration, or active registry mutation through auto-improvement.
+
+Dashboard/Readiness Tenant Scope Planning v1, Dashboard/Readiness Tenant Scope Implementation v1, and Tenant Scope Enforcement v1 do not change that production boundary. Planning v1 inventories dashboard panels and readiness endpoints. Implementation v1 attaches safe scope summaries, visibility hints, fallback warnings, and redaction labels to dashboard/readiness read models. Tenant Scope Enforcement v1 adds partial representative helper decisions and warning metadata only. They do not implement production tenant filtering or production tenant isolation.
 
 ## Scope Model
 
@@ -106,6 +115,8 @@ Policy helpers in `packages/policy/src/resource-scope.ts` construct scoped polic
 
 Scope metadata enriches policy input and audit output, but it does not weaken or bypass existing policy decisions.
 
+Tenant Scope Enforcement v1 can attach safe scope-decision summaries to `PolicySubject` and policy resource metadata. These summaries are audit/readiness context only: policy deny remains authoritative, and a scope allow cannot override a `StaticPolicyEngine` deny.
+
 ## Representative Integrations
 
 - Git audit and policy resources include repo scope metadata where migrated.
@@ -133,8 +144,32 @@ Read-only endpoints:
 - `GET /readiness/scopes/local-agents`
 - `GET /readiness/scopes/audit-queries`
 - `GET /dashboard/scopes`
+- `GET /readiness/tenant-scope/dashboard-plans`
+- `GET /readiness/tenant-scope/dashboard-scope-summaries`
+- `GET /readiness/tenant-scope/readiness-plans`
+- `GET /readiness/tenant-scope/readiness-scope-summaries`
+- `GET /readiness/tenant-scope/role-visibility`
+- `GET /readiness/tenant-scope/fallback-behavior`
+- `GET /readiness/tenant-scope/summary`
+- `GET /dashboard/tenant-scope`
+- `GET /readiness/tenant-enforcement/modes`
+- `GET /readiness/tenant-enforcement/mismatches`
+- `GET /readiness/tenant-enforcement/summary`
+- `GET /dashboard/tenant-enforcement`
 
 These surfaces are read-only, use deterministic mock/readiness metadata, and expose no secret values or env values. Tenant filtering is explicitly future work.
+
+Dashboard/Readiness Tenant Scope Planning v1 is documented in:
+
+- `docs/roadmaps/dashboard-readiness-tenant-scope/v1.md`
+- `docs/reference/dashboard-tenant-scope-inventory.md`
+- `docs/reference/readiness-tenant-scope-inventory.md`
+- `docs/reference/dashboard-role-visibility-matrix.md`
+- `docs/reference/readiness-role-visibility-matrix.md`
+- `docs/foundations/auth-rbac/tenant-scope-enforcement-v1.md`
+- `docs/reference/tenant-scope-enforcement-inventory.md`
+
+The planning, implementation, and partial enforcement summaries explicitly report `tenantFilteringImplemented: false`, `productionTenantEnforcement: false`, `productionEnforcementImplemented: false`, and `productionReady: false`.
 
 ## Remaining Gaps
 
@@ -146,9 +181,10 @@ These surfaces are read-only, use deterministic mock/readiness metadata, and exp
 - No production SecretRef tenant isolation.
 - No artifact registry package scope enforcement or signing.
 - No real service-account credential issuance.
+- No production-grade tenant scope enforcement; v1 is partial representative scaffolding only.
 
 ## Test Strategy
 
-Coverage lives in `tests/tenant-repo-provider-scope-model-v1.test.ts` and checks scope models, helpers, policy resource mapping, auth/request/policy subject propagation, policy-deny preservation, representative Git/LLM/MCP/SecretRef/Registry/Observability metadata, readiness APIs, dashboard rendering, and no-secret/no-env behavior.
+Coverage lives in `tests/tenant-repo-provider-scope-model-v1.test.ts` and `tests/tenant-scope-enforcement-v1.test.ts`. It checks scope models, helpers, policy resource mapping, auth/request/policy subject propagation, policy-deny preservation, representative Git/LLM/MCP/SecretRef/Registry/Observability metadata, partial enforcement decisions, readiness APIs, dashboard rendering, and no-secret/no-env behavior.
 
-Recommended next task: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.

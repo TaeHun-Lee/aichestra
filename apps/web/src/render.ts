@@ -57,6 +57,15 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
   const canaryReadiness = nestedObjects(governance, "canaryReadiness");
   const proposalApplyGates = nestedObjects(governance, "proposalApplyGates");
   const safetyPolicies = nestedObjects(governance, "safetyPolicies");
+  const panelScopeSummaries = data.tenantScopePlanning.panelScopeSummaries ?? [];
+  const readinessScopeSummaries = data.tenantScopePlanning.readinessScopeSummaries ?? [];
+  const scopeWarningSummaries = panelScopeSummaries.filter((panel) => panel.missingScopes.length > 0).slice(0, 6);
+  const secretAdjacentScopeSummaries = panelScopeSummaries.filter((panel) => panel.redactionClass === "secret_adjacent" || panel.redactionClass === "never_store_raw").slice(0, 6);
+  const roleVisibilityHints = panelScopeSummaries.slice(0, 5).map((panel) => `${panel.panelName}:${panel.allowedRoles.slice(0, 3).join("|")}`);
+  const overviewScopeMetadata = data.overview.scopeMetadata;
+  const overviewScopeDecision = overviewScopeMetadata?.scopeDecisionSummary;
+  const enforcementSummary = data.tenantScopeEnforcement.summary;
+  const enforcementWarnings = Array.isArray(overviewScopeDecision?.warnings) ? overviewScopeDecision.warnings : [];
 
   return `<!doctype html>
 <html lang="en">
@@ -533,6 +542,27 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Enforcement</strong><span>production tenant enforcement ${data.scopes.enforcement.productionTenantEnforcement === true ? "enabled" : "disabled"} / dashboard filtering ${html(data.scopes.enforcement.dashboardFilteringStatus, "future")} / external lookup ${data.scopes.enforcement.externalScopeLookupEnabled === true ? "enabled" : "disabled"}</span></div>
           <div class="item"><strong>No-secret/no-env status</strong><span>no secrets ${data.scopes.noSecretStatus.noSecretsExposed === true ? "true" : "false"} / env values exposed ${data.scopes.noSecretStatus.envValuesExposed === true ? "true" : "false"} / credentials exposed ${data.scopes.noSecretStatus.rawCredentialsExposed === true ? "true" : "false"}</span></div>
         </div>
+        <h2>Scope / Visibility / Redaction</h2>
+        <div class="list">
+          <div class="item"><strong>Scope status badges</strong><span>overview ${html(overviewScopeMetadata?.scopeStatus, "metadata_only")} / dashboard panels ${html(panelScopeSummaries.length, "0")} / readiness endpoint groups ${html(readinessScopeSummaries.length, "0")}</span></div>
+          <div class="item"><strong>Applied scope dimensions</strong><span>${html(overviewScopeMetadata?.appliedScopes, "tenant, team, project")} / tenant filtering implemented: false / production tenant enforcement: false</span></div>
+          <div class="item"><strong>Missing scope warnings</strong><span>${html(scopeWarningSummaries.map((panel) => `${panel.panelId}:${panel.missingScopes.join("|")}`), "none")}</span></div>
+          <div class="item"><strong>Role visibility hints</strong><span>${html(roleVisibilityHints, "none")}</span></div>
+          <div class="item"><strong>Redaction labels</strong><span>${html(secretAdjacentScopeSummaries.map((panel) => `${panel.panelId}:${panel.redactionClass}:${panel.enforcementStatus}`), "none")}</span></div>
+          <div class="item"><strong>Tenant scope enforcement</strong><span>${html(enforcementSummary.status, "v1_implemented_partial")} / mode ${html(overviewScopeMetadata?.enforcementMode, "warning")} / decision ${html(overviewScopeDecision?.decision, "warn")} / representative only ${enforcementSummary.representativeEnforcementOnly === true ? "true" : "false"}</span></div>
+          <div class="item"><strong>Enforcement warnings</strong><span>${html(enforcementWarnings.slice(0, 6), "none")} / audit-query scope warnings visible / secret-adjacent warnings visible</span></div>
+          <div class="item"><strong>Tenant filtering</strong><span>tenant filtering implemented: ${enforcementSummary.tenantFilteringImplemented === true ? "true" : "false"} / production tenant enforcement: ${enforcementSummary.productionTenantEnforcement === true ? "true" : "false"} / production auth: ${enforcementSummary.productionAuthImplemented === true ? "true" : "false"}</span></div>
+          <div class="item"><strong>No-secret/no-env status</strong><span>no secrets ${data.tenantScopePlanning.noSecretStatus.noSecretsExposed === true ? "true" : "false"} / env values exposed ${data.tenantScopePlanning.noSecretStatus.envValuesExposed === true ? "true" : "false"} / metadata only ${data.tenantScopePlanning.summary.scopeMetadataStatus === "v1_implemented" ? "true" : "false"}</span></div>
+        </div>
+        <h2>Dashboard Tenant Scope Planning</h2>
+        <div class="list">
+          <div class="item"><strong>Status</strong><span>${html(data.tenantScopePlanning.summary.status, "v1_implemented")} / implementation ${html(data.tenantScopePlanning.summary.implementationStatus, "v1_implemented")} / planning only ${html(data.tenantScopePlanning.summary.planningOnly, "true")} / tenant filtering implemented ${data.tenantScopePlanning.summary.tenantFilteringImplemented === true ? "true" : "false"} / production enforcement ${data.tenantScopePlanning.summary.productionTenantEnforcement === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Inventory</strong><span>dashboard panels ${html(data.tenantScopePlanning.summary.dashboardPanelCount, "0")} / readiness endpoints ${html(data.tenantScopePlanning.summary.readinessEndpointCount, "0")} / panel scope summaries ${html(data.tenantScopePlanning.summary.dashboardPanelScopeSummaryCount, "0")} / endpoint scope summaries ${html(data.tenantScopePlanning.summary.readinessEndpointScopeSummaryCount, "0")} / role rows ${html(data.tenantScopePlanning.roleVisibility.length, "0")}</span></div>
+          <div class="item"><strong>Scope coverage</strong><span>tenant panels ${html(data.tenantScopePlanning.summary.panelsRequiringTenantScope, "0")} / tenant endpoints ${html(data.tenantScopePlanning.summary.endpointsRequiringTenantScope, "0")} / audit surfaces ${html(data.tenantScopePlanning.summary.auditScopedSurfaces, "0")}</span></div>
+          <div class="item"><strong>Risk counts</strong><span>secret-adjacent surfaces ${html(data.tenantScopePlanning.summary.secretAdjacentSurfaces, "0")} / production blockers ${html(data.tenantScopePlanning.summary.productionBlockerCount, "0")}</span></div>
+          <div class="item"><strong>Fallback policy</strong><span>${html(data.tenantScopePlanning.fallbackBehavior.map((entry) => `${text(entry.missingScope)}:${text(entry.productionBehavior)}`), "none")}</span></div>
+          <div class="item"><strong>No-secret/no-env status</strong><span>no secrets ${data.tenantScopePlanning.noSecretStatus.noSecretsExposed === true ? "true" : "false"} / env values exposed ${data.tenantScopePlanning.noSecretStatus.envValuesExposed === true ? "true" : "false"} / production ready ${data.tenantScopePlanning.noSecretStatus.productionReady === true ? "true" : "false"}</span></div>
+        </div>
         <h2>Observability</h2>
         <div class="list">
           <div class="item"><strong>Status</strong><span>${html(data.observability.config.status)} / ${html(data.observability.config.aggregationMode)} / external backend ${data.observability.config.externalBackendEnabled === true ? "enabled" : "disabled"}</span></div>
@@ -580,6 +610,18 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Production blockers</strong><span>${html(data.policyBundles.blockers.map((blocker) => `${text(blocker.id)}:${text(blocker.severity)}`), "none")}</span></div>
           <div class="item"><strong>No dynamic policy execution</strong><span>dynamic execution ${data.policyBundles.noExecutionStatus.dynamicPolicyExecutionEnabled === true ? "enabled" : "disabled"} / external engine ${data.policyBundles.noExecutionStatus.externalPolicyEngineEnabled === true ? "enabled" : "disabled"} / policy code executed ${data.policyBundles.noExecutionStatus.policyCodeExecuted === true ? "true" : "false"} / no secrets ${data.policyBundles.noExecutionStatus.noSecretsExposed === true ? "true" : "false"}</span></div>
         </div>
+        <h2>Policy Runtime Shadow Evaluation</h2>
+        <div class="list">
+          <div class="item"><strong>Shadow status</strong><span>${html(data.policyShadow.summary.status, "v1_implemented")} / mode ${html(data.policyShadow.summary.enforcementMode, "shadow_only")} / source ${html(data.policyShadow.summary.sourceOfTruth, "StaticPolicyEngine")} / enforcement changed ${data.policyShadow.summary.enforcementChanged === true ? "true" : "false"}</span></div>
+          <div class="item"><strong>Runtime state</strong><span>shadow evaluator ${data.policyShadow.summary.shadowEvaluatorImplemented === true ? "implemented" : "not implemented"} / candidate runtime ${data.policyShadow.summary.candidateRuntimeImplemented === true ? "implemented" : "not implemented"} / candidate executed ${data.policyShadow.summary.candidateRuntimeExecuted === true ? "true" : "false"}</span></div>
+          <div class="item"><strong>Candidate kinds</strong><span>${html(data.policyShadow.plan.candidateRuntimeKinds, "none")}</span></div>
+          <div class="item"><strong>Comparison rules</strong><span>${html(data.policyShadow.comparisonRules.map((rule) => `${text(rule.comparisonKind)}:${text(rule.required)}:${text(rule.severityOnMismatch)}`), "none")}</span></div>
+          <div class="item"><strong>Mismatch taxonomy</strong><span>${html(data.policyShadow.mismatchTaxonomy.map((mismatch) => `${text(mismatch.mismatchKind)}:${text(mismatch.severity)}:${text(mismatch.defaultAction)}`), "none")}</span></div>
+          <div class="item"><strong>Critical mismatch examples</strong><span>${html(data.policyShadow.criticalMismatchExamples.map((mismatch) => mismatch.example ?? mismatch.mismatchKind), "none")}</span></div>
+          <div class="item"><strong>Rollout stage</strong><span>${html(data.policyShadow.rollout.currentStage, "docs_planning")} / live shadow ${data.policyShadow.rollout.liveShadowEvaluationEnabled === true ? "enabled" : "disabled"} / production enforcement ${data.policyShadow.rollout.productionEnforcementEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Readiness checks</strong><span>${html(data.policyShadow.readinessChecks.map((check) => `${text(check.category)}:${text(check.status)}`), "none")}</span></div>
+          <div class="item"><strong>No dynamic policy execution</strong><span>dynamic execution ${data.policyShadow.noExecutionStatus.dynamicPolicyExecutionEnabled === true ? "enabled" : "disabled"} / external service ${data.policyShadow.noExecutionStatus.externalPolicyServiceCallsEnabled === true ? "enabled" : "disabled"} / policy code executed ${data.policyShadow.noExecutionStatus.policyCodeExecuted === true ? "true" : "false"} / no secrets ${data.policyShadow.noExecutionStatus.noSecretsExposed === true ? "true" : "false"} / env values exposed ${data.policyShadow.noExecutionStatus.envValuesExposed === true ? "true" : "false"}</span></div>
+        </div>
         <h2>Auth/RBAC</h2>
         <div class="list">
           <div class="item"><strong>Auth mode</strong><span>${html(data.auth.config.authMode)} / provider ${html(data.auth.config.providerKind)} / production auth ${data.auth.config.productionAuthEnabled === true ? "enabled" : "disabled"} / mock actor ${data.auth.config.mockActorEnabled === true ? "enabled" : "disabled"}</span></div>
@@ -601,6 +643,17 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Role matrix</strong><span>${html(data.authProduction.permissionMatrix.map((entry) => `${text(entry.roleName)}:${text(entry.productionDefault)}:${text(entry.riskLevel)}`), "none")}</span></div>
           <div class="item"><strong>Production blockers</strong><span>${html(data.authProduction.blockers.map((blocker) => `${text(blocker.id)}:${text(blocker.severity)}`), "none")}</span></div>
           <div class="item"><strong>No-token/no-session status</strong><span>tokens exposed ${data.authProduction.noTokenStatus.noTokensExposed === true ? "false" : "true"} / cookies ${data.authProduction.noTokenStatus.cookiesExposed === true ? "exposed" : "hidden"} / sessions ${data.authProduction.noTokenStatus.sessionIdsExposed === true ? "exposed" : "hidden"} / assertions ${data.authProduction.noTokenStatus.rawIdentityAssertionsExposed === true ? "exposed" : "hidden"}</span></div>
+        </div>
+        <h2>Production Auth Provider Skeleton</h2>
+        <div class="list">
+          <div class="item"><strong>Active provider</strong><span>${html(data.authProviders.summary.activeProviderKind, "mock")} / selected ${html(data.authProviders.summary.selectedProviderKind, "mock")} / status ${html(data.authProviders.summary.selectedProviderStatus, "active_mock")}</span></div>
+          <div class="item"><strong>Runtime guarantees</strong><span>production auth ${data.authProviders.summary.productionAuthEnabled === true ? "enabled" : "disabled"} / token validation ${data.authProviders.summary.tokenValidationEnabled === true ? "enabled" : "disabled"} / external calls ${data.authProviders.summary.externalCallsEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Future providers</strong><span>${html(data.authProviders.configs.map((config) => `${text(config.providerKind)}:${text(config.status)}`), "none")}</span></div>
+          <div class="item"><strong>Session boundary</strong><span>${html(data.authProviders.sessionBoundary.map((plan) => `${text(plan.boundaryKind)}:${text(plan.status)}:issued=${text(plan.tokenIssued)}`), "none")}</span></div>
+          <div class="item"><strong>Identity mapping</strong><span>${html(data.authProviders.identityMapping.map((plan) => `${text(plan.mappingKind)}:${text(plan.status)}:${text(plan.targetModel)}`), "none")}</span></div>
+          <div class="item"><strong>Missing config</strong><span>${html(data.authProviders.summary.missingConfigCount, "0")} item(s); values are never shown</span></div>
+          <div class="item"><strong>Blockers</strong><span>${html(data.authProviders.blockers.map((blocker) => `${text(blocker.providerKind)}:${text(blocker.blocker)}`), "none")}</span></div>
+          <div class="item"><strong>No-token/no-session status</strong><span>tokens ${data.authProviders.noTokenStatus.noTokensExposed === true ? "hidden" : "exposed"} / auth headers stored ${data.authProviders.noTokenStatus.authorizationHeadersStored === true ? "true" : "false"} / cookies stored ${data.authProviders.noTokenStatus.cookiesStored === true ? "true" : "false"} / session ids ${data.authProviders.noTokenStatus.sessionIdsExposed === true ? "exposed" : "hidden"} / env values ${data.authProviders.noTokenStatus.envValuesExposed === true ? "exposed" : "hidden"}</span></div>
         </div>
         <h2>Secrets and Sandbox</h2>
         <div class="list">

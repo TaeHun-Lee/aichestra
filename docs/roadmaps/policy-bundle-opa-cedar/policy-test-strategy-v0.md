@@ -33,10 +33,10 @@ Future bundle CI must run:
 - golden decision suite
 - deny-by-default suite
 - no-secret suite
-- shadow decision comparison, once available
+- shadow decision comparison, once a future evaluator is implemented
 
 ## Coverage Expectations
 
 Every production policy bundle must include at least one allow case, one deny case, one missing-input case, one tenant mismatch case, and one redaction/no-secret case for each target domain.
 
-v0 adds readiness data only; it does not implement a bundle test runner.
+Policy Runtime Shadow Evaluation Planning v1 now defines how golden cases feed future shadow comparison, but no candidate runtime is executed and v0 does not implement a bundle test runner.

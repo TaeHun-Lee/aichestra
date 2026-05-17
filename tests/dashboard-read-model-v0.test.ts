@@ -116,8 +116,10 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const agents = await getJson(port, "/dashboard/agents") as { agents: { config: { localCommandExecutionEnabled: boolean }; blockedExamples: unknown[] } };
     const policy = await getJson(port, "/dashboard/policy") as { policy: { rules: unknown[]; blockedExamples: unknown[] } };
     const policyBundles = await getJson(port, "/dashboard/policy-bundles") as { policyBundles: { summary: { productionReady: boolean; externalPolicyEngineEnabled: boolean; dynamicPolicyExecutionEnabled: boolean }; engineOptions: unknown[]; domainMappings: unknown[]; noExecutionStatus: { policyCodeExecuted: boolean; noSecretsExposed: boolean } } };
+    const policyShadow = await getJson(port, "/dashboard/policy-shadow") as { policyShadow: { summary: { productionReady: boolean; sourceOfTruth: string; enforcementChanged: boolean; candidateRuntimeImplemented: boolean; shadowEvaluatorImplemented: boolean; dynamicPolicyExecutionEnabled: boolean }; comparisonRules: unknown[]; mismatchTaxonomy: unknown[]; criticalMismatchExamples: unknown[]; noExecutionStatus: { staticPolicyEngineAuthoritative: boolean; candidateRuntimeExecuted: boolean; policyCodeExecuted: boolean; noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const auth = await getJson(port, "/dashboard/auth") as { auth: { config: { authMode: string; productionAuthEnabled: boolean }; warning: string; actors: unknown[] } };
     const authProduction = await getJson(port, "/dashboard/auth-production") as { authProduction: { summary: { productionReady: boolean; productionAuthEnabled: boolean; futureIdpConfigured: boolean }; providerOptions: unknown[]; blockers: unknown[]; noTokenStatus: { noTokensExposed: boolean; cookiesExposed: boolean; sessionIdsExposed: boolean; rawIdentityAssertionsExposed: boolean } } };
+    const authProviders = await getJson(port, "/dashboard/auth-providers") as { authProviders: { summary: { activeProviderKind: string; productionAuthEnabled: boolean; tokenValidationEnabled: boolean }; configs: unknown[]; readiness: unknown[]; noTokenStatus: { noTokensExposed: boolean; authorizationHeadersStored: boolean; cookiesStored: boolean; sessionIdsExposed: boolean; envValuesExposed: boolean } } };
     const providers = await getJson(port, "/dashboard/providers") as { providers: { catalog: unknown[]; blockedExamples: unknown[] } };
     const security = await getJson(port, "/dashboard/security") as { security: { secretRefs: unknown[]; blockedExamples: unknown[] } };
     const localAgents = await getJson(port, "/dashboard/local-agents") as { localAgents: { config: { realTransportEnabled: boolean; vendorCliExecutionEnabled: boolean }; blockedExamples: unknown[] } };
@@ -176,6 +178,20 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(policyBundles.policyBundles.domainMappings.length > 0, true);
     assert.equal(policyBundles.policyBundles.noExecutionStatus.policyCodeExecuted, false);
     assert.equal(policyBundles.policyBundles.noExecutionStatus.noSecretsExposed, true);
+    assert.equal(policyShadow.policyShadow.summary.productionReady, false);
+    assert.equal(policyShadow.policyShadow.summary.sourceOfTruth, "StaticPolicyEngine");
+    assert.equal(policyShadow.policyShadow.summary.enforcementChanged, false);
+    assert.equal(policyShadow.policyShadow.summary.candidateRuntimeImplemented, false);
+    assert.equal(policyShadow.policyShadow.summary.shadowEvaluatorImplemented, false);
+    assert.equal(policyShadow.policyShadow.summary.dynamicPolicyExecutionEnabled, false);
+    assert.equal(policyShadow.policyShadow.comparisonRules.length > 0, true);
+    assert.equal(policyShadow.policyShadow.mismatchTaxonomy.length > 0, true);
+    assert.equal(policyShadow.policyShadow.criticalMismatchExamples.length > 0, true);
+    assert.equal(policyShadow.policyShadow.noExecutionStatus.staticPolicyEngineAuthoritative, true);
+    assert.equal(policyShadow.policyShadow.noExecutionStatus.candidateRuntimeExecuted, false);
+    assert.equal(policyShadow.policyShadow.noExecutionStatus.policyCodeExecuted, false);
+    assert.equal(policyShadow.policyShadow.noExecutionStatus.noSecretsExposed, true);
+    assert.equal(policyShadow.policyShadow.noExecutionStatus.envValuesExposed, false);
     assert.equal(auth.auth.config.authMode, "mock");
     assert.equal(auth.auth.config.productionAuthEnabled, false);
     assert.equal(auth.auth.actors.length > 0, true);
@@ -189,6 +205,16 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(authProduction.authProduction.noTokenStatus.cookiesExposed, false);
     assert.equal(authProduction.authProduction.noTokenStatus.sessionIdsExposed, false);
     assert.equal(authProduction.authProduction.noTokenStatus.rawIdentityAssertionsExposed, false);
+    assert.equal(authProviders.authProviders.summary.activeProviderKind, "mock");
+    assert.equal(authProviders.authProviders.summary.productionAuthEnabled, false);
+    assert.equal(authProviders.authProviders.summary.tokenValidationEnabled, false);
+    assert.equal(authProviders.authProviders.configs.length > 0, true);
+    assert.equal(authProviders.authProviders.readiness.length > 0, true);
+    assert.equal(authProviders.authProviders.noTokenStatus.noTokensExposed, true);
+    assert.equal(authProviders.authProviders.noTokenStatus.authorizationHeadersStored, false);
+    assert.equal(authProviders.authProviders.noTokenStatus.cookiesStored, false);
+    assert.equal(authProviders.authProviders.noTokenStatus.sessionIdsExposed, false);
+    assert.equal(authProviders.authProviders.noTokenStatus.envValuesExposed, false);
     assert.equal(providers.providers.catalog.length > 0, true);
     assert.equal(providers.providers.blockedExamples.length > 0, true);
     assert.equal(security.security.secretRefs.length > 0, true);
@@ -333,7 +359,19 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const scopes = await getJson(port, "/dashboard/scopes") as { scopes: DashboardReadModels["scopes"] };
     assert.equal((scopes.scopes.summary as Record<string, unknown>).enforcementStatus, "planning_model_only");
     assert.equal(scopes.scopes.noSecretStatus.noSecretsExposed, true);
-    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, githubAppIntegration, llm, llmIntegration, agents, policy, policyBundles, auth, authProduction, scopes, providers, security, localAgents, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, vaultIntegration, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit }), false);
+    const tenantScopePlanning = await getJson(port, "/dashboard/tenant-scope") as { tenantScopePlanning: DashboardReadModels["tenantScopePlanning"] };
+    const tenantScopePlanningSummary = tenantScopePlanning.tenantScopePlanning.summary as Record<string, unknown>;
+    assert.equal(tenantScopePlanningSummary.status, "v1_implemented");
+    assert.equal(tenantScopePlanningSummary.tenantFilteringImplemented, false);
+    assert.equal(tenantScopePlanningSummary.productionTenantEnforcement, false);
+    assert.equal(tenantScopePlanning.tenantScopePlanning.dashboardPlans.length > 0, true);
+    assert.equal(tenantScopePlanning.tenantScopePlanning.readinessPlans.length > 0, true);
+    assert.equal(tenantScopePlanning.tenantScopePlanning.noSecretStatus.noSecretsExposed, true);
+    const tenantScopeEnforcement = await getJson(port, "/dashboard/tenant-enforcement") as { tenantScopeEnforcement: DashboardReadModels["tenantScopeEnforcement"] };
+    assert.equal(tenantScopeEnforcement.tenantScopeEnforcement.summary.status, "v1_implemented_partial");
+    assert.equal(tenantScopeEnforcement.tenantScopeEnforcement.summary.tenantFilteringImplemented, false);
+    assert.equal(tenantScopeEnforcement.tenantScopeEnforcement.summary.productionTenantEnforcement, false);
+    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, githubAppIntegration, llm, llmIntegration, agents, policy, policyBundles, policyShadow, auth, authProduction, authProviders, scopes, tenantScopePlanning, tenantScopeEnforcement, providers, security, localAgents, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, vaultIntegration, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit }), false);
   });
 });
 
@@ -370,9 +408,13 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
     ["/dashboard/agents", { agents: demo.agents }],
     ["/dashboard/policy", { policy: demo.policy }],
     ["/dashboard/policy-bundles", { policyBundles: demo.policyBundles }],
+    ["/dashboard/policy-shadow", { policyShadow: demo.policyShadow }],
     ["/dashboard/auth", { auth: demo.auth }],
     ["/dashboard/auth-production", { authProduction: demo.authProduction }],
+    ["/dashboard/auth-providers", { authProviders: demo.authProviders }],
     ["/dashboard/scopes", { scopes: demo.scopes }],
+    ["/dashboard/tenant-scope", { tenantScopePlanning: demo.tenantScopePlanning }],
+    ["/dashboard/tenant-enforcement", { tenantScopeEnforcement: demo.tenantScopeEnforcement }],
     ["/dashboard/providers", { providers: demo.providers }],
     ["/dashboard/security", { security: demo.security }],
     ["/dashboard/local-agents", { localAgents: demo.localAgents }],
@@ -434,6 +476,7 @@ test("dashboard renderer consumes read models and preserves static demo fallback
   assert.equal(html.includes("LLM Gateway"), true);
   assert.equal(html.includes("LLM Integration Tests"), true);
   assert.equal(html.includes("Policy Bundle / OPA-Cedar Readiness"), true);
+  assert.equal(html.includes("Policy Runtime Shadow Evaluation"), true);
   assert.equal(html.includes("Auth/RBAC"), true);
   assert.equal(html.includes("Auth/RBAC Production Readiness"), true);
   assert.equal(html.includes("Local Agent Protocol"), true);
@@ -447,6 +490,8 @@ test("dashboard renderer consumes read models and preserves static demo fallback
   assert.equal(html.includes("Staging Release Candidate Checklist"), true);
   assert.equal(html.includes("Staging Deployment Execution Plan"), true);
   assert.equal(html.includes("Staging CI/CD Pipeline"), true);
+  assert.equal(html.includes("Dashboard Tenant Scope Planning"), true);
+  assert.equal(html.includes("tenant filtering implemented false"), true);
   assert.equal(html.includes("Observability"), true);
   assert.equal(html.includes("credential cache paths redacted"), true);
   assert.equal(html.includes("sk-dashboard-secret"), false);

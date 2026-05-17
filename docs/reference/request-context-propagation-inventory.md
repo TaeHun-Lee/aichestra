@@ -1,6 +1,6 @@
 # RequestContext Propagation Inventory
 
-Status: RequestContext Propagation `v1_implemented`; API AuthContext Middleware Skeleton `v1_implemented`; Service Account Actor Boundary `v1_implemented`; Registry/Governance RequestContext Migration `v1_implemented`; Tenant/Repo/Provider Scope Model `v1_implemented`.
+Status: RequestContext Propagation `v1_implemented`; API AuthContext Middleware Skeleton `v1_implemented`; Service Account Actor Boundary `v1_implemented`; Registry/Governance RequestContext Migration `v1_implemented`; Tenant/Repo/Provider Scope Model `v1_implemented`; Production Auth Provider Skeleton `v1_implemented`.
 
 This inventory classifies current propagation after the v1 slice. It is not a production auth readiness claim.
 
@@ -9,7 +9,7 @@ API route-level coverage is tracked in `docs/reference/api-authcontext-middlewar
 | Boundary | Files | Context Propagated | Actor Source Before | Actor Source After | PolicySubject Enriched | Audit Correlation Added | Remaining Gap | Production Impact |
 |---|---|---:|---|---|---:|---:|---|---|
 | API | `apps/api/src/main.ts`, `apps/api/src/request-context-middleware.ts` | yes/partial | route-specific actor strings and body actor ids | `ApiRequestContextMiddleware` cached ingress context plus `RequestContextResolver` helpers | partial | partial | route permission matrix and legacy actor fields remain | production auth still blocked |
-| Auth/RBAC | `packages/auth/src/*` | yes | `MockAuthProvider` actor id | `RequestContext` -> `AuthContext` -> `AuthorizationService` | yes | yes | no real provider/session/token | mock-first only |
+| Auth/RBAC | `packages/auth/src/*` | yes | `MockAuthProvider` actor id | `RequestContext` -> `AuthContext` -> `AuthorizationService` plus safe authProviderKind/status metadata | yes | yes | no real provider/session/token; disabled future providers cannot authenticate | mock-first only |
 | Policy | `packages/policy/src/*` | yes | subject/body/default mock subject | AuthContext-derived subject when propagated | yes | yes | direct policy calls can still pass explicit subjects | deny-by-default preserved |
 | Git | `packages/git-adapter/src/service.ts`, `packages/git-adapter/src/webhooks.ts`, `packages/git-adapter/src/github-app.ts`, `apps/api/src/main.ts` | partial | `mock-git-actor`, webhook/sync service strings | optional `RequestContext` on API paths plus `git_provider_service`, `git_webhook_service`, `git_sync_service`, and `github_app_token_service` fallbacks | partial | yes | production webhook replay/dead-letter and worker context persistence future | no remote operation enabled |
 | LLM | `packages/llm-gateway/src/gateway.ts`, `apps/api/src/main.ts` | yes for route/completion | `mock-llm-actor` fallback | optional `RequestContext` on route/completion requests plus `llm_gateway_service`/`llm_router_service` fallbacks | yes | yes | some nested fallback metadata remains partial | remote LLM gates unchanged |
@@ -34,6 +34,8 @@ Runtime actor strings remaining after v1:
 
 Test fixtures and documentation references are not runtime gaps.
 
+Production Auth Provider Skeleton v1 adds provider kind/status, production auth enabled false, token validation enabled false, session boundary status, and identity mapping status to safe metadata paths. These fields must not contain Authorization headers, cookies, token values, session ids, raw claims, IdP responses, client secrets, or env values.
+
 ## Follow-up
 
-Next implementation slice should add Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Next implementation slice should add OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.

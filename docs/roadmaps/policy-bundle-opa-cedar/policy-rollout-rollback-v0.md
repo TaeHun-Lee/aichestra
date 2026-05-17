@@ -21,7 +21,7 @@ Future rollout stages:
 1. Draft bundle, not executable.
 2. Validated bundle, tests attached.
 3. Reviewed bundle, approved but inactive.
-4. Shadow evaluation against `StaticPolicyEngine`.
+4. Shadow evaluation against `StaticPolicyEngine`, using the planning model in `docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1.md`.
 5. Dry-run decisions recorded but not enforced.
 6. Per-domain activation behind explicit gates.
 7. Full activation only after production Auth/RBAC, tenant scope, audit, and rollback controls exist.
@@ -50,4 +50,4 @@ Planned events:
 
 ## Out Of Scope
 
-No rollout controller, background job, policy runtime activation, or rollback mechanism exists in v0.
+No rollout controller, background job, policy runtime activation, shadow evaluator, candidate runtime execution, or rollback mechanism exists in v0.

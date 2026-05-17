@@ -46,6 +46,14 @@ import type {
   PolicyBundleRisk,
   PolicyDomainMapping,
   PolicyEngineOption,
+  PolicyShadowComparisonRule,
+  PolicyShadowEvaluationPlan,
+  PolicyShadowEvaluationReport,
+  PolicyShadowMismatch,
+  PolicyShadowReadinessCheck,
+  ProductionAuthProviderConfig,
+  ProductionAuthProviderReadiness,
+  IdentityMappingPlan,
   ProductionRisk,
   ReadinessCheck,
   SecretBackendDecisionCriterion,
@@ -69,7 +77,8 @@ import type {
   StagingReadinessCheck,
   StagingRollbackCriterion,
   SecretLeasePolicy,
-  SecretRotationPlan
+  SecretRotationPlan,
+  SessionTokenBoundaryPlan
 } from "./types.ts";
 
 export const defaultDeploymentProfiles: DeploymentProfile[] = [
@@ -2836,6 +2845,137 @@ export const defaultAuthProviderOptions: AuthProviderOption[] = [
   }
 ];
 
+function productionAuthProviderConfig(input: {
+  providerKind: ProductionAuthProviderConfig["providerKind"];
+  status: ProductionAuthProviderConfig["status"];
+  displayName: string;
+  requiredConfig: string[];
+  protocolFamily: string;
+}): ProductionAuthProviderConfig {
+  return {
+    id: `production_auth_provider_${input.providerKind}`,
+    providerKind: input.providerKind,
+    status: input.status,
+    displayName: input.displayName,
+    issuerConfigured: false,
+    audienceConfigured: false,
+    jwksConfigured: false,
+    metadataUrlConfigured: false,
+    scimEndpointConfigured: false,
+    groupMappingConfigured: false,
+    tenantMappingConfigured: false,
+    sessionBoundaryConfigured: false,
+    tokenValidationEnabled: false,
+    externalCallsEnabled: false,
+    productionReady: false,
+    metadata: {
+      requiredConfig: input.requiredConfig,
+      protocolFamily: input.protocolFamily,
+      providerImplemented: input.providerKind === "mock",
+      futureProviderImplemented: false,
+      rawEnvValuesReturned: false,
+      noTokenValidation: true,
+      noSessionIssuance: true,
+      noExternalCalls: true
+    }
+  };
+}
+
+export const defaultProductionAuthProviderConfigs: ProductionAuthProviderConfig[] = [
+  productionAuthProviderConfig({ providerKind: "mock", status: "active_mock", displayName: "MockAuthProvider", requiredConfig: [], protocolFamily: "mock" }),
+  productionAuthProviderConfig({ providerKind: "oidc_future", status: "future", displayName: "Disabled OIDC provider", requiredConfig: ["AICHESTRA_AUTH_OIDC_ISSUER", "AICHESTRA_AUTH_OIDC_AUDIENCE", "AICHESTRA_AUTH_OIDC_JWKS_URI"], protocolFamily: "oidc" }),
+  productionAuthProviderConfig({ providerKind: "saml_future", status: "future", displayName: "Disabled SAML provider", requiredConfig: ["AICHESTRA_AUTH_SAML_METADATA_URL"], protocolFamily: "saml" }),
+  productionAuthProviderConfig({ providerKind: "scim_future", status: "future", displayName: "Disabled SCIM directory provider", requiredConfig: ["AICHESTRA_AUTH_SCIM_ENDPOINT"], protocolFamily: "scim" }),
+  productionAuthProviderConfig({ providerKind: "microsoft_entra_future", status: "future", displayName: "Disabled Microsoft Entra provider", requiredConfig: ["AICHESTRA_AUTH_OIDC_ISSUER", "AICHESTRA_AUTH_OIDC_AUDIENCE", "AICHESTRA_AUTH_OIDC_JWKS_URI", "AICHESTRA_AUTH_SCIM_ENDPOINT"], protocolFamily: "oidc_scim" }),
+  productionAuthProviderConfig({ providerKind: "okta_future", status: "future", displayName: "Disabled Okta provider", requiredConfig: ["AICHESTRA_AUTH_OIDC_ISSUER", "AICHESTRA_AUTH_OIDC_AUDIENCE", "AICHESTRA_AUTH_OIDC_JWKS_URI", "AICHESTRA_AUTH_SCIM_ENDPOINT"], protocolFamily: "oidc_scim" }),
+  productionAuthProviderConfig({ providerKind: "auth0_future", status: "future", displayName: "Disabled Auth0 provider", requiredConfig: ["AICHESTRA_AUTH_OIDC_ISSUER", "AICHESTRA_AUTH_OIDC_AUDIENCE", "AICHESTRA_AUTH_OIDC_JWKS_URI"], protocolFamily: "oidc" }),
+  productionAuthProviderConfig({ providerKind: "google_workspace_future", status: "future", displayName: "Disabled Google Workspace provider", requiredConfig: ["AICHESTRA_AUTH_OIDC_ISSUER", "AICHESTRA_AUTH_OIDC_AUDIENCE", "AICHESTRA_AUTH_OIDC_JWKS_URI", "AICHESTRA_AUTH_SCIM_ENDPOINT"], protocolFamily: "oidc_scim" }),
+  productionAuthProviderConfig({ providerKind: "github_enterprise_future", status: "future", displayName: "Disabled GitHub Enterprise identity provider", requiredConfig: ["AICHESTRA_AUTH_OIDC_ISSUER", "AICHESTRA_AUTH_OIDC_AUDIENCE"], protocolFamily: "oidc" }),
+  productionAuthProviderConfig({ providerKind: "custom_future", status: "future", displayName: "Disabled custom production auth provider", requiredConfig: [], protocolFamily: "custom" })
+];
+
+function productionAuthProviderReadiness(config: ProductionAuthProviderConfig): ProductionAuthProviderReadiness {
+  return {
+    id: `readiness_${config.providerKind}`,
+    providerKind: config.providerKind,
+    status: config.providerKind === "mock" ? "ready_mock" : "future",
+    requiredConfig: Array.isArray(config.metadata.requiredConfig) ? config.metadata.requiredConfig.filter((item): item is string => typeof item === "string") : [],
+    missingConfig: [],
+    warnings: config.providerKind === "mock"
+      ? ["mock_provider_is_not_production_authentication"]
+      : ["future_provider_disabled", "token_validation_enabled:false", "external_calls_enabled:false"],
+    blockers: config.providerKind === "mock" ? ["production_auth_provider_not_implemented"] : [],
+    metadata: {
+      selected: config.providerKind === "mock",
+      providerImplemented: config.providerKind === "mock",
+      futureProviderImplemented: false,
+      rawEnvValuesReturned: false,
+      noTokenValidation: true,
+      noSessionIssuance: true,
+      noExternalCalls: true
+    }
+  };
+}
+
+export const defaultProductionAuthProviderReadiness: ProductionAuthProviderReadiness[] = defaultProductionAuthProviderConfigs.map(productionAuthProviderReadiness);
+
+function sessionTokenBoundaryPlan(boundaryKind: SessionTokenBoundaryPlan["boundaryKind"], storageStrategy: string): SessionTokenBoundaryPlan {
+  return {
+    id: `session_token_boundary_${boundaryKind}`,
+    boundaryKind,
+    status: "future",
+    tokenIssued: false,
+    validationEnabled: false,
+    storageStrategy,
+    rotationStrategy: "future_rotation_design_required_before_any_token_material_exists",
+    revocationStrategy: "future_revocation_design_required_before_any_session_or_token_is_issued",
+    auditRequirements: [
+      "auth_token_validation_attempt_future",
+      "auth_session_created_future",
+      "auth_session_revoked_future"
+    ],
+    metadata: {
+      noTokenMaterialStored: true,
+      noSessionCookieStored: true,
+      noCredentialIssued: true,
+      productionReady: false
+    }
+  };
+}
+
+export const defaultSessionTokenBoundaryPlans: SessionTokenBoundaryPlan[] = [
+  sessionTokenBoundaryPlan("cookie_session_future", "HttpOnly server session with CSRF protection, tenant scope binding, and server-side revocation metadata."),
+  sessionTokenBoundaryPlan("bearer_jwt_future", "JWT validation boundary only; signing, issuance, and trust configuration remain future work."),
+  sessionTokenBoundaryPlan("api_key_future", "API key metadata boundary for future service-to-service access; no key material is issued."),
+  sessionTokenBoundaryPlan("service_account_token_future", "Service-account credential lifecycle boundary; no JWTs, client secrets, or installation tokens are minted."),
+  sessionTokenBoundaryPlan("local_agent_pairing_future", "Local Agent pairing token boundary; pairing remains consent metadata only.")
+];
+
+function identityMappingPlan(mappingKind: IdentityMappingPlan["mappingKind"], requiredClaims: string[], targetModel: string, risks: string[]): IdentityMappingPlan {
+  return {
+    id: `identity_mapping_${mappingKind}`,
+    mappingKind,
+    status: "future",
+    requiredClaims,
+    targetModel,
+    risks,
+    metadata: {
+      externalClaimsParsed: false,
+      tokenValidationRequiredFirst: true,
+      productionReady: false
+    }
+  };
+}
+
+export const defaultIdentityMappingPlans: IdentityMappingPlan[] = [
+  identityMappingPlan("subject_to_principal", ["sub", "iss"], "Principal", ["claim_stability_required", "duplicate_subject_collision"]),
+  identityMappingPlan("group_to_team", ["groups"], "Team", ["group_overbreadth", "deprovisioning_delay"]),
+  identityMappingPlan("role_claim_to_role", ["roles"], "RoleBinding", ["claim_spoofing_if_unvalidated", "role_drift"]),
+  identityMappingPlan("tenant_claim_to_tenant_scope", ["tenant", "org"], "TenantScope", ["cross_tenant_claim_confusion"]),
+  identityMappingPlan("repo_claim_to_repo_scope", ["repo", "repository"], "RepoScope", ["repo_rename_drift"]),
+  identityMappingPlan("service_account_mapping", ["client_id", "service_account_id"], "ServiceAccount", ["credential_lifecycle_required"])
+];
+
 export const defaultAuthRbacMigrationPhases: AuthRbacMigrationPhase[] = [
   {
     id: "auth_phase_1_inventory",
@@ -4014,6 +4154,285 @@ export const defaultPolicyBundleMigrationPhases: PolicyBundleMigrationPhase[] = 
     rollbackPlan: ["Switch back to StaticPolicyEngine or prior approved bundle"],
     status: "future",
     metadata: { runtimeActivationImplemented: false }
+  }
+];
+
+export const defaultPolicyShadowEvaluationPlan: PolicyShadowEvaluationPlan = {
+  id: "policy_shadow_evaluation_v1_plan",
+  status: "ready_for_design",
+  sourceOfTruth: "StaticPolicyEngine",
+  candidateRuntimeKinds: ["signed_json_yaml_bundle", "opa_rego", "cedar", "custom_future"],
+  domains: ["git", "git_webhook", "llm", "mcp", "runner", "registry", "improvement", "secretref", "secrets_sandbox", "local_agent", "provider", "auth", "dashboard", "deployment_readiness"],
+  rolloutStages: [
+    "docs_planning",
+    "golden_harness_only",
+    "offline_candidate_runtime_evaluation_future",
+    "live_shadow_record_only_future",
+    "critical_mismatch_alerting_future",
+    "selected_non_critical_enforcement_future",
+    "production_enforcement_future"
+  ],
+  enforcementMode: "shadow_only",
+  metadata: {
+    docs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1.md",
+    planDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1-plan.md",
+    candidateRuntimeInterfaceDocs: "docs/roadmaps/policy-bundle-runtime-poc/candidate-runtime-interface-v1.md",
+    staticPolicyEngineAuthoritative: true,
+    enforcementChanged: false,
+    shadowEvaluatorImplemented: false,
+    candidateRuntimeImplemented: false,
+    dynamicPolicyExecutionEnabled: false,
+    externalPolicyServiceCallsEnabled: false,
+    noSecretsOrEnvValues: true
+  }
+};
+
+export const defaultPolicyShadowComparisonRules: PolicyShadowComparisonRule[] = [
+  {
+    id: "policy_shadow_compare_effect_match",
+    comparisonKind: "effect_match",
+    required: true,
+    severityOnMismatch: "critical",
+    metadata: { compares: ["decision", "allowed"], blocksRuntimeRolloutFuture: true }
+  },
+  {
+    id: "policy_shadow_compare_reason_match",
+    comparisonKind: "reason_match",
+    required: false,
+    severityOnMismatch: "medium",
+    metadata: { normalizedTextMatchAllowed: true, recordOnlyInV1: true }
+  },
+  {
+    id: "policy_shadow_compare_rule_id_match",
+    comparisonKind: "rule_id_match",
+    required: true,
+    severityOnMismatch: "high",
+    metadata: { acceptsExplicitRuleAliasMappingFuture: true }
+  },
+  {
+    id: "policy_shadow_compare_obligation_match",
+    comparisonKind: "obligation_match",
+    required: true,
+    severityOnMismatch: "high",
+    metadata: { obligationsMayIncludeApprovalLeaseRedactionOrBudgetRequirements: true }
+  },
+  {
+    id: "policy_shadow_compare_redaction_match",
+    comparisonKind: "redaction_match",
+    required: true,
+    severityOnMismatch: "critical",
+    metadata: { rawSecretOrPromptExposureBlocksRolloutFuture: true }
+  },
+  {
+    id: "policy_shadow_compare_audit_metadata_match",
+    comparisonKind: "audit_metadata_match",
+    required: true,
+    severityOnMismatch: "medium",
+    metadata: { requiredFields: ["action", "resourceKind", "actor", "requestId", "correlationId"], recordOnlyInV1: true }
+  }
+];
+
+export const defaultPolicyShadowMismatches: PolicyShadowMismatch[] = [
+  {
+    id: "policy_shadow_mismatch_static_allow_candidate_deny",
+    mismatchKind: "static_allow_candidate_deny",
+    severity: "medium",
+    defaultAction: "record_only",
+    productionImpact: "Candidate runtime could block an operation currently allowed by the static source of truth; review before any activation.",
+    metadata: { rolloutImpact: "requires_review", example: "Static allows a mock dashboard read but candidate denies it." }
+  },
+  {
+    id: "policy_shadow_mismatch_static_deny_candidate_allow",
+    mismatchKind: "static_deny_candidate_allow",
+    severity: "critical",
+    defaultAction: "block_rollout_future",
+    productionImpact: "Candidate runtime could allow an operation denied by StaticPolicyEngine, including destructive provider or secret-adjacent actions.",
+    metadata: { rolloutImpact: "blocks_rollout", example: "Static denies secret.read but candidate allows it." }
+  },
+  {
+    id: "policy_shadow_mismatch_static_block_candidate_allow",
+    mismatchKind: "static_block_candidate_allow",
+    severity: "critical",
+    defaultAction: "block_rollout_future",
+    productionImpact: "Candidate runtime could bypass a static block such as governance apply, credential cache read, critical MCP invocation, or destructive Git.",
+    metadata: { rolloutImpact: "blocks_rollout", example: "Static blocks governance apply but candidate allows it." }
+  },
+  {
+    id: "policy_shadow_mismatch_reason_mismatch",
+    mismatchKind: "reason_mismatch",
+    severity: "low",
+    defaultAction: "record_only",
+    productionImpact: "Decision outcome may match, but operators could lose useful review context.",
+    metadata: { rolloutImpact: "review_before_alerting", example: "Both deny but candidate omits the branch prefix reason." }
+  },
+  {
+    id: "policy_shadow_mismatch_rule_id_mismatch",
+    mismatchKind: "rule_id_mismatch",
+    severity: "medium",
+    defaultAction: "record_only",
+    productionImpact: "Auditors may not be able to trace a candidate decision to the equivalent static rule.",
+    metadata: { rolloutImpact: "requires_mapping", example: "Static matches git.merge.deny but candidate reports a generic deny rule." }
+  },
+  {
+    id: "policy_shadow_mismatch_missing_obligation",
+    mismatchKind: "missing_obligation",
+    severity: "high",
+    defaultAction: "block_rollout_future",
+    productionImpact: "Candidate runtime may omit required approvals, leases, budgets, redaction, or audit obligations.",
+    metadata: { rolloutImpact: "blocks_domain_activation", example: "Candidate allows remote LLM without budget obligation metadata." }
+  },
+  {
+    id: "policy_shadow_mismatch_extra_obligation",
+    mismatchKind: "extra_obligation",
+    severity: "low",
+    defaultAction: "record_only",
+    productionImpact: "Candidate runtime may add a requirement that changes UX or operational review without changing enforcement yet.",
+    metadata: { rolloutImpact: "review_required", example: "Candidate adds manual review to a low-risk mock read." }
+  },
+  {
+    id: "policy_shadow_mismatch_redaction_mismatch",
+    mismatchKind: "redaction_mismatch",
+    severity: "critical",
+    defaultAction: "block_rollout_future",
+    productionImpact: "Candidate runtime may fail to preserve no-secret, no-env, no-token, prompt, credential-cache, or webhook payload redaction requirements.",
+    metadata: { rolloutImpact: "blocks_rollout", example: "Candidate audit metadata includes an env value that static policy never returns." }
+  },
+  {
+    id: "policy_shadow_mismatch_audit_metadata_mismatch",
+    mismatchKind: "audit_metadata_mismatch",
+    severity: "medium",
+    defaultAction: "alert_future",
+    productionImpact: "Candidate runtime may weaken traceability for request, correlation, actor, service account, tenant, or resource scope metadata.",
+    metadata: { rolloutImpact: "requires_audit_review", example: "Candidate omits serviceAccountId or correlationId." }
+  },
+  {
+    id: "policy_shadow_mismatch_error_in_candidate",
+    mismatchKind: "error_in_candidate",
+    severity: "high",
+    defaultAction: "block_rollout_future",
+    productionImpact: "Candidate runtime errors could create noisy reports or hide decision gaps; enforcement still stays on StaticPolicyEngine.",
+    metadata: { rolloutImpact: "blocks_candidate_runtime_activation", example: "Candidate evaluator throws while static decision succeeds." }
+  }
+];
+
+export const defaultPolicyShadowEvaluationReports: PolicyShadowEvaluationReport[] = [
+  {
+    id: "policy_shadow_report_planning_only_v1",
+    generatedAt: new Date("2026-05-17T00:00:00.000Z"),
+    domain: "deployment_readiness",
+    caseCount: 0,
+    matchCount: 0,
+    mismatchCount: 0,
+    criticalMismatchCount: 0,
+    enforcementChanged: false,
+    sourceOfTruth: "StaticPolicyEngine",
+    candidateRuntimeKind: "signed_json_yaml_bundle",
+    metadata: {
+      planningOnly: true,
+      candidateRuntimeExecuted: false,
+      goldenCasesLinked: true,
+      reportFormatDefinedOnly: true,
+      noExternalObservabilityExport: true
+    }
+  }
+];
+
+export const defaultPolicyShadowReadinessChecks: PolicyShadowReadinessCheck[] = [
+  {
+    id: "policy_shadow_input_contract_planned",
+    category: "input_contract",
+    status: "warning",
+    severity: "medium",
+    description: "Candidate runtime input and output contracts are documented, but no runtime interface is implemented.",
+    remediation: "Implement a non-executing schema contract before any candidate evaluator is wired.",
+    metadata: { docs: "docs/roadmaps/policy-bundle-runtime-poc/candidate-runtime-interface-v1.md", interfaceImplemented: false }
+  },
+  {
+    id: "policy_shadow_golden_cases_available",
+    category: "golden_cases",
+    status: "pass",
+    severity: "medium",
+    description: "Golden policy decisions remain anchored to StaticPolicyEngine as the source of truth.",
+    remediation: "Keep golden cases deterministic and expand coverage before candidate runtime evaluation.",
+    metadata: { sourceOfTruth: "StaticPolicyEngine", goldenHarnessStatus: "v1_implemented" }
+  },
+  {
+    id: "policy_shadow_candidate_runtime_future",
+    category: "candidate_runtime",
+    status: "future",
+    severity: "high",
+    description: "No candidate policy runtime is implemented or executed in this milestone.",
+    remediation: "Add a disabled, non-executing skeleton only in a future reviewed task.",
+    metadata: { candidateRuntimeImplemented: false, candidateRuntimeExecuted: false }
+  },
+  {
+    id: "policy_shadow_comparison_rules_defined",
+    category: "comparison_rules",
+    status: "pass",
+    severity: "medium",
+    description: "Effect, reason, rule id, obligation, redaction, and audit metadata comparisons are modeled.",
+    remediation: "Keep effect and redaction mismatches rollout-blocking before future runtime activation.",
+    metadata: { comparisonRuleCount: defaultPolicyShadowComparisonRules.length }
+  },
+  {
+    id: "policy_shadow_audit_events_planned",
+    category: "audit",
+    status: "warning",
+    severity: "medium",
+    description: "Shadow audit events are documented but not emitted by runtime code.",
+    remediation: "Add sanitized audit persistence before live shadow evaluation.",
+    metadata: { auditEmissionImplemented: false, noSecretsExposed: true }
+  },
+  {
+    id: "policy_shadow_observability_planned",
+    category: "observability",
+    status: "warning",
+    severity: "medium",
+    description: "Shadow metrics are planned as internal read models only; no external exporter is enabled.",
+    remediation: "Add durable metrics and alert thresholds before critical mismatch alerting.",
+    metadata: { externalObservabilityExportEnabled: false }
+  },
+  {
+    id: "policy_shadow_dashboard_panel_available",
+    category: "dashboard",
+    status: "pass",
+    severity: "low",
+    description: "Dashboard/readiness can show planning status without implying shadow evaluation is running.",
+    remediation: "Keep candidate runtime and enforcement flags false.",
+    metadata: { dashboardReadOnly: true }
+  },
+  {
+    id: "policy_shadow_rollout_future",
+    category: "rollout",
+    status: "future",
+    severity: "high",
+    description: "Rollout stages are documented only; live shadow and enforcement stages remain future.",
+    remediation: "Implement record-only live shadow after offline evaluation and observability are ready.",
+    metadata: { liveShadowEvaluationEnabled: false, runtimeActivationImplemented: false }
+  },
+  {
+    id: "policy_shadow_rollback_future",
+    category: "rollback",
+    status: "future",
+    severity: "high",
+    description: "Rollback behavior is documented only; disabling shadow keeps StaticPolicyEngine authoritative.",
+    remediation: "Add candidate bundle invalidation and audit events before live shadow rollout.",
+    metadata: { rollbackControllerImplemented: false }
+  },
+  {
+    id: "policy_shadow_safety_guarantees_hold",
+    category: "safety",
+    status: "pass",
+    severity: "critical",
+    description: "No enforcement change, no candidate execution, no dynamic policy execution, no external calls, and no secrets/env values are exposed.",
+    remediation: "Reject any future change that weakens StaticPolicyEngine authority or executes dynamic policy code by default.",
+    metadata: {
+      enforcementChanged: false,
+      staticPolicyEngineAuthoritative: true,
+      dynamicPolicyExecutionEnabled: false,
+      externalPolicyServiceCallsEnabled: false,
+      noSecretsOrEnvValues: true
+    }
   }
 ];
 

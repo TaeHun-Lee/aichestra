@@ -117,6 +117,8 @@ Coverage includes:
 - Dashboard/readiness registry/governance scoping remains future planning.
 - Apply remains blocked; real eval/canary execution remains out of scope.
 
+Dashboard/Readiness Tenant Scope Planning v1 inventories registry and governance dashboard/readiness panels as target tenant/team/project/registry-package/audit-query scoped surfaces. It does not mutate active registry entries, approve proposals, execute evals/canaries, or enforce package-level tenant filtering.
+
 ## Recommended Next Task
 
-Recommended next task: Dashboard/Readiness Tenant Scope Planning v1, or Tenant Scope Enforcement v1.
+Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.

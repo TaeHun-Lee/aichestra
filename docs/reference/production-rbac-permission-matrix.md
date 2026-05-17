@@ -2,6 +2,8 @@
 
 This matrix is planning-only for Production Auth/RBAC v1. It does not grant production access today. Policy-as-code remains authoritative, and no role can read raw secrets, bypass SecretRef/lease constraints, bypass provider gates, or override policy denial.
 
+Production Auth Provider Skeleton v1 does not add production permissions or trust a real identity source. Future OIDC/SAML/SCIM/vendor/custom providers remain disabled, cannot authenticate users, cannot issue sessions/JWTs/API keys/service-account credentials, cannot run SCIM sync, and cannot bypass this permission matrix or Policy-as-code.
+
 RequestContext Propagation v1 is implemented as a mock-first attribution layer for selected boundaries. It enriches policy/audit inputs with request id, correlation id, actor/principal metadata, auth mode, and source, but it does not make any role production-authenticated or production-authorized.
 
 Service Account Actor Boundary v1 adds a static mock catalog and serviceAccountId-enriched policy/audit attribution for selected runtime service fallbacks. It does not issue production service-account credentials, rotate credentials, or enable production auth.

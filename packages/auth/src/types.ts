@@ -18,10 +18,43 @@ export type IdentityProviderKind =
   | "github_future"
   | "google_future"
   | "microsoft_future"
+  | "microsoft_entra_future"
+  | "okta_future"
+  | "auth0_future"
+  | "google_workspace_future"
+  | "github_enterprise_future"
   | "custom_future";
 export type IdentityProviderStatus = "active" | "disabled";
 export type AuthMode = "mock" | "mock_service_account" | "future_oidc" | "future_saml" | "future_service_account" | "system";
-export type AuthProviderKind = AuthMode | "scim_future";
+export type ProductionAuthProviderKind =
+  | "mock"
+  | "oidc_future"
+  | "saml_future"
+  | "scim_future"
+  | "microsoft_entra_future"
+  | "okta_future"
+  | "auth0_future"
+  | "google_workspace_future"
+  | "github_enterprise_future"
+  | "custom_future";
+export type AuthProviderKind = AuthMode | Exclude<ProductionAuthProviderKind, "mock">;
+export type ProductionAuthProviderStatus = "active_mock" | "disabled" | "not_configured" | "future";
+export type ProductionAuthProviderReadinessStatus = "ready_mock" | "disabled" | "missing_config" | "blocked" | "future";
+export type SessionTokenBoundaryKind =
+  | "cookie_session_future"
+  | "bearer_jwt_future"
+  | "api_key_future"
+  | "service_account_token_future"
+  | "local_agent_pairing_future";
+export type SessionTokenBoundaryStatus = "planned" | "disabled" | "future";
+export type IdentityMappingKind =
+  | "subject_to_principal"
+  | "group_to_team"
+  | "role_claim_to_role"
+  | "tenant_claim_to_tenant_scope"
+  | "repo_claim_to_repo_scope"
+  | "service_account_mapping";
+export type IdentityMappingStatus = "planned" | "future" | "not_configured";
 export type RequestSource = "api" | "worker" | "dashboard" | "readiness" | "test" | "system" | "webhook" | "local_agent";
 export type AuthAuditResult = "allowed" | "denied" | "resolved" | "missing" | "blocked" | "disabled";
 export type ScopeModelStatus = "active_mock" | "disabled" | "future";
@@ -242,6 +275,90 @@ export type IdentityProvider = {
   metadata: Record<string, unknown>;
 };
 
+export type ProductionAuthProviderConfig = {
+  id: string;
+  providerKind: ProductionAuthProviderKind;
+  status: ProductionAuthProviderStatus;
+  displayName: string;
+  issuerConfigured: boolean;
+  audienceConfigured: boolean;
+  jwksConfigured: boolean;
+  metadataUrlConfigured: boolean;
+  scimEndpointConfigured: boolean;
+  groupMappingConfigured: boolean;
+  tenantMappingConfigured: boolean;
+  sessionBoundaryConfigured: boolean;
+  tokenValidationEnabled: false;
+  externalCallsEnabled: false;
+  productionReady: false;
+  metadata: Record<string, unknown>;
+};
+
+export type ProductionAuthProviderReadiness = {
+  id: string;
+  providerKind: ProductionAuthProviderKind;
+  status: ProductionAuthProviderReadinessStatus;
+  requiredConfig: string[];
+  missingConfig: string[];
+  warnings: string[];
+  blockers: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type SessionTokenBoundaryPlan = {
+  id: string;
+  boundaryKind: SessionTokenBoundaryKind;
+  status: SessionTokenBoundaryStatus;
+  tokenIssued: false;
+  validationEnabled: false;
+  storageStrategy: string;
+  rotationStrategy: string;
+  revocationStrategy: string;
+  auditRequirements: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type IdentityMappingPlan = {
+  id: string;
+  mappingKind: IdentityMappingKind;
+  status: IdentityMappingStatus;
+  requiredClaims: string[];
+  targetModel: string;
+  risks: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type ProductionAuthProviderSkeletonSummary = {
+  id: string;
+  status: "v1_implemented";
+  activeProviderKind: "mock";
+  selectedProviderKind: ProductionAuthProviderKind;
+  selectedProviderStatus: ProductionAuthProviderStatus;
+  productionAuthEnabled: false;
+  requireAuthForApi: false;
+  futureProviderSelected: boolean;
+  futureProviderBlocked: boolean;
+  tokenValidationEnabled: false;
+  sessionBoundaryEnabled: false;
+  sessionBoundaryStatus: "disabled" | "future";
+  identityMappingStatus: "not_configured" | "future";
+  externalCallsEnabled: false;
+  missingConfigCount: number;
+  blockerCount: number;
+  providerOptionCount: number;
+  readinessCheckCount: number;
+  sessionBoundaryPlanCount: number;
+  identityMappingPlanCount: number;
+  noTokensExposed: true;
+  authorizationHeadersStored: false;
+  cookiesStored: false;
+  sessionIdsExposed: false;
+  envValuesExposed: false;
+  secretsExposed: false;
+  productionReady: false;
+  metadata: Record<string, unknown>;
+};
+
 export type AuthContext = {
   requestId: string;
   actor: Actor;
@@ -296,7 +413,10 @@ export type AuthAuditEvent = {
     | "role_binding_evaluated"
     | "service_account_used"
     | "production_auth_not_configured"
-    | "future_provider_disabled";
+    | "future_provider_disabled"
+    | "production_auth_provider_config_checked"
+    | "production_auth_provider_blocked"
+    | "mock_auth_provider_used";
   actorId?: string;
   principalId?: string;
   serviceAccountId?: string;

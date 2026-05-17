@@ -14,6 +14,11 @@ import {
 import type { StorageProvider } from "@aichestra/db";
 import {
   authProviderOptionToDto,
+  productionAuthProviderConfigToDto,
+  productionAuthProviderReadinessToDto,
+  productionAuthProviderSkeletonSummaryToDto,
+  sessionTokenBoundaryPlanToDto,
+  identityMappingPlanToDto,
   authRbacMigrationPhaseToDto,
   authRbacPermissionMatrixEntryToDto,
   authRbacProductionRiskToDto,
@@ -26,7 +31,9 @@ import {
   cicdReadinessCheckToDto,
   cicdRiskToDto,
   captureLocalStagingSignoffScope,
+  createDashboardReadinessTenantScopePlanningService,
   createDeploymentReadinessService,
+  dashboardPanelScopeSummaryToDto,
   databaseAuditGrowthPlanToDto,
   databaseDeploymentProfileToDto,
   databaseIndexReviewItemToDto,
@@ -39,6 +46,7 @@ import {
   databaseWebhookPersistencePlanToDto,
   deploymentProfileToDto,
   deploymentReadinessSummaryToDto,
+  dashboardTenantScopePlanToDto,
   githubAppCredentialReadinessToDto,
   githubAppDescriptorToDto,
   githubAppIntegrationTestCaseToDto,
@@ -72,8 +80,16 @@ import {
   policyBundleRiskToDto,
   policyDomainMappingToDto,
   policyEngineOptionToDto,
+  policyShadowComparisonRuleToDto,
+  policyShadowEvaluationPlanToDto,
+  policyShadowEvaluationReportToDto,
+  policyShadowEvaluationSummaryToDto,
+  policyShadowMismatchToDto,
+  policyShadowReadinessCheckToDto,
   productionRiskToDto,
   readinessCheckToDto,
+  readinessEndpointScopeSummaryToDto,
+  readinessTenantScopePlanToDto,
   secretBackendDecisionCriterionToDto,
   secretBackendDecisionRiskToDto,
   secretBackendDecisionScoreToDto,
@@ -118,19 +134,25 @@ import {
   stagingReleaseNoteRequirementToDto,
   stagingRollbackChecklistItemToDto,
   stagingRollbackCriterionToDto,
-  tenantBoundaryPlanToDto
+  tenantBoundaryPlanToDto,
+  tenantScopeFallbackBehaviorToDto,
+  tenantScopePlanningSummaryToDto,
+  tenantScopeRoleVisibilityToDto,
+  scopedReadModelMetadataToDto
 } from "@aichestra/deployment-readiness";
-import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, PolicyBundleReadinessCategory, SecretBackendReadinessCategory, StagingDeploymentDryRunCheckCategory, StagingDeploymentGateCategory, StagingHumanSignoffEvidence, StagingHumanSignoffStatus, StagingReadinessCategory, StagingReleaseCandidateGateCategory, StagingReleaseCandidateSignoffRole, StagingSignoffScopeReview, StagingSignoffScopeSnapshot, VaultIntegrationTestSafetyCategory } from "@aichestra/deployment-readiness";
+import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DashboardReadinessTenantScopePlanningService, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, PolicyBundleReadinessCategory, PolicyShadowReadinessCategory, SecretBackendReadinessCategory, StagingDeploymentDryRunCheckCategory, StagingDeploymentGateCategory, StagingHumanSignoffEvidence, StagingHumanSignoffStatus, StagingReadinessCategory, StagingReleaseCandidateGateCategory, StagingReleaseCandidateSignoffRole, StagingSignoffScopeReview, StagingSignoffScopeSnapshot, VaultIntegrationTestSafetyCategory } from "@aichestra/deployment-readiness";
 import {
   AuthorizationService,
   InMemoryAuthRepository,
   MockAuthProvider,
+  ProductionAuthProviderRegistry,
   RequestContextResolver,
   ServiceAccountContextFactory,
   actorToDto,
   authAuditEventToDto,
   authContextToDto,
   authorizationDecisionToDto,
+  createTenantScopeEnforcementService,
   identityProviderToDto,
   listMockScopeCatalog,
   permissionToDto,
@@ -139,9 +161,12 @@ import {
   roleToDto,
   serviceAccountToDto,
   scopeSummary,
+  tenantScopeEnforcementModeToDto,
+  tenantScopeEnforcementSummaryToDto,
+  tenantScopeMismatchToDto,
   teamToDto
 } from "@aichestra/auth";
-import type { AuthorizationResource, RequestSource, ResourceScope } from "@aichestra/auth";
+import type { AuthorizationResource, RequestSource, ResourceScope, TenantScopeEnforcementService } from "@aichestra/auth";
 import {
   GitIntegrationService,
   GitHubAppRuntimeService,
@@ -339,6 +364,8 @@ type RouteContext = {
   localAgentProtocolService: LocalAgentProtocolService;
   mcpGatewayService: MCPGateway;
   deploymentReadinessService: DeploymentReadinessService;
+  tenantScopePlanningService: DashboardReadinessTenantScopePlanningService;
+  tenantScopeEnforcementService: TenantScopeEnforcementService;
   observabilityService: ObservabilityService;
 };
 
@@ -350,6 +377,61 @@ function sendJson(response: ServerResponse, statusCode: number, body: JsonValue)
     "content-type": "application/json; charset=utf-8"
   });
   response.end(JSON.stringify(body, null, 2));
+}
+
+function fallbackReadinessScopeMetadata(endpointKey: string): Record<string, unknown> {
+  return {
+    scopeStatus: "metadata_only",
+    appliedScopes: [],
+    requiredScopes: [],
+    missingScopes: [],
+    sensitivity: "internal_metadata",
+    roleVisibility: { allowedRoles: ["platform_admin"] },
+    redactionStatus: "metadata_only",
+    tenantFilteringImplemented: false,
+    productionEnforcementImplemented: false,
+    warnings: ["scope_plan_not_found", "tenant_filtering_implemented:false", "production_tenant_enforcement:false"],
+    metadata: {
+      endpointKey,
+      planningOnly: true,
+      noSecretsOrEnvValues: true,
+      productionReady: false
+    }
+  };
+}
+
+function readinessScopedPayload(context: RouteContext, endpointKey: string, payload: Record<string, unknown>): Record<string, unknown> {
+  const metadata = context.tenantScopePlanningService.getReadinessEndpointScopeMetadata(endpointKey);
+  const summary = context.tenantScopePlanningService.getReadinessEndpointScopeSummary(endpointKey);
+  const decision = summary
+    ? context.tenantScopeEnforcementService.evaluateReadinessEndpointAccess(undefined, summary, { source: `readiness:${endpointKey}` })
+    : context.tenantScopeEnforcementService.evaluateScopeAccess(undefined, undefined, { source: `readiness:${endpointKey}` });
+  const decisionSummary = context.tenantScopeEnforcementService.summarizeDecision(decision);
+  const baseScopeMetadata = metadata ? scopedReadModelMetadataToDto(metadata) : fallbackReadinessScopeMetadata(endpointKey);
+  return {
+    ...payload,
+    scopeMetadata: {
+      ...baseScopeMetadata,
+      tenantScopeEnforcementImplemented: "partial",
+      enforcementMode: decision.enforcementMode,
+      scopeDecisionSummary: decisionSummary,
+      warnings: [
+        ...new Set([
+          ...((baseScopeMetadata.warnings as string[] | undefined) ?? []),
+          ...decisionSummary.warnings
+        ])
+      ],
+      metadata: {
+        ...((baseScopeMetadata.metadata as Record<string, unknown> | undefined) ?? {}),
+        tenantScopeEnforcementStatus: "v1_implemented_partial",
+        representativeEnforcementOnly: true,
+        productionTenantEnforcement: false
+      }
+    },
+    endpointScopeSummary: summary ? readinessEndpointScopeSummaryToDto(summary) : undefined,
+    enforcementMode: decision.enforcementMode,
+    scopeDecisionSummary: decisionSummary
+  };
 }
 
 function sendHtml(response: ServerResponse, statusCode: number, body: string): void {
@@ -1065,7 +1147,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const secretBackendMigration = context.deploymentReadinessService.getSecretBackendMigrationSummary();
       const secretBackendDecision = context.deploymentReadinessService.getSecretBackendOptionDecisionSummary();
       const authRbacProduction = context.deploymentReadinessService.getAuthRbacProductionSummary();
+      const productionAuthProvider = context.deploymentReadinessService.getProductionAuthProviderSkeletonSummary();
       const policyBundleReadiness = context.deploymentReadinessService.getPolicyBundleReadinessSummary();
+      const policyShadowEvaluation = context.deploymentReadinessService.getPolicyShadowEvaluationSummary();
       const stagingDeployment = context.deploymentReadinessService.getStagingDeploymentSummary();
       const stagingDryRun = context.deploymentReadinessService.getStagingDeploymentDryRunSummary();
       const stagingReleaseCandidate = context.deploymentReadinessService.getStagingReleaseCandidateSummary();
@@ -1074,6 +1158,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const githubAppIntegration = context.deploymentReadinessService.getGitHubAppIntegrationTestReadinessSummary();
       const llmIntegration = context.deploymentReadinessService.getLLMIntegrationTestReadinessSummary();
       const vaultIntegration = context.deploymentReadinessService.getVaultIntegrationTestReadinessSummary();
+      const tenantScopePlanning = context.tenantScopePlanningService.getSummary();
+      const tenantScopeEnforcement = context.tenantScopeEnforcementService.getSummary();
       const secretRefs = context.securityService.listSecretRefs();
       sendJson(response, storage.healthy ? 200 : 503, {
         status: storage.healthy ? "ok" : "degraded",
@@ -1245,6 +1331,27 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           remotePolicyLoadingEnabled: policyBundleReadiness.remotePolicyLoadingEnabled,
           policyCodeExecuted: policyBundleReadiness.policyCodeExecuted,
           noSecretsExposed: policyBundleReadiness.noSecretsExposed
+        },
+        policyShadowEvaluation: {
+          status: policyShadowEvaluation.status,
+          planningOnly: policyShadowEvaluation.planningOnly,
+          productionReady: policyShadowEvaluation.productionReady,
+          sourceOfTruth: policyShadowEvaluation.sourceOfTruth,
+          enforcementMode: policyShadowEvaluation.enforcementMode,
+          enforcementChanged: policyShadowEvaluation.enforcementChanged,
+          staticPolicyEngineAuthoritative: policyShadowEvaluation.staticPolicyEngineAuthoritative,
+          shadowEvaluatorImplemented: policyShadowEvaluation.shadowEvaluatorImplemented,
+          candidateRuntimeImplemented: policyShadowEvaluation.candidateRuntimeImplemented,
+          candidateRuntimeExecuted: policyShadowEvaluation.candidateRuntimeExecuted,
+          comparisonRuleCount: policyShadowEvaluation.comparisonRuleCount,
+          mismatchTaxonomyCount: policyShadowEvaluation.mismatchTaxonomyCount,
+          criticalMismatchKindCount: policyShadowEvaluation.criticalMismatchKindCount,
+          dynamicPolicyExecutionEnabled: policyShadowEvaluation.dynamicPolicyExecutionEnabled,
+          externalPolicyServiceCallsEnabled: policyShadowEvaluation.externalPolicyServiceCallsEnabled,
+          remotePolicyBundleLoadingEnabled: policyShadowEvaluation.remotePolicyBundleLoadingEnabled,
+          policyCodeExecuted: policyShadowEvaluation.policyCodeExecuted,
+          noSecretsExposed: policyShadowEvaluation.noSecretsExposed,
+          envValuesExposed: policyShadowEvaluation.envValuesExposed
         },
         stagingDeployment: {
           status: stagingDeployment.status,
@@ -1472,11 +1579,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           providerKind: context.authorizationService.getConfig().providerKind,
           authMode: context.authorizationService.getConfig().authMode,
           productionAuthEnabled: false,
+          selectedProviderKind: context.authorizationService.getConfig().selectedAuthProviderKind,
+          selectedProviderStatus: context.authorizationService.getConfig().productionAuthProviderStatus,
+          tokenValidationEnabled: false,
+          sessionBoundaryStatus: context.authorizationService.getConfig().sessionBoundaryStatus,
+          identityMappingStatus: context.authorizationService.getConfig().identityMappingStatus,
           mockActorEnabled: context.authorizationService.getConfig().mockActorEnabled,
           roleCatalogCount: context.authorizationService.getConfig().roleCatalogCount,
           permissionCatalogCount: context.authorizationService.getConfig().permissionCatalogCount,
+          authorizationHeadersStored: false,
+          cookiesStored: false,
+          sessionIdsExposed: false,
           secretsExposed: false,
-          tokensExposed: false
+          tokensExposed: false,
+          envValuesExposed: false
         },
         requestContext: context.apiRequestContextMiddleware.getSafeRequestContextSummary(apiRequestContext, { includeIds: false }) as unknown as JsonValue,
         authReadiness: {
@@ -1500,6 +1616,32 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           externalIdpCallsEnabled: authRbacProduction.externalIdpCallsEnabled,
           realSessionsImplemented: authRbacProduction.realSessionsImplemented,
           realJwtIssuanceImplemented: authRbacProduction.realJwtIssuanceImplemented
+        },
+        authProviderSkeleton: {
+          status: productionAuthProvider.status,
+          planningOnly: productionAuthProvider.planningOnly,
+          activeProviderKind: productionAuthProvider.activeProviderKind,
+          selectedProviderKind: productionAuthProvider.selectedProviderKind,
+          selectedProviderStatus: productionAuthProvider.selectedProviderStatus,
+          productionAuthEnabled: productionAuthProvider.productionAuthEnabled,
+          requireAuthForApi: productionAuthProvider.requireAuthForApi,
+          futureProviderSelected: productionAuthProvider.futureProviderSelected,
+          futureProviderBlocked: productionAuthProvider.futureProviderBlocked,
+          tokenValidationEnabled: productionAuthProvider.tokenValidationEnabled,
+          sessionBoundaryEnabled: productionAuthProvider.sessionBoundaryEnabled,
+          sessionBoundaryStatus: productionAuthProvider.sessionBoundaryStatus,
+          identityMappingStatus: productionAuthProvider.identityMappingStatus,
+          missingConfigCount: productionAuthProvider.missingConfigCount,
+          blockerCount: productionAuthProvider.blockerCount,
+          noTokensExposed: productionAuthProvider.noTokensExposed,
+          authorizationHeadersStored: productionAuthProvider.authorizationHeadersStored,
+          cookiesStored: productionAuthProvider.cookiesStored,
+          sessionIdsExposed: productionAuthProvider.sessionIdsExposed,
+          envValuesExposed: productionAuthProvider.envValuesExposed,
+          secretsExposed: productionAuthProvider.secretsExposed,
+          externalCallsEnabled: productionAuthProvider.externalCallsEnabled,
+          externalIdpCallsEnabled: productionAuthProvider.externalIdpCallsEnabled,
+          productionReady: productionAuthProvider.productionReady
         },
         providerAbstraction: {
           status: context.providerAbstractionService.getConfig().status,
@@ -1547,6 +1689,41 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           secretsExposed: false,
           tokensExposed: false
         },
+        dashboardTenantScopePlanning: {
+          status: tenantScopePlanning.status,
+          implementationStatus: tenantScopePlanning.implementationStatus,
+          scopeMetadataStatus: tenantScopePlanning.scopeMetadataStatus,
+          planningOnly: tenantScopePlanning.planningOnly,
+          dashboardPanelCount: tenantScopePlanning.dashboardPanelCount,
+          readinessEndpointCount: tenantScopePlanning.readinessEndpointCount,
+          dashboardPanelScopeSummaryCount: tenantScopePlanning.dashboardPanelScopeSummaryCount,
+          readinessEndpointScopeSummaryCount: tenantScopePlanning.readinessEndpointScopeSummaryCount,
+          panelsRequiringTenantScope: tenantScopePlanning.panelsRequiringTenantScope,
+          endpointsRequiringTenantScope: tenantScopePlanning.endpointsRequiringTenantScope,
+          secretAdjacentSurfaces: tenantScopePlanning.secretAdjacentSurfaces,
+          auditScopedSurfaces: tenantScopePlanning.auditScopedSurfaces,
+          productionBlockerCount: tenantScopePlanning.productionBlockerCount,
+          tenantFilteringImplemented: tenantScopePlanning.tenantFilteringImplemented,
+          productionTenantEnforcement: tenantScopePlanning.productionTenantEnforcement,
+          productionEnforcementImplemented: false,
+          productionReady: tenantScopePlanning.productionReady,
+          noSecretsExposed: tenantScopePlanning.noSecretsExposed,
+          envValuesExposed: tenantScopePlanning.envValuesExposed
+        },
+        tenantScopeEnforcement: {
+          status: tenantScopeEnforcement.status,
+          enforcementModes: tenantScopeEnforcement.enforcementModes,
+          mismatchKinds: tenantScopeEnforcement.mismatchKinds,
+          defaultMode: tenantScopeEnforcement.defaultMode,
+          dashboardReadinessMetadataEnabled: tenantScopeEnforcement.dashboardReadinessMetadataEnabled,
+          representativeEnforcementOnly: tenantScopeEnforcement.representativeEnforcementOnly,
+          tenantFilteringImplemented: tenantScopeEnforcement.tenantFilteringImplemented,
+          productionTenantEnforcement: tenantScopeEnforcement.productionTenantEnforcement,
+          productionAuthImplemented: tenantScopeEnforcement.productionAuthImplemented,
+          rowLevelSecurityImplemented: tenantScopeEnforcement.rowLevelSecurityImplemented,
+          noSecretsExposed: tenantScopeEnforcement.noSecretsExposed,
+          envValuesExposed: tenantScopeEnforcement.envValuesExposed
+        },
         observability: {
           status: context.observabilityService.getConfig().status,
           aggregationMode: context.observabilityService.getConfig().aggregationMode,
@@ -1583,6 +1760,92 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "tenant-scope") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Dashboard/readiness tenant scope planning endpoints are read-only planning models." });
+        return;
+      }
+      const planning = context.tenantScopePlanningService;
+      if (segments.length === 3 && segments[2] === "dashboard-plans") {
+        sendJson(response, 200, readinessScopedPayload(context, "tenant_scope", {
+          dashboardPlans: planning.listDashboardPlans().map(dashboardTenantScopePlanToDto),
+          panelScopeSummaries: planning.listDashboardPanelScopeSummaries().map(dashboardPanelScopeSummaryToDto)
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "dashboard-scope-summaries") {
+        sendJson(response, 200, readinessScopedPayload(context, "tenant_scope", {
+          panelScopeSummaries: planning.listDashboardPanelScopeSummaries().map(dashboardPanelScopeSummaryToDto)
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "readiness-plans") {
+        sendJson(response, 200, readinessScopedPayload(context, "tenant_scope", {
+          readinessPlans: planning.listReadinessPlans().map(readinessTenantScopePlanToDto),
+          readinessScopeSummaries: planning.listReadinessEndpointScopeSummaries().map(readinessEndpointScopeSummaryToDto)
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "readiness-scope-summaries") {
+        sendJson(response, 200, readinessScopedPayload(context, "tenant_scope", {
+          readinessScopeSummaries: planning.listReadinessEndpointScopeSummaries().map(readinessEndpointScopeSummaryToDto)
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "role-visibility") {
+        sendJson(response, 200, readinessScopedPayload(context, "tenant_scope", { roleVisibility: planning.getRoleVisibilityMatrix().map(tenantScopeRoleVisibilityToDto) }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "fallback-behavior") {
+        sendJson(response, 200, readinessScopedPayload(context, "tenant_scope", { fallbackBehavior: planning.getFallbackBehavior().map(tenantScopeFallbackBehaviorToDto) }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, readinessScopedPayload(context, "tenant_scope", { summary: tenantScopePlanningSummaryToDto(planning.getSummary()) }));
+        return;
+      }
+      sendJson(response, 404, { error: "tenant_scope_planning_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "tenant-enforcement") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Tenant scope enforcement v1 endpoints are read-only metadata models." });
+        return;
+      }
+      const enforcement = context.tenantScopeEnforcementService;
+      if (segments.length === 3 && segments[2] === "modes") {
+        sendJson(response, 200, {
+          modes: enforcement.listModes().map(tenantScopeEnforcementModeToDto),
+          summary: tenantScopeEnforcementSummaryToDto(enforcement.getSummary())
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "mismatches") {
+        sendJson(response, 200, {
+          mismatches: enforcement.listMismatches().map(tenantScopeMismatchToDto),
+          summary: tenantScopeEnforcementSummaryToDto(enforcement.getSummary())
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, {
+          summary: tenantScopeEnforcementSummaryToDto(enforcement.getSummary()),
+          noSecretStatus: {
+            noSecretsExposed: true,
+            envValuesExposed: false,
+            tenantFilteringImplemented: false,
+            productionTenantEnforcement: false
+          }
+        });
+        return;
+      }
+      sendJson(response, 404, { error: "tenant_scope_enforcement_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "scopes") {
       context.apiRequestContextMiddleware.requireApiContext(request);
       if (method !== "GET") {
@@ -1591,7 +1854,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const catalog = listMockScopeCatalog();
       const safeContextSummary = context.apiRequestContextMiddleware.getSafeRequestContextSummary(apiRequestContext, { includeIds: false });
-      const envelope = (payload: Record<string, unknown>): Record<string, unknown> => ({
+      const envelope = (payload: Record<string, unknown>): Record<string, unknown> => readinessScopedPayload(context, "scopes", {
         ...payload,
         enforcementStatus: "planning_model_only",
         productionTenantEnforcement: false,
@@ -1685,7 +1948,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: deploymentReadinessSummaryToDto(readiness.getSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "deployment", { summary: deploymentReadinessSummaryToDto(readiness.getSummary()) }));
         return;
       }
       sendJson(response, 404, { error: "deployment_readiness_route_not_found" });
@@ -1699,7 +1962,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: databaseOperationsSummaryToDto(readiness.getDatabaseOperationsSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "database", { summary: databaseOperationsSummaryToDto(readiness.getDatabaseOperationsSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "profiles") {
@@ -1753,7 +2016,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: authRbacProductionSummaryToDto(readiness.getAuthRbacProductionSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "auth", { summary: authRbacProductionSummaryToDto(readiness.getAuthRbacProductionSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "providers") {
@@ -1793,6 +2056,48 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "auth-providers") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Production auth provider skeleton endpoints are read-only readiness models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "config") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", {
+          selectedProvider: productionAuthProviderConfigToDto(readiness.listProductionAuthProviderConfigs().find((config) => config.metadata.selected === true) ?? readiness.listProductionAuthProviderConfigs()[0]),
+          configs: readiness.listProductionAuthProviderConfigs().map(productionAuthProviderConfigToDto)
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "options") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", {
+          configs: readiness.listProductionAuthProviderConfigs().map(productionAuthProviderConfigToDto),
+          readiness: readiness.listProductionAuthProviderReadiness().map(productionAuthProviderReadinessToDto)
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "session-boundary") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", {
+          sessionBoundary: readiness.listSessionTokenBoundaryPlans().map(sessionTokenBoundaryPlanToDto)
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "identity-mapping") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", {
+          identityMapping: readiness.listIdentityMappingPlans().map(identityMappingPlanToDto)
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", {
+          summary: productionAuthProviderSkeletonSummaryToDto(readiness.getProductionAuthProviderSkeletonSummary())
+        }));
+        return;
+      }
+      sendJson(response, 404, { error: "auth_provider_skeleton_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "secrets") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Secret backend migration readiness endpoints are read-only planning models." });
@@ -1800,7 +2105,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: secretBackendMigrationSummaryToDto(readiness.getSecretBackendMigrationSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "secrets", { summary: secretBackendMigrationSummaryToDto(readiness.getSecretBackendMigrationSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "backends") {
@@ -1841,7 +2146,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       if (segments.length === 4 && segments[2] === "vault" && segments[3] === "summary") {
-        sendJson(response, 200, { summary: context.securityService.getVaultSummary() });
+        sendJson(response, 200, readinessScopedPayload(context, "vault_secret_backend", { summary: context.securityService.getVaultSummary() }));
         return;
       }
       sendJson(response, 404, { error: "secret_backend_readiness_route_not_found" });
@@ -1855,7 +2160,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: secretBackendOptionDecisionSummaryToDto(readiness.getSecretBackendOptionDecisionSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "secret_backend_decision", { summary: secretBackendOptionDecisionSummaryToDto(readiness.getSecretBackendOptionDecisionSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "decision") {
@@ -1893,13 +2198,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, {
+        sendJson(response, 200, readinessScopedPayload(context, "github_app", {
           summary: githubWebhookHardeningSummaryToDto(readiness.getGitHubWebhookHardeningSummary()),
           descriptors: readiness.listGitHubAppDescriptors().map(githubAppDescriptorToDto),
           installations: readiness.listGitHubAppInstallations().map(githubAppInstallationToDto),
           repositoryGrants: readiness.listGitHubAppRepositoryGrants().map(githubAppRepositoryGrantToDto),
           readinessChecks: readiness.listGitHubAppReadinessChecks().map(githubAppReadinessCheckToDto)
-        });
+        }));
         return;
       }
       if (segments.length === 3 && segments[2] === "permissions") {
@@ -1964,7 +2269,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: githubAppIntegrationTestReadinessSummaryToDto(readiness.getGitHubAppIntegrationTestReadinessSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "github_app_integration", { summary: githubAppIntegrationTestReadinessSummaryToDto(readiness.getGitHubAppIntegrationTestReadinessSummary()) }));
         return;
       }
       sendJson(response, 404, { error: "github_app_integration_readiness_route_not_found" });
@@ -1995,7 +2300,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: llmIntegrationTestReadinessSummaryToDto(readiness.getLLMIntegrationTestReadinessSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "llm_integration", { summary: llmIntegrationTestReadinessSummaryToDto(readiness.getLLMIntegrationTestReadinessSummary()) }));
         return;
       }
       sendJson(response, 404, { error: "llm_integration_readiness_route_not_found" });
@@ -2026,7 +2331,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: vaultIntegrationTestReadinessSummaryToDto(readiness.getVaultIntegrationTestReadinessSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "vault_integration", { summary: vaultIntegrationTestReadinessSummaryToDto(readiness.getVaultIntegrationTestReadinessSummary()) }));
         return;
       }
       sendJson(response, 404, { error: "vault_integration_readiness_route_not_found" });
@@ -2040,7 +2345,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: policyBundleReadinessSummaryToDto(readiness.getPolicyBundleReadinessSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "policy_bundles", { summary: policyBundleReadinessSummaryToDto(readiness.getPolicyBundleReadinessSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "engines") {
@@ -2076,6 +2381,45 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "policy-shadow") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Policy shadow evaluation endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "plan") {
+        sendJson(response, 200, { plan: policyShadowEvaluationPlanToDto(readiness.getPolicyShadowEvaluationPlan()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "comparison-rules") {
+        sendJson(response, 200, { comparisonRules: readiness.listPolicyShadowComparisonRules().map(policyShadowComparisonRuleToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "mismatches") {
+        sendJson(response, 200, { mismatches: readiness.listPolicyShadowMismatches().map(policyShadowMismatchToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "reports") {
+        sendJson(response, 200, { reports: readiness.listPolicyShadowEvaluationReports().map(policyShadowEvaluationReportToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["input_contract", "golden_cases", "candidate_runtime", "comparison_rules", "audit", "observability", "dashboard", "rollout", "rollback", "safety"];
+        sendJson(response, 200, {
+          checks: readiness.listPolicyShadowReadinessChecks(category && categories.includes(category) ? { category: category as PolicyShadowReadinessCategory } : {})
+            .map(policyShadowReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, readinessScopedPayload(context, "policy_shadow", { summary: policyShadowEvaluationSummaryToDto(readiness.getPolicyShadowEvaluationSummary()) }));
+        return;
+      }
+      sendJson(response, 404, { error: "policy_shadow_readiness_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "staging") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Staging deployment profile endpoints are read-only planning models." });
@@ -2083,7 +2427,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: stagingDeploymentSummaryToDto(readiness.getStagingDeploymentSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "staging", { summary: stagingDeploymentSummaryToDto(readiness.getStagingDeploymentSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "profile") {
@@ -2122,7 +2466,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: stagingDeploymentDryRunSummaryToDto(readiness.getStagingDeploymentDryRunSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "staging_dry_run", { summary: stagingDeploymentDryRunSummaryToDto(readiness.getStagingDeploymentDryRunSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "profile") {
@@ -2161,7 +2505,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: stagingReleaseCandidateSummaryToDto(readiness.getStagingReleaseCandidateSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "staging_rc", { summary: stagingReleaseCandidateSummaryToDto(readiness.getStagingReleaseCandidateSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "checklist") {
@@ -2208,7 +2552,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: stagingDeploymentExecutionSummaryToDto(readiness.getStagingDeploymentExecutionSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "staging_execution", { summary: stagingDeploymentExecutionSummaryToDto(readiness.getStagingDeploymentExecutionSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "plan") {
@@ -2247,7 +2591,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       const readiness = context.deploymentReadinessService;
       if (segments.length === 3 && segments[2] === "summary") {
-        sendJson(response, 200, { summary: cicdPipelineReadinessSummaryToDto(readiness.getCicdPipelineReadinessSummary()) });
+        sendJson(response, 200, readinessScopedPayload(context, "ci_cd", { summary: cicdPipelineReadinessSummaryToDto(readiness.getCicdPipelineReadinessSummary()) }));
         return;
       }
       if (segments.length === 3 && segments[2] === "profiles") {
@@ -2416,12 +2760,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { policyBundles: dashboard.policyBundles });
         return;
       }
+      if (section === "policy-shadow") {
+        sendJson(response, 200, { policyShadow: dashboard.policyShadow });
+        return;
+      }
       if (section === "auth") {
         sendJson(response, 200, { auth: dashboard.auth });
         return;
       }
       if (section === "auth-production") {
         sendJson(response, 200, { authProduction: dashboard.authProduction });
+        return;
+      }
+      if (section === "auth-providers") {
+        sendJson(response, 200, { authProviders: dashboard.authProviders });
         return;
       }
       if (section === "providers") {
@@ -2442,6 +2794,14 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (section === "scopes") {
         sendJson(response, 200, { scopes: dashboard.scopes });
+        return;
+      }
+      if (section === "tenant-scope") {
+        sendJson(response, 200, { tenantScopePlanning: dashboard.tenantScopePlanning });
+        return;
+      }
+      if (section === "tenant-enforcement") {
+        sendJson(response, 200, { tenantScopeEnforcement: dashboard.tenantScopeEnforcement });
         return;
       }
       if (section === "readiness") {
@@ -2795,10 +3155,18 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
 
         if (segments[1] === "config") {
+          const providerSummary = authService.getProductionAuthProviderSummary();
           sendJson(response, 200, {
             config: authService.getConfig(),
+            productionAuthProvider: providerSummary,
             identityProviders: authService.listIdentityProviders().map(identityProviderToDto),
             productionAuthEnabled: false,
+            providerKind: providerSummary.activeProviderKind,
+            providerStatus: providerSummary.selectedProviderStatus,
+            selectedProviderKind: providerSummary.selectedProviderKind,
+            tokenValidationEnabled: false,
+            sessionBoundaryStatus: providerSummary.sessionBoundaryStatus,
+            identityMappingStatus: providerSummary.identityMappingStatus,
             mockAuthWarning: "MockAuthProvider is default and is not production authentication."
           });
           return;
@@ -5765,10 +6133,15 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
   const store = storage.repositoryFactory.createDataStore();
   const policyService = new PolicyService();
   const authRepository = new InMemoryAuthRepository();
+  const productionAuthProviderRegistry = new ProductionAuthProviderRegistry({
+    env: process.env,
+    repository: authRepository
+  });
   const authorizationService = new AuthorizationService({
     repository: authRepository,
     provider: new MockAuthProvider({ repository: authRepository }),
-    policyService
+    policyService,
+    productionAuthProviderRegistry
   });
   const requestContextResolver = new RequestContextResolver(authorizationService);
   const apiRequestContextMiddleware = new ApiRequestContextMiddleware({ resolver: requestContextResolver });
@@ -5913,6 +6286,8 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
   const deploymentReadinessService = createDeploymentReadinessService({
     staticPolicyRuleCount: policyService.getConfig().ruleCount
   });
+  const tenantScopePlanningService = createDashboardReadinessTenantScopePlanningService();
+  const tenantScopeEnforcementService = createTenantScopeEnforcementService();
   const agentRunnerConfig = createAgentRunnerConfigFromEnv();
   const agentRunnerRepositories = createInMemoryAgentRunnerRepositories();
   const agentRunner = agentRunnerConfig.runnerKind === "mock"
@@ -5979,6 +6354,8 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       localAgentProtocolService,
       mcpGatewayService,
       deploymentReadinessService,
+      tenantScopePlanningService,
+      tenantScopeEnforcementService,
       observabilityService
     });
   });
