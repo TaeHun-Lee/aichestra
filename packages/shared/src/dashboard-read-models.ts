@@ -230,6 +230,28 @@ export type PolicyShadowEvaluationReadModel = {
   rollout: DashboardJsonObject;
   noExecutionStatus: DashboardJsonObject;
 };
+export type PolicyRuntimePocReadinessReadModel = {
+  summary: DashboardJsonObject;
+  options: DashboardJsonObject[];
+  inputContract: DashboardJsonObject;
+  domainMappings: DashboardJsonObject[];
+  goldenCases: DashboardJsonObject[];
+  goldenHarness: DashboardJsonObject;
+  goldenHarnessResults: DashboardJsonObject[];
+  readinessChecks: DashboardJsonObject[];
+  risks: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  recommendedPath: DashboardJsonObject;
+  shadowEvaluation: DashboardJsonObject;
+  rolloutRollback: DashboardJsonObject;
+  noExecutionStatus: DashboardJsonObject;
+  shadowPlan: DashboardJsonObject;
+  shadowComparisonRules: DashboardJsonObject[];
+  shadowMismatchTaxonomy: DashboardJsonObject[];
+  shadowReports: DashboardJsonObject[];
+  shadowReadinessChecks: DashboardJsonObject[];
+  shadowSummary: DashboardJsonObject;
+};
 
 export type AuthReadModel = {
   scopeMetadata?: ScopedReadModelMetadata;
@@ -638,6 +660,7 @@ export type DashboardReadModels = {
   policy: PolicyReadModel;
   policyBundles: PolicyBundleReadinessReadModel;
   policyShadow: PolicyShadowEvaluationReadModel;
+  policyRuntimePoc: PolicyRuntimePocReadinessReadModel;
   auth: AuthReadModel;
   authProduction: AuthRbacProductionReadinessReadModel;
   authProviders: ProductionAuthProviderSkeletonReadModel;
@@ -677,6 +700,7 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/policy",
   "/dashboard/policy-bundles",
   "/dashboard/policy-shadow",
+  "/dashboard/policy-runtime-poc",
   "/dashboard/auth",
   "/dashboard/auth-production",
   "/dashboard/auth-providers",

@@ -46,6 +46,12 @@ import type {
   PolicyBundleRisk,
   PolicyDomainMapping,
   PolicyEngineOption,
+  PolicyRuntimePocDomainMapping,
+  PolicyRuntimePocGoldenCase,
+  PolicyRuntimePocInputContract,
+  PolicyRuntimePocOption,
+  PolicyRuntimePocReadinessCheck,
+  PolicyRuntimePocRisk,
   PolicyShadowComparisonRule,
   PolicyShadowEvaluationPlan,
   PolicyShadowEvaluationReport,
@@ -4157,12 +4163,701 @@ export const defaultPolicyBundleMigrationPhases: PolicyBundleMigrationPhase[] = 
   }
 ];
 
+export const defaultPolicyRuntimePocOptions: PolicyRuntimePocOption[] = [
+  {
+    id: "policy_runtime_poc_static_baseline",
+    optionKind: "static_policy_engine_baseline",
+    displayName: "StaticPolicyEngine baseline",
+    status: "baseline",
+    pocGoal: "Keep the current deny-by-default runtime as the source of truth and produce baseline fixtures for all PoC comparisons.",
+    inputsRequired: ["PolicySubject", "PolicyResource", "PolicyAction", "PolicyContext", "environment gates"],
+    outputContract: ["PolicyDecision", "matched rule ids", "sanitized audit metadata"],
+    testability: "High. Existing deterministic TypeScript policy tests and API tests already exercise the baseline.",
+    auditability: "High for current audit fields, but bundle version and shadow mismatch fields are future work.",
+    developerReviewExperience: "Code review of TypeScript rule diffs.",
+    scopeModelCompatibility: "Compatible with Tenant/Repo/Provider Scope metadata where current callers populate it.",
+    authRbacCompatibility: "Compatible with mock AuthContext, RequestContext, and service-account attribution; production Auth/RBAC remains future.",
+    performanceConsiderations: "In-process deterministic rule matching with low operational overhead.",
+    operationalComplexity: "low",
+    securityRisks: ["Policy changes are tied to code releases", "No independent bundle review or rollback artifact"],
+    productionSuitability: "Current scaffold only; not sufficient for production policy governance.",
+    recommendation: "Use as the mandatory source of truth for all PoC golden decisions and shadow comparisons.",
+    runtimeImplemented: false,
+    metadata: { staticRuntimeAlreadyActive: true, sourceOfTruth: true, policyRuntimeChanged: false }
+  },
+  {
+    id: "policy_runtime_poc_signed_json_yaml",
+    optionKind: "signed_json_yaml_bundle_evaluator_future",
+    displayName: "Signed JSON/YAML bundle evaluator",
+    status: "recommended_for_poc",
+    pocGoal: "Evaluate a narrow declarative bundle shape against static golden decisions before adopting a full policy language.",
+    inputsRequired: ["normalized policy input contract", "bundle id", "bundle version", "schema compatibility version", "golden fixtures"],
+    outputContract: ["decision", "reason", "ruleId", "policyBundleId", "policyVersion", "obligations", "redaction requirements"],
+    testability: "High if the schema remains declarative and fixture-driven.",
+    auditability: "High once bundle id/version and rule id are emitted with every shadow decision.",
+    developerReviewExperience: "Readable for domain owners when rules stay schema-driven and examples are generated.",
+    scopeModelCompatibility: "Strong. The schema can directly require tenant, repo, provider, model, SecretRef, MCP, registry, Local Agent, and audit scopes.",
+    authRbacCompatibility: "Strong after production Auth/RBAC supplies stable subjects; current mock subjects can exercise the shape only.",
+    performanceConsiderations: "Expected low overhead if implemented as a bounded schema evaluator with no dynamic code.",
+    operationalComplexity: "medium",
+    securityRisks: ["A too-expressive schema could become an unsafe policy language", "Signing verification and compatibility enforcement are future work"],
+    productionSuitability: "Good first PoC path, not production-ready until signing, review, shadow, rollback, and tenant controls exist.",
+    recommendation: "Recommended first runtime PoC path in shadow mode after golden fixtures exist.",
+    runtimeImplemented: false,
+    metadata: { parserImplemented: false, evaluatorImplemented: false, signingVerificationImplemented: false }
+  },
+  {
+    id: "policy_runtime_poc_opa_local",
+    optionKind: "opa_rego_local_library_future",
+    displayName: "OPA/Rego local evaluator",
+    status: "candidate",
+    pocGoal: "Assess whether local Rego evaluation can reproduce static decisions without an external policy service.",
+    inputsRequired: ["strict JSON input contract", "versioned Rego module", "data bundle", "golden fixtures"],
+    outputContract: ["decision", "reason", "ruleId", "policyBundleId", "policyVersion", "obligations"],
+    testability: "Strong when Rego unit tests and Aichestra golden fixtures are both required.",
+    auditability: "Strong if decision logs include bundle revision and exact input schema version.",
+    developerReviewExperience: "Specialized. Rego reviewers need generated examples and domain-owner review.",
+    scopeModelCompatibility: "Good if every scope field is normalized into the input document.",
+    authRbacCompatibility: "Good after production Auth/RBAC subjects are stable; current mock subjects remain non-production.",
+    performanceConsiderations: "Requires latency benchmarks and bounded input size review before shadow mode.",
+    operationalComplexity: "high",
+    securityRisks: ["Input schema drift", "Unexpected policy complexity", "WASM or dynamic execution must remain disabled unless explicitly designed later"],
+    productionSuitability: "Future candidate after input contract and governance controls are proven.",
+    recommendation: "Evaluate after the JSON/YAML schema PoC defines stable fixtures.",
+    runtimeImplemented: false,
+    metadata: { opaRuntimeImplemented: false, wasmPolicyExecutionEnabled: false }
+  },
+  {
+    id: "policy_runtime_poc_opa_server",
+    optionKind: "opa_rego_server_future",
+    displayName: "OPA/Rego server or sidecar",
+    status: "future_only",
+    pocGoal: "Assess remote or sidecar policy-service boundaries only after local/shadow fixtures are stable.",
+    inputsRequired: ["strict JSON input contract", "service availability contract", "mTLS/auth future", "decision timeout", "fallback policy"],
+    outputContract: ["decision", "reason", "ruleId", "policyBundleId", "policyVersion", "latency", "service health metadata"],
+    testability: "Medium. Requires service fixture tests in addition to golden decisions.",
+    auditability: "Medium to high if request ids, bundle revision, and service latency are captured.",
+    developerReviewExperience: "Specialized Rego review plus service-operations review.",
+    scopeModelCompatibility: "Good if the same normalized input contract is used.",
+    authRbacCompatibility: "Requires production service identity, request signing, and no-secret audit review.",
+    performanceConsiderations: "Adds network or IPC latency and availability risk.",
+    operationalComplexity: "high",
+    securityRisks: ["External policy service outage", "Policy bypass during timeout handling", "Service auth and request signing are not implemented"],
+    productionSuitability: "Not near-term; consider only after local evaluator and rollback controls exist.",
+    recommendation: "Do not start with this path.",
+    runtimeImplemented: false,
+    metadata: { externalPolicyServiceImplemented: false, serviceCallsEnabled: false }
+  },
+  {
+    id: "policy_runtime_poc_cedar",
+    optionKind: "cedar_local_evaluator_future",
+    displayName: "Cedar local evaluator",
+    status: "candidate",
+    pocGoal: "Evaluate Cedar for authorization-heavy domains such as dashboard access, SecretRef authorization, registry mutation, and Local Agent ownership.",
+    inputsRequired: ["principal entity", "action", "resource entity", "entity hierarchy", "context object"],
+    outputContract: ["decision", "reason", "policy id", "policy set version", "obligations", "redaction requirements"],
+    testability: "Strong for authorization cases after entity schemas are stable.",
+    auditability: "Good if policy set version and entity ids are always recorded.",
+    developerReviewExperience: "Readable for authorization reviewers, less direct for operational gates.",
+    scopeModelCompatibility: "Strong for tenant, team, project, repo, provider, SecretRef, registry, Local Agent, and audit query hierarchies.",
+    authRbacCompatibility: "Strong future fit once production principals and service accounts exist.",
+    performanceConsiderations: "Expected to be acceptable for scoped authorization, but needs benchmark coverage.",
+    operationalComplexity: "medium",
+    securityRisks: ["Operational gates may be awkward to model", "Entity hierarchy drift can cause incorrect decisions"],
+    productionSuitability: "Candidate for selected authorization-heavy domains, not the broad first PoC.",
+    recommendation: "Evaluate with dashboard, SecretRef, registry, and audit-query golden cases after the shared input contract lands.",
+    runtimeImplemented: false,
+    metadata: { cedarRuntimeImplemented: false, cedarPoliciesLoaded: false }
+  },
+  {
+    id: "policy_runtime_poc_custom_service",
+    optionKind: "custom_policy_decision_service_future",
+    displayName: "Custom policy decision service",
+    status: "not_recommended",
+    pocGoal: "Only evaluate if OPA, Cedar, and schema-driven bundles fail Aichestra-specific requirements.",
+    inputsRequired: ["service API contract", "authentication boundary", "decision timeout", "audit schema", "rollback contract"],
+    outputContract: ["decision", "reason", "rule id", "service version", "obligations", "audit metadata"],
+    testability: "Medium. A bespoke service requires a larger fixture and contract-test surface.",
+    auditability: "Depends on custom implementation and therefore carries high review cost.",
+    developerReviewExperience: "Bespoke and harder to staff than schema, OPA, or Cedar review.",
+    scopeModelCompatibility: "Possible, but all semantics would be custom.",
+    authRbacCompatibility: "Requires production service identity and request authorization that do not exist yet.",
+    performanceConsiderations: "Adds service latency and availability constraints.",
+    operationalComplexity: "high",
+    securityRisks: ["New service boundary", "Custom authorization semantics", "Higher bypass and availability risk"],
+    productionSuitability: "Not recommended for near-term production planning.",
+    recommendation: "Keep as an escape hatch only.",
+    runtimeImplemented: false,
+    metadata: { customServiceImplemented: false, recommendedNearTerm: false }
+  }
+];
+
+export const defaultPolicyRuntimePocInputContract: PolicyRuntimePocInputContract = {
+  id: "policy_runtime_poc_input_contract_v0",
+  version: "policy_runtime_poc_input_v0",
+  subjectFields: ["actorId", "principalId", "actorKind", "serviceAccountId", "roles", "teams", "authMode", "isMockActor"],
+  requestFields: ["requestId", "correlationId", "source", "taskId", "taskRunId"],
+  resourceFields: ["resourceKind", "resourceId", "tenantId", "teamId", "projectId", "repoId", "providerId", "modelId", "secretRefId", "mcpServerId", "mcpToolId", "registryPackageId", "localAgentHostId"],
+  actionField: "action",
+  environmentFields: ["integrationGates", "deploymentProfile", "stagingFlags", "productionFlags"],
+  contextFields: ["riskLevel", "budget", "secretLeaseState", "auditCorrelationMetadata"],
+  outputFields: ["decision", "reason", "ruleId", "policyBundleId", "policyVersion", "obligations", "auditMetadata", "redactionRequirements"],
+  supportedDecisions: ["allow", "deny", "block", "warn"],
+  redactionRequirements: ["never return raw secrets", "never return env values", "never return credential-cache paths", "never return raw provider tokens", "redact prompts and webhook payloads in audit previews"],
+  metadata: {
+    docs: "docs/roadmaps/policy-bundle-runtime-poc/policy-io-contract-v0.md",
+    parserImplemented: false,
+    runtimeExecutionImplemented: false
+  }
+};
+
+export const defaultPolicyRuntimePocDomainMappings: PolicyRuntimePocDomainMapping[] = [
+  {
+    id: "policy_runtime_poc_domain_git_remote_operation",
+    domain: "git_remote_operation",
+    currentStaticAction: "git.remote_operation, git.merge, git.rebase, git.branch.delete",
+    currentResourceKind: "git_operation",
+    requiredSubjectFields: ["actorId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "repoId", "projectId"],
+    requiredEnvironmentGates: ["AICHESTRA_ENABLE_REMOTE_GIT", "operation-specific Git gate", "repo allowlist", "allowed branch prefix"],
+    expectedDenyByDefaultBehavior: "remote merge, rebase, force push, branch deletion, and unknown Git operations deny.",
+    pocTestCases: ["git_remote_merge_denied", "git_force_push_denied"],
+    futureBundleRepresentation: "git-remote-operations bundle rule with destructive actions denied before allow rules.",
+    metadata: { currentRuntime: "StaticPolicyEngine", remoteProviderCallsDefault: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_github_app_token",
+    domain: "github_app_token_issuance",
+    currentStaticAction: "github_app.installation_token.issue",
+    currentResourceKind: "github_app_installation",
+    requiredSubjectFields: ["actorId", "serviceAccountId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "repoId", "providerId"],
+    requiredEnvironmentGates: ["AICHESTRA_GITHUB_AUTH_MODE", "AICHESTRA_ENABLE_GITHUB_APP", "installation allowlist", "repo allowlist", "private-key SecretRef metadata"],
+    expectedDenyByDefaultBehavior: "real installation token issuance is not implemented and token handles remain metadata-only.",
+    pocTestCases: ["service_account_cannot_bypass_policy"],
+    futureBundleRepresentation: "github-app-token-handle bundle rule requiring service account, SecretRef metadata, allowlists, and no live token value output.",
+    metadata: { liveInstallationTokenIssued: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_github_webhook",
+    domain: "github_webhook_processing",
+    currentStaticAction: "git.webhook.process",
+    currentResourceKind: "git_operation",
+    requiredSubjectFields: ["actorId", "serviceAccountId", "authMode"],
+    requiredScopeFields: ["tenantId", "repoId"],
+    requiredEnvironmentGates: ["AICHESTRA_ENABLE_GITHUB_WEBHOOKS", "signature verified", "webhook repo allowlist", "replay check"],
+    expectedDenyByDefaultBehavior: "unverified or unallowlisted webhook processing denies and stores no raw payload.",
+    pocTestCases: ["github_webhook_unverified_denied"],
+    futureBundleRepresentation: "git-webhook-receiver bundle with signature, replay, and repo allowlist conditions.",
+    metadata: { rawPayloadStored: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_llm_remote_completion",
+    domain: "llm_remote_completion",
+    currentStaticAction: "llm.remote_completion",
+    currentResourceKind: "llm_provider",
+    requiredSubjectFields: ["actorId", "principalId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "providerId", "modelId"],
+    requiredEnvironmentGates: ["AICHESTRA_ENABLE_REMOTE_LLM", "AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION", "base URL configured", "credential metadata", "model allowlist", "budget allow"],
+    expectedDenyByDefaultBehavior: "remote completion denies unless every gate, allowlist, budget, credential, Auth/RBAC, and Policy condition passes.",
+    pocTestCases: ["llm_remote_completion_requires_gates"],
+    futureBundleRepresentation: "llm-remote-completion bundle rule with budget and credential obligations.",
+    metadata: { rawPromptStored: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_llm_fallback",
+    domain: "llm_fallback",
+    currentStaticAction: "llm.fallback",
+    currentResourceKind: "llm_fallback_policy",
+    requiredSubjectFields: ["actorId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "providerId", "modelId"],
+    requiredEnvironmentGates: ["fallback enabled", "max fallback attempts bounded", "provider/model allowlists", "budget allow"],
+    expectedDenyByDefaultBehavior: "fallback is disabled and unbounded fallback denies.",
+    pocTestCases: ["llm_fallback_bounded"],
+    futureBundleRepresentation: "llm-fallback bundle rule requiring bounded attempts and no allowlist bypass.",
+    metadata: { fallbackBypassAllowed: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_mcp",
+    domain: "mcp_tool_invocation",
+    currentStaticAction: "mcp.tool.invoke, mcp.tool.invoke.critical",
+    currentResourceKind: "mcp_tool",
+    requiredSubjectFields: ["actorId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "mcpServerId", "mcpToolId"],
+    requiredEnvironmentGates: ["mock gateway active", "tool risk low", "real transport disabled", "secret forwarding disabled", "network disabled"],
+    expectedDenyByDefaultBehavior: "critical, high-risk, write, deploy, network, and secret-resolving tools deny by default.",
+    pocTestCases: ["mcp_critical_tool_denied"],
+    futureBundleRepresentation: "mcp-tool-risk bundle rule with risk, transport, network, and redaction constraints.",
+    metadata: { realTransportEnabled: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_secretref_vault",
+    domain: "secretref_vault_credential_resolution",
+    currentStaticAction: "provider.credential.resolve, secret.read, secret.lease.request",
+    currentResourceKind: "secret_ref",
+    requiredSubjectFields: ["actorId", "serviceAccountId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "providerId", "secretRefId"],
+    requiredEnvironmentGates: ["SecretRef active", "Auth/RBAC allow", "Policy allow", "Vault provider gate when provider is vault", "path allowlist"],
+    expectedDenyByDefaultBehavior: "raw secret read and credential cache access deny; Vault resolution needs Auth/RBAC, Policy, active SecretRef, provider gates, and allowlisted path.",
+    pocTestCases: ["secret_read_denied", "credential_cache_read_denied", "vault_secret_resolution_requires_auth_policy_path_allowlist"],
+    futureBundleRepresentation: "secretref-resolution bundle rule with lease and redaction obligations.",
+    metadata: { secretValuesReturned: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_runner",
+    domain: "runner_command_execution",
+    currentStaticAction: "runner.command.execute, runner.secret.inject",
+    currentResourceKind: "command",
+    requiredSubjectFields: ["actorId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "repoId", "projectId"],
+    requiredEnvironmentGates: ["local execution gate", "harness policy allow", "fixture workspace", "network disabled", "secret injection denied"],
+    expectedDenyByDefaultBehavior: "runner command execution and secret injection deny by default outside explicit fixture gates.",
+    pocTestCases: ["runner_secret_injection_denied"],
+    futureBundleRepresentation: "runner-execution bundle with command, workspace, output, network, and secret obligations.",
+    metadata: { shellStringExecutionAllowed: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_local_agent",
+    domain: "local_agent_invocation",
+    currentStaticAction: "local_agent.invoke, local_agent.secret.forward, credential.cache.read",
+    currentResourceKind: "local_agent",
+    requiredSubjectFields: ["actorId", "principalId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "localAgentHostId"],
+    requiredEnvironmentGates: ["mock transport", "connected host", "consent recorded", "sandbox profile", "redaction policy"],
+    expectedDenyByDefaultBehavior: "real transport, PTY, secret forwarding, credential cache reads, and vendor CLI execution deny.",
+    pocTestCases: ["credential_cache_read_denied", "service_account_cannot_bypass_policy"],
+    futureBundleRepresentation: "local-agent-consent bundle with consent, capability, sandbox, and redaction obligations.",
+    metadata: { realDaemonImplemented: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_registry",
+    domain: "registry_mutation",
+    currentStaticAction: "registry.create, registry.update, registry.approve, registry.rollback",
+    currentResourceKind: "registry_item",
+    requiredSubjectFields: ["actorId", "principalId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "registryPackageId"],
+    requiredEnvironmentGates: ["registry mutation authorizer allow", "lifecycle gate", "approval gate", "checksum gate", "eval gate"],
+    expectedDenyByDefaultBehavior: "pending approval entries are excluded from resolver selection and mutation roles remain required.",
+    pocTestCases: ["registry_pending_approval_excluded"],
+    futureBundleRepresentation: "registry-governance bundle with lifecycle, approval, eval, checksum, and rollback obligations.",
+    metadata: { activeMutationFromAutoImprovementAllowed: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_governance",
+    domain: "governance_apply_gate",
+    currentStaticAction: "improvement.apply",
+    currentResourceKind: "improvement_proposal",
+    requiredSubjectFields: ["actorId", "serviceAccountId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "registryPackageId"],
+    requiredEnvironmentGates: ["human approval", "eval passed", "canary ready", "auto apply disabled"],
+    expectedDenyByDefaultBehavior: "governance apply remains denied and auto-apply remains disabled.",
+    pocTestCases: ["governance_apply_gate_denied"],
+    futureBundleRepresentation: "improvement-governance bundle with apply obligations and human review requirements.",
+    metadata: { allowAutoApply: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_dashboard",
+    domain: "dashboard_readiness_access",
+    currentStaticAction: "dashboard.read, readiness.read",
+    currentResourceKind: "dashboard",
+    requiredSubjectFields: ["actorId", "principalId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "teamId", "projectId", "audit query scope"],
+    requiredEnvironmentGates: ["read-only route", "sanitized DTO", "no secret/env values", "production dashboard filtering future"],
+    expectedDenyByDefaultBehavior: "viewers can see safe summaries but not secret-adjacent raw details.",
+    pocTestCases: ["dashboard_viewer_no_secret_adjacent_details", "tenant_scope_mismatch_denied_future"],
+    futureBundleRepresentation: "dashboard-read-scope bundle with tenant, retention, and redaction obligations.",
+    metadata: { dashboardFilteringImplemented: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_observability",
+    domain: "observability_audit_query",
+    currentStaticAction: "observability.audit.read, policy.audit.read",
+    currentResourceKind: "dashboard",
+    requiredSubjectFields: ["actorId", "principalId", "roles", "authMode"],
+    requiredScopeFields: ["tenantId", "audit query scope", "retention class"],
+    requiredEnvironmentGates: ["sanitized audit envelope", "retention class allowed", "raw secret and prompt views denied"],
+    expectedDenyByDefaultBehavior: "security_admin can view sanitized audit metadata but not raw secrets, tokens, prompts, or webhook payloads.",
+    pocTestCases: ["security_admin_audit_metadata_no_raw_secrets"],
+    futureBundleRepresentation: "audit-query-scope bundle with retention, redaction, and tenant obligations.",
+    metadata: { rawSecretAuditViewAllowed: false }
+  }
+];
+
+export const defaultPolicyRuntimePocGoldenCases: PolicyRuntimePocGoldenCase[] = [
+  {
+    id: "git_remote_merge_denied",
+    domain: "git_remote_operation",
+    action: "git.merge",
+    title: "Git remote merge denied",
+    expectedDecision: "deny",
+    expectedReason: "remote provider merge is unsupported and denied by static policy.",
+    requiredInputs: ["actorId", "repoId", "action", "environment.remoteMergeEnabled"],
+    requiredStaticBehavior: "Deny regardless of mock admin or service-account role.",
+    futureBundleExpectation: "Bundle must deny merge before any allow rule can match.",
+    metadata: { destructiveGitDenied: true }
+  },
+  {
+    id: "git_force_push_denied",
+    domain: "git_remote_operation",
+    action: "git.force_push",
+    title: "Force push denied",
+    expectedDecision: "deny",
+    expectedReason: "force push is outside Real Git Adapter v2 and remains unsupported.",
+    requiredInputs: ["actorId", "repoId", "action", "riskLevel"],
+    requiredStaticBehavior: "Unknown/destructive Git operation denies.",
+    futureBundleExpectation: "Bundle must deny force push explicitly or through destructive operation class.",
+    metadata: { forcePushSupported: false }
+  },
+  {
+    id: "secret_read_denied",
+    domain: "secretref_vault_credential_resolution",
+    action: "secret.read",
+    title: "Raw secret read denied",
+    expectedDecision: "deny",
+    expectedReason: "raw secret reads are never exposed through policy, API, health, dashboard, or audit surfaces.",
+    requiredInputs: ["actorId", "secretRefId", "action"],
+    requiredStaticBehavior: "Deny direct secret.read for all roles.",
+    futureBundleExpectation: "Bundle output must never include a secret value obligation.",
+    metadata: { rawSecretValueReturned: false }
+  },
+  {
+    id: "credential_cache_read_denied",
+    domain: "local_agent_invocation",
+    action: "credential.cache.read",
+    title: "Credential cache read denied",
+    expectedDecision: "deny",
+    expectedReason: "provider-owned credential caches are not read by Aichestra.",
+    requiredInputs: ["actorId", "providerId", "action"],
+    requiredStaticBehavior: "Deny credential-cache read and upload for every provider path.",
+    futureBundleExpectation: "Bundle must deny credential cache actions even under service account or break-glass future roles.",
+    metadata: { credentialCacheReadAllowed: false }
+  },
+  {
+    id: "runner_secret_injection_denied",
+    domain: "runner_command_execution",
+    action: "runner.secret.inject",
+    title: "Runner secret injection denied",
+    expectedDecision: "deny",
+    expectedReason: "runner secret injection is not allowed in the default runtime.",
+    requiredInputs: ["actorId", "runnerKind", "workspace", "secretRefId"],
+    requiredStaticBehavior: "Deny secret injection by default.",
+    futureBundleExpectation: "Bundle must deny unless a future explicit policy and sandbox design allow it.",
+    metadata: { productionSecretInjection: false }
+  },
+  {
+    id: "mcp_critical_tool_denied",
+    domain: "mcp_tool_invocation",
+    action: "mcp.tool.invoke.critical",
+    title: "MCP critical tool denied",
+    expectedDecision: "deny",
+    expectedReason: "critical MCP tools, write/deploy tools, network tools, and secret tools deny by default.",
+    requiredInputs: ["actorId", "mcpServerId", "mcpToolId", "riskLevel"],
+    requiredStaticBehavior: "Deny critical MCP tool invocation.",
+    futureBundleExpectation: "Bundle must preserve risk-level denial and real transport disabled behavior.",
+    metadata: { criticalToolAllowed: false }
+  },
+  {
+    id: "llm_remote_completion_requires_gates",
+    domain: "llm_remote_completion",
+    action: "llm.remote_completion",
+    title: "LLM remote completion requires gates",
+    expectedDecision: "deny",
+    expectedReason: "remote completion denies unless every LLM gate, allowlist, credential, budget, Auth/RBAC, and Policy check passes.",
+    requiredInputs: ["actorId", "providerId", "modelId", "taskId", "taskRunId", "budget"],
+    requiredStaticBehavior: "Deny when remote LLM or completion gate is disabled.",
+    futureBundleExpectation: "Bundle must require the same gates and emit redaction obligations.",
+    metadata: { rawPromptReturned: false }
+  },
+  {
+    id: "llm_fallback_bounded",
+    domain: "llm_fallback",
+    action: "llm.fallback",
+    title: "LLM fallback bounded",
+    expectedDecision: "deny",
+    expectedReason: "fallback is disabled by default and must be bounded when enabled.",
+    requiredInputs: ["actorId", "providerId", "modelId", "maxFallbackAttempts"],
+    requiredStaticBehavior: "Deny disabled or unbounded fallback.",
+    futureBundleExpectation: "Bundle must not allow fallback to bypass provider/model/budget gates.",
+    metadata: { fallbackBypassAllowed: false }
+  },
+  {
+    id: "vault_secret_resolution_requires_auth_policy_path_allowlist",
+    domain: "secretref_vault_credential_resolution",
+    action: "provider.credential.resolve",
+    title: "Vault secret resolution requires Auth/RBAC, Policy, and path allowlist",
+    expectedDecision: "allow_when_gated",
+    expectedReason: "Vault-backed SecretRef resolution is allowed only after explicit Vault gates, active SecretRef, Auth/RBAC, Policy, lease, and path allowlist checks.",
+    requiredInputs: ["actorId", "serviceAccountId", "secretRefId", "providerId", "secretLeaseState"],
+    requiredStaticBehavior: "Deny unless all configured checks pass; never expose secret values.",
+    futureBundleExpectation: "Bundle must emit lease and redaction obligations for any allow.",
+    metadata: { vaultDefaultEnabled: false, secretValuesReturned: false }
+  },
+  {
+    id: "registry_pending_approval_excluded",
+    domain: "registry_mutation",
+    action: "registry.resolve",
+    title: "Registry pending approval excluded",
+    expectedDecision: "exclude",
+    expectedReason: "pending approval registry entries are excluded by resolver gates.",
+    requiredInputs: ["actorId", "registryPackageId", "approvalStatus", "lifecycle"],
+    requiredStaticBehavior: "Resolver must exclude pending approval entries.",
+    futureBundleExpectation: "Bundle must not weaken lifecycle, approval, eval, checksum, or resolver gates.",
+    metadata: { approvalBypassAllowed: false }
+  },
+  {
+    id: "governance_apply_gate_denied",
+    domain: "governance_apply_gate",
+    action: "improvement.apply",
+    title: "Governance apply gate denied",
+    expectedDecision: "deny",
+    expectedReason: "auto-improvement apply is not implemented and remains blocked by policy and governance gates.",
+    requiredInputs: ["actorId", "proposalId", "evalStatus", "canaryStatus", "humanApproval"],
+    requiredStaticBehavior: "Deny improvement.apply.",
+    futureBundleExpectation: "Bundle must require human approval, eval pass, canary readiness, and explicit future implementation before any allow.",
+    metadata: { autoApplyAllowed: false }
+  },
+  {
+    id: "dashboard_viewer_no_secret_adjacent_details",
+    domain: "dashboard_readiness_access",
+    action: "dashboard.read",
+    title: "Dashboard viewer cannot see secret-adjacent details",
+    expectedDecision: "warn",
+    expectedReason: "viewer dashboards may show safe counts/statuses only and must not expose secret-adjacent raw values.",
+    requiredInputs: ["actorId", "roles", "panel", "tenantId"],
+    requiredStaticBehavior: "Return sanitized read models only.",
+    futureBundleExpectation: "Bundle must emit redaction obligations and tenant scope filters.",
+    metadata: { rawEnvValuesExposed: false }
+  },
+  {
+    id: "security_admin_audit_metadata_no_raw_secrets",
+    domain: "observability_audit_query",
+    action: "observability.audit.read",
+    title: "security_admin can view audit metadata but not raw secrets",
+    expectedDecision: "warn",
+    expectedReason: "security_admin may inspect sanitized audit metadata but never raw secret, token, prompt, or payload values.",
+    requiredInputs: ["actorId", "roles", "auditQueryScope", "retentionClass"],
+    requiredStaticBehavior: "Return sanitized audit envelopes only.",
+    futureBundleExpectation: "Bundle must separate metadata visibility from raw sensitive value access.",
+    metadata: { rawSecretAuditViewAllowed: false }
+  },
+  {
+    id: "service_account_cannot_bypass_policy",
+    domain: "github_app_token_issuance",
+    action: "github_app.installation_token.issue",
+    title: "Service account cannot bypass policy",
+    expectedDecision: "deny",
+    expectedReason: "mock service accounts add attribution but do not bypass Policy-as-code or SecretRef gates.",
+    requiredInputs: ["actorId", "serviceAccountId", "roles", "authMode", "repoId"],
+    requiredStaticBehavior: "Deny when required GitHub App gates or policy conditions are missing.",
+    futureBundleExpectation: "Bundle must treat service-account identity as subject metadata, not a bypass.",
+    metadata: { serviceAccountCredentialIssued: false }
+  },
+  {
+    id: "tenant_scope_mismatch_denied_future",
+    domain: "dashboard_readiness_access",
+    action: "readiness.read",
+    title: "Tenant scope mismatch denied in future",
+    expectedDecision: "deny",
+    expectedReason: "future production tenant scope mismatch must deny cross-tenant readiness or audit reads.",
+    requiredInputs: ["actorId", "tenantId", "resource.tenantId", "requestId", "correlationId"],
+    requiredStaticBehavior: "Current metadata-only scope model does not enforce production tenant isolation.",
+    futureBundleExpectation: "Bundle must deny tenant mismatch once production tenant enforcement exists.",
+    metadata: { productionTenantEnforcementImplemented: false }
+  }
+];
+
+export const defaultPolicyRuntimePocReadinessChecks: PolicyRuntimePocReadinessCheck[] = [
+  {
+    id: "policy_runtime_poc_goals_documented",
+    category: "goals",
+    name: "PoC goals documented",
+    status: "pass",
+    severity: "medium",
+    description: "Runtime PoC goals and boundaries are documented without implementing an evaluator.",
+    remediation: "Keep runtime implementation behind a future explicit task.",
+    evidence: ["docs/roadmaps/policy-bundle-runtime-poc/v0-plan.md"],
+    metadata: { runtimeImplemented: false }
+  },
+  {
+    id: "policy_runtime_poc_input_contract_defined",
+    category: "input_contract",
+    name: "Policy input/output contract defined",
+    status: "pass",
+    severity: "high",
+    description: "A normalized input and output contract exists for future shadow evaluation.",
+    remediation: "Add schema validation before any future runtime evaluator or bundle loader.",
+    evidence: ["docs/roadmaps/policy-bundle-runtime-poc/policy-io-contract-v0.md", "docs/roadmaps/policy-bundle-runtime-poc/golden-test-harness-v1.md"],
+    metadata: { schemaValidatorImplemented: false }
+  },
+  {
+    id: "policy_runtime_poc_domain_mapping_complete",
+    category: "domain_mapping",
+    name: "PoC domains mapped",
+    status: "pass",
+    severity: "high",
+    description: "Git, GitHub App, webhook, LLM, MCP, SecretRef/Vault, Runner, Local Agent, Registry, Governance, Dashboard, and Observability domains are mapped.",
+    remediation: "Keep mappings synchronized with new static policy actions.",
+    evidence: ["docs/roadmaps/policy-bundle-runtime-poc/domain-poc-mapping-v0.md"],
+    metadata: { mappedDomainCount: 13 }
+  },
+  {
+    id: "policy_runtime_poc_golden_cases_defined",
+    category: "golden_tests",
+    name: "Golden decision cases defined",
+    status: "pass",
+    severity: "high",
+    description: "Golden decision cases define expected allow/deny/block/warn/exclude outcomes without running a policy runtime.",
+    remediation: "Keep golden fixtures synchronized with StaticPolicyEngine before any future shadow evaluator.",
+    evidence: ["docs/roadmaps/policy-bundle-runtime-poc/golden-decision-tests-v0.md", "docs/roadmaps/policy-bundle-runtime-poc/golden-test-harness-v1.md"],
+    metadata: { goldenHarnessImplemented: true, sourceOfTruth: "StaticPolicyEngine" }
+  },
+  {
+    id: "policy_runtime_poc_shadow_evaluator_future",
+    category: "shadow_evaluation",
+    name: "Shadow evaluator is future work",
+    status: "fail",
+    severity: "critical",
+    description: "No shadow evaluator exists yet; StaticPolicyEngine remains the only source of truth.",
+    remediation: "Implement shadow evaluation only after offline golden fixtures pass.",
+    evidence: ["docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v0.md"],
+    metadata: { shadowEvaluatorImplemented: false }
+  },
+  {
+    id: "policy_runtime_poc_runtime_execution_disabled",
+    category: "safety",
+    name: "Runtime execution disabled",
+    status: "pass",
+    severity: "critical",
+    description: "No OPA, Cedar, JSON/YAML evaluator, custom policy service, dynamic code execution, remote policy loading, or hot reload is implemented.",
+    remediation: "Preserve this invariant until a future runtime PoC task is explicitly approved.",
+    evidence: ["packages/policy/src/engine.ts", "packages/deployment-readiness/src/catalog.ts"],
+    metadata: { dynamicPolicyExecutionEnabled: false, remotePolicyLoadingEnabled: false }
+  },
+  {
+    id: "policy_runtime_poc_rollout_rollback_planned",
+    category: "rollback",
+    name: "Rollout and rollback strategy planned",
+    status: "warning",
+    severity: "high",
+    description: "Rollout phases and rollback triggers are documented, but no controller or runtime switch exists.",
+    remediation: "Add rollout state and rollback pinning only after shadow evaluation proves stable.",
+    evidence: ["docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v0.md"],
+    metadata: { rolloutControllerImplemented: false, rollbackImplemented: false }
+  },
+  {
+    id: "policy_runtime_poc_dashboard_panel_available",
+    category: "dashboard",
+    name: "Dashboard panel available",
+    status: "pass",
+    severity: "low",
+    description: "Dashboard exposes read-only Policy Runtime PoC planning status.",
+    remediation: "Keep dashboard/API surfaces read-only and sanitized.",
+    evidence: ["apps/api/src/dashboard-read-model.ts", "apps/web/src/render.ts"],
+    metadata: { dashboardReadOnly: true }
+  }
+];
+
+export const defaultPolicyRuntimePocRisks: PolicyRuntimePocRisk[] = [
+  {
+    id: "policy_runtime_poc_risk_dynamic_execution",
+    category: "runtime_safety",
+    title: "Dynamic policy execution accidentally introduced",
+    severity: "critical",
+    likelihood: "medium",
+    impact: "A runtime PoC could execute untrusted policy logic or bypass existing safety gates.",
+    mitigation: "Keep this milestone planning-only and block eval, new Function, WASM policy execution, remote loading, and hot reload.",
+    status: "open",
+    metadata: { dynamicPolicyExecutionEnabled: false }
+  },
+  {
+    id: "policy_runtime_poc_risk_shadow_mismatch",
+    category: "shadow_evaluation",
+    title: "Shadow decisions diverge from StaticPolicyEngine",
+    severity: "high",
+    likelihood: "high",
+    impact: "A future runtime could allow operations currently denied by static policy.",
+    mitigation: "Require offline golden fixtures and shadow mismatch review before any enforcement.",
+    status: "open",
+    metadata: { staticPolicyEngineSourceOfTruth: true }
+  },
+  {
+    id: "policy_runtime_poc_risk_scope_gap",
+    category: "input_contract",
+    title: "Input contract lacks production tenant scope",
+    severity: "critical",
+    likelihood: "high",
+    impact: "A future runtime could make cross-tenant decisions without trustworthy tenant, repo, provider, SecretRef, or audit query scope.",
+    mitigation: "Block enforcement until production Auth/RBAC and tenant scope enforcement exist.",
+    status: "open",
+    metadata: { productionTenantEnforcementImplemented: false }
+  },
+  {
+    id: "policy_runtime_poc_risk_secret_exposure",
+    category: "safety",
+    title: "Policy input/output exposes secrets or env values",
+    severity: "critical",
+    likelihood: "medium",
+    impact: "A future evaluator or audit record could leak credentials, secret values, env values, prompts, or raw webhook payloads.",
+    mitigation: "Use only metadata fields and require redaction obligations in every output.",
+    status: "open",
+    metadata: { noSecretsExposed: true, envValuesExposed: false }
+  },
+  {
+    id: "policy_runtime_poc_risk_operational_complexity",
+    category: "migration",
+    title: "PoC selects a high-complexity runtime too early",
+    severity: "high",
+    likelihood: "medium",
+    impact: "A service-based or expressive runtime could add availability, latency, and review burden before contracts are stable.",
+    mitigation: "Start with signed JSON/YAML golden fixtures and shadow-only comparison.",
+    status: "open",
+    metadata: { recommendedPocOptionId: "policy_runtime_poc_signed_json_yaml" }
+  }
+];
+
 export const defaultPolicyShadowEvaluationPlan: PolicyShadowEvaluationPlan = {
   id: "policy_shadow_evaluation_v1_plan",
   status: "ready_for_design",
   sourceOfTruth: "StaticPolicyEngine",
-  candidateRuntimeKinds: ["signed_json_yaml_bundle", "opa_rego", "cedar", "custom_future"],
-  domains: ["git", "git_webhook", "llm", "mcp", "runner", "registry", "improvement", "secretref", "secrets_sandbox", "local_agent", "provider", "auth", "dashboard", "deployment_readiness"],
+  candidateRuntimeKinds: [
+    "signed_json_yaml_bundle",
+    "opa_rego",
+    "cedar",
+    "custom_future",
+    "signed_json_yaml_bundle_evaluator_future",
+    "opa_rego_local_library_future",
+    "cedar_local_evaluator_future",
+    "custom_policy_decision_service_future"
+  ],
+  domains: [
+    "git",
+    "git_webhook",
+    "llm",
+    "mcp",
+    "runner",
+    "registry",
+    "improvement",
+    "secretref",
+    "secrets_sandbox",
+    "local_agent",
+    "provider",
+    "auth",
+    "dashboard",
+    "deployment_readiness",
+    "git_remote_operation",
+    "github_app_token_issuance",
+    "github_webhook_processing",
+    "llm_remote_completion",
+    "llm_fallback",
+    "mcp_tool_invocation",
+    "secretref_vault_credential_resolution",
+    "runner_command_execution",
+    "local_agent_invocation",
+    "registry_mutation",
+    "governance_apply_gate",
+    "dashboard_readiness_access",
+    "observability_audit_query"
+  ],
   rolloutStages: [
     "docs_planning",
     "golden_harness_only",
@@ -4183,7 +4878,8 @@ export const defaultPolicyShadowEvaluationPlan: PolicyShadowEvaluationPlan = {
     candidateRuntimeImplemented: false,
     dynamicPolicyExecutionEnabled: false,
     externalPolicyServiceCallsEnabled: false,
-    noSecretsOrEnvValues: true
+    noSecretsOrEnvValues: true,
+    runtimeExecutionImplemented: false
   }
 };
 
@@ -4229,6 +4925,48 @@ export const defaultPolicyShadowComparisonRules: PolicyShadowComparisonRule[] = 
     required: true,
     severityOnMismatch: "medium",
     metadata: { requiredFields: ["action", "resourceKind", "actor", "requestId", "correlationId"], recordOnlyInV1: true }
+  },
+  {
+    id: "policy_shadow_compare_effect",
+    comparisonKind: "effect_match",
+    required: true,
+    severityOnMismatch: "critical",
+    metadata: { blocksRolloutFuture: true, description: "Candidate decision effect must match StaticPolicyEngine before rollout." }
+  },
+  {
+    id: "policy_shadow_compare_reason",
+    comparisonKind: "reason_match",
+    required: false,
+    severityOnMismatch: "medium",
+    metadata: { reviewRequired: true, description: "Reason text may differ only after policy owner review." }
+  },
+  {
+    id: "policy_shadow_compare_rule_id",
+    comparisonKind: "rule_id_match",
+    required: false,
+    severityOnMismatch: "medium",
+    metadata: { reviewRequired: true, description: "Rule id mismatches require traceability mapping." }
+  },
+  {
+    id: "policy_shadow_compare_obligations",
+    comparisonKind: "obligation_match",
+    required: true,
+    severityOnMismatch: "high",
+    metadata: { blocksRolloutFuture: true, description: "Missing obligations can weaken follow-up gates." }
+  },
+  {
+    id: "policy_shadow_compare_redaction",
+    comparisonKind: "redaction_match",
+    required: true,
+    severityOnMismatch: "critical",
+    metadata: { blocksRolloutFuture: true, description: "Redaction requirements must never be dropped." }
+  },
+  {
+    id: "policy_shadow_compare_audit_metadata",
+    comparisonKind: "audit_metadata_match",
+    required: true,
+    severityOnMismatch: "high",
+    metadata: { blocksRolloutFuture: true, description: "Request, correlation, tenant, bundle, and rule metadata must remain auditable." }
   }
 ];
 
@@ -4238,16 +4976,16 @@ export const defaultPolicyShadowMismatches: PolicyShadowMismatch[] = [
     mismatchKind: "static_allow_candidate_deny",
     severity: "medium",
     defaultAction: "record_only",
-    productionImpact: "Candidate runtime could block an operation currently allowed by the static source of truth; review before any activation.",
-    metadata: { rolloutImpact: "requires_review", example: "Static allows a mock dashboard read but candidate denies it." }
+    productionImpact: "Candidate runtime could block an operation currently allowed by the static source of truth; future enforcement could create false denials for safe read-only workflows.",
+    metadata: { example: "Static allows low-risk mock MCP read but candidate denies.", rolloutImpact: "review_before_rollout" }
   },
   {
     id: "policy_shadow_mismatch_static_deny_candidate_allow",
     mismatchKind: "static_deny_candidate_allow",
     severity: "critical",
     defaultAction: "block_rollout_future",
-    productionImpact: "Candidate runtime could allow an operation denied by StaticPolicyEngine, including destructive provider or secret-adjacent actions.",
-    metadata: { rolloutImpact: "blocks_rollout", example: "Static denies secret.read but candidate allows it." }
+    productionImpact: "Candidate runtime could allow an operation denied by StaticPolicyEngine, including destructive provider or secret-adjacent actions; future enforcement could allow operations currently denied by static policy.",
+    metadata: { examples: ["force push", "secret.read", "credential cache read", "MCP critical tool"], rolloutImpact: "block_rollout" }
   },
   {
     id: "policy_shadow_mismatch_static_block_candidate_allow",
@@ -4270,16 +5008,32 @@ export const defaultPolicyShadowMismatches: PolicyShadowMismatch[] = [
     mismatchKind: "rule_id_mismatch",
     severity: "medium",
     defaultAction: "record_only",
-    productionImpact: "Auditors may not be able to trace a candidate decision to the equivalent static rule.",
-    metadata: { rolloutImpact: "requires_mapping", example: "Static matches git.merge.deny but candidate reports a generic deny rule." }
+    productionImpact: "Auditors may not be able to trace a candidate decision to the equivalent static rule; future enforcement could bypass a hard block such as governance apply.",
+    metadata: { example: "Static blocks governance apply but candidate allows.", rolloutImpact: "block_rollout" }
+  },
+  {
+    id: "policy_shadow_mismatch_reason",
+    mismatchKind: "reason_mismatch",
+    severity: "medium",
+    defaultAction: "record_only",
+    productionImpact: "Decision audit and operator debugging could diverge.",
+    metadata: { rolloutImpact: "policy_owner_review" }
+  },
+  {
+    id: "policy_shadow_mismatch_rule_id",
+    mismatchKind: "rule_id_mismatch",
+    severity: "medium",
+    defaultAction: "record_only",
+    productionImpact: "Rule traceability and bundle review could become ambiguous.",
+    metadata: { rolloutImpact: "policy_owner_review" }
   },
   {
     id: "policy_shadow_mismatch_missing_obligation",
     mismatchKind: "missing_obligation",
     severity: "high",
     defaultAction: "block_rollout_future",
-    productionImpact: "Candidate runtime may omit required approvals, leases, budgets, redaction, or audit obligations.",
-    metadata: { rolloutImpact: "blocks_domain_activation", example: "Candidate allows remote LLM without budget obligation metadata." }
+    productionImpact: "Candidate runtime may omit required approvals, leases, budgets, redaction, or audit obligations; future enforcement could skip required review, redaction, lease, or audit obligations.",
+    metadata: { rolloutImpact: "block_enforcement", example: "Candidate allows remote LLM without budget obligation metadata." }
   },
   {
     id: "policy_shadow_mismatch_extra_obligation",
@@ -4312,6 +5066,30 @@ export const defaultPolicyShadowMismatches: PolicyShadowMismatch[] = [
     defaultAction: "block_rollout_future",
     productionImpact: "Candidate runtime errors could create noisy reports or hide decision gaps; enforcement still stays on StaticPolicyEngine.",
     metadata: { rolloutImpact: "blocks_candidate_runtime_activation", example: "Candidate evaluator throws while static decision succeeds." }
+  },
+  {
+    id: "policy_shadow_mismatch_redaction",
+    mismatchKind: "redaction_mismatch",
+    severity: "critical",
+    defaultAction: "block_rollout_future",
+    productionImpact: "Future enforcement or audit output could expose secret-adjacent data.",
+    metadata: { examples: ["raw secret value", "env value", "provider token", "raw prompt"], rolloutImpact: "block_rollout" }
+  },
+  {
+    id: "policy_shadow_mismatch_audit_metadata",
+    mismatchKind: "audit_metadata_mismatch",
+    severity: "high",
+    defaultAction: "block_rollout_future",
+    productionImpact: "Future audit records could miss request, correlation, tenant, rule, or bundle metadata.",
+    metadata: { rolloutImpact: "block_enforcement" }
+  },
+  {
+    id: "policy_shadow_mismatch_candidate_error",
+    mismatchKind: "error_in_candidate",
+    severity: "high",
+    defaultAction: "alert_future",
+    productionImpact: "Candidate runtime reliability could be insufficient for shadow or enforcement.",
+    metadata: { rolloutImpact: "block_until_error_handling_is_stable" }
   }
 ];
 
@@ -4333,6 +5111,24 @@ export const defaultPolicyShadowEvaluationReports: PolicyShadowEvaluationReport[
       goldenCasesLinked: true,
       reportFormatDefinedOnly: true,
       noExternalObservabilityExport: true
+    }
+  },
+  {
+    id: "policy_shadow_report_planning_seed",
+    generatedAt: new Date("2026-05-16T00:00:00.000Z"),
+    domain: "all_domains",
+    caseCount: 0,
+    matchCount: 0,
+    mismatchCount: 0,
+    criticalMismatchCount: 0,
+    enforcementChanged: false,
+    sourceOfTruth: "StaticPolicyEngine",
+    candidateRuntimeKind: "signed_json_yaml_bundle_evaluator_future",
+    metadata: {
+      reportKind: "planning_seed",
+      shadowEvaluatorImplemented: false,
+      candidateRuntimeExecuted: false,
+      goldenHarnessFeedsFutureReports: true
     }
   }
 ];
@@ -4357,21 +5153,39 @@ export const defaultPolicyShadowReadinessChecks: PolicyShadowReadinessCheck[] = 
     metadata: { sourceOfTruth: "StaticPolicyEngine", goldenHarnessStatus: "v1_implemented" }
   },
   {
+    id: "policy_shadow_input_contract_ready",
+    category: "input_contract",
+    status: "pass",
+    severity: "high",
+    description: "Policy Runtime PoC input/output contract exists for future shadow comparisons.",
+    remediation: "Add schema validation before candidate runtime execution.",
+    metadata: { docs: "docs/roadmaps/policy-bundle-runtime-poc/policy-io-contract-v0.md" }
+  },
+  {
+    id: "policy_shadow_golden_cases_ready",
+    category: "golden_cases",
+    status: "pass",
+    severity: "high",
+    description: "Golden Harness v1 provides deterministic StaticPolicyEngine decisions for future candidate comparison.",
+    remediation: "Keep golden cases synchronized with static policy rule changes.",
+    metadata: { goldenHarnessImplemented: true, sourceOfTruth: "StaticPolicyEngine" }
+  },
+  {
     id: "policy_shadow_candidate_runtime_future",
     category: "candidate_runtime",
     status: "future",
-    severity: "high",
-    description: "No candidate policy runtime is implemented or executed in this milestone.",
-    remediation: "Add a disabled, non-executing skeleton only in a future reviewed task.",
-    metadata: { candidateRuntimeImplemented: false, candidateRuntimeExecuted: false }
+    severity: "critical",
+    description: "No candidate policy runtime is implemented or executed in this milestone; shadow evaluation cannot run yet.",
+    remediation: "Implement a candidate runtime only in a future explicit task and keep it shadow-only.",
+    metadata: { candidateRuntimeImplemented: false, candidateRuntimeExecuted: false, shadowEvaluationCanRun: false }
   },
   {
     id: "policy_shadow_comparison_rules_defined",
     category: "comparison_rules",
     status: "pass",
-    severity: "medium",
-    description: "Effect, reason, rule id, obligation, redaction, and audit metadata comparisons are modeled.",
-    remediation: "Keep effect and redaction mismatches rollout-blocking before future runtime activation.",
+    severity: "high",
+    description: "Comparison rules define effect, reason, rule id, obligation, redaction, and audit metadata checks.",
+    remediation: "Keep effect and redaction mismatches rollout-blocking before future runtime activation; extend comparison rules when new output obligations are added.",
     metadata: { comparisonRuleCount: defaultPolicyShadowComparisonRules.length }
   },
   {
@@ -4431,7 +5245,59 @@ export const defaultPolicyShadowReadinessChecks: PolicyShadowReadinessCheck[] = 
       staticPolicyEngineAuthoritative: true,
       dynamicPolicyExecutionEnabled: false,
       externalPolicyServiceCallsEnabled: false,
-      noSecretsOrEnvValues: true
+      noSecretsOrEnvValues: true,
+      auditEventsEmitted: false
+    }
+  },
+  {
+    id: "policy_shadow_observability_metrics_planned",
+    category: "observability",
+    status: "future",
+    severity: "medium",
+    description: "Shadow metrics are planned as local/read-model metadata only.",
+    remediation: "Add metrics after shadow reporting exists; external export requires separate approval.",
+    metadata: { externalObservabilityExportEnabled: false }
+  },
+  {
+    id: "policy_shadow_dashboard_planning_visible",
+    category: "dashboard",
+    status: "pass",
+    severity: "low",
+    description: "Dashboard read model exposes shadow planning status without claiming shadow evaluation is running.",
+    remediation: "Keep dashboard/API surfaces read-only and sanitized.",
+    metadata: { dashboardReadOnly: true }
+  },
+  {
+    id: "policy_shadow_rollout_stages_planned",
+    category: "rollout",
+    status: "future",
+    severity: "high",
+    description: "Rollout stages are documented, but no rollout controller or runtime selector exists.",
+    remediation: "Implement rollout controls only after offline and live shadow comparisons are stable.",
+    metadata: { rolloutControllerImplemented: false }
+  },
+  {
+    id: "policy_shadow_rollback_strategy_planned",
+    category: "rollback",
+    status: "pass",
+    severity: "high",
+    description: "Rollback keeps StaticPolicyEngine as source of truth and disables future shadow/candidate paths.",
+    remediation: "Add runtime switches only after rollback audit and bundle invalidation behavior are implemented.",
+    metadata: { enforcementChanged: false }
+  },
+  {
+    id: "policy_shadow_safety_invariants_hold",
+    category: "safety",
+    status: "pass",
+    severity: "critical",
+    description: "No dynamic policy execution, external policy service, remote loading, hot reload, secrets, or env values are exposed.",
+    remediation: "Block any future task that violates shadow-only safety constraints.",
+    metadata: {
+      dynamicPolicyExecutionEnabled: false,
+      policyCodeExecuted: false,
+      externalPolicyServiceCallsEnabled: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
     }
   }
 ];

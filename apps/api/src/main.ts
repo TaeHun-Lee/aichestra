@@ -83,6 +83,13 @@ import {
   policyShadowComparisonRuleToDto,
   policyShadowEvaluationPlanToDto,
   policyShadowEvaluationReportToDto,
+  policyRuntimePocDomainMappingToDto,
+  policyRuntimePocGoldenCaseToDto,
+  policyRuntimePocInputContractToDto,
+  policyRuntimePocOptionToDto,
+  policyRuntimePocReadinessCheckToDto,
+  policyRuntimePocRiskToDto,
+  policyRuntimePocSummaryToDto,
   policyShadowEvaluationSummaryToDto,
   policyShadowMismatchToDto,
   policyShadowReadinessCheckToDto,
@@ -140,7 +147,7 @@ import {
   tenantScopeRoleVisibilityToDto,
   scopedReadModelMetadataToDto
 } from "@aichestra/deployment-readiness";
-import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DashboardReadinessTenantScopePlanningService, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, PolicyBundleReadinessCategory, PolicyShadowReadinessCategory, SecretBackendReadinessCategory, StagingDeploymentDryRunCheckCategory, StagingDeploymentGateCategory, StagingHumanSignoffEvidence, StagingHumanSignoffStatus, StagingReadinessCategory, StagingReleaseCandidateGateCategory, StagingReleaseCandidateSignoffRole, StagingSignoffScopeReview, StagingSignoffScopeSnapshot, VaultIntegrationTestSafetyCategory } from "@aichestra/deployment-readiness";
+import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DashboardReadinessTenantScopePlanningService, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, PolicyBundleReadinessCategory, PolicyRuntimePocReadinessCategory, PolicyShadowReadinessCategory, SecretBackendReadinessCategory, StagingDeploymentDryRunCheckCategory, StagingDeploymentGateCategory, StagingHumanSignoffEvidence, StagingHumanSignoffStatus, StagingReadinessCategory, StagingReleaseCandidateGateCategory, StagingReleaseCandidateSignoffRole, StagingSignoffScopeReview, StagingSignoffScopeSnapshot, VaultIntegrationTestSafetyCategory } from "@aichestra/deployment-readiness";
 import {
   AuthorizationService,
   InMemoryAuthRepository,
@@ -294,7 +301,8 @@ import {
   isPolicyResourceKind,
   policyDecisionAuditEntryToDto,
   policyDecisionToDto,
-  policyRuleToDto
+  policyRuleToDto,
+  runPolicyRuntimeGoldenHarness
 } from "@aichestra/policy";
 import type { PolicyActorKind } from "@aichestra/policy";
 import {
@@ -1150,6 +1158,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const productionAuthProvider = context.deploymentReadinessService.getProductionAuthProviderSkeletonSummary();
       const policyBundleReadiness = context.deploymentReadinessService.getPolicyBundleReadinessSummary();
       const policyShadowEvaluation = context.deploymentReadinessService.getPolicyShadowEvaluationSummary();
+      const policyRuntimePoc = context.deploymentReadinessService.getPolicyRuntimePocSummary();
       const stagingDeployment = context.deploymentReadinessService.getStagingDeploymentSummary();
       const stagingDryRun = context.deploymentReadinessService.getStagingDeploymentDryRunSummary();
       const stagingReleaseCandidate = context.deploymentReadinessService.getStagingReleaseCandidateSummary();
@@ -1352,6 +1361,31 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           policyCodeExecuted: policyShadowEvaluation.policyCodeExecuted,
           noSecretsExposed: policyShadowEvaluation.noSecretsExposed,
           envValuesExposed: policyShadowEvaluation.envValuesExposed
+        },
+        policyRuntimePoc: {
+          status: policyRuntimePoc.status,
+          planningOnly: policyRuntimePoc.planningOnly,
+          productionReady: policyRuntimePoc.productionReady,
+          currentRuntime: policyRuntimePoc.currentRuntime,
+          recommendedPocPath: policyRuntimePoc.recommendedPocPath,
+          runtimeEnforcementEnabled: policyRuntimePoc.runtimeEnforcementEnabled,
+          shadowEvaluationImplemented: policyRuntimePoc.shadowEvaluationImplemented,
+          optionCount: policyRuntimePoc.optionCount,
+          domainMappingCount: policyRuntimePoc.domainMappingCount,
+          goldenCaseCount: policyRuntimePoc.goldenCaseCount,
+          readinessStatus: policyRuntimePoc.criticalBlockerCount > 0 ? "blocked" : "planning_only",
+          externalPolicyEngineEnabled: policyRuntimePoc.externalPolicyEngineEnabled,
+          opaRuntimeImplemented: policyRuntimePoc.opaRuntimeImplemented,
+          cedarRuntimeImplemented: policyRuntimePoc.cedarRuntimeImplemented,
+          signedJsonYamlRuntimeImplemented: policyRuntimePoc.signedJsonYamlRuntimeImplemented,
+          customPolicyServiceImplemented: policyRuntimePoc.customPolicyServiceImplemented,
+          dynamicPolicyExecutionEnabled: policyRuntimePoc.dynamicPolicyExecutionEnabled,
+          remotePolicyLoadingEnabled: policyRuntimePoc.remotePolicyLoadingEnabled,
+          hotReloadEnabled: policyRuntimePoc.hotReloadEnabled,
+          policyCodeExecuted: policyRuntimePoc.policyCodeExecuted,
+          staticPolicyEngineUnchanged: policyRuntimePoc.staticPolicyEngineUnchanged,
+          noSecretsExposed: policyRuntimePoc.noSecretsExposed,
+          noEnvValuesExposed: !policyRuntimePoc.envValuesExposed
         },
         stagingDeployment: {
           status: stagingDeployment.status,
@@ -2381,6 +2415,67 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "policy-runtime-poc") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Policy runtime PoC readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, { summary: policyRuntimePocSummaryToDto(readiness.getPolicyRuntimePocSummary()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "options") {
+        sendJson(response, 200, { options: readiness.listPolicyRuntimePocOptions().map(policyRuntimePocOptionToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "input-contract") {
+        sendJson(response, 200, { inputContract: policyRuntimePocInputContractToDto(readiness.getPolicyRuntimePocInputContract()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "domain-mappings") {
+        sendJson(response, 200, { domainMappings: readiness.listPolicyRuntimePocDomainMappings().map(policyRuntimePocDomainMappingToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "golden-cases") {
+        sendJson(response, 200, { goldenCases: readiness.listPolicyRuntimePocGoldenCases().map(policyRuntimePocGoldenCaseToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "golden-summary") {
+        const goldenHarness = runPolicyRuntimeGoldenHarness();
+        sendJson(response, 200, {
+          goldenSummary: goldenHarness.summary,
+          goldenResults: goldenHarness.results.map((result) => ({
+            id: result.id,
+            domain: result.domain,
+            action: result.action,
+            passed: result.passed,
+            expectedEffect: result.expectedEffect,
+            actualEffect: result.actualEffect,
+            expectedRuleId: result.expectedRuleId,
+            actualRuleId: result.actualRuleId,
+            mismatchCount: result.mismatches.length
+          }))
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["goals", "input_contract", "domain_mapping", "golden_tests", "shadow_evaluation", "rollout", "rollback", "safety", "audit", "dashboard"];
+        sendJson(response, 200, {
+          checks: readiness.listPolicyRuntimePocReadinessChecks(category && categories.includes(category) ? { category: category as PolicyRuntimePocReadinessCategory } : {})
+            .map(policyRuntimePocReadinessCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "risks") {
+        sendJson(response, 200, { risks: readiness.listPolicyRuntimePocRisks().map(policyRuntimePocRiskToDto) });
+        return;
+      }
+      sendJson(response, 404, { error: "policy_runtime_poc_readiness_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "policy-shadow") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Policy shadow evaluation endpoints are read-only planning models." });
@@ -2762,6 +2857,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (section === "policy-shadow") {
         sendJson(response, 200, { policyShadow: dashboard.policyShadow });
+        return;
+      }
+      if (section === "policy-runtime-poc") {
+        sendJson(response, 200, { policyRuntimePoc: dashboard.policyRuntimePoc });
         return;
       }
       if (section === "auth") {

@@ -945,6 +945,36 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_registry_pending_approval_deny",
+      name: "Deny pending approval registry mutation",
+      description: "Pending approval registry entries cannot be treated as active or mutation-ready.",
+      effect: "deny",
+      action: "registry.update",
+      resourceKind: "registry_item",
+      conditions: {
+        metadataEquals: {
+          approvalStatus: "pending"
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_checksum_mismatch_deny",
+      name: "Deny registry mutation with checksum mismatch",
+      description: "Registry mutations cannot bypass checksum mismatch evidence.",
+      effect: "deny",
+      action: "registry.update",
+      resourceKind: "registry_item",
+      conditions: {
+        metadataEquals: {
+          checksumValid: false
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
       id: "policy_registry_update_allow_editor",
       name: "Allow registry update for editor/admin",
       description: "Registry update requires editor, admin, reviewer, or system role depending on mutation type.",
@@ -1045,6 +1075,24 @@ export function createDefaultPolicyRules(): PolicyRule[] {
         }
       },
       priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_provider_credential_resolve_vault_path_deny",
+      name: "Deny Vault provider credential resolution outside allowlist metadata",
+      description: "Vault-backed provider credentials require allowlisted Vault path metadata before any future bundle runtime comparison can allow them.",
+      effect: "deny",
+      action: "provider.credential.resolve",
+      resourceKind: "provider_credential",
+      conditions: {
+        environmentEquals: {
+          vaultSecretBackendSelected: true
+        },
+        metadataEquals: {
+          vaultPathAllowed: false
+        }
+      },
+      priority: 1100,
       enabled: true
     },
     {
@@ -1951,6 +1999,36 @@ export function createDefaultPolicyRules(): PolicyRule[] {
         subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"]
       },
       priority: 200,
+      enabled: true
+    },
+    {
+      id: "policy_dashboard_tenant_scope_mismatch_deny",
+      name: "Deny dashboard read with explicit tenant mismatch metadata",
+      description: "Dashboard/readiness access cannot rely on a tenant scope mismatch sentinel.",
+      effect: "deny",
+      action: "dashboard.read",
+      resourceKind: "dashboard",
+      conditions: {
+        metadataEquals: {
+          tenantScopeMismatch: true
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_dashboard_production_ready_overclaim_deny",
+      name: "Deny dashboard production-ready overclaim metadata",
+      description: "Readiness surfaces must not claim production policy runtime readiness.",
+      effect: "deny",
+      action: "dashboard.read",
+      resourceKind: "dashboard",
+      conditions: {
+        metadataEquals: {
+          productionReadyOverclaim: true
+        }
+      },
+      priority: 1000,
       enabled: true
     },
     {

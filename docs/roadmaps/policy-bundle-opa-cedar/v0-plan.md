@@ -89,6 +89,10 @@ Signed JSON/YAML policy bundle:
 - Documentation for engine options, bundle schema, domain mapping, review workflow, tests, rollout/rollback, break-glass, and v0 roadmap.
 - Deterministic tests for models, API, dashboard, health, no dynamic execution, and no secret exposure.
 
+## Follow-up Runtime PoC Planning
+
+Policy Bundle Runtime PoC Planning v0, Policy Runtime PoC Golden Test Harness v1, and Policy Runtime Shadow Evaluation Planning v1 now live in `docs/roadmaps/policy-bundle-runtime-poc/`. They define how a future runtime proof-of-concept should be evaluated through normalized inputs, domain fixtures, golden decisions, future shadow comparison rules, mismatch taxonomy, and reporting, while still implementing no runtime evaluator or shadow evaluator.
+
 ## Out Of Scope
 
 - Real OPA/Rego runtime integration.

@@ -25,6 +25,8 @@ This inventory tracks the shared scope metadata model after v1 and the partial T
 - `PolicyResourceScope` enriches policy/audit input without weakening existing deny rules.
 - `TenantScopeEnforcementService` compares subject/resource scope metadata and emits warnings or helper decisions without replacing `StaticPolicyEngine`; policy deny remains authoritative.
 - Readiness and dashboard surfaces expose safe summaries and Implementation v1 scope metadata only; no secrets, env values, raw headers, cookies, tokens, session ids, or credential values are exposed.
+- Readiness and dashboard surfaces expose safe summaries only; no secrets, env values, raw headers, cookies, tokens, session ids, or credential values are exposed.
+- Policy Bundle Runtime PoC Planning v0 consumes these scope shapes in the future normalized policy input contract and golden decision mappings. Policy Runtime PoC Golden Test Harness v1 now includes missing-tenant, future tenant-mismatch, and service-account non-bypass cases as static fixtures. Policy Runtime Shadow Evaluation Planning v1 preserves tenant/scope fields as comparison metadata for future candidate runtimes. None of these milestones enforce production tenant scope or execute a policy runtime.
 - Production tenant enforcement, production dashboard filtering, row-level security, tenant provisioning, and durable scope repositories remain future work.
 
 ## Dashboard/Readiness Tenant Scope Cross-reference

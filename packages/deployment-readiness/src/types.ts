@@ -200,7 +200,50 @@ export type PolicyBundleReadinessCategory =
 export type PolicyBundleMigrationPhaseStatus = "planned" | "ready_for_design" | "blocked" | "future";
 export type PolicyShadowEvaluationPlanStatus = "planned" | "ready_for_design" | "blocked" | "future";
 export type PolicyShadowSourceOfTruth = "StaticPolicyEngine";
-export type PolicyShadowCandidateRuntimeKind = "signed_json_yaml_bundle" | "opa_rego" | "cedar" | "custom_future";
+export type PolicyShadowCandidateRuntimeKind =
+  | "signed_json_yaml_bundle"
+  | "opa_rego"
+  | "cedar"
+  | "custom_future"
+  | "signed_json_yaml_bundle_evaluator_future"
+  | "opa_rego_local_library_future"
+  | "cedar_local_evaluator_future"
+  | "custom_policy_decision_service_future";
+export type PolicyRuntimePocOptionKind =
+  | "static_policy_engine_baseline"
+  | "opa_rego_local_library_future"
+  | "opa_rego_server_future"
+  | "cedar_local_evaluator_future"
+  | "signed_json_yaml_bundle_evaluator_future"
+  | "custom_policy_decision_service_future";
+export type PolicyRuntimePocOptionStatus = "baseline" | "recommended_for_poc" | "candidate" | "not_recommended" | "future_only";
+export type PolicyRuntimePocReadinessCategory =
+  | "goals"
+  | "input_contract"
+  | "domain_mapping"
+  | "golden_tests"
+  | "shadow_evaluation"
+  | "rollout"
+  | "rollback"
+  | "safety"
+  | "audit"
+  | "dashboard";
+export type PolicyRuntimePocDomainName =
+  | "git_remote_operation"
+  | "github_app_token_issuance"
+  | "github_webhook_processing"
+  | "llm_remote_completion"
+  | "llm_fallback"
+  | "mcp_tool_invocation"
+  | "secretref_vault_credential_resolution"
+  | "runner_command_execution"
+  | "local_agent_invocation"
+  | "registry_mutation"
+  | "governance_apply_gate"
+  | "dashboard_readiness_access"
+  | "observability_audit_query";
+export type PolicyRuntimePocDecision = "allow" | "deny" | "block" | "warn";
+export type PolicyRuntimePocGoldenCaseOutcome = "allow_when_gated" | "deny" | "block" | "warn" | "exclude";
 export type PolicyShadowEnforcementMode = "shadow_only";
 export type PolicyShadowComparisonKind =
   | "effect_match"
@@ -1656,13 +1699,131 @@ export type IdentityMappingPlan = {
   risks: string[];
   metadata: Record<string, unknown>;
 };
+export type PolicyRuntimePocOption = {
+  id: string;
+  optionKind: PolicyRuntimePocOptionKind;
+  displayName: string;
+  status: PolicyRuntimePocOptionStatus;
+  pocGoal: string;
+  inputsRequired: string[];
+  outputContract: string[];
+  testability: string;
+  auditability: string;
+  developerReviewExperience: string;
+  scopeModelCompatibility: string;
+  authRbacCompatibility: string;
+  performanceConsiderations: string;
+  operationalComplexity: PolicyBundleOperationalComplexity;
+  securityRisks: string[];
+  productionSuitability: string;
+  recommendation: string;
+  runtimeImplemented: false;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyRuntimePocInputContract = {
+  id: string;
+  version: "policy_runtime_poc_input_v0";
+  subjectFields: string[];
+  requestFields: string[];
+  resourceFields: string[];
+  actionField: "action";
+  environmentFields: string[];
+  contextFields: string[];
+  outputFields: string[];
+  supportedDecisions: PolicyRuntimePocDecision[];
+  redactionRequirements: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyRuntimePocDomainMapping = {
+  id: string;
+  domain: PolicyRuntimePocDomainName;
+  currentStaticAction: string;
+  currentResourceKind: string;
+  requiredSubjectFields: string[];
+  requiredScopeFields: string[];
+  requiredEnvironmentGates: string[];
+  expectedDenyByDefaultBehavior: string;
+  pocTestCases: string[];
+  futureBundleRepresentation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyRuntimePocGoldenCase = {
+  id: string;
+  domain: PolicyRuntimePocDomainName;
+  action: string;
+  title: string;
+  expectedDecision: PolicyRuntimePocGoldenCaseOutcome;
+  expectedReason: string;
+  requiredInputs: string[];
+  requiredStaticBehavior: string;
+  futureBundleExpectation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyRuntimePocReadinessCheck = {
+  id: string;
+  category: PolicyRuntimePocReadinessCategory;
+  name: string;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyRuntimePocRisk = {
+  id: string;
+  category: PolicyRuntimePocReadinessCategory | "runtime_safety" | "policy_governance" | "migration";
+  title: string;
+  severity: ReadinessSeverity;
+  likelihood: ProductionRiskLikelihood;
+  impact: string;
+  mitigation: string;
+  status: ProductionRiskStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type PolicyRuntimePocSummary = {
+  generatedAt: Date;
+  status: "v0_implemented";
+  planningOnly: true;
+  productionReady: false;
+  currentRuntime: "StaticPolicyEngine";
+  staticPolicyEngineUnchanged: true;
+  recommendedPocOptionId: "policy_runtime_poc_signed_json_yaml";
+  recommendedPocPath: "signed_json_yaml_shadow_first";
+  runtimeEnforcementEnabled: false;
+  shadowEvaluationImplemented: false;
+  externalPolicyEngineEnabled: false;
+  opaRuntimeImplemented: false;
+  cedarRuntimeImplemented: false;
+  signedJsonYamlRuntimeImplemented: false;
+  customPolicyServiceImplemented: false;
+  dynamicPolicyExecutionEnabled: false;
+  remotePolicyLoadingEnabled: false;
+  hotReloadEnabled: false;
+  policyCodeExecuted: false;
+  optionCount: number;
+  domainMappingCount: number;
+  goldenCaseCount: number;
+  readinessCheckCount: number;
+  criticalBlockerCount: number;
+  riskCount: number;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  metadata: Record<string, unknown>;
+};
 
 export type PolicyShadowEvaluationPlan = {
   id: string;
   status: PolicyShadowEvaluationPlanStatus;
   sourceOfTruth: PolicyShadowSourceOfTruth;
   candidateRuntimeKinds: PolicyShadowCandidateRuntimeKind[];
-  domains: PolicyDomainName[];
+  domains: Array<PolicyDomainName | PolicyRuntimePocDomainName>;
   rolloutStages: string[];
   enforcementMode: PolicyShadowEnforcementMode;
   metadata: Record<string, unknown>;
@@ -1688,7 +1849,7 @@ export type PolicyShadowMismatch = {
 export type PolicyShadowEvaluationReport = {
   id: string;
   generatedAt: Date;
-  domain: PolicyDomainName;
+  domain: PolicyDomainName | PolicyRuntimePocDomainName | "all_domains";
   caseCount: number;
   matchCount: number;
   mismatchCount: number;
@@ -1746,6 +1907,11 @@ export type PolicyShadowEvaluationSummary = {
   reportCount: number;
   goldenCaseSource: "Policy Runtime PoC Golden Test Harness v1";
   recommendedNextTask: string;
+  currentRolloutStage: "docs_planning_golden_harness_only";
+  candidateRuntimeInterfaceImplemented: false;
+  staticPolicyEngineUnchanged: true;
+  goldenHarnessSourceOfTruth: "StaticPolicyEngine";
+  noDynamicPolicyExecution: true;
   metadata: Record<string, unknown>;
 };
 

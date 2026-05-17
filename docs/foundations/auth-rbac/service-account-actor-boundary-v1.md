@@ -26,6 +26,7 @@ This is not production service-account authentication.
 - Optional tenant/team/project/resource scope metadata on service-account AuthContext, RequestContext, and PolicySubject values when a caller supplies mock/readiness scopes.
 - Top-level and metadata-level `serviceAccountId` in Auth, Policy, LLM, MCP, Security, Runner, and Observability audit surfaces where migrated.
 - High-value runtime fallback migration for Git provider, GitHub webhook receiver/sync, GitHub App token-handle checks, LLM gateway/router, MCP gateway internal fallback, Security credential resolution, Runner policy fallback, and Local Agent protocol policy fallback.
+- Policy Bundle Runtime PoC Planning v0 treats `serviceAccountId` as a future normalized policy input field and explicitly requires that service accounts cannot bypass Policy-as-code. Policy Runtime Shadow Evaluation Planning v1 preserves that requirement in future candidate comparison rules and mismatch taxonomy.
 - Deterministic coverage in `tests/service-account-actor-boundary-v1.test.ts`.
 
 ## What v1 Does Not Implement
@@ -179,3 +180,4 @@ Production Auth Provider Skeleton v1 keeps service-account credential issuance d
 ## Recommended Next Task
 
 Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next task: Policy Runtime Shadow Evaluator Skeleton v1, or Tenant Scope Enforcement v1.

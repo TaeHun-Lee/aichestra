@@ -6,3 +6,5 @@ export * from "./engine.ts";
 export * from "./audit.ts";
 export * from "./dto.ts";
 export * from "./resource-scope.ts";
+export * from "./golden-cases.ts";
+export * from "./golden-harness.ts";

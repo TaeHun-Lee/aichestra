@@ -59,6 +59,16 @@ export default async function DashboardPage() {
         <p>Redaction: {data.security.redaction.enabled === true ? "enabled" : "available"}</p>
         <p>No secrets exposed: {data.overview.safety.noSecretsExposed ? "true" : "false"}</p>
       </section>
+      <section>
+        <h2>Policy Runtime PoC</h2>
+        <p>Runtime: {String(data.policyRuntimePoc.summary.currentRuntime ?? "StaticPolicyEngine")}</p>
+        <p>Recommended path: {String(data.policyRuntimePoc.summary.recommendedPocPath ?? "signed_json_yaml_shadow_first")}</p>
+        <p>Golden cases: {String(data.policyRuntimePoc.summary.goldenCaseCount ?? data.policyRuntimePoc.goldenCases.length)}</p>
+        <p>Golden harness: {String(data.policyRuntimePoc.goldenHarness.status ?? "pass")} ({String(data.policyRuntimePoc.goldenHarness.totalCases ?? 0)} cases)</p>
+        <p>Shadow planning: {String(data.policyRuntimePoc.shadowSummary.status ?? "v1_implemented")}</p>
+        <p>Shadow enforcement changed: {data.policyRuntimePoc.shadowSummary.enforcementChanged === true ? "true" : "false"}</p>
+        <p>Runtime enforcement: {data.policyRuntimePoc.summary.runtimeEnforcementEnabled === true ? "enabled" : "disabled"}</p>
+      </section>
     </main>
   );
 }

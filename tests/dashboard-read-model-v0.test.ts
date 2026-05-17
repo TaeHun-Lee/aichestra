@@ -84,6 +84,7 @@ function jsonHasUnsafeSecret(value: unknown): boolean {
     text.includes("SESSION_SECRET=") ||
     text.includes("JWT_SECRET=") ||
     text.includes("POLICY_BUNDLE_SECRET=") ||
+    text.includes("POLICY_RUNTIME_TOKEN=") ||
     text.includes("OPA_TOKEN=") ||
     text.includes("CEDAR_SECRET=") ||
     text.includes("session-cookie-secret") ||
@@ -117,6 +118,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const policy = await getJson(port, "/dashboard/policy") as { policy: { rules: unknown[]; blockedExamples: unknown[] } };
     const policyBundles = await getJson(port, "/dashboard/policy-bundles") as { policyBundles: { summary: { productionReady: boolean; externalPolicyEngineEnabled: boolean; dynamicPolicyExecutionEnabled: boolean }; engineOptions: unknown[]; domainMappings: unknown[]; noExecutionStatus: { policyCodeExecuted: boolean; noSecretsExposed: boolean } } };
     const policyShadow = await getJson(port, "/dashboard/policy-shadow") as { policyShadow: { summary: { productionReady: boolean; sourceOfTruth: string; enforcementChanged: boolean; candidateRuntimeImplemented: boolean; shadowEvaluatorImplemented: boolean; dynamicPolicyExecutionEnabled: boolean }; comparisonRules: unknown[]; mismatchTaxonomy: unknown[]; criticalMismatchExamples: unknown[]; noExecutionStatus: { staticPolicyEngineAuthoritative: boolean; candidateRuntimeExecuted: boolean; policyCodeExecuted: boolean; noSecretsExposed: boolean; envValuesExposed: boolean } } };
+    const policyRuntimePoc = await getJson(port, "/dashboard/policy-runtime-poc") as { policyRuntimePoc: { summary: { productionReady: boolean; currentRuntime: string; runtimeEnforcementEnabled: boolean; shadowEvaluationImplemented: boolean }; options: unknown[]; domainMappings: unknown[]; goldenCases: unknown[]; goldenHarness: { status: string; sourceOfTruth: string; totalCases: number; failedCases: number; dynamicPolicyExecutionEnabled: boolean }; goldenHarnessResults: unknown[]; noExecutionStatus: { policyCodeExecuted: boolean; dynamicPolicyExecutionEnabled: boolean; noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const auth = await getJson(port, "/dashboard/auth") as { auth: { config: { authMode: string; productionAuthEnabled: boolean }; warning: string; actors: unknown[] } };
     const authProduction = await getJson(port, "/dashboard/auth-production") as { authProduction: { summary: { productionReady: boolean; productionAuthEnabled: boolean; futureIdpConfigured: boolean }; providerOptions: unknown[]; blockers: unknown[]; noTokenStatus: { noTokensExposed: boolean; cookiesExposed: boolean; sessionIdsExposed: boolean; rawIdentityAssertionsExposed: boolean } } };
     const authProviders = await getJson(port, "/dashboard/auth-providers") as { authProviders: { summary: { activeProviderKind: string; productionAuthEnabled: boolean; tokenValidationEnabled: boolean }; configs: unknown[]; readiness: unknown[]; noTokenStatus: { noTokensExposed: boolean; authorizationHeadersStored: boolean; cookiesStored: boolean; sessionIdsExposed: boolean; envValuesExposed: boolean } } };
@@ -192,6 +194,23 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(policyShadow.policyShadow.noExecutionStatus.policyCodeExecuted, false);
     assert.equal(policyShadow.policyShadow.noExecutionStatus.noSecretsExposed, true);
     assert.equal(policyShadow.policyShadow.noExecutionStatus.envValuesExposed, false);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.summary.productionReady, false);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.summary.currentRuntime, "StaticPolicyEngine");
+    assert.equal(policyRuntimePoc.policyRuntimePoc.summary.runtimeEnforcementEnabled, false);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.summary.shadowEvaluationImplemented, false);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.options.length > 0, true);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.domainMappings.length > 0, true);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.goldenCases.length > 0, true);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.goldenHarness.status, "pass");
+    assert.equal(policyRuntimePoc.policyRuntimePoc.goldenHarness.sourceOfTruth, "StaticPolicyEngine");
+    assert.equal(policyRuntimePoc.policyRuntimePoc.goldenHarness.totalCases, 42);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.goldenHarness.failedCases, 0);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.goldenHarness.dynamicPolicyExecutionEnabled, false);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.goldenHarnessResults.length, 42);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.noExecutionStatus.dynamicPolicyExecutionEnabled, false);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.noExecutionStatus.policyCodeExecuted, false);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.noExecutionStatus.noSecretsExposed, true);
+    assert.equal(policyRuntimePoc.policyRuntimePoc.noExecutionStatus.envValuesExposed, false);
     assert.equal(auth.auth.config.authMode, "mock");
     assert.equal(auth.auth.config.productionAuthEnabled, false);
     assert.equal(auth.auth.actors.length > 0, true);
@@ -372,6 +391,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(tenantScopeEnforcement.tenantScopeEnforcement.summary.tenantFilteringImplemented, false);
     assert.equal(tenantScopeEnforcement.tenantScopeEnforcement.summary.productionTenantEnforcement, false);
     assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, githubAppIntegration, llm, llmIntegration, agents, policy, policyBundles, policyShadow, auth, authProduction, authProviders, scopes, tenantScopePlanning, tenantScopeEnforcement, providers, security, localAgents, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, vaultIntegration, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit }), false);
+    assert.equal(jsonHasUnsafeSecret({ overview, tasks, git, githubApp, githubAppIntegration, llm, llmIntegration, agents, policy, policyBundles, policyRuntimePoc, auth, authProduction, scopes, providers, security, localAgents, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, vaultIntegration, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit }), false);
   });
 });
 
@@ -409,6 +429,7 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
     ["/dashboard/policy", { policy: demo.policy }],
     ["/dashboard/policy-bundles", { policyBundles: demo.policyBundles }],
     ["/dashboard/policy-shadow", { policyShadow: demo.policyShadow }],
+    ["/dashboard/policy-runtime-poc", { policyRuntimePoc: demo.policyRuntimePoc }],
     ["/dashboard/auth", { auth: demo.auth }],
     ["/dashboard/auth-production", { authProduction: demo.authProduction }],
     ["/dashboard/auth-providers", { authProviders: demo.authProviders }],

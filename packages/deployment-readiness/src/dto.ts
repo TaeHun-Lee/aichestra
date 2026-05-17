@@ -56,6 +56,13 @@ import type {
   PolicyBundleRisk,
   PolicyDomainMapping,
   PolicyEngineOption,
+  PolicyRuntimePocDomainMapping,
+  PolicyRuntimePocGoldenCase,
+  PolicyRuntimePocInputContract,
+  PolicyRuntimePocOption,
+  PolicyRuntimePocReadinessCheck,
+  PolicyRuntimePocRisk,
+  PolicyRuntimePocSummary,
   PolicyShadowComparisonRule,
   PolicyShadowEvaluationPlan,
   PolicyShadowEvaluationReport,
@@ -433,6 +440,34 @@ export function policyBundleMigrationPhaseToDto(phase: PolicyBundleMigrationPhas
 }
 
 export function policyBundleReadinessSummaryToDto(summary: PolicyBundleReadinessSummary) {
+  return sanitize(summary);
+}
+
+export function policyRuntimePocOptionToDto(option: PolicyRuntimePocOption) {
+  return sanitize(option);
+}
+
+export function policyRuntimePocInputContractToDto(contract: PolicyRuntimePocInputContract) {
+  return sanitize(contract);
+}
+
+export function policyRuntimePocDomainMappingToDto(mapping: PolicyRuntimePocDomainMapping) {
+  return sanitize(mapping);
+}
+
+export function policyRuntimePocGoldenCaseToDto(goldenCase: PolicyRuntimePocGoldenCase) {
+  return sanitize(goldenCase);
+}
+
+export function policyRuntimePocReadinessCheckToDto(check: PolicyRuntimePocReadinessCheck) {
+  return sanitize(check);
+}
+
+export function policyRuntimePocRiskToDto(risk: PolicyRuntimePocRisk) {
+  return sanitize(risk);
+}
+
+export function policyRuntimePocSummaryToDto(summary: PolicyRuntimePocSummary) {
   return sanitize(summary);
 }
 

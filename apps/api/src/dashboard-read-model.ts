@@ -8,7 +8,7 @@ import type { ImprovementServices } from "@aichestra/improvement";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
 import type { MCPGateway } from "@aichestra/mcp-gateway";
 import type { ObservabilityService } from "@aichestra/observability";
-import type { PolicyService } from "@aichestra/policy";
+import { runPolicyRuntimeGoldenHarness, type PolicyService } from "@aichestra/policy";
 import type { RegistryService } from "@aichestra/registry";
 import type { AgentRunnerService } from "@aichestra/runner";
 import type { SecurityControlService } from "@aichestra/security";
@@ -44,6 +44,7 @@ import {
   type PolicyShadowEvaluationReadModel,
   type ProductionAuthProviderSkeletonReadModel,
   type ReadinessEndpointScopeSummary,
+  type PolicyRuntimePocReadinessReadModel,
   type RegistryReadModel,
   type ScopedReadModelMetadata,
   type SecurityReadModel,
@@ -147,10 +148,10 @@ function dashboardScopeMetadata(context: DashboardReadModelContext, panelId: str
   }) as unknown as ScopedReadModelMetadata;
 }
 
-function withScopeMetadata<T extends { scopeMetadata?: ScopedReadModelMetadata }>(
+function withScopeMetadata<T extends object>(
   readModel: T,
   scopeMetadata: ScopedReadModelMetadata
-): T {
+): T & { scopeMetadata: ScopedReadModelMetadata } {
   return {
     ...readModel,
     scopeMetadata
@@ -1129,6 +1130,84 @@ function buildPolicyShadow(context: DashboardReadModelContext): PolicyShadowEval
     })
   };
 }
+function buildPolicyRuntimePoc(context: DashboardReadModelContext): PolicyRuntimePocReadinessReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getPolicyRuntimePocSummary();
+  const checks = readiness.listPolicyRuntimePocReadinessChecks();
+  const risks = readiness.listPolicyRuntimePocRisks();
+  const options = readiness.listPolicyRuntimePocOptions();
+  const goldenHarness = runPolicyRuntimeGoldenHarness();
+  const shadowPlan = readiness.getPolicyShadowEvaluationPlan();
+  const shadowSummary = readiness.getPolicyShadowEvaluationSummary();
+  const shadowComparisonRules = readiness.listPolicyShadowComparisonRules();
+  const shadowMismatchTaxonomy = readiness.listPolicyShadowMismatchTaxonomy();
+  const shadowReports = readiness.listPolicyShadowEvaluationReports();
+  const shadowReadinessChecks = readiness.listPolicyShadowReadinessChecks();
+  const recommended = options.find((option) => option.id === summary.recommendedPocOptionId) ?? options.find((option) => option.status === "recommended_for_poc");
+  return {
+    summary: sanitizeDashboardObject(summary),
+    options: sanitizeDashboardArray(options),
+    inputContract: sanitizeDashboardObject(readiness.getPolicyRuntimePocInputContract()),
+    domainMappings: sanitizeDashboardArray(readiness.listPolicyRuntimePocDomainMappings()),
+    goldenCases: sanitizeDashboardArray(readiness.listPolicyRuntimePocGoldenCases()),
+    goldenHarness: sanitizeDashboardObject(goldenHarness.summary),
+    goldenHarnessResults: sanitizeDashboardArray(goldenHarness.results.map((result) => ({
+      id: result.id,
+      domain: result.domain,
+      action: result.action,
+      passed: result.passed,
+      expectedEffect: result.expectedEffect,
+      actualEffect: result.actualEffect,
+      expectedRuleId: result.expectedRuleId,
+      actualRuleId: result.actualRuleId,
+      mismatchCount: result.mismatches.length
+    }))),
+    readinessChecks: sanitizeDashboardArray(checks),
+    risks: sanitizeDashboardArray(risks),
+    blockers: sanitizeDashboardArray(checks.filter((check) => check.status === "fail")),
+    recommendedPath: sanitizeDashboardObject({
+      optionId: recommended?.id ?? "policy_runtime_poc_signed_json_yaml",
+      optionKind: recommended?.optionKind ?? "signed_json_yaml_bundle_evaluator_future",
+      status: recommended?.status ?? "recommended_for_poc",
+      runtimeImplemented: false,
+      reason: "schema_driven_golden_tests_then_shadow_evaluation"
+    }),
+    shadowEvaluation: sanitizeDashboardObject({
+      sourceOfTruth: shadowSummary.sourceOfTruth,
+      shadowEvaluationImplemented: shadowSummary.shadowEvaluatorImplemented,
+      candidateRuntimeImplemented: shadowSummary.candidateRuntimeImplemented,
+      enforcementChanged: shadowSummary.enforcementChanged,
+      mismatchesEnforced: false,
+      mismatchAuditEvent: "policy_runtime_poc_shadow_mismatch_future",
+      rolloutPhase: shadowSummary.currentRolloutStage
+    }),
+    rolloutRollback: sanitizeDashboardObject({
+      rolloutPhases: ["docs_only", "offline_golden_tests", "shadow_evaluator", "selected_non_critical_enforcement_future", "production_enforcement_future"],
+      rollbackStrategy: "disable_future_shadow_evaluator_and_keep_StaticPolicyEngine",
+      runtimeEnforcementEnabled: summary.runtimeEnforcementEnabled
+    }),
+    noExecutionStatus: sanitizeDashboardObject({
+      dynamicPolicyExecutionEnabled: summary.dynamicPolicyExecutionEnabled,
+      externalPolicyEngineEnabled: summary.externalPolicyEngineEnabled,
+      opaRuntimeImplemented: summary.opaRuntimeImplemented,
+      cedarRuntimeImplemented: summary.cedarRuntimeImplemented,
+      signedJsonYamlRuntimeImplemented: summary.signedJsonYamlRuntimeImplemented,
+      customPolicyServiceImplemented: summary.customPolicyServiceImplemented,
+      remotePolicyLoadingEnabled: summary.remotePolicyLoadingEnabled,
+      hotReloadEnabled: summary.hotReloadEnabled,
+      policyCodeExecuted: summary.policyCodeExecuted,
+      staticPolicyEngineUnchanged: summary.staticPolicyEngineUnchanged,
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed
+    }),
+    shadowPlan: sanitizeDashboardObject(shadowPlan),
+    shadowComparisonRules: sanitizeDashboardArray(shadowComparisonRules),
+    shadowMismatchTaxonomy: sanitizeDashboardArray(shadowMismatchTaxonomy),
+    shadowReports: sanitizeDashboardArray(shadowReports),
+    shadowReadinessChecks: sanitizeDashboardArray(shadowReadinessChecks),
+    shadowSummary: sanitizeDashboardObject(shadowSummary)
+  };
+}
 
 function buildAuth(context: DashboardReadModelContext): AuthReadModel {
   const currentContext = context.authorizationService.getAuthContext({
@@ -1562,6 +1641,7 @@ function buildOverview(
   policy: PolicyReadModel,
   policyBundles: PolicyBundleReadinessReadModel,
   policyShadow: PolicyShadowEvaluationReadModel,
+  policyRuntimePoc: PolicyRuntimePocReadinessReadModel,
   auth: AuthReadModel,
   authProduction: AuthRbacProductionReadinessReadModel,
   authProviders: ProductionAuthProviderSkeletonReadModel,
@@ -1628,6 +1708,12 @@ function buildOverview(
       policyShadowComparisonRules: policyShadow.comparisonRules.length,
       policyShadowMismatchKinds: policyShadow.mismatchTaxonomy.length,
       policyShadowCriticalMismatchKinds: policyShadow.criticalMismatchExamples.length,
+      policyRuntimePocOptions: policyRuntimePoc.options.length,
+      policyRuntimePocDomainMappings: policyRuntimePoc.domainMappings.length,
+      policyRuntimePocGoldenCases: policyRuntimePoc.goldenCases.length,
+      policyRuntimePocShadowComparisonRules: policyRuntimePoc.shadowComparisonRules.length,
+      policyRuntimePocShadowMismatchKinds: policyRuntimePoc.shadowMismatchTaxonomy.length,
+      policyRuntimePocShadowCriticalMismatchKinds: policyRuntimePoc.shadowMismatchTaxonomy.filter((mismatch) => mismatch.severity === "critical").length,
       authRoles: auth.roles.length,
       authActors: auth.actors.length,
       authProductionReadinessBlockers: authProduction.blockers.length,
@@ -1699,6 +1785,7 @@ function buildOverview(
       policy: { status: "available", count: policy.rules.length, notes: [] },
       policyBundles: { status: "available", count: policyBundles.blockers.length, notes: ["Policy Bundle / OPA-Cedar v0 is planning-only; StaticPolicyEngine remains the runtime and no external policy engine is enabled."] },
       policyShadow: { status: "available", count: policyShadow.mismatchTaxonomy.length, notes: ["Policy Runtime Shadow Evaluation Planning v1 is planning-only; no shadow evaluator or candidate runtime is running."] },
+      policyRuntimePoc: { status: "available", count: policyRuntimePoc.blockers.length, notes: ["Policy Bundle Runtime PoC Planning v0 and Shadow Evaluation Planning v1 are read-only; StaticPolicyEngine remains source of truth and no runtime evaluator is implemented."] },
       auth: { status: "available", count: auth.actors.length, notes: ["Mock auth is not production authentication."] },
       authProduction: { status: "available", count: authProduction.blockers.length, notes: ["Production Auth/RBAC v1 is planning-only; no real IdP, sessions, JWTs, cookies, or login flow is implemented."] },
       authProviders: { status: "available", count: authProviders.configs.length, notes: ["Production Auth Provider Skeleton v1 is disabled-by-default; MockAuthProvider remains active and no token/session validation is running."] },
@@ -1759,6 +1846,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const policy = buildPolicy(context);
   const policyBundles = buildPolicyBundles(context);
   const policyShadow = buildPolicyShadow(context);
+  const policyRuntimePoc = buildPolicyRuntimePoc(context);
   const auth = buildAuth(context);
   const authProduction = buildAuthProduction(context);
   const authProviders = buildAuthProviders(context);
@@ -1781,7 +1869,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const cicd = buildCicd(context);
   const observability = buildObservability(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, agents, policy, policyBundles, policyShadow, auth, authProduction, authProviders, providers, security, localAgents, mcp, scopes, tenantScopePlanning, tenantScopeEnforcement, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
+  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, agents, policy, policyBundles, policyShadow, policyRuntimePoc, auth, authProduction, authProviders, providers, security, localAgents, mcp, scopes, tenantScopePlanning, tenantScopeEnforcement, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
 
   return {
     overview: withScopeMetadata(overview, dashboardScopeMetadata(context, "overview")),
@@ -1819,6 +1907,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     stagingExecution: withScopeMetadata(stagingExecution, dashboardScopeMetadata(context, "staging_execution")),
     cicd: withScopeMetadata(cicd, dashboardScopeMetadata(context, "ci_cd")),
     observability: withScopeMetadata(observability, dashboardScopeMetadata(context, "observability")),
-    audit: withScopeMetadata(audit, dashboardScopeMetadata(context, "audit"))
+    audit: withScopeMetadata(audit, dashboardScopeMetadata(context, "audit")),
+    policyRuntimePoc: withScopeMetadata(policyRuntimePoc, dashboardScopeMetadata(context, "policy_runtime_poc"))
   };
 }

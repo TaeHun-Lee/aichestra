@@ -27,3 +27,16 @@ All future bundles must preserve deny-by-default behavior and must not bypass Au
 Policy Runtime Shadow Evaluation Planning v1 uses this mapping as the domain inventory for future static-vs-candidate comparisons. Shadow comparison must preserve `StaticPolicyEngine` as source of truth, compare effect/reason/rule id/obligation/redaction/audit metadata, record mismatches only, and keep `enforcementChanged: false`.
 
 No candidate runtime, OPA/Rego runtime, Cedar runtime, signed bundle verification runtime, dynamic policy execution, remote bundle loading, external policy service call, or production policy enforcement exists in v1.
+## Runtime PoC Planning v0 Crosswalk
+
+Policy Bundle Runtime PoC Planning v0 refines this inventory into executable-future fixture domains under `docs/roadmaps/policy-bundle-runtime-poc/domain-poc-mapping-v0.md`.
+
+Additional PoC-specific domains include GitHub App token issuance, LLM fallback, SecretRef/Vault credential resolution, Governance apply gate, Dashboard/readiness access, and Observability audit query access. These are still planning-only mappings. No OPA/Rego, Cedar, signed JSON/YAML evaluator, external policy service, shadow evaluator, dynamic policy execution, remote loading, or runtime enforcement is implemented.
+
+Policy Runtime PoC Golden Test Harness v1 now stores 42 reviewable static fixtures in `packages/policy/src/golden-cases.ts` and compares them against `StaticPolicyEngine` in `packages/policy/src/golden-harness.ts`. The harness is offline/test-only: it does not execute bundles, call external policy engines, or change production enforcement. Current fixture domains use existing static actions where possible; future readiness/audit action names in this inventory remain bundle-design targets rather than active runtime actions.
+
+## Shadow Evaluation Planning v1 Crosswalk
+
+Policy Runtime Shadow Evaluation Planning v1 defines how a future candidate runtime will compare against these static domains without changing enforcement. The planned comparison rules cover effect, reason, rule id, obligations, redaction requirements, and audit metadata. Critical mismatch examples are static-denied destructive Git, `secret.read`, credential-cache read, runner secret injection, MCP critical/high-risk tool invocation, and governance apply that a candidate runtime would allow.
+
+The read-only planning surface lives at `/readiness/policy-shadow/*` and in the existing `/dashboard/policy-runtime-poc` panel. It does not implement a shadow evaluator, candidate runtime, OPA/Rego, Cedar, signed JSON/YAML evaluator, external policy service, dynamic policy execution, remote bundle loading, hot reload, or enforcement change. `StaticPolicyEngine` remains source of truth.

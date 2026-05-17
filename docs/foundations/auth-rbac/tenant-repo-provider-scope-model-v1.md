@@ -29,6 +29,7 @@ Status:
 - Dashboard/Readiness Tenant Scope Planning v1 inventory and read-only planning surfaces for future dashboard/readiness filtering.
 - Dashboard/Readiness Tenant Scope Implementation v1 safe read-model metadata: `ScopedReadModelMetadata`, `DashboardPanelScopeSummary`, `ReadinessEndpointScopeSummary`, missing-scope warnings, role hints, and redaction labels.
 - Tenant Scope Enforcement v1 partial helper metadata: `TenantScopeEnforcementDecision`, `TenantScopeEnforcementMode`, `TenantScopeMismatch`, and `TenantScopeEnforcementService` for deterministic scope comparison and representative dashboard/readiness warnings.
+- Policy Bundle Runtime PoC Planning v0 input contract and domain mappings consume this scope vocabulary as future policy input metadata only. Policy Runtime Shadow Evaluation Planning v1 keeps those scope fields in the future candidate comparison plan while leaving production tenant enforcement unimplemented.
 
 ## What v1 Does Not Implement
 
@@ -188,3 +189,4 @@ The planning, implementation, and partial enforcement summaries explicitly repor
 Coverage lives in `tests/tenant-repo-provider-scope-model-v1.test.ts` and `tests/tenant-scope-enforcement-v1.test.ts`. It checks scope models, helpers, policy resource mapping, auth/request/policy subject propagation, policy-deny preservation, representative Git/LLM/MCP/SecretRef/Registry/Observability metadata, partial enforcement decisions, readiness APIs, dashboard rendering, and no-secret/no-env behavior.
 
 Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next task: Policy Runtime Shadow Evaluator Skeleton v1, or Tenant Scope Enforcement v1. Production tenant enforcement remains future work.

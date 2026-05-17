@@ -4,6 +4,8 @@ Planning only. No OPA, Cedar, external policy service, remote policy loading, si
 
 Detailed v0 planning now lives in `docs/roadmaps/policy-bundle-opa-cedar/`. That package adds read-only readiness models, `/readiness/policy-bundles/*`, `/dashboard/policy-bundles`, and safe `/health` metadata while keeping `StaticPolicyEngine` as the only runtime.
 
+Policy Bundle Runtime PoC Planning v0, Policy Runtime PoC Golden Test Harness v1, and Policy Runtime Shadow Evaluation Planning v1 now live in `docs/roadmaps/policy-bundle-runtime-poc/`. They add read-only PoC option, input/output contract, domain mapping, golden case, check, risk, offline StaticPolicyEngine golden harness, future shadow comparison plan/mismatch taxonomy, `/readiness/policy-runtime-poc/*`, `/readiness/policy-runtime-poc/golden-summary`, `/readiness/policy-shadow/*`, `/dashboard/policy-runtime-poc`, and `/health` metadata. They do not implement OPA/Rego, Cedar, signed JSON/YAML runtime execution, signed bundle verification, custom policy services, shadow evaluation, candidate runtime execution, dynamic execution, or enforcement.
+
 ## Current State
 
 Policy-as-code v0 uses static TypeScript rules in-process. The default rules are deny-by-default for unsafe Git, LLM, MCP, runner, Local Agent, secret, network, credential-cache, and improvement apply paths.

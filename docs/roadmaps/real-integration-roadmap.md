@@ -49,6 +49,10 @@
 45. Policy Runtime Shadow Evaluation Planning v1 - implemented
 46. Production Auth Provider Skeleton v1 - implemented
 47. Phase 5 enterprise planning
+42. Policy Bundle Runtime PoC Planning v0 - implemented
+43. Policy Runtime PoC Golden Test Harness v1 - implemented
+44. Policy Runtime Shadow Evaluation Planning v1 - implemented
+45. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -737,6 +741,50 @@ Goals:
 Recommended next step: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## 47. Phase 5 Enterprise Planning
+## 42. Policy Bundle Runtime PoC Planning v0
+
+Implemented with `docs/roadmaps/policy-bundle-runtime-poc/v0.md`, `v0-plan.md`, runtime option comparison, normalized policy input/output contract, PoC domain mapping, shadow evaluation plan, golden decision test plan, deterministic runtime PoC readiness models in `packages/deployment-readiness`, read-only `/readiness/policy-runtime-poc/*` API endpoints, `/dashboard/policy-runtime-poc`, safe `/health` metadata, dashboard rendering, and tests.
+
+Goals:
+
+- Define how a future policy runtime proof-of-concept should be evaluated without implementing runtime execution.
+- Compare `StaticPolicyEngine`, OPA/Rego local/server futures, Cedar local evaluator future, signed JSON/YAML bundle evaluator future, and custom policy service future.
+- Define future normalized input/output using AuthContext, RequestContext, service-account, and Tenant/Repo/Provider Scope metadata.
+- Map Git, GitHub App token issuance, webhook processing, LLM, MCP, SecretRef/Vault, Runner, Local Agent, Registry, Governance, Dashboard/readiness, and Observability domains to PoC fixtures.
+- Define shadow evaluation, mismatch severity, golden decision cases, rollout/rollback, safety constraints, and success/failure criteria.
+- Keep runtime safe: no OPA/Rego, Cedar, signed JSON/YAML evaluator, custom policy service, shadow evaluator, dynamic policy execution, remote policy loading, hot reload, external calls, production Auth/RBAC, tenant enforcement, secrets, or env values.
+
+Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1, or Tenant Scope Enforcement v1.
+
+## 43. Policy Runtime PoC Golden Test Harness v1
+
+Implemented with `docs/roadmaps/policy-bundle-runtime-poc/golden-test-harness-v1-plan.md`, `docs/roadmaps/policy-bundle-runtime-poc/golden-test-harness-v1.md`, typed fixtures in `packages/policy/src/golden-cases.ts`, the offline harness in `packages/policy/src/golden-harness.ts`, read-only `/readiness/policy-runtime-poc/golden-summary`, `/dashboard/policy-runtime-poc` golden harness summary fields, and deterministic tests.
+
+Goals:
+
+- Define reviewable normalized golden policy input fixtures for critical domains.
+- Use `StaticPolicyEngine` as the source of truth and compare effect, reason, and first matched rule id.
+- Cover destructive Git, GitHub App token-handle gating, LLM completion/fallback, MCP risk gates, SecretRef/Vault credential resolution, Runner/Local Agent denials, Registry/Governance, Dashboard/readiness, and tenant/scope metadata cases.
+- Preserve deny-by-default behavior and record deterministic pass/fail counts for future runtime comparisons.
+- Keep runtime safe: no OPA/Rego, Cedar, signed JSON/YAML evaluator, signed bundle verification, custom policy service, shadow evaluator, dynamic policy execution, remote bundle loading, hot reload, external calls, production Auth/RBAC, tenant enforcement, secrets, or env values.
+
+Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1, or Tenant Scope Enforcement v1.
+
+## 44. Policy Runtime Shadow Evaluation Planning v1
+
+Implemented with `docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1-plan.md`, `docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1.md`, candidate runtime interface planning, mismatch taxonomy, reporting, rollout/rollback docs, deterministic shadow planning models in `packages/deployment-readiness`, read-only `/readiness/policy-shadow/*` API endpoints, `/dashboard/policy-runtime-poc` shadow planning fields, and deterministic tests.
+
+Goals:
+
+- Define future shadow evaluator architecture without implementing it.
+- Define candidate runtime interface expectations for future signed JSON/YAML, OPA/Rego, Cedar, or custom candidates.
+- Define static-vs-candidate comparison rules, mismatch severity taxonomy, audit/reporting model, rollout, and rollback.
+- Connect Golden Harness v1 as the future static baseline for candidate runtime comparisons.
+- Keep runtime safe: no candidate runtime, no shadow evaluator, no OPA/Rego, no Cedar, no signed JSON/YAML evaluator, no signed verification runtime, no external policy service calls, no dynamic policy execution, no remote policy loading, no enforcement change, no production Auth/RBAC, no tenant enforcement, no secrets, and no env values.
+
+Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1, or Tenant Scope Enforcement v1.
+
+## 45. Phase 5 Enterprise Planning
 
 Goals:
 

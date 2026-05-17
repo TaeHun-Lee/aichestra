@@ -49,6 +49,12 @@ import {
   defaultPolicyBundleRisks,
   defaultPolicyDomainMappings,
   defaultPolicyEngineOptions,
+  defaultPolicyRuntimePocDomainMappings,
+  defaultPolicyRuntimePocGoldenCases,
+  defaultPolicyRuntimePocInputContract,
+  defaultPolicyRuntimePocOptions,
+  defaultPolicyRuntimePocReadinessChecks,
+  defaultPolicyRuntimePocRisks,
   defaultPolicyShadowComparisonRules,
   defaultPolicyShadowEvaluationPlan,
   defaultPolicyShadowEvaluationReports,
@@ -155,6 +161,14 @@ import type {
   PolicyBundleRisk,
   PolicyDomainMapping,
   PolicyEngineOption,
+  PolicyRuntimePocDomainMapping,
+  PolicyRuntimePocGoldenCase,
+  PolicyRuntimePocInputContract,
+  PolicyRuntimePocOption,
+  PolicyRuntimePocReadinessCategory,
+  PolicyRuntimePocReadinessCheck,
+  PolicyRuntimePocRisk,
+  PolicyRuntimePocSummary,
   PolicyShadowComparisonRule,
   PolicyShadowEvaluationPlan,
   PolicyShadowEvaluationReport,
@@ -305,6 +319,12 @@ export type DeploymentReadinessServiceInput = {
   policyBundleReadinessChecks?: PolicyBundleReadinessCheck[];
   policyBundleRisks?: PolicyBundleRisk[];
   policyBundleMigrationPhases?: PolicyBundleMigrationPhase[];
+  policyRuntimePocOptions?: PolicyRuntimePocOption[];
+  policyRuntimePocInputContract?: PolicyRuntimePocInputContract;
+  policyRuntimePocDomainMappings?: PolicyRuntimePocDomainMapping[];
+  policyRuntimePocGoldenCases?: PolicyRuntimePocGoldenCase[];
+  policyRuntimePocReadinessChecks?: PolicyRuntimePocReadinessCheck[];
+  policyRuntimePocRisks?: PolicyRuntimePocRisk[];
   policyShadowEvaluationPlan?: PolicyShadowEvaluationPlan;
   policyShadowComparisonRules?: PolicyShadowComparisonRule[];
   policyShadowMismatches?: PolicyShadowMismatch[];
@@ -564,6 +584,12 @@ export class DeploymentReadinessService {
   private readonly policyBundleReadinessChecks: PolicyBundleReadinessCheck[];
   private readonly policyBundleRisks: PolicyBundleRisk[];
   private readonly policyBundleMigrationPhases: PolicyBundleMigrationPhase[];
+  private readonly policyRuntimePocOptions: PolicyRuntimePocOption[];
+  private readonly policyRuntimePocInputContract: PolicyRuntimePocInputContract;
+  private readonly policyRuntimePocDomainMappings: PolicyRuntimePocDomainMapping[];
+  private readonly policyRuntimePocGoldenCases: PolicyRuntimePocGoldenCase[];
+  private readonly policyRuntimePocReadinessChecks: PolicyRuntimePocReadinessCheck[];
+  private readonly policyRuntimePocRisks: PolicyRuntimePocRisk[];
   private readonly policyShadowEvaluationPlan: PolicyShadowEvaluationPlan;
   private readonly policyShadowComparisonRules: PolicyShadowComparisonRule[];
   private readonly policyShadowMismatches: PolicyShadowMismatch[];
@@ -656,6 +682,12 @@ export class DeploymentReadinessService {
     this.policyBundleReadinessChecks = clone(input.policyBundleReadinessChecks ?? defaultPolicyBundleReadinessChecks);
     this.policyBundleRisks = clone(input.policyBundleRisks ?? defaultPolicyBundleRisks);
     this.policyBundleMigrationPhases = clone(input.policyBundleMigrationPhases ?? defaultPolicyBundleMigrationPhases);
+    this.policyRuntimePocOptions = clone(input.policyRuntimePocOptions ?? defaultPolicyRuntimePocOptions);
+    this.policyRuntimePocInputContract = clone(input.policyRuntimePocInputContract ?? defaultPolicyRuntimePocInputContract);
+    this.policyRuntimePocDomainMappings = clone(input.policyRuntimePocDomainMappings ?? defaultPolicyRuntimePocDomainMappings);
+    this.policyRuntimePocGoldenCases = clone(input.policyRuntimePocGoldenCases ?? defaultPolicyRuntimePocGoldenCases);
+    this.policyRuntimePocReadinessChecks = clone(input.policyRuntimePocReadinessChecks ?? defaultPolicyRuntimePocReadinessChecks);
+    this.policyRuntimePocRisks = clone(input.policyRuntimePocRisks ?? defaultPolicyRuntimePocRisks);
     this.policyShadowEvaluationPlan = clone(input.policyShadowEvaluationPlan ?? defaultPolicyShadowEvaluationPlan);
     this.policyShadowComparisonRules = clone(input.policyShadowComparisonRules ?? defaultPolicyShadowComparisonRules);
     this.policyShadowMismatches = clone(input.policyShadowMismatches ?? defaultPolicyShadowMismatches);
@@ -1079,6 +1111,30 @@ export class DeploymentReadinessService {
     return clone(this.policyBundleMigrationPhases);
   }
 
+  listPolicyRuntimePocOptions(): PolicyRuntimePocOption[] {
+    return clone(this.policyRuntimePocOptions);
+  }
+
+  getPolicyRuntimePocInputContract(): PolicyRuntimePocInputContract {
+    return clone(this.policyRuntimePocInputContract);
+  }
+
+  listPolicyRuntimePocDomainMappings(): PolicyRuntimePocDomainMapping[] {
+    return clone(this.policyRuntimePocDomainMappings);
+  }
+
+  listPolicyRuntimePocGoldenCases(): PolicyRuntimePocGoldenCase[] {
+    return clone(this.policyRuntimePocGoldenCases);
+  }
+
+  listPolicyRuntimePocReadinessChecks(filter: { category?: PolicyRuntimePocReadinessCategory } = {}): PolicyRuntimePocReadinessCheck[] {
+    return clone(this.policyRuntimePocReadinessChecks.filter((check) => filter.category === undefined || check.category === filter.category));
+  }
+
+  listPolicyRuntimePocRisks(): PolicyRuntimePocRisk[] {
+    return clone(this.policyRuntimePocRisks);
+  }
+
   getPolicyShadowEvaluationPlan(): PolicyShadowEvaluationPlan {
     return clone(this.policyShadowEvaluationPlan);
   }
@@ -1088,6 +1144,10 @@ export class DeploymentReadinessService {
   }
 
   listPolicyShadowMismatches(): PolicyShadowMismatch[] {
+    return clone(this.policyShadowMismatches);
+  }
+
+  listPolicyShadowMismatchTaxonomy(): PolicyShadowMismatch[] {
     return clone(this.policyShadowMismatches);
   }
 
@@ -4140,10 +4200,61 @@ export class DeploymentReadinessService {
     };
   }
 
+  getPolicyRuntimePocSummary(): PolicyRuntimePocSummary {
+    const criticalBlockers = this.policyRuntimePocReadinessChecks.filter((check) => check.status === "fail" && check.severity === "critical");
+    return {
+      generatedAt: this.now(),
+      status: "v0_implemented",
+      planningOnly: true,
+      productionReady: false,
+      currentRuntime: "StaticPolicyEngine",
+      staticPolicyEngineUnchanged: true,
+      recommendedPocOptionId: "policy_runtime_poc_signed_json_yaml",
+      recommendedPocPath: "signed_json_yaml_shadow_first",
+      runtimeEnforcementEnabled: false,
+      shadowEvaluationImplemented: false,
+      externalPolicyEngineEnabled: false,
+      opaRuntimeImplemented: false,
+      cedarRuntimeImplemented: false,
+      signedJsonYamlRuntimeImplemented: false,
+      customPolicyServiceImplemented: false,
+      dynamicPolicyExecutionEnabled: false,
+      remotePolicyLoadingEnabled: false,
+      hotReloadEnabled: false,
+      policyCodeExecuted: false,
+      optionCount: this.policyRuntimePocOptions.length,
+      domainMappingCount: this.policyRuntimePocDomainMappings.length,
+      goldenCaseCount: this.policyRuntimePocGoldenCases.length,
+      readinessCheckCount: this.policyRuntimePocReadinessChecks.length,
+      criticalBlockerCount: criticalBlockers.length,
+      riskCount: this.policyRuntimePocRisks.length,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      metadata: {
+        docs: "docs/roadmaps/policy-bundle-runtime-poc/v0.md",
+        planDocs: "docs/roadmaps/policy-bundle-runtime-poc/v0-plan.md",
+        runtimeOptionsDocs: "docs/roadmaps/policy-bundle-runtime-poc/runtime-options-v0.md",
+        inputContractDocs: "docs/roadmaps/policy-bundle-runtime-poc/policy-io-contract-v0.md",
+        domainMappingDocs: "docs/roadmaps/policy-bundle-runtime-poc/domain-poc-mapping-v0.md",
+        shadowEvaluationDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v0.md",
+        goldenDecisionDocs: "docs/roadmaps/policy-bundle-runtime-poc/golden-decision-tests-v0.md",
+        staticPolicyEngineSourceOfTruth: true,
+        runtimeImplemented: false,
+        shadowEvaluatorImplemented: false,
+        opaRuntimeImplemented: false,
+        cedarRuntimeImplemented: false,
+        jsonYamlEvaluatorImplemented: false,
+        customPolicyServiceImplemented: false,
+        externalPolicyServiceCallsEnabled: false
+      }
+    };
+  }
+
   getPolicyShadowEvaluationSummary(): PolicyShadowEvaluationSummary {
     const warningCount = this.policyShadowReadinessChecks.filter((check) => check.status === "warning").length;
     const futureCount = this.policyShadowReadinessChecks.filter((check) => check.status === "future").length;
     const failCount = this.policyShadowReadinessChecks.filter((check) => check.status === "fail").length;
+    const criticalMismatchKinds = this.policyShadowMismatches.filter((mismatch) => mismatch.severity === "critical");
     return {
       generatedAt: this.now(),
       status: "v1_implemented",
@@ -4181,6 +4292,11 @@ export class DeploymentReadinessService {
       reportCount: this.policyShadowEvaluationReports.length,
       goldenCaseSource: "Policy Runtime PoC Golden Test Harness v1",
       recommendedNextTask: "Policy Runtime Shadow Evaluator Skeleton v1",
+      currentRolloutStage: "docs_planning_golden_harness_only",
+      candidateRuntimeInterfaceImplemented: false,
+      staticPolicyEngineUnchanged: true,
+      goldenHarnessSourceOfTruth: "StaticPolicyEngine",
+      noDynamicPolicyExecution: true,
       metadata: {
         docs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1.md",
         planDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1-plan.md",
@@ -4193,7 +4309,11 @@ export class DeploymentReadinessService {
         noEnforcementChange: true,
         noDynamicPolicyExecution: true,
         noExternalPolicyServiceCalls: true,
-        noSecretsOrEnvValues: true
+        noSecretsOrEnvValues: true,
+        staticPolicyEngineSourceOfTruth: true,
+        shadowEvaluatorImplemented: false,
+        candidateRuntimeImplemented: false,
+        externalPolicyServiceCallsEnabled: false
       }
     };
   }

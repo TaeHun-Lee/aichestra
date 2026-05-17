@@ -30,6 +30,7 @@ import {
   type PolicyShadowEvaluationReadModel,
   type ProductionAuthProviderSkeletonReadModel,
   type ReadinessEndpointScopeSummary,
+  type PolicyRuntimePocReadinessReadModel,
   type RegistryReadModel,
   type ScopedReadModelMetadata,
   type SecurityReadModel,
@@ -136,10 +137,10 @@ function withDemoEnforcementMetadata(
   }) as unknown as ScopedReadModelMetadata;
 }
 
-function withScopeMetadata<T extends { scopeMetadata?: ScopedReadModelMetadata }>(
+function withScopeMetadata<T extends object>(
   readModel: T,
   scopeMetadata: unknown
-): T {
+): T & { scopeMetadata: ScopedReadModelMetadata } {
   return {
     ...readModel,
     scopeMetadata: sanitizeDashboardObject(scopeMetadata) as unknown as ScopedReadModelMetadata
@@ -184,6 +185,14 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       policyBundleReadinessBlockers: sections.policyBundles.blockers.length,
       policyBundleDomainsMapped: sections.policyBundles.domainMappings.filter((mapping) => mapping.migrationStatus === "mapped").length,
       policyEngineOptions: sections.policyBundles.engineOptions.length,
+      policyRuntimePocOptions: sections.policyRuntimePoc.options.length,
+      policyRuntimePocDomainMappings: sections.policyRuntimePoc.domainMappings.length,
+      policyRuntimePocGoldenCases: sections.policyRuntimePoc.goldenCases.length,
+      policyRuntimeGoldenHarnessCases: numeric(sections.policyRuntimePoc.goldenHarness.totalCases),
+      policyRuntimeGoldenHarnessFailures: numeric(sections.policyRuntimePoc.goldenHarness.failedCases),
+      policyShadowComparisonRules: sections.policyRuntimePoc.shadowComparisonRules.length,
+      policyShadowMismatchKinds: sections.policyRuntimePoc.shadowMismatchTaxonomy.length,
+      policyShadowCriticalMismatchKinds: sections.policyRuntimePoc.shadowMismatchTaxonomy.filter((mismatch) => mismatch.severity === "critical").length,
       authRoles: sections.auth.roles.length,
       authActors: sections.auth.actors.length,
       authProductionReadinessBlockers: sections.authProduction.blockers.length,
@@ -256,6 +265,7 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       agents: { status: "available", count: sections.agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: sections.policy.rules.length, notes: [] },
       policyBundles: { status: "available", count: sections.policyBundles.blockers.length, notes: ["Policy Bundle / OPA-Cedar v0 is planning-only; StaticPolicyEngine remains the runtime and no external policy engine is enabled."] },
+      policyRuntimePoc: { status: "available", count: sections.policyRuntimePoc.blockers.length, notes: ["Policy Bundle Runtime PoC Planning v0 and Shadow Evaluation Planning v1 are planning-only; StaticPolicyEngine remains source of truth and no runtime evaluator is implemented.", "Policy Runtime PoC Golden Test Harness v1 runs offline deterministic StaticPolicyEngine comparisons only."] },
       auth: { status: "available", count: sections.auth.actors.length, notes: ["Mock auth is not production authentication."] },
       authProduction: { status: "available", count: sections.authProduction.blockers.length, notes: ["Production Auth/RBAC v1 is planning-only; no real IdP, login, session, JWT, or cookie flow is implemented."] },
       authProviders: { status: "available", count: sections.authProviders.configs.length, notes: ["Production Auth Provider Skeleton v1 is disabled-by-default; MockAuthProvider remains active and no token/session validation is running."] },
@@ -968,6 +978,190 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       envValuesExposed: false
     })
   };
+
+
+  const policyRuntimePoc: PolicyRuntimePocReadinessReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v0_implemented",
+      planningOnly: true,
+      productionReady: false,
+      currentRuntime: "StaticPolicyEngine",
+      staticPolicyEngineUnchanged: true,
+      recommendedPocOptionId: "policy_runtime_poc_signed_json_yaml",
+      recommendedPocPath: "signed_json_yaml_shadow_first",
+      runtimeEnforcementEnabled: false,
+      shadowEvaluationImplemented: false,
+      externalPolicyEngineEnabled: false,
+      opaRuntimeImplemented: false,
+      cedarRuntimeImplemented: false,
+      signedJsonYamlRuntimeImplemented: false,
+      customPolicyServiceImplemented: false,
+      dynamicPolicyExecutionEnabled: false,
+      remotePolicyLoadingEnabled: false,
+      hotReloadEnabled: false,
+      policyCodeExecuted: false,
+      optionCount: 6,
+      domainMappingCount: 13,
+      goldenCaseCount: 15,
+      readinessCheckCount: 8,
+      criticalBlockerCount: 1,
+      riskCount: 5,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    options: sanitizeDashboardArray([
+      { id: "policy_runtime_poc_static_baseline", optionKind: "static_policy_engine_baseline", status: "baseline", runtimeImplemented: false },
+      { id: "policy_runtime_poc_signed_json_yaml", optionKind: "signed_json_yaml_bundle_evaluator_future", status: "recommended_for_poc", runtimeImplemented: false },
+      { id: "policy_runtime_poc_opa_local", optionKind: "opa_rego_local_library_future", status: "candidate", runtimeImplemented: false },
+      { id: "policy_runtime_poc_cedar", optionKind: "cedar_local_evaluator_future", status: "candidate", runtimeImplemented: false }
+    ]),
+    inputContract: sanitizeDashboardObject({
+      version: "policy_runtime_poc_input_v0",
+      subjectFields: ["actorId", "principalId", "actorKind", "serviceAccountId", "roles", "teams", "authMode", "isMockActor"],
+      requestFields: ["requestId", "correlationId", "source", "taskId", "taskRunId"],
+      outputFields: ["decision", "reason", "ruleId", "policyBundleId", "policyVersion", "obligations", "auditMetadata", "redactionRequirements"]
+    }),
+    domainMappings: sanitizeDashboardArray([
+      { id: "policy_runtime_poc_domain_git_remote_operation", domain: "git_remote_operation", currentStaticAction: "git.remote_operation", expectedDenyByDefaultBehavior: "destructive Git denied" },
+      { id: "policy_runtime_poc_domain_llm_remote_completion", domain: "llm_remote_completion", currentStaticAction: "llm.remote_completion", expectedDenyByDefaultBehavior: "remote LLM requires gates" },
+      { id: "policy_runtime_poc_domain_secretref_vault", domain: "secretref_vault_credential_resolution", currentStaticAction: "provider.credential.resolve", expectedDenyByDefaultBehavior: "raw secrets denied" }
+    ]),
+    goldenCases: sanitizeDashboardArray([
+      { id: "git_remote_merge_denied", action: "git.merge", expectedDecision: "deny" },
+      { id: "secret_read_denied", action: "secret.read", expectedDecision: "deny" },
+      { id: "llm_remote_completion_requires_gates", action: "llm.remote_completion", expectedDecision: "deny" },
+      { id: "tenant_scope_mismatch_denied_future", action: "readiness.read", expectedDecision: "deny" }
+    ]),
+    goldenHarness: sanitizeDashboardObject({
+      status: "pass",
+      sourceOfTruth: "StaticPolicyEngine",
+      totalCases: 42,
+      passedCases: 42,
+      failedCases: 0,
+      domainCount: 11,
+      domainsCovered: ["dashboard_readiness", "git", "governance", "llm", "local_agent", "mcp", "registry", "runner", "scope", "secretref_vault", "tenant_scope"],
+      expectedAllowCases: 6,
+      expectedDenyCases: 35,
+      expectedBlockCases: 1,
+      expectedWarnCases: 0,
+      staticPolicyEngineOnly: true,
+      dynamicPolicyExecutionEnabled: false,
+      opaRuntimeExecuted: false,
+      cedarRuntimeExecuted: false,
+      signedBundleRuntimeExecuted: false,
+      externalPolicyServiceCallsEnabled: false,
+      remotePolicyLoadingEnabled: false,
+      hotReloadEnabled: false,
+      secretsInFixtures: false,
+      envValuesExposed: false
+    }),
+    goldenHarnessResults: sanitizeDashboardArray([
+      { id: "git_remote_merge_denied", domain: "git", action: "git.merge", passed: true, expectedEffect: "deny", actualEffect: "deny", expectedRuleId: "policy_git_merge_deny", actualRuleId: "policy_git_merge_deny", mismatchCount: 0 },
+      { id: "secret_read_denied", domain: "secretref_vault", action: "secret.read", passed: true, expectedEffect: "deny", actualEffect: "deny", expectedRuleId: "policy_secret_read_deny", actualRuleId: "policy_secret_read_deny", mismatchCount: 0 },
+      { id: "mcp_critical_tool_denied", domain: "mcp", action: "mcp.tool.invoke", passed: true, expectedEffect: "deny", actualEffect: "deny", expectedRuleId: "policy_mcp_critical_tool_deny", actualRuleId: "policy_mcp_critical_tool_deny", mismatchCount: 0 },
+      { id: "governance_apply_denied", domain: "governance", action: "improvement.apply", passed: true, expectedEffect: "deny", actualEffect: "deny", expectedRuleId: "policy_improvement_apply_deny", actualRuleId: "policy_improvement_apply_deny", mismatchCount: 0 }
+    ]),
+    readinessChecks: sanitizeDashboardArray([
+      { id: "policy_runtime_poc_input_contract_defined", category: "input_contract", status: "pass", severity: "high" },
+      { id: "policy_runtime_poc_shadow_evaluator_future", category: "shadow_evaluation", status: "fail", severity: "critical" },
+      { id: "policy_runtime_poc_runtime_execution_disabled", category: "safety", status: "pass", severity: "critical" }
+    ]),
+    risks: sanitizeDashboardArray([
+      { id: "policy_runtime_poc_risk_dynamic_execution", severity: "critical", status: "open" },
+      { id: "policy_runtime_poc_risk_shadow_mismatch", severity: "high", status: "open" }
+    ]),
+    blockers: sanitizeDashboardArray([
+      { id: "policy_runtime_poc_shadow_evaluator_future", severity: "critical" }
+    ]),
+    recommendedPath: sanitizeDashboardObject({
+      optionId: "policy_runtime_poc_signed_json_yaml",
+      optionKind: "signed_json_yaml_bundle_evaluator_future",
+      status: "recommended_for_poc",
+      runtimeImplemented: false
+    }),
+    shadowEvaluation: sanitizeDashboardObject({
+      sourceOfTruth: "StaticPolicyEngine",
+      shadowEvaluationImplemented: false,
+      candidateRuntimeImplemented: false,
+      enforcementChanged: false,
+      mismatchesEnforced: false,
+      rolloutPhase: "docs_planning_golden_harness_only"
+    }),
+    rolloutRollback: sanitizeDashboardObject({
+      rolloutPhases: ["docs_only", "offline_golden_tests", "shadow_evaluator"],
+      rollbackStrategy: "keep_StaticPolicyEngine",
+      runtimeEnforcementEnabled: false
+    }),
+    noExecutionStatus: sanitizeDashboardObject({
+      dynamicPolicyExecutionEnabled: false,
+      externalPolicyEngineEnabled: false,
+      opaRuntimeImplemented: false,
+      cedarRuntimeImplemented: false,
+      signedJsonYamlRuntimeImplemented: false,
+      customPolicyServiceImplemented: false,
+      remotePolicyLoadingEnabled: false,
+      hotReloadEnabled: false,
+      policyCodeExecuted: false,
+      staticPolicyEngineUnchanged: true,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    shadowPlan: sanitizeDashboardObject({
+      id: "policy_shadow_evaluation_v1_plan",
+      status: "ready_for_design",
+      sourceOfTruth: "StaticPolicyEngine",
+      candidateRuntimeKinds: ["signed_json_yaml_bundle_evaluator_future", "opa_rego_local_library_future", "cedar_local_evaluator_future", "custom_policy_decision_service_future"],
+      domains: ["git_remote_operation", "llm_remote_completion", "secretref_vault_credential_resolution", "mcp_tool_invocation", "governance_apply_gate"],
+      rolloutStages: ["docs_planning", "golden_harness_only", "offline_candidate_runtime_evaluation_future", "live_shadow_record_only_future"],
+      enforcementMode: "shadow_only",
+      metadata: { shadowEvaluatorImplemented: false, candidateRuntimeImplemented: false, enforcementChanged: false }
+    }),
+    shadowComparisonRules: sanitizeDashboardArray([
+      { id: "policy_shadow_compare_effect", comparisonKind: "effect_match", required: true, severityOnMismatch: "critical" },
+      { id: "policy_shadow_compare_redaction", comparisonKind: "redaction_match", required: true, severityOnMismatch: "critical" },
+      { id: "policy_shadow_compare_audit_metadata", comparisonKind: "audit_metadata_match", required: true, severityOnMismatch: "high" }
+    ]),
+    shadowMismatchTaxonomy: sanitizeDashboardArray([
+      { id: "policy_shadow_mismatch_static_deny_candidate_allow", mismatchKind: "static_deny_candidate_allow", severity: "critical", defaultAction: "block_rollout_future" },
+      { id: "policy_shadow_mismatch_static_block_candidate_allow", mismatchKind: "static_block_candidate_allow", severity: "critical", defaultAction: "block_rollout_future" },
+      { id: "policy_shadow_mismatch_redaction", mismatchKind: "redaction_mismatch", severity: "critical", defaultAction: "block_rollout_future" },
+      { id: "policy_shadow_mismatch_candidate_error", mismatchKind: "error_in_candidate", severity: "high", defaultAction: "alert_future" }
+    ]),
+    shadowReports: sanitizeDashboardArray([
+      { id: "policy_shadow_report_planning_seed", domain: "all_domains", caseCount: 0, matchCount: 0, mismatchCount: 0, criticalMismatchCount: 0, enforcementChanged: false, sourceOfTruth: "StaticPolicyEngine", candidateRuntimeKind: "signed_json_yaml_bundle_evaluator_future" }
+    ]),
+    shadowReadinessChecks: sanitizeDashboardArray([
+      { id: "policy_shadow_golden_cases_ready", category: "golden_cases", status: "pass", severity: "high" },
+      { id: "policy_shadow_candidate_runtime_future", category: "candidate_runtime", status: "future", severity: "critical" },
+      { id: "policy_shadow_safety_invariants_hold", category: "safety", status: "pass", severity: "critical" }
+    ]),
+    shadowSummary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      planningOnly: true,
+      productionReady: false,
+      sourceOfTruth: "StaticPolicyEngine",
+      enforcementMode: "shadow_only",
+      currentRolloutStage: "docs_planning_golden_harness_only",
+      shadowEvaluatorImplemented: false,
+      candidateRuntimeImplemented: false,
+      candidateRuntimeInterfaceImplemented: false,
+      enforcementChanged: false,
+      staticPolicyEngineUnchanged: true,
+      goldenHarnessSourceOfTruth: "StaticPolicyEngine",
+      comparisonRuleCount: 6,
+      mismatchTaxonomyCount: 10,
+      criticalMismatchKindCount: 3,
+      readinessCheckCount: 10,
+      reportCount: 1,
+      noDynamicPolicyExecution: true,
+      dynamicPolicyExecutionEnabled: false,
+      policyCodeExecuted: false,
+      externalPolicyServiceCallsEnabled: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    })
+  };
+
 
   const auth: AuthReadModel = {
     config: sanitizeDashboardObject({
@@ -2608,6 +2802,7 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     policy,
     policyBundles,
     policyShadow,
+    policyRuntimePoc,
     auth,
     authProduction,
     authProviders,
@@ -2655,6 +2850,7 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     policy: withScopeMetadata(policy, scopeMetadataFor("policy")),
     policyBundles: withScopeMetadata(policyBundles, scopeMetadataFor("policy_bundles")),
     policyShadow: withScopeMetadata(policyShadow, scopeMetadataFor("policy_shadow")),
+    policyRuntimePoc: withScopeMetadata(policyRuntimePoc, scopeMetadataFor("policy_runtime_poc")),
     auth: withScopeMetadata(auth, scopeMetadataFor("auth")),
     authProduction: withScopeMetadata(authProduction, scopeMetadataFor("auth_production")),
     authProviders: withScopeMetadata(authProviders, scopeMetadataFor("auth_provider_skeleton")),
@@ -2722,6 +2918,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         policyResponse,
         policyBundlesResponse,
         policyShadowResponse,
+        policyRuntimePocResponse,
         authResponse,
         authProductionResponse,
         authProvidersResponse,
@@ -2760,6 +2957,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         policy: objectValue((policyResponse as Record<string, unknown>).policy) as unknown as PolicyReadModel,
         policyBundles: objectValue((policyBundlesResponse as Record<string, unknown>).policyBundles) as unknown as PolicyBundleReadinessReadModel,
         policyShadow: objectValue((policyShadowResponse as Record<string, unknown>).policyShadow) as unknown as PolicyShadowEvaluationReadModel,
+        policyRuntimePoc: objectValue((policyRuntimePocResponse as Record<string, unknown>).policyRuntimePoc) as unknown as PolicyRuntimePocReadinessReadModel,
         auth: objectValue((authResponse as Record<string, unknown>).auth) as unknown as AuthReadModel,
         authProduction: objectValue((authProductionResponse as Record<string, unknown>).authProduction) as unknown as AuthRbacProductionReadinessReadModel,
         authProviders: objectValue((authProvidersResponse as Record<string, unknown>).authProviders) as unknown as ProductionAuthProviderSkeletonReadModel,
