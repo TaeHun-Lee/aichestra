@@ -8,6 +8,21 @@ import {
 import { sanitizeSecurityMetadata } from "@aichestra/security";
 import type { PolicyAction } from "@aichestra/policy";
 import type { LocalAgentConsentLevel, LocalAgentInvocation, LocalAgentProtocolService } from "./local-agent-protocol.ts";
+import {
+  buildLocalCliProviderTemplateReadiness,
+  getLocalCliProviderTemplate,
+  seedLocalCliCompatibilityRules,
+  seedLocalCliParserProfiles,
+  seedLocalCliProviderTemplates,
+  seedLocalCliSecurityConstraints
+} from "./local-cli-provider-templates.ts";
+import type {
+  LocalCliCompatibilityRule,
+  LocalCliParserProfile,
+  LocalCliProviderTemplate,
+  LocalCliProviderTemplateReadiness,
+  LocalCliSecurityConstraint
+} from "./local-cli-provider-templates.ts";
 
 export type ProviderKind =
   | "cloud_api"
@@ -32,7 +47,10 @@ export type ProviderBillingMode =
   | "provider_workspace"
   | "cloud_project"
   | "user_subscription"
+  | "user_subscription_future"
   | "local_user_session"
+  | "local_cli_future"
+  | "not_metered_mock"
   | "unknown";
 
 export type ProviderCapability =
@@ -532,6 +550,9 @@ export class ProviderAbstractionService {
     return {
       status: "available",
       providerCatalogCount: this.catalog.listProviders().length,
+      localCliTemplateCount: seedLocalCliProviderTemplates().length,
+      localCliTemplatesStatus: "v1_implemented",
+      localCliExecutionEnabled: false,
       localAgentSupportEnabled: this.localAgentProtocolService !== undefined,
       connectedLocalAgents: this.localAgentProtocolService
         ? this.localAgentProtocolService.getConfig().connectedAgents
@@ -571,8 +592,40 @@ export class ProviderAbstractionService {
     return ["api_key", "oauth_user", "device_code", "workload_identity", "cloud_iam", "external_cli_session"];
   }
 
-  listLocalCliTemplates(): LocalCliProviderConfig[] {
+  listLocalCliTemplates(): LocalCliProviderTemplate[] {
+    return seedLocalCliProviderTemplates();
+  }
+
+  getLocalCliTemplate(id: string): LocalCliProviderTemplate | undefined {
+    return getLocalCliProviderTemplate(id);
+  }
+
+  listLocalCliProviderConfigs(): LocalCliProviderConfig[] {
     return seedLocalCliProviderConfigs();
+  }
+
+  listLocalCliCompatibilityRules(filter: { providerId?: string; templateId?: string } = {}): LocalCliCompatibilityRule[] {
+    return seedLocalCliCompatibilityRules().filter((rule) => {
+      if (filter.providerId && rule.providerId !== filter.providerId) return false;
+      if (filter.templateId && rule.metadata.templateId !== filter.templateId) return false;
+      return true;
+    });
+  }
+
+  listLocalCliParserProfiles(filter: { providerId?: string } = {}): LocalCliParserProfile[] {
+    return seedLocalCliParserProfiles().filter((profile) => !filter.providerId || profile.providerId === filter.providerId);
+  }
+
+  listLocalCliSecurityConstraints(filter: { providerId?: string; constraint?: string } = {}): LocalCliSecurityConstraint[] {
+    return seedLocalCliSecurityConstraints().filter((constraint) => {
+      if (filter.providerId && constraint.providerId !== filter.providerId) return false;
+      if (filter.constraint && constraint.constraint !== filter.constraint) return false;
+      return true;
+    });
+  }
+
+  getLocalCliReadiness(): LocalCliProviderTemplateReadiness {
+    return buildLocalCliProviderTemplateReadiness();
   }
 
   listLocalAgents(): LocalAgentDescriptor[] {
@@ -1249,10 +1302,19 @@ export function seedProviderCatalogEntries(): ProviderCatalogEntry[] {
       kind: "local_cli",
       auth: { type: "external_cli_session", credentialAccess: "never_read_tokens" },
       supportedModels: ["claude-code/local"],
-      billingMode: "local_user_session",
-      capabilities: ["local_cli", "json_output", "jsonl_output", "file_read", "file_write", "shell_execution"],
-      policyNotes: ["Requires Aichestra Local Agent; credential caches are never read."],
-      metadata: { localAgentRequired: true, templateId: "claude-code-headless-json" }
+      billingMode: "user_subscription_future",
+      capabilities: ["local_cli", "json_output", "jsonl_output", "file_read"],
+      policyNotes: ["Requires Aichestra Local Agent; credential caches are never read; vendor CLI execution is not implemented."],
+      metadata: {
+        localAgentRequired: true,
+        templateId: "claude-code-headless-json",
+        localCliTemplateV1Id: "claude-code-template-v1",
+        templateOnly: true,
+        directExecutionEnabled: false,
+        ptySupported: false,
+        credentialCacheReadAllowed: false,
+        secretForwardingAllowed: false
+      }
     }),
     base({
       id: "openai-api-key",
@@ -1273,10 +1335,19 @@ export function seedProviderCatalogEntries(): ProviderCatalogEntry[] {
       kind: "local_cli",
       auth: { type: "external_cli_session", credentialAccess: "never_read_tokens" },
       supportedModels: ["codex-cli/local"],
-      billingMode: "local_user_session",
-      capabilities: ["local_cli", "jsonl_output", "file_read", "file_write", "shell_execution"],
-      policyNotes: ["Requires Aichestra Local Agent; ChatGPT local session is not uploaded."],
-      metadata: { localAgentRequired: true, templateId: "codex-cli-jsonl" }
+      billingMode: "user_subscription_future",
+      capabilities: ["local_cli", "jsonl_output", "file_read"],
+      policyNotes: ["Requires Aichestra Local Agent; ChatGPT local session is not uploaded; vendor CLI execution is not implemented."],
+      metadata: {
+        localAgentRequired: true,
+        templateId: "codex-cli-jsonl",
+        localCliTemplateV1Id: "codex-cli-template-v1",
+        templateOnly: true,
+        directExecutionEnabled: false,
+        ptySupported: false,
+        credentialCacheReadAllowed: false,
+        secretForwardingAllowed: false
+      }
     }),
     base({
       id: "gemini-api-key",
@@ -1297,10 +1368,19 @@ export function seedProviderCatalogEntries(): ProviderCatalogEntry[] {
       kind: "local_cli",
       auth: { type: "external_cli_session", credentialAccess: "never_read_tokens" },
       supportedModels: ["gemini-cli/local"],
-      billingMode: "local_user_session",
-      capabilities: ["local_cli", "json_output", "file_read", "file_write", "shell_execution"],
-      policyNotes: ["Requires Aichestra Local Agent; OAuth cache piggybacking is forbidden."],
-      metadata: { localAgentRequired: true, templateId: "gemini-cli-json" }
+      billingMode: "user_subscription_future",
+      capabilities: ["local_cli", "json_output", "file_read"],
+      policyNotes: ["Requires Aichestra Local Agent; OAuth cache piggybacking is forbidden; vendor CLI execution is not implemented."],
+      metadata: {
+        localAgentRequired: true,
+        templateId: "gemini-cli-json",
+        localCliTemplateV1Id: "gemini-cli-template-v1",
+        templateOnly: true,
+        directExecutionEnabled: false,
+        ptySupported: false,
+        credentialCacheReadAllowed: false,
+        secretForwardingAllowed: false
+      }
     }),
     base({
       id: "vertex-gemini-cloud",
@@ -1313,6 +1393,48 @@ export function seedProviderCatalogEntries(): ProviderCatalogEntry[] {
       capabilities: ["completion", "cloud_iam"],
       policyNotes: ["Cloud IAM exchange is future-only."],
       metadata: { skeleton: true }
+    }),
+    base({
+      id: "aider-local",
+      displayName: "Aider Local CLI",
+      vendor: "custom",
+      kind: "local_cli",
+      auth: { type: "external_cli_session", credentialAccess: "never_read_tokens" },
+      supportedModels: ["aider/local"],
+      billingMode: "local_cli_future",
+      capabilities: ["local_cli", "file_read"],
+      policyNotes: ["Requires Aichestra Local Agent; Aider execution is template-only and disabled."],
+      metadata: {
+        localAgentRequired: true,
+        templateId: "aider-diff-summary",
+        localCliTemplateV1Id: "aider-template-v1",
+        templateOnly: true,
+        directExecutionEnabled: false,
+        ptySupported: false,
+        credentialCacheReadAllowed: false,
+        secretForwardingAllowed: false
+      }
+    }),
+    base({
+      id: "custom-local-cli",
+      displayName: "Custom Local CLI Provider",
+      vendor: "custom",
+      kind: "local_cli",
+      auth: { type: "external_cli_session", credentialAccess: "never_read_tokens" },
+      supportedModels: ["custom-local-cli/local"],
+      billingMode: "not_metered_mock",
+      capabilities: ["local_cli", "file_read"],
+      policyNotes: ["Requires Aichestra Local Agent; custom CLI execution is future-only and disabled."],
+      metadata: {
+        localAgentRequired: true,
+        templateId: "custom-local-cli-raw",
+        localCliTemplateV1Id: "custom-local-cli-template-v1",
+        templateOnly: true,
+        directExecutionEnabled: false,
+        ptySupported: false,
+        credentialCacheReadAllowed: false,
+        secretForwardingAllowed: false
+      }
     }),
     base({
       id: "bedrock-anthropic-cloud",
@@ -1347,7 +1469,9 @@ export function seedLocalCliProviderConfigs(): LocalCliProviderConfig[] {
     localCliTemplate("claude-code-stream-json", "anthropic", "claude", ["-p", "{{prompt}}", "--output-format", "stream-json", "--verbose", "--include-partial-messages"], "jsonl"),
     localCliTemplate("codex-cli-headless", "openai", "codex", ["exec", "{{prompt}}"], "raw"),
     localCliTemplate("codex-cli-jsonl", "openai", "codex", ["exec", "--json", "{{prompt}}"], "jsonl"),
-    localCliTemplate("gemini-cli-json", "google", "gemini", ["-p", "{{prompt}}", "--output-format", "json"], "json")
+    localCliTemplate("gemini-cli-json", "google", "gemini", ["-p", "{{prompt}}", "--output-format", "json"], "json"),
+    localCliTemplate("aider-diff-summary", "custom", "aider", ["--message", "{{prompt}}"], "raw"),
+    localCliTemplate("custom-local-cli-raw", "custom", "custom-local-cli", ["{{prompt}}"], "raw")
   ];
 }
 

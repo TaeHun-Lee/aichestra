@@ -132,6 +132,13 @@ export type GitIntegrationReadModel = {
   changedFiles: DashboardJsonObject[];
   changedFilesRefreshStatus: DashboardJsonObject;
   mergeQueueLinkage: DashboardJsonObject[];
+  branchOrchestrationRequests: DashboardJsonObject[];
+  branchOrchestrationDecisions: DashboardJsonObject[];
+  branchOwnershipRecords: DashboardJsonObject[];
+  branchDriftStatuses: DashboardJsonObject[];
+  branchNamingPolicies: DashboardJsonObject[];
+  branchOrchestratorAuditEvents: DashboardJsonObject[];
+  branchOrchestratorSummary: DashboardJsonObject;
   auditEvents: DashboardJsonObject[];
   remoteAuditEvents: DashboardJsonObject[];
   blockedExamples: DashboardJsonObject[];
@@ -144,6 +151,9 @@ export type ConflictManagerReadModel = {
   conflictRisks: DashboardJsonObject[];
   mergeQueue: DashboardJsonObject[];
   mergeSimulations: DashboardJsonObject[];
+  mergeQueuePolicy: DashboardJsonObject;
+  mergeReadinessDecisions: DashboardJsonObject[];
+  mergeQueueHolds: DashboardJsonObject[];
   summary: DashboardJsonObject;
 };
 
@@ -189,6 +199,21 @@ export type AgentRunnerReadModel = {
   instructionAssemblies: DashboardJsonObject[];
   commandResults: DashboardJsonObject[];
   workspaces: DashboardJsonObject[];
+  workspaceLeases: DashboardJsonObject[];
+  workspaceEvents: DashboardJsonObject[];
+  cleanupDecisions: DashboardJsonObject[];
+  workspaceLifecycle: DashboardJsonObject;
+  coordinationSessions: DashboardJsonObject[];
+  coordinationGroups: DashboardJsonObject[];
+  sessionOverlaps: DashboardJsonObject[];
+  concurrencyPolicies: DashboardJsonObject[];
+  coordinationAuditEvents: DashboardJsonObject[];
+  coordinationSummary: DashboardJsonObject;
+  editIntents: DashboardJsonObject[];
+  fileLeases: DashboardJsonObject[];
+  editIntentGraph: DashboardJsonObject;
+  editOverlapAssessments: DashboardJsonObject[];
+  editIntentSummary: DashboardJsonObject;
   blockedExamples: DashboardJsonObject[];
 };
 
@@ -281,6 +306,10 @@ export type EnterpriseProviderReadModel = {
   catalog: DashboardJsonObject[];
   authTypes: string[];
   localCliTemplates: DashboardJsonObject[];
+  localCliCompatibilityRules: DashboardJsonObject[];
+  localCliParserProfiles: DashboardJsonObject[];
+  localCliSecurityConstraints: DashboardJsonObject[];
+  localCliReadiness: DashboardJsonObject;
   localAgents: DashboardJsonObject[];
   auditEvents: DashboardJsonObject[];
   readiness: DashboardJsonObject;

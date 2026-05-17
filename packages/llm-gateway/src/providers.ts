@@ -650,7 +650,7 @@ export function seedLlmModels(): LLMModel[] {
       inputTokenCostUsd: 0,
       outputTokenCostUsd: 0,
       status: "active",
-      metadata: { localAgentRequired: true, providerId: "claude-code-local", capabilities: ["local_cli", "code_generation"] },
+      metadata: { localAgentRequired: true, providerId: "claude-code-local", localCliTemplateV1Id: "claude-code-template-v1", templateOnly: true, vendorCliExecutionImplemented: false, capabilities: ["local_cli", "code_generation"] },
       createdAt: now,
       updatedAt: now
     },
@@ -664,7 +664,7 @@ export function seedLlmModels(): LLMModel[] {
       inputTokenCostUsd: 0,
       outputTokenCostUsd: 0,
       status: "active",
-      metadata: { localAgentRequired: true, providerId: "codex-cli-local", capabilities: ["local_cli", "code_generation"] },
+      metadata: { localAgentRequired: true, providerId: "codex-cli-local", localCliTemplateV1Id: "codex-cli-template-v1", templateOnly: true, vendorCliExecutionImplemented: false, capabilities: ["local_cli", "code_generation"] },
       createdAt: now,
       updatedAt: now
     },
@@ -678,7 +678,35 @@ export function seedLlmModels(): LLMModel[] {
       inputTokenCostUsd: 0,
       outputTokenCostUsd: 0,
       status: "active",
-      metadata: { localAgentRequired: true, providerId: "gemini-cli-local", capabilities: ["local_cli", "summarization"] },
+      metadata: { localAgentRequired: true, providerId: "gemini-cli-local", localCliTemplateV1Id: "gemini-cli-template-v1", templateOnly: true, vendorCliExecutionImplemented: false, capabilities: ["local_cli", "summarization"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "aider/local",
+      providerKind: "local_cli",
+      displayName: "Aider Local CLI",
+      contextWindow: 128000,
+      supportsTools: true,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0,
+      outputTokenCostUsd: 0,
+      status: "disabled",
+      metadata: { localAgentRequired: true, providerId: "aider-local", localCliTemplateV1Id: "aider-template-v1", templateOnly: true, vendorCliExecutionImplemented: false, capabilities: ["local_cli", "patch"] },
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "custom-local-cli/local",
+      providerKind: "local_cli",
+      displayName: "Custom Local CLI Provider",
+      contextWindow: 128000,
+      supportsTools: false,
+      supportsStreaming: false,
+      inputTokenCostUsd: 0,
+      outputTokenCostUsd: 0,
+      status: "disabled",
+      metadata: { localAgentRequired: true, providerId: "custom-local-cli", localCliTemplateV1Id: "custom-local-cli-template-v1", templateOnly: true, vendorCliExecutionImplemented: false, capabilities: ["local_cli"] },
       createdAt: now,
       updatedAt: now
     }

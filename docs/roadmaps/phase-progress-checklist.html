@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aichestra Phase Progress Checklist</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5d667a;
+      --line: #d9deea;
+      --accent: #0f766e;
+      --accent-soft: #dff7f3;
+      --warn: #a15c07;
+      --warn-soft: #fff4dc;
+      --todo: #596174;
+      --todo-soft: #eef1f6;
+      --danger: #b42318;
+      --danger-soft: #ffe8e5;
+      --shadow: 0 10px 30px rgba(23, 32, 51, 0.08);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.5;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .wrap {
+      width: min(1280px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      padding: 28px 0 22px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(24px, 4vw, 36px);
+      letter-spacing: 0;
+    }
+
+    .lead {
+      margin: 0;
+      color: var(--muted);
+      max-width: 960px;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--line);
+      background: rgba(247, 248, 251, 0.95);
+      backdrop-filter: blur(10px);
+    }
+
+    .toolbar-inner {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 14px;
+      align-items: center;
+      padding: 12px 0;
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    label.control {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    select,
+    input[type="search"],
+    button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--ink);
+      font: inherit;
+    }
+
+    select,
+    input[type="search"] {
+      padding: 0 10px;
+    }
+
+    input[type="search"] {
+      width: min(420px, 100%);
+    }
+
+    button {
+      padding: 0 12px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+    }
+
+    .summary,
+    .notes,
+    .review-grid {
+      display: grid;
+      gap: 12px;
+      margin: 22px 0;
+    }
+
+    .summary {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .notes,
+    .review-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .metric,
+    .note {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 26px;
+      line-height: 1.1;
+    }
+
+    .metric span,
+    .section-meta,
+    .progress-label,
+    .note p,
+    .note li {
+      color: var(--muted);
+    }
+
+    main {
+      padding-bottom: 48px;
+    }
+
+    section {
+      margin: 22px 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: 1fr minmax(160px, 260px);
+      gap: 16px;
+      align-items: center;
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .section-title,
+    .note h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .note h2 {
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+
+    .section-meta {
+      margin-top: 4px;
+      font-size: 13px;
+    }
+
+    .progress {
+      height: 10px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e9edf5;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: var(--accent);
+      transition: width 160ms ease;
+    }
+
+    .progress-label {
+      margin-top: 6px;
+      font-size: 13px;
+      text-align: right;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      text-transform: uppercase;
+      background: #fbfcfe;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    tr.is-done td {
+      background: #fbfffe;
+    }
+
+    .check-cell {
+      width: 62px;
+      text-align: center;
+    }
+
+    .phase-cell {
+      width: 105px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .work-cell {
+      min-width: 240px;
+      font-weight: 600;
+    }
+
+    .remaining-cell {
+      color: var(--muted);
+      min-width: 280px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      min-width: 72px;
+      justify-content: center;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .status-done {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .status-partial {
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .status-todo {
+      background: var(--todo-soft);
+      color: var(--todo);
+    }
+
+    .status-issue {
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .task-check {
+      width: 20px;
+      height: 20px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .note ul,
+    .note ol {
+      margin: 0;
+      padding-left: 22px;
+    }
+
+    .note li {
+      margin: 6px 0;
+    }
+
+    .empty {
+      display: none;
+      padding: 28px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .toolbar-inner,
+      .section-head,
+      .summary,
+      .notes,
+      .review-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .progress-label {
+        text-align: left;
+      }
+
+      input[type="search"] {
+        width: 100%;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .wrap {
+        width: min(100% - 20px, 1280px);
+      }
+
+      table,
+      thead,
+      tbody,
+      th,
+      td,
+      tr {
+        display: block;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tr {
+        border-bottom: 1px solid var(--line);
+      }
+
+      td {
+        display: grid;
+        grid-template-columns: 118px 1fr;
+        gap: 10px;
+        border-bottom: 0;
+      }
+
+      td::before {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .check-cell,
+      .phase-cell,
+      .work-cell,
+      .remaining-cell {
+        width: auto;
+        min-width: 0;
+        text-align: left;
+        white-space: normal;
+      }
+
+      .check-cell::before {
+        content: "Done";
+      }
+
+      .phase-cell::before {
+        content: "Phase";
+      }
+
+      .work-cell::before {
+        content: "Work";
+      }
+
+      .status-cell::before {
+        content: "Status";
+      }
+
+      .remaining-cell::before {
+        content: "Remaining";
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap hero">
+      <h1>Aichestra Phase Progress Checklist</h1>
+      <p class="lead">Updated on 2026-05-18 after comparing the checklist with the current worktree. The review focused on Multi-user / Multi-session Branch Orchestrator v2, Cross-session File Lease / Edit Intent Graph v1, and Merge Queue Policy v2. Checkbox state is saved in browser localStorage.</p>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="wrap toolbar-inner">
+      <div class="filters">
+        <label class="control" for="phaseFilter">Phase
+          <select id="phaseFilter">
+            <option value="all">All</option>
+          </select>
+        </label>
+        <label class="control" for="statusFilter">Status
+          <select id="statusFilter">
+            <option value="all">All</option>
+            <option value="unchecked">Unchecked</option>
+            <option value="checked">Checked</option>
+            <option value="done">Done</option>
+            <option value="partial">Partial</option>
+            <option value="todo">Todo</option>
+            <option value="issue">Issue</option>
+          </select>
+        </label>
+        <input id="searchBox" type="search" placeholder="Search work or remaining items">
+      </div>
+      <div class="filters">
+        <button id="expandAll" type="button">Show all</button>
+        <button id="resetChecks" type="button">Reset checks</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <div class="summary" id="summary"></div>
+    <div class="review-grid" id="reviewGrid"></div>
+    <div id="sections"></div>
+    <div class="empty" id="emptyState">No work items match the current filters.</div>
+
+    <div class="notes">
+      <div class="note">
+        <h2>Boundary Review</h2>
+        <ul id="boundaryList"></ul>
+      </div>
+      <div class="note">
+        <h2>Recommended Next Order</h2>
+        <ol id="recommendationList"></ol>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const storageKey = "aichestra-phase-progress-checklist-v2";
+
+    const groups = [
+      {
+        id: "phase-1",
+        title: "Phase 1. Core Orchestration / Task / Agent / LLM",
+        completeness: "95-100%",
+        rows: [
+          ["p1-task-model", "Phase 1", "Task / TaskRun model", "done", "Production persistence hardening remains future work."],
+          ["p1-task-api", "Phase 1", "Task creation and run trigger APIs", "done", "Production auth and tenant scope enforcement still need hardening."],
+          ["p1-llm-v2-routing", "Phase 1", "LLM Gateway v2 routing and provider-neutral model", "done", "Non-OpenAI providers remain skeleton or gated paths."],
+          ["p1-local-agent-runner", "Phase 1", "Local Agent Runner v1", "done", "Mock-first. Real CLI execution and production sandbox remain blocked."],
+          ["p1-local-agent-protocol", "Phase 1", "Aichestra Local Agent Protocol v1", "done", "Fixture daemon and mock transport only; no vendor CLI execution."],
+          ["p1-local-cli-provider", "Phase 1", "Local CLI Provider Templates v1", "done", "Implemented in packages/llm-gateway/src/local-cli-provider-templates.ts with provider catalog/API/dashboard/tests. Real PTY execution, credential-cache reads, and secret forwarding remain blocked."],
+          ["p1-agent-workspace-lifecycle", "Phase 1", "Agent Workspace Lifecycle v2", "done", "Implemented in packages/runner/src/workspace-lifecycle.ts and linked through AgentRunnerService workspaceLeaseId metadata. No real git worktree allocation, branch checkout, or destructive cleanup."],
+          ["p1-multi-session-agent-run", "Phase 1", "Multi-session Agent Run Coordination v1", "done", "Implemented in packages/runner/src/coordination.ts with /agents/sessions and /agents/coordination/* APIs. It remains high-level session overlap metadata and does not own file leases, branch ownership, or merge policy execution."]
+        ]
+      },
+      {
+        id: "phase-2",
+        title: "Phase 2. Collaborative Git / Branch / Merge / Conflict",
+        completeness: "90-95%",
+        rows: [
+          ["p2-mock-git-provider", "Phase 2", "Mock Git Provider", "done", "Default provider remains mock-first."],
+          ["p2-local-git-provider", "Phase 2", "Local Git Provider local-only path", "done", "Allowed only for explicit local fixtures; no remote provider mutation."],
+          ["p2-real-git-v2", "Phase 2", "Real Git Adapter v2 gated branch/PR/webhook read models", "done", "GitHub paths stay behind explicit gates and allowlists; no auto-merge, force-push, rebase, branch deletion, or provider merge."],
+          ["p2-branchlease", "Phase 2", "BranchLease", "done", "Conflict Manager branch lease remains separate from branch orchestration ownership records."],
+          ["p2-conflict-risk", "Phase 2", "Conflict risk scoring", "done", "Semantic conflict analysis remains future work."],
+          ["p2-dry-run-merge", "Phase 2", "Local dry-run merge simulation", "done", "Local fixture/mock dry-run only; no fetch, push, or working branch mutation."],
+          ["p2-merge-queue-skeleton", "Phase 2", "Merge Queue skeleton", "done", "Existing merge queue entries remain execution-neutral metadata; Merge Queue Policy v2 evaluates readiness separately."],
+          ["p2-pr-branch-sync", "Phase 2", "PR/branch sync read models", "done", "Webhook replay/dead-letter worker and durable sync storage remain future work."],
+          ["p2-multi-user-branch-orchestrator", "Phase 2", "Multi-user / Multi-session Branch Orchestrator v2", "done", "Actual implementation verified: packages/git-adapter/src/branch-orchestrator.ts, exports in packages/git-adapter/src/index.ts, /git/branches/orchestrate and /git/branches/orchestration* APIs, /git/branches/ownership, /git/branches/drift, dashboard Git panel, docs/features/multi-user-branch-orchestrator/v2.md, tests/multi-user-branch-orchestrator-v2.test.ts. It owns branch request/decision/ownership/drift metadata only. It links BranchLease and WorkspaceLease ids, detects collision and same-workspace blockers, and records safe aichestra/ branch naming. It does not create, switch, fetch, push, merge, rebase, delete branches, mutate worktrees, or call providers."],
+          ["p2-cross-session-file-lease", "Phase 2", "Cross-session File Lease / Edit Intent Graph v1", "done", "Actual implementation verified: packages/runner/src/edit-intent.ts, exports in packages/runner/src/index.ts and dto.ts, /agents/edit-intents, /agents/file-leases, /agents/edit-intent-graph, /agents/edit-overlaps, /agents/edit-intent-summary APIs, dashboard agent panel, docs/features/cross-session-file-lease-edit-intent/v1.md, tests/cross-session-file-lease-edit-intent-v1.test.ts. It owns file lease, edit intent, graph, and overlap assessment metadata only. It does not lock OS files, mutate source, call Git/providers, read credential caches, or expose secrets/env values."],
+          ["p2-merge-queue-policy", "Phase 2", "Merge Queue Policy v2", "done", "Actual implementation verified: packages/core/src/conflicts/merge-queue-policy.ts, export in packages/core/src/index.ts, policy-as-code merge_queue.* gates, /git/merge-queue/* policy APIs, dashboard conflict/readiness panel, docs/features/merge-queue-policy/v2.md, tests/merge-queue-policy-v2.test.ts. It consumes BranchLease, WorkspaceLease, coordination/edit-intent overlap, conflict risk, dry-run, validation, approval, and policy evidence. It produces readiness decisions, holds, and ranking only. It does not execute merges, auto-merge, call remote Git/providers/LLMs/vendor CLIs, mutate workspaces, or expose secrets/env values."],
+          ["p2-conflict-resolution-assistant", "Phase 2", "Conflict Resolution Assistant v1", "todo", "Next depth layer for conflict explanation and proposed resolution. Must stay behind LLM Gateway gates and remain non-executing."],
+          ["p2-merge-queue-live-profile", "Phase 2", "Merge Queue Live Integration-Test Profile v1", "todo", "Future profile for gated live validation. Must not enable merge execution by default."],
+          ["p2-agent-worktree-allocation", "Phase 2", "Agent Worktree Allocation v1", "todo", "Future controlled worktree allocator. Must not run real worktree commands until explicitly gated."],
+          ["p2-pr-ownership-handoff", "Phase 2", "PR Ownership / Handoff Model v1", "todo", "Model PR handoff between users/agents without provider mutation."],
+          ["p2-branch-cleanup-orphan-lease", "Phase 2", "Branch Cleanup / Orphan Lease Recovery v1", "todo", "Review/metadata workflow for failed or expired branch ownership; no real branch deletion by default."],
+          ["p2-real-merge-execution-policy", "Phase 2", "Real merge execution policy", "todo", "Explicit future design only. Auto-merge remains forbidden in the MVP scaffold."]
+        ]
+      },
+      {
+        id: "phase-3",
+        title: "Phase 3. Skill / Harness / Instruction Registry",
+        completeness: "85-90%",
+        rows: [
+          ["p3-skill-registry", "Phase 3", "Skill Registry", "done", "Production tenant visibility and signed package trust remain future work."],
+          ["p3-harness-registry", "Phase 3", "Harness Registry", "done", "Compatibility matrix still needs production-grade coverage."],
+          ["p3-instruction-artifact-registry", "Phase 3", "Instruction Artifact Registry", "done", "Instruction checksum gates are present; production signing remains future work."],
+          ["p3-registry-resolver-gates", "Phase 3", "Registry resolver lifecycle/approval/eval/checksum gates", "done", "Keep resolver selection strict; do not bypass gates from generated instructions."],
+          ["p3-registry-governance-requestcontext", "Phase 3", "Registry/Governance RequestContext Migration v1", "done", "Mock-first attribution only; no real auth or auto-apply."],
+          ["p3-compatibility-matrix", "Phase 3", "Skill/Harness Compatibility Matrix v1", "todo", "Repo/task/provider compatibility management."],
+          ["p3-tenant-scope-enforcement", "Phase 3", "Registry Tenant Scope Enforcement v1", "partial", "Representative scope metadata exists; production enforcement remains future work."],
+          ["p3-signed-package-trust", "Phase 3", "Registry signed package / artifact trust", "todo", "Package signing, verification, and import/export governance."],
+          ["p3-drift-detection", "Phase 3", "Skill/Harness drift detection", "todo", "Detect local registry drift against approved package manifests."]
+        ]
+      },
+      {
+        id: "phase-4",
+        title: "Phase 4. Auto-improvement / Governance / Evals",
+        completeness: "70-80%",
+        rows: [
+          ["p4-preparation", "Phase 4", "Phase 4 Preparation", "done", "Metadata-only. No LLMs, embeddings, eval execution, canary rollout, or registry activation."],
+          ["p4-auto-improvement", "Phase 4", "Auto-improvement v0", "done", "Deterministic draft-only candidates/proposals. Auto-apply remains disabled."],
+          ["p4-governance", "Phase 4", "Governance v1", "done", "Records decisions and readiness metadata only; does not execute evals/canaries or apply registry changes."],
+          ["p4-eval-suite-execution", "Phase 4", "Eval Suite Execution Harness v1", "todo", "Future execution harness behind safety and policy gates."],
+          ["p4-canary-apply-workflow", "Phase 4", "Canary Execution Harness + Apply Workflow", "todo", "Future gated workflow; human approval and eval pass must remain required."]
+        ]
+      },
+      {
+        id: "phase-5-auth-scope",
+        title: "Phase 5-A. Auth / Tenant Scope",
+        completeness: "planning and partial scaffolding",
+        rows: [
+          ["p5a-production-auth-planning", "Phase 5-A", "Production Auth/RBAC Planning v0", "done", "Provider-neutral planning only; mock auth remains the default."],
+          ["p5a-production-auth-provider-skeleton", "Phase 5-A", "Production Auth Provider Skeleton v1", "done", "Disabled/readiness-only skeletons; no OIDC/SAML/SCIM/session/JWT implementation."],
+          ["p5a-requestcontext-propagation", "Phase 5-A", "RequestContext Propagation v1", "done", "Mock-first attribution and correlation only."],
+          ["p5a-service-account-boundary", "Phase 5-A", "Service Account Actor Boundary v1", "done", "Static mock catalog only; no credential issuance."],
+          ["p5a-tenant-scope-model", "Phase 5-A", "Tenant/Repo/Provider Scope Model v1", "done", "Mock/readiness scope metadata only."],
+          ["p5a-dashboard-readiness-scope-implementation", "Phase 5-A", "Dashboard/Readiness Tenant Scope Implementation v1", "done", "Safe metadata and warnings only; no production filtering."],
+          ["p5a-tenant-scope-enforcement", "Phase 5-A", "Tenant Scope Enforcement v1", "partial", "Representative helper decisions only; no production tenant isolation."],
+          ["p5a-dashboard-scope-filtering", "Phase 5-A", "Dashboard Scope Filtering v1", "todo", "Future real panel filtering/redaction enforcement."],
+          ["p5a-audit-query-scope-enforcement", "Phase 5-A", "Audit Query Scope Enforcement v1", "todo", "Future audit_reader scope restrictions."]
+        ]
+      },
+      {
+        id: "phase-5-platform",
+        title: "Phase 5-B/C/D/E/F. Policy / Secrets / Observability / DB / Staging",
+        completeness: "readiness and planning heavy",
+        rows: [
+          ["p5b-policy-as-code-v0", "Phase 5-B", "Policy-as-code v0 StaticPolicyEngine", "done", "Current runtime source of truth. Dynamic policy runtime remains future work."],
+          ["p5b-shadow-evaluator-skeleton", "Phase 5-B", "Policy Runtime Shadow Evaluator Skeleton v1", "todo", "Disabled/mock shadow evaluator."],
+          ["p5c-secretref-provider-credentials", "Phase 5-C", "SecretRef-backed Provider Credentials v1", "done", "Credential handles and redaction boundaries only."],
+          ["p5c-vault-secret-backend", "Phase 5-C", "Vault-backed Secret Backend v1", "done", "Non-default and explicitly gated; no default Vault calls."],
+          ["p5c-vault-live-enable", "Phase 5-C", "Vault Live Integration Enablement v1", "todo", "Test-only live read validation under all gates."],
+          ["p5d-observability-retention-v0", "Phase 5-D", "Observability / Audit Retention v0", "done", "In-memory/derived metadata; no external backend export."],
+          ["p5d-external-observability-export", "Phase 5-D", "External Observability Export v1", "todo", "SIEM/OTel/cloud backend integration remains future work."],
+          ["p5e-persistent-db-v1", "Phase 5-E", "Persistent DB v1", "done", "Postgres opt-in behind storage provider boundaries."],
+          ["p5e-durable-concurrency-stores", "Phase 5-E", "Durable branch/session/edit-intent/merge-policy stores", "todo", "Needed before production concurrency control. Current Branch Orchestrator, Edit Intent Graph, and Merge Queue Policy records are in-memory metadata."],
+          ["p5f-staging-rc-checklist", "Phase 5-F", "Staging RC Checklist v0", "done", "Read-only readiness metadata. Does not create releases, tags, deployments, or provider calls."],
+          ["p5f-clean-approved-worktree", "Phase 5-F", "Clean approved worktree verification", "issue", "Current worktree is dirty by design for active implementation. Do not treat this branch as an approved staging execution target until reviewed."],
+          ["p5f-actual-staging-execution", "Phase 5-F", "Actual Staging Deployment Execution", "todo", "Requires separate explicit instruction and completed signoff evidence."]
+        ]
+      }
+    ];
+
+    const reviewCards = [
+      {
+        title: "Actual Worktree Comparison",
+        lines: [
+          "Branch Orchestrator v2, Edit Intent Graph v1, and Merge Queue Policy v2 are present as code, docs, API/dashboard read models, and deterministic tests.",
+          "No overwrite was found between the three feature owners: git-adapter owns branch orchestration, runner owns file/edit-intent coordination, and core owns merge queue policy.",
+          "The only broken surface found in this pass was this checklist HTML: several labels and controls were mojibake/corrupted. This file has been rewritten with valid ASCII text and valid HTML."
+        ]
+      },
+      {
+        title: "Collision / Overlap Result",
+        lines: [
+          "Intentional overlap exists only through metadata: branchLeaseId, workspaceLeaseId, session ids, and edit overlap snapshots.",
+          "Multi-session Agent Run Coordination v1 and Edit Intent Graph v1 both report overlap risk, but they do not duplicate ownership: coordination owns session-level overlap, edit-intent owns file lease/graph records.",
+          "Merge Queue Policy v2 consumes the evidence and records readiness/holds. It does not mutate branch ownership, file leases, workspaces, or queue execution state."
+        ]
+      },
+      {
+        title: "Safety Status",
+        lines: [
+          "Real Git branch creation, checkout/switch, fetch, push, merge, rebase, force-push, branch deletion, worktree mutation, provider calls, LLM calls, vendor CLI execution, credential-cache reads, and secret/env exposure remain disabled, blocked, or future-only.",
+          "Legacy merge queue metadata routes remain separate from /git/merge-queue/* policy evaluation routes. Merge Queue Policy v2 does not execute merges."
+        ]
+      },
+      {
+        title: "Validation Tracking",
+        lines: [
+          "Focused validation passed on 2026-05-18: pnpm test -- tests/multi-user-branch-orchestrator-v2.test.ts tests/cross-session-file-lease-edit-intent-v1.test.ts tests/merge-queue-policy-v2.test.ts.",
+          "Result: 23 tests passed across Branch Orchestrator v2, Edit Intent Graph v1, and Merge Queue Policy v2.",
+          "Whitespace validation passed on 2026-05-18: git diff --check.",
+          "Full validation passed on 2026-05-18: pnpm lint, pnpm typecheck, pnpm test, and pnpm build.",
+          "Full test result: 396 tests total, 388 passed, 8 optional integration tests skipped by default, 0 failed."
+        ]
+      }
+    ];
+
+    const boundaryItems = [
+      "Branch Orchestrator v2: Git adapter boundary, branch request/decision/ownership/drift metadata only.",
+      "Cross-session File Lease / Edit Intent Graph v1: Runner boundary, explicit file lease/edit-intent graph metadata only.",
+      "Merge Queue Policy v2: Core boundary, readiness decisions, holds, ranking, and policy evidence only.",
+      "Conflict Manager concepts remain separate from Merge Queue Policy v2; policy may consume evidence but does not perform merge execution.",
+      "Dashboard/API surfaces expose sanitized read models and must not expose full paths, secrets, tokens, env values, or credential cache paths."
+    ];
+
+    const recommendations = [
+      "Run focused tests for the three reviewed features.",
+      "Run pnpm lint, pnpm typecheck, pnpm test, pnpm build, and git diff --check before signoff.",
+      "Implement Conflict Resolution Assistant v1 as the next coordination depth target.",
+      "Add Merge Queue Live Integration-Test Profile v1 without enabling merge execution by default.",
+      "Plan Agent Worktree Allocation v1 separately from Branch Orchestrator v2 metadata.",
+      "Design durable stores for branch ownership, sessions, edit intents, and merge policy decisions before production concurrency."
+    ];
+
+    const statusLabels = {
+      done: "done",
+      partial: "partial",
+      todo: "todo",
+      issue: "issue"
+    };
+
+    function loadChecks() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(storageKey) || "{}");
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function saveChecks(checks) {
+      localStorage.setItem(storageKey, JSON.stringify(checks));
+    }
+
+    function defaultChecked(status) {
+      return status === "done";
+    }
+
+    let checks = loadChecks();
+
+    function isChecked(row) {
+      return Object.prototype.hasOwnProperty.call(checks, row[0])
+        ? Boolean(checks[row[0]])
+        : defaultChecked(row[3]);
+    }
+
+    function render() {
+      const sections = document.getElementById("sections");
+      const phaseFilter = document.getElementById("phaseFilter").value;
+      const statusFilter = document.getElementById("statusFilter").value;
+      const search = document.getElementById("searchBox").value.trim().toLowerCase();
+      sections.innerHTML = "";
+
+      let visibleRows = 0;
+
+      for (const group of groups) {
+        if (phaseFilter !== "all" && phaseFilter !== group.id) {
+          continue;
+        }
+
+        const filteredRows = group.rows.filter((row) => {
+          const checked = isChecked(row);
+          const status = row[3];
+          const haystack = `${row[1]} ${row[2]} ${statusLabels[status]} ${row[4]}`.toLowerCase();
+          const statusMatch =
+            statusFilter === "all" ||
+            (statusFilter === "checked" && checked) ||
+            (statusFilter === "unchecked" && !checked) ||
+            statusFilter === status ||
+            (statusFilter === "partial" && status === "issue");
+          return statusMatch && (!search || haystack.includes(search));
+        });
+
+        if (filteredRows.length === 0) {
+          continue;
+        }
+
+        visibleRows += filteredRows.length;
+        sections.appendChild(renderGroup(group, filteredRows));
+      }
+
+      document.getElementById("emptyState").style.display = visibleRows === 0 ? "block" : "none";
+      renderSummary();
+    }
+
+    function renderGroup(group, rows) {
+      const allRows = group.rows;
+      const doneCount = allRows.filter((row) => isChecked(row)).length;
+      const percent = allRows.length === 0 ? 0 : Math.round((doneCount / allRows.length) * 100);
+
+      const section = document.createElement("section");
+      section.id = group.id;
+
+      const head = document.createElement("div");
+      head.className = "section-head";
+      head.innerHTML = `
+        <div>
+          <h2 class="section-title">${escapeHtml(group.title)}</h2>
+          <div class="section-meta">Reported completeness: ${escapeHtml(group.completeness)}. Showing ${rows.length}/${allRows.length} rows.</div>
+        </div>
+        <div>
+          <div class="progress"><span style="width:${percent}%"></span></div>
+          <div class="progress-label">${doneCount}/${allRows.length} checked (${percent}%)</div>
+        </div>
+      `;
+
+      const table = document.createElement("table");
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th class="check-cell">Done</th>
+            <th class="phase-cell">Phase</th>
+            <th class="work-cell">Work</th>
+            <th class="status-cell">Status</th>
+            <th class="remaining-cell">Remaining / Evidence</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      `;
+
+      const tbody = table.querySelector("tbody");
+      for (const row of rows) {
+        const checked = isChecked(row);
+        const tr = document.createElement("tr");
+        tr.className = checked ? "is-done" : "";
+        tr.dataset.id = row[0];
+        tr.dataset.status = row[3];
+        tr.innerHTML = `
+          <td class="check-cell">
+            <input class="task-check" type="checkbox" ${checked ? "checked" : ""} aria-label="${escapeHtml(row[2])} done">
+          </td>
+          <td class="phase-cell">${escapeHtml(row[1])}</td>
+          <td class="work-cell">${escapeHtml(row[2])}</td>
+          <td class="status-cell"><span class="status-pill status-${row[3]}">${escapeHtml(statusLabels[row[3]])}</span></td>
+          <td class="remaining-cell">${escapeHtml(row[4])}</td>
+        `;
+        tr.querySelector("input").addEventListener("change", (event) => {
+          checks[row[0]] = event.target.checked;
+          saveChecks(checks);
+          render();
+        });
+        tbody.appendChild(tr);
+      }
+
+      section.appendChild(head);
+      section.appendChild(table);
+      return section;
+    }
+
+    function renderSummary() {
+      const allRows = groups.flatMap((group) => group.rows);
+      const checked = allRows.filter((row) => isChecked(row)).length;
+      const initialDone = allRows.filter((row) => row[3] === "done").length;
+      const partial = allRows.filter((row) => row[3] === "partial" || row[3] === "issue").length;
+      const todo = allRows.filter((row) => row[3] === "todo").length;
+      const percent = allRows.length === 0 ? 0 : Math.round((checked / allRows.length) * 100);
+
+      document.getElementById("summary").innerHTML = `
+        <div class="metric"><strong>${checked}/${allRows.length}</strong><span>currently checked - ${percent}%</span></div>
+        <div class="metric"><strong>${initialDone}</strong><span>reported done</span></div>
+        <div class="metric"><strong>${partial}</strong><span>partial or issue</span></div>
+        <div class="metric"><strong>${todo}</strong><span>todo</span></div>
+      `;
+    }
+
+    function fillFilters() {
+      const phaseFilter = document.getElementById("phaseFilter");
+      for (const group of groups) {
+        const option = document.createElement("option");
+        option.value = group.id;
+        option.textContent = group.title;
+        phaseFilter.appendChild(option);
+      }
+    }
+
+    function renderReviewCards() {
+      document.getElementById("reviewGrid").innerHTML = reviewCards.map((card) => `
+        <div class="note">
+          <h2>${escapeHtml(card.title)}</h2>
+          <ul>${card.lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>
+        </div>
+      `).join("");
+    }
+
+    function renderNotes() {
+      document.getElementById("boundaryList").innerHTML = boundaryItems
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("");
+      document.getElementById("recommendationList").innerHTML = recommendations
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("");
+    }
+
+    function resetChecks() {
+      const confirmed = window.confirm("Reset checklist state to reported defaults?");
+      if (!confirmed) {
+        return;
+      }
+      checks = {};
+      localStorage.removeItem(storageKey);
+      render();
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    document.getElementById("phaseFilter").addEventListener("change", render);
+    document.getElementById("statusFilter").addEventListener("change", render);
+    document.getElementById("searchBox").addEventListener("input", render);
+    document.getElementById("resetChecks").addEventListener("click", resetChecks);
+    document.getElementById("expandAll").addEventListener("click", () => {
+      document.getElementById("phaseFilter").value = "all";
+      document.getElementById("statusFilter").value = "all";
+      document.getElementById("searchBox").value = "";
+      render();
+    });
+
+    fillFilters();
+    renderReviewCards();
+    renderNotes();
+    render();
+  </script>
+</body>
+</html>

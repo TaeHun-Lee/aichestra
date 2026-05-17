@@ -27,6 +27,10 @@ function asObjects(value: unknown): DashboardJsonObject[] {
     : [];
 }
 
+function asObject(value: unknown): DashboardJsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as DashboardJsonObject : {};
+}
+
 function nestedObjects(source: DashboardJsonObject, key: string): DashboardJsonObject[] {
   return asObjects(source[key]);
 }
@@ -66,6 +70,10 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
   const overviewScopeDecision = overviewScopeMetadata?.scopeDecisionSummary;
   const enforcementSummary = data.tenantScopeEnforcement.summary;
   const enforcementWarnings = Array.isArray(overviewScopeDecision?.warnings) ? overviewScopeDecision.warnings : [];
+  const agentCoordinationMetadata = asObject(data.agents.coordinationSummary.metadata);
+  const editIntentMetadata = asObject(data.agents.editIntentSummary.metadata);
+  const branchOrchestratorMetadata = asObject(data.git.branchOrchestratorSummary.metadata);
+  const branchNamingPolicy = asObject(data.git.branchOrchestratorSummary.branchNamingPolicy);
 
   return `<!doctype html>
 <html lang="en">
@@ -292,6 +300,23 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
             ${data.conflicts.mergeQueue.map((entry) => `<tr><td>${html(entry.taskRunId)}</td><td>${html(entry.branchName)}</td><td>${html(entry.pullRequestId)}</td><td>${Number(entry.riskScore ?? 0).toFixed(2)}</td><td>${html(entry.status)}</td><td>${html(entry.simulationStatus, "not_run")}</td><td>${html(entry.recommendation)}</td><td>${html(entry.reasons, "none")}</td></tr>`).join("")}
           </tbody>
         </table>
+        <h2>Merge Queue Policy</h2>
+        <div class="list">
+          <div class="item"><strong>Status</strong><span>${html(data.conflicts.summary.mergeQueuePolicyStatus, text(data.conflicts.mergeQueuePolicy.status, "not_evaluated"))} / merge execution ${data.conflicts.summary.mergeExecutionEnabled === true ? "enabled" : "disabled"} / auto-merge ${data.conflicts.summary.autoMergeEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Readiness</strong><span>ready ${html(data.conflicts.summary.mergeQueuePolicyReady, "0")} / held or blocked ${html(data.conflicts.summary.mergeQueuePolicyHolds, "0")} / holds ${html(data.conflicts.mergeQueueHolds.length, "0")}</span></div>
+        </div>
+        <table>
+          <thead><tr><th>Entry</th><th>Branch</th><th>Decision</th><th>Priority</th><th>Blockers</th><th>Warnings</th><th>Required actions</th></tr></thead>
+          <tbody>
+            ${data.conflicts.mergeReadinessDecisions.map((decision) => `<tr><td>${html(decision.queueEntryId)}</td><td>${html(decision.branchName)}</td><td>${html(decision.decision)}</td><td>${Number(decision.priority ?? 0).toFixed(0)}</td><td>${html(decision.blockingReasons, "none")}</td><td>${html(decision.warnings, "none")}</td><td>${html(decision.requiredActions, "none")}</td></tr>`).join("") || `<tr><td colspan="7">No merge queue policy decisions.</td></tr>`}
+          </tbody>
+        </table>
+        <table>
+          <thead><tr><th>Entry</th><th>Hold</th><th>Severity</th><th>Reason</th></tr></thead>
+          <tbody>
+            ${data.conflicts.mergeQueueHolds.map((hold) => `<tr><td>${html(hold.queueEntryId)}</td><td>${html(hold.holdKind)}</td><td>${html(hold.severity)}</td><td>${html(hold.reason)}</td></tr>`).join("") || `<tr><td colspan="4">No active policy holds.</td></tr>`}
+          </tbody>
+        </table>
       </div>
       <aside class="panel">
         <h2>Registries</h2>
@@ -332,6 +357,17 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Remote Git audit</strong><span>${html(data.git.remoteAuditEvents.map((event) => event.action), "none")}</span></div>
           <div class="item"><strong>Webhook audit</strong><span>${html(data.git.webhookAuditEvents.map((event) => `${text(event.eventType)}:${text(event.result)}`), "none")}</span></div>
           <div class="item"><strong>Remote blocked example</strong><span>${html(data.git.blockedExamples.map((example) => example.reason), "none")}</span></div>
+        </div>
+        <h2>Branch Orchestrator</h2>
+        <div class="list">
+          <div class="item"><strong>Status</strong><span>${html(data.git.branchOrchestratorSummary.status, "v2_implemented")} / active ownership ${html(data.git.branchOrchestratorSummary.activeOwnershipRecords, "0")} / requests ${html(data.git.branchOrchestratorSummary.requests, "0")} / decisions ${html(data.git.branchOrchestratorSummary.decisions, "0")}</span></div>
+          <div class="item"><strong>Naming policy</strong><span>prefix ${html(branchNamingPolicy.prefix, "aichestra/")} / pattern ${html(branchNamingPolicy.pattern, "aichestra/{repoSlug}/{taskId}/{agentRunId}")} / max ${html(branchNamingPolicy.maxLength, "160")}</span></div>
+          <div class="item"><strong>Ownership</strong><span>${html(data.git.branchOwnershipRecords.map((record) => `${text(record.branchName)}:${text(record.status)}:${text(record.workspaceLeaseId, "no-workspace")}`), "no ownership records")}</span></div>
+          <div class="item"><strong>Decisions</strong><span>${html(data.git.branchOrchestrationDecisions.map((decision) => `${text(decision.branchName)}:${text(decision.decision)}:${text(decision.reason)}`), "no decisions")}</span></div>
+          <div class="item"><strong>Collision blockers</strong><span>branch collisions ${html(data.git.branchOrchestratorSummary.blockedCollisions, "0")} / same workspace ${html(data.git.branchOrchestratorSummary.sameWorkspaceBlockers, "0")} / no destructive Git ${data.git.branchOrchestratorSummary.noDestructiveGit === true ? "true" : "false"}</span></div>
+          <div class="item"><strong>Base drift</strong><span>${html(data.git.branchDriftStatuses.map((status) => `${text(status.branchName)}:${text(status.status)}:${text(status.recommendation)}`), "no drift records")} / warnings ${html(data.git.branchOrchestratorSummary.baseBranchDriftWarnings, "0")}</span></div>
+          <div class="item"><strong>Merge readiness</strong><span>ready for review ${html(data.git.branchOrchestratorSummary.readyForReview, "0")} / ready for merge ${html(data.git.branchOrchestratorSummary.readyForMerge, "0")} / merge queue mutation ${html(branchOrchestratorMetadata.mergeQueueMutation, "false")}</span></div>
+          <div class="item"><strong>Safety</strong><span>remote Git operation ${data.git.branchOrchestratorSummary.remoteGitOperation === true ? "enabled" : "disabled"} / branch deletion ${data.git.branchOrchestratorSummary.branchDeletion === true ? "enabled" : "disabled"} / workspace mutation ${data.git.branchOrchestratorSummary.workspaceMutation === true ? "enabled" : "disabled"} / secrets exposed ${data.git.branchOrchestratorSummary.secretsExposed === true ? "true" : "false"}</span></div>
         </div>
         <h2>GitHub App / Webhook Hardening</h2>
         <div class="list">
@@ -585,6 +621,15 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Instruction assembly</strong><span>${html(data.agents.instructionAssemblies.at(-1)?.instructionSetHash, "none")}</span></div>
           <div class="item"><strong>Command results</strong><span>${html(data.agents.commandResults.map((result) => `${text(result.command)}:${text(result.status)}`), "none")}</span></div>
           <div class="item"><strong>Workspace status</strong><span>${html(data.agents.workspaces.map((workspace) => `${text(workspace.mode)}:${text(workspace.status)}`), "no local workspace")}</span></div>
+          <div class="item"><strong>Workspace lifecycle</strong><span>${html(data.agents.workspaceLifecycle.status, "v2_implemented")} / active leases ${html(data.agents.workspaceLifecycle.activeWorkspaceLeases, "0")} / worktree execution ${data.agents.workspaceLifecycle.realGitWorktreeExecutionEnabled === true ? "enabled" : "disabled"} / destructive cleanup ${data.agents.workspaceLifecycle.destructiveCleanupEnabled === true ? "enabled" : "disabled"}</span></div>
+          <div class="item"><strong>Workspace leases</strong><span>${html(data.agents.workspaceLeases.map((workspace) => `${text(workspace.workspaceKind)}:${text(workspace.status)}:${text(workspace.isolationStatus)}:${text(workspace.branchLeaseId, "no-branch-lease")}`), "no workspace lease")}</span></div>
+          <div class="item"><strong>Cleanup decisions</strong><span>${html(data.agents.cleanupDecisions.map((decision) => `${text(decision.decision)}:${text(decision.reason)}`), "no cleanup decision")} / no destructive cleanup</span></div>
+          <div class="item"><strong>Session coordination</strong><span>${html(agentCoordinationMetadata.status, "v1_implemented")} / active sessions ${html(data.agents.coordinationSummary.activeSessions, "0")} / groups ${html(data.agents.coordinationSummary.coordinationGroups, "0")} / overlaps ${html(data.agents.coordinationSummary.overlaps, "0")}</span></div>
+          <div class="item"><strong>Coordination groups</strong><span>${html(data.agents.coordinationGroups.map((group) => `${text(group.repoId)}:${text(group.coordinationMode)}:${text(group.status)}`), "no coordination group")}</span></div>
+          <div class="item"><strong>Overlap warnings</strong><span>${html(data.agents.sessionOverlaps.map((overlap) => `${text(overlap.overlapKind)}:${text(overlap.severity)}:${text(overlap.recommendation)}`), "no overlap")} / same workspace blockers ${html(data.agents.coordinationSummary.sameWorkspaceBlockers, "0")}</span></div>
+          <div class="item"><strong>Edit intent graph</strong><span>${html(editIntentMetadata.status, "v1_implemented")} / intents ${html(data.agents.editIntentSummary.activeIntents, "0")} / file leases ${html(data.agents.editIntentSummary.activeFileLeases, "0")} / graph ${html(data.agents.editIntentSummary.graphNodes, "0")} nodes ${html(data.agents.editIntentSummary.graphEdges, "0")} edges / file locks ${data.agents.editIntentSummary.noFileLocks === true ? "disabled" : "unknown"}</span></div>
+          <div class="item"><strong>File leases</strong><span>${html(data.agents.fileLeases.map((lease) => `${text(lease.leaseKind)}:${text(lease.status)}:${text(lease.filePath)}`), "no file lease")}</span></div>
+          <div class="item"><strong>Edit overlaps</strong><span>${html(data.agents.editOverlapAssessments.map((overlap) => `${text(overlap.overlapKind)}:${text(overlap.severity)}:${text(overlap.recommendation)}`), "no edit overlap")} / same file ${html(data.agents.editIntentSummary.sameFileOverlaps, "0")} / same directory ${html(data.agents.editIntentSummary.sameDirectoryOverlaps, "0")} / same workspace ${html(data.agents.editIntentSummary.sameWorkspaceConflicts, "0")}</span></div>
           <div class="item"><strong>Blocked command example</strong><span>${html(data.agents.blockedExamples.map((example) => example.blockedReason ?? example.reason ?? example.status), "none")}</span></div>
           <div class="item"><strong>Local runner blocked example</strong><span>${html(data.agents.blockedExamples.map((example) => example.reason), "mock runner available")}</span></div>
         </div>
@@ -694,9 +739,14 @@ export function renderDashboardReadModels(data: DashboardReadModels): string {
           <div class="item"><strong>Provider abstraction</strong><span>${html(data.providers.config.status)} / ${data.providers.catalog.length} catalog entries</span></div>
           <div class="item"><strong>Provider kinds</strong><span>${html(data.providers.catalog.map((provider) => provider.kind), "none")}</span></div>
           <div class="item"><strong>Auth types</strong><span>${html(data.providers.authTypes, "none")}</span></div>
-          <div class="item"><strong>Local CLI readiness</strong><span>${html(data.providers.readiness.localCliProviderReadiness, "Local Agent required")} / Local Agent required</span></div>
-          <div class="item"><strong>Credential cache access</strong><span>denied; credential references only</span></div>
-          <div class="item"><strong>PTY fallback</strong><span>disabled by policy</span></div>
+          <div class="item"><strong>Local CLI templates v1</strong><span>${html(data.providers.localCliTemplates.map((template) => `${text(template.providerId)}:${text(template.status)}`), "none")} / execution disabled</span></div>
+          <div class="item"><strong>Compatibility matrix</strong><span>${html(data.providers.localCliCompatibilityRules.map((rule) => `${text(rule.providerId)}:${text(rule.capability)}:${text(rule.status)}`), "none")}</span></div>
+          <div class="item"><strong>Parser profiles</strong><span>${html(data.providers.localCliParserProfiles.map((profile) => `${text(profile.providerId)}:${text(profile.expectedOutputShape)}`), "none")}</span></div>
+          <div class="item"><strong>Security constraints</strong><span>${html(data.providers.localCliSecurityConstraints.map((constraint) => `${text(constraint.providerId)}:${text(constraint.constraint)}:${text(constraint.status)}`), "none")}</span></div>
+          <div class="item"><strong>Local CLI readiness</strong><span>${html(data.providers.readiness.localCliProviderReadiness, "Local Agent required")} / Local Agent required / ${html(data.providers.localCliReadiness.status, "unknown")}</span></div>
+          <div class="item"><strong>Credential cache access</strong><span>denied; credential references only / env values exposed false / secrets exposed false</span></div>
+          <div class="item"><strong>Secret forwarding</strong><span>denied; safe environment metadata is empty</span></div>
+          <div class="item"><strong>PTY fallback</strong><span>unsupported by policy</span></div>
           <div class="item"><strong>Provider audit</strong><span>${data.providers.auditEvents.length} event(s)</span></div>
         </div>
         <h2>Phase 4 Preparation</h2>

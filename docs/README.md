@@ -63,12 +63,18 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 | Feature | 위치 | 보유 버전 |
 |---|---|---|
 | Conflict Manager | [features/conflict-manager/](features/conflict-manager/) | v0, v1 |
+| Merge Queue Policy | [features/merge-queue-policy/](features/merge-queue-policy/) | v2 (+ plan) |
 | Persistent DB | [features/persistent-db/](features/persistent-db/) | v1 (+ plan) |
 | Real Git Adapter | [features/real-git-adapter/](features/real-git-adapter/) | v0, v1, v2, github-app-controlled-v1 (+ plans, audits/v0-readiness) |
 | LLM Gateway | [features/llm-gateway/](features/llm-gateway/) | v0, v1, v2 (+ plans) |
 | MCP Gateway | [features/mcp-gateway/](features/mcp-gateway/) | v0 (+ plan) |
 | Local Agent Runner | [features/local-agent-runner/](features/local-agent-runner/) | v0, v1 (+ plans) |
+| Agent Workspace Lifecycle | [features/agent-workspace-lifecycle/](features/agent-workspace-lifecycle/) | v2 (+ plan) |
+| Multi-session Agent Run Coordination | [features/multi-session-agent-run-coordination/](features/multi-session-agent-run-coordination/) | v1 (+ plan) |
+| Multi-user / Multi-session Branch Orchestrator | [features/multi-user-branch-orchestrator/](features/multi-user-branch-orchestrator/) | v2 (+ plan) |
+| Cross-session File Lease / Edit Intent Graph | [features/cross-session-file-lease-edit-intent/](features/cross-session-file-lease-edit-intent/) | v1 (+ plan) |
 | Local Agent Protocol | [features/local-agent-protocol/](features/local-agent-protocol/) | v0, v1 (+ plans) |
+| Local CLI Provider Templates | [features/local-cli-provider-templates/](features/local-cli-provider-templates/) | v1 (+ plan) |
 | Enterprise LLM Provider | [features/enterprise-llm-provider/](features/enterprise-llm-provider/) | v0 (+ plan) |
 | Secrets / Sandbox | [features/secrets-sandbox/](features/secrets-sandbox/) | v0 (+ plan) |
 | Policy-as-Code | [features/policy-as-code/](features/policy-as-code/) | v0 (+ plan) |

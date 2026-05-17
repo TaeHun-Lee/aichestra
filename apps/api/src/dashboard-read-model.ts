@@ -1,16 +1,44 @@
 import { listMockScopeCatalog, scopeSummary } from "@aichestra/auth";
 import type { AuthorizationService } from "@aichestra/auth";
+import type { MergeQueuePolicyService } from "@aichestra/core";
 import type { TenantScopeEnforcementService } from "@aichestra/auth";
 import type { InMemoryAichestraStore } from "@aichestra/db";
 import type { DashboardReadinessTenantScopePlanningService, DeploymentReadinessService } from "@aichestra/deployment-readiness";
-import type { GitHubAppRuntimeService, GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
+import {
+  baseBranchDriftStatusToDto,
+  branchNamingPolicyToDto,
+  branchOrchestrationDecisionToDto,
+  branchOrchestrationRequestToDto,
+  branchOrchestratorAuditEventToDto,
+  branchOrchestratorSummaryToDto,
+  branchOwnershipRecordToDto
+} from "@aichestra/git-adapter";
+import type { BranchOrchestratorService, GitHubAppRuntimeService, GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
 import type { ImprovementServices } from "@aichestra/improvement";
+import { providerCatalogEntryToDto } from "@aichestra/llm-gateway";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
 import type { MCPGateway } from "@aichestra/mcp-gateway";
 import type { ObservabilityService } from "@aichestra/observability";
 import type { PolicyService } from "@aichestra/policy";
 import type { RegistryService } from "@aichestra/registry";
-import type { AgentRunnerService } from "@aichestra/runner";
+import {
+  agentConcurrencyPolicyToDto,
+  editIntentGraphToDto,
+  editIntentOverlapSummaryToDto,
+  editIntentToDto,
+  editOverlapAssessmentToDto,
+  fileLeaseToDto,
+  agentRunCoordinationAuditEventToDto,
+  agentRunCoordinationGroupToDto,
+  agentRunCoordinationSummaryToDto,
+  agentSessionOverlapToDto,
+  agentSessionToDto,
+  agentWorkspaceCleanupDecisionToDto,
+  agentWorkspaceLeaseToDto,
+  agentWorkspaceLifecycleEventToDto,
+  agentWorkspaceToDto
+} from "@aichestra/runner";
+import type { AgentRunCoordinationService, AgentRunnerService, EditIntentGraphService } from "@aichestra/runner";
 import type { SecurityControlService } from "@aichestra/security";
 import {
   sanitizeDashboardArray,
@@ -62,12 +90,16 @@ import {
 export type DashboardReadModelContext = {
   store: InMemoryAichestraStore;
   gitIntegrationService: GitIntegrationService;
+  branchOrchestratorService: BranchOrchestratorService;
   gitProviderConfig: GitProviderRuntimeConfig;
   githubAppRuntimeService: GitHubAppRuntimeService;
   gitWebhookReceiverService: GitWebhookReceiverService;
   gitWebhookConfig: GitHubWebhookRuntimeConfig;
   llmGatewayService: LLMGatewayService;
   agentRunnerService: AgentRunnerService;
+  agentRunCoordinationService: AgentRunCoordinationService;
+  mergeQueuePolicyService: MergeQueuePolicyService;
+  editIntentGraphService: EditIntentGraphService;
   registryService: RegistryService;
   improvementServices: ImprovementServices;
   policyService: PolicyService;
@@ -208,17 +240,34 @@ function buildConflicts(context: DashboardReadModelContext): ConflictManagerRead
   const conflictRisks = context.store.listRepos().flatMap((repo) => context.store.computeRepoConflictRisks(repo.id));
   const mergeQueue = context.store.listMergeQueueEntries();
   const mergeSimulations = context.store.listMergeSimulations();
+  const mergeQueuePolicy = context.mergeQueuePolicyService.previewQueue(undefined, {
+    actorId: "dashboard_read_model",
+    serviceAccountId: "dashboard_read_model",
+    metadata: {
+      source: "dashboard",
+      validationStatus: "missing",
+      approvalStatus: "missing"
+    }
+  });
 
   return {
     branchLeases: sanitizeDashboardArray(branchLeases),
     conflictRisks: sanitizeDashboardArray(conflictRisks),
     mergeQueue: sanitizeDashboardArray(mergeQueue),
     mergeSimulations: sanitizeDashboardArray(mergeSimulations),
+    mergeQueuePolicy: sanitizeDashboardObject(mergeQueuePolicy.policy),
+    mergeReadinessDecisions: sanitizeDashboardArray(mergeQueuePolicy.decisions),
+    mergeQueueHolds: sanitizeDashboardArray(mergeQueuePolicy.holds),
     summary: sanitizeDashboardObject({
       activeLeases: branchLeases.filter((lease) => lease.status === "active").length,
       conflictRisks: conflictRisks.length,
       mergeQueueEntries: mergeQueue.length,
-      dryRunSimulations: mergeSimulations.length
+      dryRunSimulations: mergeSimulations.length,
+      mergeQueuePolicyStatus: mergeQueuePolicy.summary.metadata.status,
+      mergeQueuePolicyReady: mergeQueuePolicy.summary.ready,
+      mergeQueuePolicyHolds: mergeQueuePolicy.summary.hold + mergeQueuePolicy.summary.needsHumanReview + mergeQueuePolicy.summary.blocked,
+      mergeExecutionEnabled: mergeQueuePolicy.summary.mergeExecutionEnabled,
+      autoMergeEnabled: mergeQueuePolicy.summary.autoMergeEnabled
     })
   };
 }
@@ -234,6 +283,7 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
   const pullRequestSyncStates = context.gitWebhookReceiverService.listPullRequestSyncStates();
   const branchSyncStates = context.gitWebhookReceiverService.listBranchSyncStates();
   const lastChangedFilesAudit = webhookAuditEvents.find((event) => event.eventType.startsWith("github_changed_files_refresh_"));
+  const branchOrchestratorSummary = context.branchOrchestratorService.getSummary();
   const changedFiles = branchRecords.flatMap((lease) =>
     lease.files.map((file) => ({
       path: file,
@@ -245,6 +295,12 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
     }))
   );
   const mergeQueue = context.store.listMergeQueueEntries();
+  const mergeQueuePolicy = context.mergeQueuePolicyService.previewQueue(undefined, {
+    actorId: "dashboard_read_model",
+    serviceAccountId: "dashboard_read_model",
+    metadata: { source: "dashboard_git" }
+  });
+  const decisionsByEntry = new Map(mergeQueuePolicy.decisions.map((decision) => [decision.queueEntryId, decision]));
 
   return {
     config: sanitizeDashboardObject(context.gitIntegrationService.getConfig()),
@@ -277,8 +333,17 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       taskRunId: entry.taskRunId,
       mergeQueueEntryId: entry.id,
       pullRequestId: entry.pullRequestId,
-      recommendation: entry.recommendation
+      recommendation: entry.recommendation,
+      policyDecision: decisionsByEntry.get(entry.id)?.decision ?? "not_evaluated",
+      mergeExecutionEnabled: false
     }))),
+    branchOrchestrationRequests: sanitizeDashboardArray(context.branchOrchestratorService.listOrchestrationRequests().map(branchOrchestrationRequestToDto)),
+    branchOrchestrationDecisions: sanitizeDashboardArray(context.branchOrchestratorService.listOrchestrationDecisions().map(branchOrchestrationDecisionToDto)),
+    branchOwnershipRecords: sanitizeDashboardArray(context.branchOrchestratorService.listBranchOwnershipRecords().map(branchOwnershipRecordToDto)),
+    branchDriftStatuses: sanitizeDashboardArray(context.branchOrchestratorService.listBaseBranchDrift().map(baseBranchDriftStatusToDto)),
+    branchNamingPolicies: sanitizeDashboardArray(context.branchOrchestratorService.listNamingPolicies().map(branchNamingPolicyToDto)),
+    branchOrchestratorAuditEvents: sanitizeDashboardArray(context.branchOrchestratorService.listAuditEvents().map(branchOrchestratorAuditEventToDto)),
+    branchOrchestratorSummary: sanitizeDashboardObject(branchOrchestratorSummaryToDto(branchOrchestratorSummary)),
     auditEvents: sanitizeDashboardArray(auditEvents),
     remoteAuditEvents: sanitizeDashboardArray(auditEvents.filter(remoteGitAuditEvent)),
     blockedExamples: sanitizeDashboardArray([
@@ -297,6 +362,14 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       {
         operation: "github_rebase",
         reason: "rebase_unsupported"
+      },
+      {
+        operation: "branch_orchestrator.real_branch_create",
+        reason: "branch_orchestrator_records_metadata_only"
+      },
+      {
+        operation: "branch_orchestrator.branch_delete",
+        reason: "branch_deletion_unsupported"
       },
       {
         operation: "github_webhook_unverified",
@@ -320,6 +393,9 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       rebasePushEnabled: false,
       forcePushEnabled: false,
       branchDeletionEnabled: false,
+      branchOrchestratorStatus: branchOrchestratorSummary.status,
+      branchOrchestratorRemoteGitOperation: branchOrchestratorSummary.remoteGitOperation,
+      branchOrchestratorNoDestructiveGit: branchOrchestratorSummary.noDestructiveGit,
       tokenExposed: false,
       webhookSecretExposed: false
     })
@@ -984,6 +1060,12 @@ function buildLlm(context: DashboardReadModelContext): LLMGatewayReadModel {
 }
 
 function buildAgents(context: DashboardReadModelContext): AgentRunnerReadModel {
+  const workspaceLeases = context.agentRunnerService.listWorkspaceLeases();
+  const cleanupDecisions = context.agentRunnerService.listWorkspaceCleanupDecisions();
+  const activeLeases = workspaceLeases.filter((lease) => lease.status === "active");
+  const coordinationSummary = context.agentRunCoordinationService.getSummary();
+  const editIntentSummary = context.editIntentGraphService.getOverlapSummary();
+  const editIntentGraph = context.editIntentGraphService.listGraph();
   return {
     config: sanitizeDashboardObject(context.agentRunnerService.getConfig()),
     runners: sanitizeDashboardArray(context.agentRunnerService.listRunners()),
@@ -992,7 +1074,33 @@ function buildAgents(context: DashboardReadModelContext): AgentRunnerReadModel {
     auditEvents: sanitizeDashboardArray(context.agentRunnerService.listAuditEvents()),
     instructionAssemblies: sanitizeDashboardArray(context.agentRunnerService.listInstructionAssemblies()),
     commandResults: sanitizeDashboardArray(context.agentRunnerService.listCommandResults()),
-    workspaces: sanitizeDashboardArray(context.agentRunnerService.listWorkspaces()),
+    workspaces: sanitizeDashboardArray(context.agentRunnerService.listWorkspaces().map(agentWorkspaceToDto)),
+    workspaceLeases: sanitizeDashboardArray(workspaceLeases.map(agentWorkspaceLeaseToDto)),
+    workspaceEvents: sanitizeDashboardArray(context.agentRunnerService.listWorkspaceLifecycleEvents().slice(-20).map(agentWorkspaceLifecycleEventToDto)),
+    cleanupDecisions: sanitizeDashboardArray(cleanupDecisions.map(agentWorkspaceCleanupDecisionToDto)),
+    workspaceLifecycle: sanitizeDashboardObject({
+      status: "v2_implemented",
+      activeWorkspaceLeases: activeLeases.length,
+      fixtureWorkspaceLeases: workspaceLeases.filter((lease) => lease.workspaceKind === "fixture").length,
+      futureGitWorktreeLeases: workspaceLeases.filter((lease) => lease.workspaceKind === "git_worktree_future").length,
+      sharedWorkspaceForbidden: workspaceLeases.some((lease) => lease.isolationStatus === "shared_forbidden"),
+      cleanupDecisionCount: cleanupDecisions.length,
+      destructiveCleanupEnabled: false,
+      realGitWorktreeExecutionEnabled: false,
+      fullWorkspacePathsExposed: false,
+      noSecretsExposed: true
+    }),
+    coordinationSessions: sanitizeDashboardArray(context.agentRunCoordinationService.listSessions().map(agentSessionToDto)),
+    coordinationGroups: sanitizeDashboardArray(context.agentRunCoordinationService.listCoordinationGroups().map(agentRunCoordinationGroupToDto)),
+    sessionOverlaps: sanitizeDashboardArray(context.agentRunCoordinationService.listSessionOverlaps().map(agentSessionOverlapToDto)),
+    concurrencyPolicies: sanitizeDashboardArray(context.agentRunCoordinationService.listConcurrencyPolicies().map(agentConcurrencyPolicyToDto)),
+    coordinationAuditEvents: sanitizeDashboardArray(context.agentRunCoordinationService.listAuditEvents().map(agentRunCoordinationAuditEventToDto)),
+    coordinationSummary: sanitizeDashboardObject(agentRunCoordinationSummaryToDto(coordinationSummary)),
+    editIntents: sanitizeDashboardArray(context.editIntentGraphService.listIntents().map(editIntentToDto)),
+    fileLeases: sanitizeDashboardArray(context.editIntentGraphService.listLeases().map(fileLeaseToDto)),
+    editIntentGraph: sanitizeDashboardObject(editIntentGraphToDto(editIntentGraph)),
+    editOverlapAssessments: sanitizeDashboardArray(context.editIntentGraphService.listOverlapAssessments().map(editOverlapAssessmentToDto)),
+    editIntentSummary: sanitizeDashboardObject(editIntentOverlapSummaryToDto(editIntentSummary)),
     blockedExamples: sanitizeDashboardArray([
       {
         operation: "runner.command.execute",
@@ -1005,6 +1113,34 @@ function buildAgents(context: DashboardReadModelContext): AgentRunnerReadModel {
       {
         operation: "runner.secret.inject",
         reason: "runner_secret_injection_denied"
+      },
+      {
+        operation: "runner.shared_working_directory",
+        reason: "shared_working_directory_forbidden_by_workspace_lifecycle_v2"
+      },
+      {
+        operation: "runner.git_worktree_execution",
+        reason: "git_worktree_allocation_modeled_but_not_enabled"
+      },
+      {
+        operation: "runner.workspace_cleanup_delete",
+        reason: "destructive_workspace_cleanup_disabled"
+      },
+      {
+        operation: "agent_session.same_workspace",
+        reason: "same_workspace_sessions_are_blocked_metadata_only"
+      },
+      {
+        operation: "agent_session.remote_git",
+        reason: "coordination_never_runs_remote_git"
+      },
+      {
+        operation: "edit_intent.file_lock",
+        reason: "file_leases_are_metadata_only_no_os_locks"
+      },
+      {
+        operation: "edit_intent.source_mutation",
+        reason: "edit_intent_graph_never_modifies_source_files"
       }
     ])
   };
@@ -1253,15 +1389,23 @@ function buildProviders(context: DashboardReadModelContext): EnterpriseProviderR
   const config = context.providerAbstractionService.getConfig();
   return {
     config: sanitizeDashboardObject(config),
-    catalog: sanitizeDashboardArray(context.providerAbstractionService.listProviders()),
+    catalog: sanitizeDashboardArray(context.providerAbstractionService.listProviders().map(providerCatalogEntryToDto)),
     authTypes: context.providerAbstractionService.listAuthTypes(),
     localCliTemplates: sanitizeDashboardArray(context.providerAbstractionService.listLocalCliTemplates()),
+    localCliCompatibilityRules: sanitizeDashboardArray(context.providerAbstractionService.listLocalCliCompatibilityRules()),
+    localCliParserProfiles: sanitizeDashboardArray(context.providerAbstractionService.listLocalCliParserProfiles()),
+    localCliSecurityConstraints: sanitizeDashboardArray(context.providerAbstractionService.listLocalCliSecurityConstraints()),
+    localCliReadiness: sanitizeDashboardObject(context.providerAbstractionService.getLocalCliReadiness()),
     localAgents: sanitizeDashboardArray(context.providerAbstractionService.listLocalAgents()),
     auditEvents: sanitizeDashboardArray(context.providerAbstractionService.listAuditEvents()),
     readiness: sanitizeDashboardObject({
-      localCliProviderReadiness: config.connectedLocalAgents > 0 ? "local_agent_available" : "local_agent_required",
+      localCliProviderReadiness: "templates_v1_implemented_execution_disabled",
       credentialCacheAccess: "denied",
       directLocalCliExecution: "blocked",
+      secretForwarding: "denied",
+      ptySupport: "unsupported",
+      localAgentProtocolRequired: true,
+      templateCount: config.localCliTemplateCount,
       productionProviderCalls: "not_implemented"
     }),
     blockedExamples: sanitizeDashboardArray([
@@ -1524,6 +1668,7 @@ function buildAudit(context: DashboardReadModelContext): AuditSummaryReadModel {
     auditGroup("core", context.store.listAuditLogs()),
     auditGroup("registry", context.registryService.listAuditLogs()),
     auditGroup("git", context.gitIntegrationService.listGitAuditEvents()),
+    auditGroup("branch_orchestrator", context.branchOrchestratorService.listAuditEvents()),
     auditGroup("llm", context.llmGatewayService.listAuditEvents()),
     auditGroup("agent_runner", context.agentRunnerService.listAuditEvents()),
     auditGroup("policy", context.policyService.listAuditEntries()),
@@ -1606,6 +1751,9 @@ function buildOverview(
       activeInstructions: registry.summary.activeInstructions ?? 0,
       gitRepos: git.repos.length,
       gitPullRequests: git.pullRequests.length,
+      branchOrchestratorOwnershipRecords: git.branchOwnershipRecords.length,
+      branchOrchestratorBlockedCollisions: git.branchOrchestratorSummary.blockedCollisions ?? 0,
+      branchOrchestratorSameWorkspaceBlockers: git.branchOrchestratorSummary.sameWorkspaceBlockers ?? 0,
       githubAppReadinessBlockers: githubApp.blockers.length,
       githubAppPermissions: githubApp.permissionMatrix.length,
       githubWebhookAllowlistedEvents: githubApp.webhookEventAllowlist.length,
@@ -1687,7 +1835,7 @@ function buildOverview(
     }),
     sections: {
       tasks: { status: statusForCount(tasks.tasks.length), count: tasks.tasks.length, notes: tasks.warnings },
-      git: { status: "available", count: git.repos.length, notes: ["Remote Git gates remain explicit and token-free."] },
+      git: { status: "available", count: git.repos.length, notes: ["Remote Git gates remain explicit and token-free; branch orchestration is metadata-only."] },
       githubApp: { status: "available", count: githubApp.blockers.length, notes: ["GitHub App and production webhook hardening are planning-only; no live App or token exchange is implemented."] },
       githubAppIntegration: { status: "available", count: githubAppIntegration.testCases.length, notes: ["GitHub App integration-test profile v1 is skipped by default and never exposes private keys, installation tokens, or env values."] },
       conflicts: { status: statusForCount(conflicts.mergeQueue.length + conflicts.branchLeases.length), count: conflicts.mergeQueue.length, notes: [] },

@@ -17,6 +17,7 @@ export type {
   MergeSimulationResult
 } from "@aichestra/adapters";
 export * from "./service.ts";
+export * from "./branch-orchestrator.ts";
 export * from "./github-app.ts";
 export * from "./webhooks.ts";
 export {

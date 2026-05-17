@@ -28,6 +28,15 @@ import {
   type CommandExecutionResultRepository,
   type InstructionAssemblyRepository
 } from "./repository.ts";
+import {
+  AgentWorkspaceLifecycleService,
+  type AgentWorkspaceCleanupDecision,
+  type AgentWorkspaceLifecycleContext,
+  type AgentWorkspaceLifecycleEvent,
+  type AgentWorkspaceLifecycleQuery,
+  type AgentWorkspaceLease,
+  workspaceLeaseIdFromMetadata
+} from "./workspace-lifecycle.ts";
 
 export type AgentRunnerServiceInput = {
   runner: AgentRunner;
@@ -37,6 +46,7 @@ export type AgentRunnerServiceInput = {
   instructionAssemblyRepository?: InstructionAssemblyRepository;
   commandExecutionResultRepository?: CommandExecutionResultRepository;
   workspaceRepository?: AgentWorkspaceRepository;
+  workspaceLifecycleService?: AgentWorkspaceLifecycleService;
   policyService?: PolicyService;
   securityService?: SecurityControlService;
 };
@@ -64,6 +74,7 @@ export class AgentRunnerService {
   private readonly instructionAssemblyRepository: InstructionAssemblyRepository;
   private readonly commandExecutionResultRepository: CommandExecutionResultRepository;
   private readonly workspaceRepository: AgentWorkspaceRepository;
+  private readonly workspaceLifecycleService: AgentWorkspaceLifecycleService;
   private readonly policyService: PolicyService;
   private readonly securityService?: SecurityControlService;
 
@@ -76,6 +87,7 @@ export class AgentRunnerService {
     this.instructionAssemblyRepository = input.instructionAssemblyRepository ?? repositories.instructionAssemblyRepository;
     this.commandExecutionResultRepository = input.commandExecutionResultRepository ?? repositories.commandExecutionResultRepository;
     this.workspaceRepository = input.workspaceRepository ?? repositories.workspaceRepository;
+    this.workspaceLifecycleService = input.workspaceLifecycleService ?? new AgentWorkspaceLifecycleService();
     this.policyService = input.policyService ?? new PolicyService();
     this.securityService = input.securityService;
   }
@@ -331,6 +343,13 @@ export class AgentRunnerService {
 
     try {
       const execution = await this.runner.executeRun(request);
+      const workspaceLease = await this.ensureWorkspaceLeaseForExecution(request, execution, {
+        actorId: request.actorId,
+        serviceAccountId: stringMetadata(request.metadata.serviceAccountId),
+        requestId: stringMetadata(request.metadata.requestId),
+        correlationId: stringMetadata(request.metadata.correlationId),
+        metadata: { source: "agent_runner_service" }
+      });
       const completeAudit = this.recordAudit({
         taskId: request.taskId,
         taskRunId: request.taskRunId,
@@ -344,7 +363,8 @@ export class AgentRunnerService {
           llmGatewayRequestIds: execution.llmGatewayRequestIds,
           usageLedgerEntryIds: execution.usageLedgerEntryIds,
           commandExecutionResultIds: execution.commandExecutionResultIds,
-          workspaceId: execution.workspaceId
+          workspaceId: execution.workspaceId,
+          workspaceLeaseId: workspaceLease?.id
         }
       });
       if (sandbox?.session) {
@@ -352,9 +372,11 @@ export class AgentRunnerService {
       }
       const saved = this.runRepository.createRun({
         ...execution,
+        workspaceLeaseId: workspaceLease?.id,
         auditEventIds: [...execution.auditEventIds, preparedAudit.id, completeAudit.id],
         metadata: {
           ...execution.metadata,
+          workspaceLeaseId: workspaceLease?.id,
           instructionAssemblyId: assembly.id,
           instructionSetHash: assembly.instructionSetHash,
           sandboxSessionId: sandbox?.session?.id,
@@ -438,6 +460,62 @@ export class AgentRunnerService {
     const run = this.getRun(runId);
     if (!run?.workspaceId) return undefined;
     return this.getWorkspace(run.workspaceId);
+  }
+
+  listWorkspaceLeases(query: AgentWorkspaceLifecycleQuery = {}): AgentWorkspaceLease[] {
+    return this.workspaceLifecycleService.listWorkspaces(query);
+  }
+
+  getWorkspaceLease(workspaceLeaseId: string): AgentWorkspaceLease | undefined {
+    return this.workspaceLifecycleService.getWorkspace(workspaceLeaseId);
+  }
+
+  listWorkspaceLifecycleEvents(workspaceLeaseId?: string): AgentWorkspaceLifecycleEvent[] {
+    return this.workspaceLifecycleService.listEvents(workspaceLeaseId);
+  }
+
+  listWorkspaceCleanupDecisions(workspaceLeaseId?: string): AgentWorkspaceCleanupDecision[] {
+    return this.workspaceLifecycleService.listCleanupDecisions(workspaceLeaseId);
+  }
+
+  requestWorkspaceLease(input: Parameters<AgentWorkspaceLifecycleService["requestWorkspace"]>[0], context: AgentWorkspaceLifecycleContext = {}): AgentWorkspaceLease {
+    return this.workspaceLifecycleService.requestWorkspace(input, context);
+  }
+
+  allocateFixtureWorkspaceLease(input: Parameters<AgentWorkspaceLifecycleService["allocateFixtureWorkspace"]>[0], context: AgentWorkspaceLifecycleContext = {}): Promise<AgentWorkspaceLease> {
+    return this.workspaceLifecycleService.allocateFixtureWorkspace(input, context);
+  }
+
+  markWorkspaceLeaseActive(workspaceLeaseId: string, context: AgentWorkspaceLifecycleContext = {}): AgentWorkspaceLease {
+    return this.workspaceLifecycleService.markActive(workspaceLeaseId, context);
+  }
+
+  freezeWorkspaceLease(workspaceLeaseId: string, context: AgentWorkspaceLifecycleContext = {}): AgentWorkspaceLease {
+    return this.workspaceLifecycleService.freezeWorkspace(workspaceLeaseId, context);
+  }
+
+  markWorkspaceLeaseReadyForMerge(workspaceLeaseId: string, context: AgentWorkspaceLifecycleContext = {}): AgentWorkspaceLease {
+    return this.workspaceLifecycleService.markReadyForMerge(workspaceLeaseId, context);
+  }
+
+  recordWorkspaceLeaseMergeCompleted(workspaceLeaseId: string, context: AgentWorkspaceLifecycleContext = {}): AgentWorkspaceLease {
+    return this.workspaceLifecycleService.recordMergeCompleted(workspaceLeaseId, context);
+  }
+
+  requestWorkspaceLeaseCleanup(workspaceLeaseId: string, context: AgentWorkspaceLifecycleContext = {}): AgentWorkspaceLease {
+    return this.workspaceLifecycleService.requestCleanup(workspaceLeaseId, context);
+  }
+
+  evaluateWorkspaceLeaseCleanup(
+    workspaceLeaseId: string,
+    input: Parameters<AgentWorkspaceLifecycleService["evaluateCleanup"]>[1] = {},
+    context: AgentWorkspaceLifecycleContext = {}
+  ): AgentWorkspaceCleanupDecision {
+    return this.workspaceLifecycleService.evaluateCleanup(workspaceLeaseId, input, context);
+  }
+
+  recordWorkspaceLeaseCleanupCompleted(workspaceLeaseId: string, context: AgentWorkspaceLifecycleContext = {}): AgentWorkspaceLease {
+    return this.workspaceLifecycleService.recordCleanupCompleted(workspaceLeaseId, context);
   }
 
   async executeCommandForRun(runId: string, input: {
@@ -563,6 +641,70 @@ export class AgentRunnerService {
       source: stringMetadata(metadata.source),
       metadata
     });
+  }
+
+  private async ensureWorkspaceLeaseForExecution(
+    request: AgentRunRequest,
+    execution: AgentRunExecutionResult,
+    context: AgentWorkspaceLifecycleContext
+  ): Promise<AgentWorkspaceLease | undefined> {
+    const existingLeaseId = execution.workspaceLeaseId ?? workspaceLeaseIdFromMetadata(execution.metadata) ?? workspaceLeaseIdFromMetadata(request.metadata);
+    if (existingLeaseId) {
+      const existing = this.workspaceLifecycleService.getWorkspace(existingLeaseId);
+      if (existing) return existing;
+    }
+
+    const branchName = request.branchRef?.branchName ?? "mock-agent-run";
+    const baseBranch = request.branchRef?.baseBranch ?? request.repoRef?.defaultBranch ?? "main";
+    const branchLeaseId = stringMetadata(request.metadata.branchLeaseId);
+    const ownerServiceAccountId = stringMetadata(request.metadata.serviceAccountId);
+    const linkedWorkspace = execution.workspaceId ? this.getWorkspace(execution.workspaceId) : undefined;
+    const workspacePath = linkedWorkspace?.rootPath ?? request.repoRef?.localPath;
+
+    if (workspacePath) {
+      const lease = await this.workspaceLifecycleService.allocateFixtureWorkspace({
+        taskId: request.taskId,
+        taskRunId: request.taskRunId,
+        agentRunId: execution.id,
+        repoId: request.repoRef?.repoId ?? request.branchRef?.repoId ?? "repo_unknown",
+        branchLeaseId,
+        branchName,
+        baseBranch,
+        workspacePath,
+        ownerActorId: request.actorId,
+        ownerServiceAccountId,
+        metadata: {
+          source: "agent_runner_service",
+          agentWorkspaceId: execution.workspaceId,
+          runnerKind: execution.runnerKind,
+          branchLeaseId
+        }
+      }, context);
+      if (lease.status === "allocated") {
+        return this.workspaceLifecycleService.markActive(lease.id, context);
+      }
+      return lease;
+    }
+
+    return this.workspaceLifecycleService.requestWorkspace({
+      taskId: request.taskId,
+      taskRunId: request.taskRunId,
+      agentRunId: execution.id,
+      repoId: request.repoRef?.repoId ?? request.branchRef?.repoId ?? "repo_unknown",
+      branchLeaseId,
+      branchName,
+      baseBranch,
+      workspaceKind: "git_worktree_future",
+      ownerActorId: request.actorId,
+      ownerServiceAccountId,
+      metadata: {
+        source: "agent_runner_service",
+        runnerKind: execution.runnerKind,
+        futureWorktreeModeledOnly: true,
+        realGitWorktreeExecuted: false,
+        branchLeaseId
+      }
+    }, context);
   }
 
   private evaluatePolicy(action: "runner.execute" | "runner.command.execute", resourceKind: "runner" | "command", input: Pick<AgentRunRequest, "taskId" | "taskRunId" | "actorId" | "repoRef" | "selectedModelRef" | "selectedSkillRefs" | "selectedHarnessRef" | "selectedInstructionRefs"> | AgentRunExecutionResult, options: {

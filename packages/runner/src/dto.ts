@@ -7,7 +7,35 @@ import type {
   CommandExecutionResult,
   InstructionAssemblyResult
 } from "./agent-runner.ts";
+import type {
+  AgentConcurrencyPolicy,
+  AgentRunCoordinationAuditEvent,
+  AgentRunCoordinationGroup,
+  AgentRunCoordinationRecommendation,
+  AgentRunCoordinationSummary,
+  AgentSession,
+  AgentSessionOverlap
+} from "./coordination.ts";
 import type { AgentRunnerRuntimeConfig } from "./config.ts";
+export {
+  editIntentGraphEdgeToDto,
+  editIntentGraphNodeToDto,
+  editIntentGraphToDto,
+  editIntentOverlapSummaryToDto,
+  editIntentToDto,
+  editOverlapAssessmentToDto,
+  fileLeaseToDto,
+  sanitizeEditIntentFilePathForDto,
+  sanitizeEditIntentMetadata
+} from "./edit-intent.ts";
+export {
+  agentWorkspaceCleanupDecisionToDto,
+  agentWorkspaceLeaseToDto,
+  agentWorkspaceLifecycleEventToDto,
+  sanitizeWorkspaceLifecycleMetadata,
+  sanitizeWorkspacePathForDto
+} from "./workspace-lifecycle.ts";
+import { sanitizeWorkspaceLifecycleMetadata, sanitizeWorkspacePathForDto } from "./workspace-lifecycle.ts";
 
 export function agentRunnerConfigToDto(config: AgentRunnerRuntimeConfig) {
   return {
@@ -70,6 +98,44 @@ export function commandExecutionResultToDto(result: CommandExecutionResult) {
 export function agentWorkspaceToDto(workspace: AgentWorkspace) {
   return {
     ...workspace,
-    createdAt: workspace.createdAt.toISOString()
+    rootPath: sanitizeWorkspacePathForDto(workspace.rootPath),
+    rootPathRedacted: true,
+    createdAt: workspace.createdAt.toISOString(),
+    metadata: sanitizeWorkspaceLifecycleMetadata(workspace.metadata)
+  };
+}
+
+export function agentSessionToDto(session: AgentSession) {
+  return {
+    ...session,
+    createdAt: session.createdAt.toISOString(),
+    updatedAt: session.updatedAt.toISOString()
+  };
+}
+
+export function agentRunCoordinationGroupToDto(group: AgentRunCoordinationGroup) {
+  return group;
+}
+
+export function agentSessionOverlapToDto(overlap: AgentSessionOverlap) {
+  return overlap;
+}
+
+export function agentConcurrencyPolicyToDto(policy: AgentConcurrencyPolicy) {
+  return policy;
+}
+
+export function agentRunCoordinationRecommendationToDto(recommendation: AgentRunCoordinationRecommendation) {
+  return recommendation;
+}
+
+export function agentRunCoordinationSummaryToDto(summary: AgentRunCoordinationSummary) {
+  return summary;
+}
+
+export function agentRunCoordinationAuditEventToDto(event: AgentRunCoordinationAuditEvent) {
+  return {
+    ...event,
+    createdAt: event.createdAt.toISOString()
   };
 }

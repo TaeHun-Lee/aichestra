@@ -1,7 +1,9 @@
 export * from "./agent-runner.ts";
 export * from "./command-executor.ts";
 export * from "./config.ts";
+export * from "./coordination.ts";
 export * from "./dto.ts";
+export * from "./edit-intent.ts";
 export * from "./harness-policy.ts";
 export * from "./instructions.ts";
 export * from "./instruction-assembly.ts";
@@ -11,3 +13,4 @@ export * from "./repository.ts";
 export * from "./service.ts";
 export * from "./test-runner.ts";
 export * from "./workspace.ts";
+export * from "./workspace-lifecycle.ts";

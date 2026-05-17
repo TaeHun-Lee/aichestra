@@ -2,8 +2,8 @@ import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { AichestraError, NotFoundError, isTaskStatus } from "@aichestra/core";
-import type { BranchLeaseStatus, MergeSimulationMode, MergeSimulationStatus, RegistryVersionRef, Task } from "@aichestra/core";
+import { AichestraError, MergeQueuePolicyService, NotFoundError, isTaskStatus } from "@aichestra/core";
+import type { BranchLeaseStatus, MergeQueueHoldKind, MergeQueueHoldSeverity, MergeQueuePolicyAction, MergeQueuePolicyContext, MergeSimulationMode, MergeSimulationStatus, RegistryVersionRef, Task } from "@aichestra/core";
 import type { TaskStatus } from "@aichestra/core";
 import {
   InMemoryAichestraStore,
@@ -168,16 +168,25 @@ import {
 } from "@aichestra/auth";
 import type { AuthorizationResource, RequestSource, ResourceScope, TenantScopeEnforcementService } from "@aichestra/auth";
 import {
+  BranchOrchestratorService,
   GitIntegrationService,
   GitHubAppRuntimeService,
   GitWebhookReceiverService,
+  InMemoryBranchOrchestratorRepository,
   LocalGitDryRunMergeSimulator,
   MockMergeSimulator,
+  baseBranchDriftStatusToDto,
+  branchNamingPolicyToDto,
+  branchOrchestrationDecisionToDto,
+  branchOrchestrationRequestToDto,
+  branchOrchestratorAuditEventToDto,
+  branchOrchestratorSummaryToDto,
+  branchOwnershipRecordToDto,
   createGitHubAppRuntimeConfigFromEnv,
   createGitHubWebhookRuntimeFromEnv,
   createGitProviderFromEnv
 } from "@aichestra/git-adapter";
-import type { GitHubAppRuntimeConfig, GitHubWebhookRuntimeConfig, GitProviderRuntimeConfig } from "@aichestra/git-adapter";
+import type { BaseBranchDriftStatusValue, BranchOrchestrationDecisionValue, BranchOwnershipStatus, BranchPurpose, GitHubAppRuntimeConfig, GitHubWebhookRuntimeConfig, GitProviderRuntimeConfig } from "@aichestra/git-adapter";
 import {
   budgetDecisionToDto,
   credentialReferenceResultToDto,
@@ -198,9 +207,13 @@ import {
   localAgentRegistrationToDto,
   localAgentSessionToDto,
   localAgentStreamEventToDto,
+  localCliCompatibilityRuleToDto,
   localCliCompatibilityEntryToDto,
   localCliCompatibilityResultToDto,
-  localCliProviderConfigToDto,
+  localCliParserProfileToDto,
+  localCliProviderTemplateReadinessToDto,
+  localCliProviderTemplateToDto,
+  localCliSecurityConstraintToDto,
   isLlmModelStatus,
   isLlmProviderKind,
   isVirtualModelKeyStatus,
@@ -245,11 +258,30 @@ import {
 import type { AuditCategory, AuditOutcome, AuditSeverity, ObservabilityService } from "@aichestra/observability";
 import {
   AgentRunnerService,
+  AgentRunCoordinationService,
+  EditIntentGraphService,
+  InMemoryAgentRunCoordinationRepository,
   MockAgentRunner,
+  agentConcurrencyPolicyToDto,
+  editIntentGraphToDto,
+  editIntentOverlapSummaryToDto,
+  editIntentToDto,
+  editOverlapAssessmentToDto,
+  fileLeaseToDto,
+  agentRunCoordinationAuditEventToDto,
+  agentRunCoordinationGroupToDto,
+  agentRunCoordinationRecommendationToDto,
+  agentRunCoordinationSummaryToDto,
   agentRunAuditEventToDto,
+  agentSessionOverlapToDto,
+  agentSessionToDto,
   agentRunToDto,
   agentRunnerConfigToDto,
   agentWorkspaceToDto,
+  agentWorkspaceCleanupDecisionToDto,
+  agentWorkspaceLeaseToDto,
+  agentWorkspaceLifecycleEventToDto,
+  AgentWorkspaceLifecycleService,
   commandExecutionResultToDto,
   createInMemoryAgentRunnerRepositories,
   createAgentRunnerConfigFromEnv,
@@ -257,7 +289,23 @@ import {
   instructionAssemblyToDto,
   LocalAgentWorkspaceManager
 } from "@aichestra/runner";
-import type { AgentRunnerRuntimeConfig } from "@aichestra/runner";
+import type {
+  AgentRunnerRuntimeConfig,
+  EditIntentConfidence,
+  EditIntentKind,
+  EditIntentStatus,
+  EditOverlapKind,
+  EditOverlapRecommendation,
+  EditOverlapSeverity,
+  FileLeaseKind,
+  FileLeaseStatus,
+  AgentSessionOverlapSeverity,
+  AgentSessionSourceScopeKind,
+  AgentSessionStatus,
+  AgentWorkspaceKind,
+  AgentWorkspaceLifecycleStatus,
+  AgentWorkspaceMergeStatus
+} from "@aichestra/runner";
 import {
   autoImprovementAnalysisToDto,
   canaryReadinessToDto,
@@ -345,6 +393,7 @@ type RouteContext = {
   store: InMemoryAichestraStore;
   storageProvider: StorageProvider;
   gitIntegrationService: GitIntegrationService;
+  branchOrchestratorService: BranchOrchestratorService;
   gitProviderConfig: GitProviderRuntimeConfig;
   githubAppRuntimeService: GitHubAppRuntimeService;
   githubAppRuntimeConfig: GitHubAppRuntimeConfig;
@@ -352,6 +401,9 @@ type RouteContext = {
   gitWebhookConfig: GitHubWebhookRuntimeConfig;
   llmGatewayService: LLMGatewayService;
   agentRunnerService: AgentRunnerService;
+  agentRunCoordinationService: AgentRunCoordinationService;
+  mergeQueuePolicyService: MergeQueuePolicyService;
+  editIntentGraphService: EditIntentGraphService;
   agentRunnerConfig: AgentRunnerRuntimeConfig;
   registryService: RegistryService;
   improvementServices: ImprovementServices;
@@ -564,6 +616,13 @@ function parseDateQuery(url: URL, name: string): Date | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
+function dateValue(value: unknown): Date | undefined {
+  if (value instanceof Date) return value;
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
 function parsePositiveIntegerQuery(url: URL, name: string): number | undefined {
   const value = url.searchParams.get(name);
   if (!value) return undefined;
@@ -573,6 +632,201 @@ function parsePositiveIntegerQuery(url: URL, name: string): number | undefined {
 
 function isMergeSimulationStatus(value: unknown): value is MergeSimulationStatus {
   return value === "clean" || value === "text_conflict" || value === "failed" || value === "unavailable";
+}
+
+function isMergeQueueHoldKind(value: unknown): value is MergeQueueHoldKind {
+  return value === "conflict_risk" ||
+    value === "dry_run_failed" ||
+    value === "validation_missing" ||
+    value === "approval_missing" ||
+    value === "workspace_not_ready" ||
+    value === "branch_lease_expired" ||
+    value === "edit_overlap" ||
+    value === "policy_denied" ||
+    value === "human_review_required";
+}
+
+function isMergeQueueHoldSeverity(value: unknown): value is MergeQueueHoldSeverity {
+  return value === "low" || value === "medium" || value === "high" || value === "critical";
+}
+
+function mergeQueuePolicyContextFromInput(
+  requestContext: ReturnType<ApiRequestContextMiddleware["requireApiContext"]>,
+  body: Record<string, unknown> = {}
+): MergeQueuePolicyContext {
+  const metadata = recordValue(body.metadata);
+  return {
+    requestId: requestContext.requestId,
+    correlationId: requestContext.correlationId,
+    actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
+    serviceAccountId: stringValue(body.serviceAccountId) ?? stringValue((requestContext.authContext.actor as { serviceAccountId?: unknown }).serviceAccountId),
+    validationStatus: mergeQueueEvidenceStatus(body.validationStatus ?? metadata.validationStatus),
+    approvalStatus: mergeQueueEvidenceStatus(body.approvalStatus ?? metadata.approvalStatus),
+    humanPriority: finiteNumber(body.humanPriority ?? metadata.humanPriority),
+    releaseBlocker: body.releaseBlocker === true || metadata.releaseBlocker === true,
+    metadata: {
+      ...metadata,
+      source: metadata.source ?? "api",
+      authMode: requestContext.authContext.authMode,
+      principalId: requestContext.authContext.principal.id
+    }
+  };
+}
+
+function mergeQueueEvidenceStatus(value: unknown): MergeQueuePolicyContext["validationStatus"] {
+  if (value === "passed" ||
+    value === "approved" ||
+    value === "not_required" ||
+    value === "pending" ||
+    value === "failed" ||
+    value === "rejected" ||
+    value === "missing") {
+    return value;
+  }
+  return undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isAgentWorkspaceKind(value: unknown): value is AgentWorkspaceKind {
+  return value === "fixture" ||
+    value === "git_worktree_future" ||
+    value === "clone_future" ||
+    value === "remote_workspace_future";
+}
+
+function isAgentWorkspaceLifecycleStatus(value: unknown): value is AgentWorkspaceLifecycleStatus {
+  return value === "requested" ||
+    value === "allocated" ||
+    value === "active" ||
+    value === "frozen" ||
+    value === "ready_for_merge" ||
+    value === "merged" ||
+    value === "abandoned" ||
+    value === "cleanup_pending" ||
+    value === "cleaned" ||
+    value === "failed";
+}
+
+function isAgentWorkspaceMergeStatus(value: unknown): value is AgentWorkspaceMergeStatus {
+  return value === "unknown" || value === "ready_for_merge" || value === "merged" || value === "unmerged";
+}
+
+function isAgentSessionStatus(value: unknown): value is AgentSessionStatus {
+  return value === "requested" ||
+    value === "assigned" ||
+    value === "running" ||
+    value === "paused" ||
+    value === "waiting_on_conflict" ||
+    value === "ready_for_review" ||
+    value === "ready_for_merge" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "abandoned";
+}
+
+function isAgentSessionOverlapSeverity(value: unknown): value is AgentSessionOverlapSeverity {
+  return value === "low" || value === "medium" || value === "high" || value === "critical";
+}
+
+function isAgentSessionSourceScopeKind(value: unknown): value is AgentSessionSourceScopeKind {
+  return value === "repo" || value === "directory" || value === "file" || value === "symbol" || value === "unknown";
+}
+
+function isBranchPurpose(value: unknown): value is BranchPurpose {
+  return value === "agent_work" ||
+    value === "conflict_resolution" ||
+    value === "review_fixup" ||
+    value === "merge_candidate" ||
+    value === "experiment";
+}
+
+function isBranchOwnershipStatus(value: unknown): value is BranchOwnershipStatus {
+  return value === "active" ||
+    value === "frozen" ||
+    value === "ready_for_review" ||
+    value === "ready_for_merge" ||
+    value === "merged" ||
+    value === "abandoned" ||
+    value === "expired";
+}
+
+function isBranchOrchestrationDecision(value: unknown): value is BranchOrchestrationDecisionValue {
+  return value === "allocated" ||
+    value === "reused_existing_lease" ||
+    value === "blocked_collision" ||
+    value === "blocked_policy" ||
+    value === "blocked_same_workspace" ||
+    value === "warning_base_branch_drift" ||
+    value === "future_manual_review";
+}
+
+function isBaseBranchDriftStatus(value: unknown): value is BaseBranchDriftStatusValue {
+  return value === "current" ||
+    value === "behind_base" ||
+    value === "base_changed" ||
+    value === "unknown" ||
+    value === "future_check_required";
+}
+
+function isFileLeaseKind(value: unknown): value is FileLeaseKind {
+  return value === "read" || value === "write_intent" || value === "exclusive_write_future" || value === "review";
+}
+
+function isFileLeaseStatus(value: unknown): value is FileLeaseStatus {
+  return value === "requested" ||
+    value === "active" ||
+    value === "warning_overlap" ||
+    value === "blocked_overlap" ||
+    value === "released" ||
+    value === "expired";
+}
+
+function isEditIntentKind(value: unknown): value is EditIntentKind {
+  return value === "modify" ||
+    value === "create" ||
+    value === "delete_future" ||
+    value === "rename_future" ||
+    value === "read_only" ||
+    value === "refactor" ||
+    value === "test_update" ||
+    value === "docs_update";
+}
+
+function isEditIntentStatus(value: unknown): value is EditIntentStatus {
+  return value === "declared" ||
+    value === "active" ||
+    value === "completed" ||
+    value === "abandoned" ||
+    value === "expired";
+}
+
+function isEditIntentConfidence(value: unknown): value is EditIntentConfidence {
+  return value === "low" || value === "medium" || value === "high";
+}
+
+function isEditOverlapSeverity(value: unknown): value is EditOverlapSeverity {
+  return value === "low" || value === "medium" || value === "high" || value === "critical";
+}
+
+function isEditOverlapRecommendation(value: unknown): value is EditOverlapRecommendation {
+  return value === "allow" ||
+    value === "warn" ||
+    value === "serialize" ||
+    value === "split_files" ||
+    value === "require_review" ||
+    value === "block";
+}
+
+function isEditOverlapKind(value: unknown): value is EditOverlapKind {
+  return value === "same_file" ||
+    value === "same_directory" ||
+    value === "same_branch" ||
+    value === "same_workspace" ||
+    value === "same_symbol_future" ||
+    value === "broad_unknown";
 }
 
 function allowedLocalRepoPrefixes(env: Record<string, string | undefined> = process.env): string[] {
@@ -1308,6 +1562,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           workspaceRootConfigured: context.agentRunnerService.getConfig().workspaceRootConfigured,
           commandExecutorKind: context.agentRunnerService.getConfig().commandExecutorKind,
           maxRuntimeMs: context.agentRunnerService.getConfig().maxRuntimeMs,
+          workspaceLifecycleStatus: "v2_implemented",
+          activeWorkspaceLeaseCount: context.agentRunnerService.listWorkspaceLeases().filter((lease) => lease.status === "active").length,
+          editIntentGraphStatus: "v1_implemented",
+          activeEditIntentCount: context.editIntentGraphService.getOverlapSummary().activeIntents,
+          activeFileLeaseCount: context.editIntentGraphService.getOverlapSummary().activeFileLeases,
+          fileLockingEnabled: false,
+          sourceFileMutationEnabled: false,
+          futureGitWorktreeExecutionEnabled: false,
+          destructiveWorkspaceCleanupEnabled: false,
           llmProviderKind: context.llmGatewayService.getConfig().providerKind,
           gitProviderKind: context.gitProviderConfig.providerKind
         },
@@ -4149,9 +4412,48 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
 
-      if (method === "GET" && segments[1] === "local-cli" && segments[2] === "templates") {
-        sendJson(response, 200, { templates: providerService.listLocalCliTemplates().map(localCliProviderConfigToDto) });
-        return;
+      if (segments[1] === "local-cli") {
+        if (method !== "GET") {
+          sendJson(response, 405, { error: "local_cli_read_only", message: "Local CLI provider template endpoints are read-only." });
+          return;
+        }
+        if (segments[2] === "templates" && segments.length === 3) {
+          sendJson(response, 200, { templates: providerService.listLocalCliTemplates().map(localCliProviderTemplateToDto) });
+          return;
+        }
+        if (segments[2] === "templates" && segments.length === 4) {
+          const template = providerService.getLocalCliTemplate(segments[3]);
+          if (!template) {
+            notFound("local CLI provider template", segments[3]);
+          }
+          sendJson(response, 200, { template: localCliProviderTemplateToDto(template) });
+          return;
+        }
+        if (segments[2] === "compatibility") {
+          sendJson(response, 200, {
+            rules: providerService.listLocalCliCompatibilityRules({
+              providerId: url.searchParams.get("providerId") ?? undefined,
+              templateId: url.searchParams.get("templateId") ?? undefined
+            }).map(localCliCompatibilityRuleToDto),
+            parserProfiles: providerService.listLocalCliParserProfiles({
+              providerId: url.searchParams.get("providerId") ?? undefined
+            }).map(localCliParserProfileToDto)
+          });
+          return;
+        }
+        if (segments[2] === "security-constraints") {
+          sendJson(response, 200, {
+            constraints: providerService.listLocalCliSecurityConstraints({
+              providerId: url.searchParams.get("providerId") ?? undefined,
+              constraint: url.searchParams.get("constraint") ?? undefined
+            }).map(localCliSecurityConstraintToDto)
+          });
+          return;
+        }
+        if (segments[2] === "readiness") {
+          sendJson(response, 200, { readiness: localCliProviderTemplateReadinessToDto(providerService.getLocalCliReadiness()) });
+          return;
+        }
       }
 
       if (method === "GET" && segments[1] === "local-agents") {
@@ -4231,20 +4533,486 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
 
-      if (segments[1] === "workspaces") {
+      if (segments[1] === "sessions") {
+        const coordinationService = context.agentRunCoordinationService;
         if (method === "GET" && segments.length === 2) {
-          sendJson(response, 200, { workspaces: agentService.listWorkspaces().map(agentWorkspaceToDto) });
+          sendJson(response, 200, {
+            sessions: coordinationService.listSessions({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+              userId: url.searchParams.get("userId") ?? undefined,
+              status: isAgentSessionStatus(url.searchParams.get("status")) ? url.searchParams.get("status") as AgentSessionStatus : undefined
+            }).map(agentSessionToDto)
+          });
           return;
         }
+
+        if (method === "POST" && segments.length === 2) {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          const body = await readJson(request) as Record<string, unknown>;
+          const userId = stringValue(body.userId) ?? requestContext.authContext.principal.id;
+          const agentRunId = stringValue(body.agentRunId);
+          const repoId = stringValue(body.repoId);
+          const baseBranch = stringValue(body.baseBranch) ?? "main";
+          if (!agentRunId || !repoId) {
+            sendJson(response, 400, { error: "invalid_agent_session", message: "agentRunId and repoId are required." });
+            return;
+          }
+          const session = coordinationService.registerSession({
+            userId,
+            actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
+            taskId: stringValue(body.taskId),
+            taskRunId: stringValue(body.taskRunId),
+            agentRunId,
+            repoId,
+            providerId: stringValue(body.providerId),
+            modelId: stringValue(body.modelId),
+            branchLeaseId: stringValue(body.branchLeaseId),
+            workspaceLeaseId: stringValue(body.workspaceLeaseId),
+            baseBranch,
+            branchName: stringValue(body.branchName),
+            targetFiles: stringArrayValue(body.targetFiles),
+            sourceScope: {
+              scopeKind: isAgentSessionSourceScopeKind(recordValue(body.sourceScope).scopeKind) ? recordValue(body.sourceScope).scopeKind as AgentSessionSourceScopeKind : undefined,
+              paths: stringArrayValue(recordValue(body.sourceScope).paths),
+              description: stringValue(recordValue(body.sourceScope).description),
+              metadata: recordValue(recordValue(body.sourceScope).metadata)
+            },
+            status: isAgentSessionStatus(body.status) ? body.status : undefined,
+            metadata: recordValue(body.metadata)
+          }, {
+            actorId: requestContext.authContext.actor.id,
+            principalId: requestContext.authContext.principal.id,
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            source: "api",
+            metadata: { authMode: requestContext.authContext.authMode }
+          });
+          sendJson(response, 201, { session: agentSessionToDto(session) });
+          return;
+        }
+
+        const sessionId = segments[2];
+        if (!sessionId) {
+          sendJson(response, 400, { error: "missing_agent_session_id", message: "agent session id is required." });
+          return;
+        }
+
+        if (method === "POST") {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          const body = await readJson(request) as Record<string, unknown>;
+          const coordinationContext = {
+            actorId: requestContext.authContext.actor.id,
+            principalId: requestContext.authContext.principal.id,
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            source: "api",
+            metadata: { authMode: requestContext.authContext.authMode }
+          };
+          try {
+            if (segments[3] === "target-files") {
+              const session = coordinationService.updateTargetFiles(sessionId, stringArrayValue(body.files ?? body.targetFiles), coordinationContext);
+              sendJson(response, 200, { session: agentSessionToDto(session) });
+              return;
+            }
+            if (segments[3] === "branch-lease") {
+              const branchLeaseId = stringValue(body.branchLeaseId);
+              if (!branchLeaseId) {
+                sendJson(response, 400, { error: "invalid_branch_lease_assignment", message: "branchLeaseId is required." });
+                return;
+              }
+              const session = coordinationService.assignBranchLease(sessionId, branchLeaseId, coordinationContext);
+              sendJson(response, 200, { session: agentSessionToDto(session) });
+              return;
+            }
+            if (segments[3] === "workspace-lease") {
+              const workspaceLeaseId = stringValue(body.workspaceLeaseId);
+              if (!workspaceLeaseId) {
+                sendJson(response, 400, { error: "invalid_workspace_lease_assignment", message: "workspaceLeaseId is required." });
+                return;
+              }
+              const session = coordinationService.assignWorkspaceLease(sessionId, workspaceLeaseId, coordinationContext);
+              sendJson(response, session.status === "waiting_on_conflict" ? 409 : 200, { session: agentSessionToDto(session) });
+              return;
+            }
+            if (segments[3] === "ready-for-review") {
+              const session = coordinationService.markReadyForReview(sessionId, coordinationContext);
+              sendJson(response, 200, { session: agentSessionToDto(session) });
+              return;
+            }
+            if (segments[3] === "ready-for-merge") {
+              const session = coordinationService.markReadyForMerge(sessionId, coordinationContext);
+              sendJson(response, 200, { session: agentSessionToDto(session) });
+              return;
+            }
+          } catch (error) {
+            sendJson(response, 404, { error: "agent_session_not_found", message: error instanceof Error ? error.message : "Agent session not found" });
+            return;
+          }
+        }
+      }
+
+      if (segments[1] === "coordination") {
+        const coordinationService = context.agentRunCoordinationService;
+        if (method === "GET" && segments[2] === "groups" && segments[3] && segments[4] === "recommendation") {
+          try {
+            sendJson(response, 200, { recommendation: agentRunCoordinationRecommendationToDto(coordinationService.recommendCoordinationAction(segments[3])) });
+          } catch (error) {
+            sendJson(response, 404, { error: "coordination_group_not_found", message: error instanceof Error ? error.message : "Coordination group not found" });
+          }
+          return;
+        }
+        if (method === "GET" && segments[2] === "groups") {
+          sendJson(response, 200, {
+            groups: coordinationService.listCoordinationGroups({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              userId: url.searchParams.get("userId") ?? undefined
+            }).map(agentRunCoordinationGroupToDto)
+          });
+          return;
+        }
+        if (method === "GET" && segments[2] === "overlaps") {
+          sendJson(response, 200, {
+            overlaps: coordinationService.listSessionOverlaps({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              sessionId: url.searchParams.get("sessionId") ?? undefined,
+              severity: isAgentSessionOverlapSeverity(url.searchParams.get("severity")) ? url.searchParams.get("severity") as AgentSessionOverlapSeverity : undefined
+            }).map(agentSessionOverlapToDto)
+          });
+          return;
+        }
+        if (method === "GET" && segments[2] === "summary") {
+          sendJson(response, 200, { summary: agentRunCoordinationSummaryToDto(coordinationService.getSummary()) });
+          return;
+        }
+        if (method === "GET" && segments[2] === "policies") {
+          sendJson(response, 200, { policies: coordinationService.listConcurrencyPolicies().map(agentConcurrencyPolicyToDto) });
+          return;
+        }
+        if (method === "GET" && segments[2] === "audit") {
+          sendJson(response, 200, {
+            auditEvents: coordinationService.listAuditEvents({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              sessionId: url.searchParams.get("sessionId") ?? undefined,
+              groupId: url.searchParams.get("groupId") ?? undefined
+            }).map(agentRunCoordinationAuditEventToDto)
+          });
+          return;
+        }
+        if (method === "POST" && segments[2] === "evaluate") {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          const body = await readJson(request) as Record<string, unknown>;
+          const repoId = stringValue(body.repoId) ?? url.searchParams.get("repoId") ?? undefined;
+          if (!repoId) {
+            sendJson(response, 400, { error: "invalid_overlap_evaluation", message: "repoId is required." });
+            return;
+          }
+          const overlaps = coordinationService.evaluateOverlap(repoId, {
+            actorId: requestContext.authContext.actor.id,
+            principalId: requestContext.authContext.principal.id,
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            source: "api",
+            metadata: { authMode: requestContext.authContext.authMode }
+          });
+          sendJson(response, 200, { overlaps: overlaps.map(agentSessionOverlapToDto) });
+          return;
+        }
+      }
+
+      if (segments[1] === "edit-intents") {
+        const editIntentService = context.editIntentGraphService;
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            editIntents: editIntentService.listIntents({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              sessionId: url.searchParams.get("sessionId") ?? undefined,
+              agentRunId: url.searchParams.get("agentRunId") ?? undefined,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              status: isEditIntentStatus(url.searchParams.get("status")) ? url.searchParams.get("status") as EditIntentStatus : undefined,
+              intentKind: isEditIntentKind(url.searchParams.get("intentKind")) ? url.searchParams.get("intentKind") as EditIntentKind : undefined,
+              workspaceLeaseId: url.searchParams.get("workspaceLeaseId") ?? undefined
+            }).map(editIntentToDto)
+          });
+          return;
+        }
+
+        if (method === "POST" && segments.length === 2) {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          const body = await readJson(request) as Record<string, unknown>;
+          const repoId = stringValue(body.repoId);
+          const sessionId = stringValue(body.sessionId);
+          const branchName = stringValue(body.branchName);
+          const intentKind = isEditIntentKind(body.intentKind) ? body.intentKind : undefined;
+          if (!repoId || !sessionId || !branchName || !intentKind) {
+            sendJson(response, 400, { error: "invalid_edit_intent", message: "repoId, sessionId, branchName, and intentKind are required." });
+            return;
+          }
+          const intent = editIntentService.declareIntent({
+            repoId,
+            sessionId,
+            agentRunId: stringValue(body.agentRunId),
+            taskId: stringValue(body.taskId),
+            branchName,
+            workspaceLeaseId: stringValue(body.workspaceLeaseId),
+            intentKind,
+            filePaths: stringArrayValue(body.filePaths),
+            directoryScopes: stringArrayValue(body.directoryScopes),
+            declaredSymbols: stringArrayValue(body.declaredSymbols),
+            confidence: isEditIntentConfidence(body.confidence) ? body.confidence : undefined,
+            status: isEditIntentStatus(body.status) ? body.status : undefined,
+            metadata: recordValue(body.metadata)
+          }, {
+            actorId: requestContext.authContext.actor.id,
+            principalId: requestContext.authContext.principal.id,
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            source: "api",
+            metadata: { authMode: requestContext.authContext.authMode }
+          });
+          sendJson(response, 201, { editIntent: editIntentToDto(intent) });
+          return;
+        }
+      }
+
+      if (segments[1] === "file-leases") {
+        const editIntentService = context.editIntentGraphService;
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            fileLeases: editIntentService.listLeases({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              ownerSessionId: url.searchParams.get("ownerSessionId") ?? url.searchParams.get("sessionId") ?? undefined,
+              ownerAgentRunId: url.searchParams.get("ownerAgentRunId") ?? url.searchParams.get("agentRunId") ?? undefined,
+              ownerTaskId: url.searchParams.get("ownerTaskId") ?? url.searchParams.get("taskId") ?? undefined,
+              status: isFileLeaseStatus(url.searchParams.get("status")) ? url.searchParams.get("status") as FileLeaseStatus : undefined,
+              leaseKind: isFileLeaseKind(url.searchParams.get("leaseKind")) ? url.searchParams.get("leaseKind") as FileLeaseKind : undefined,
+              workspaceLeaseId: url.searchParams.get("workspaceLeaseId") ?? undefined
+            }).map(fileLeaseToDto)
+          });
+          return;
+        }
+
+        if (method === "POST" && segments.length === 2) {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          const body = await readJson(request) as Record<string, unknown>;
+          const repoId = stringValue(body.repoId);
+          const filePath = stringValue(body.filePath);
+          const leaseKind = isFileLeaseKind(body.leaseKind) ? body.leaseKind : undefined;
+          const ownerSessionId = stringValue(body.ownerSessionId) ?? stringValue(body.sessionId);
+          const branchName = stringValue(body.branchName);
+          if (!repoId || !filePath || !leaseKind || !ownerSessionId || !branchName) {
+            sendJson(response, 400, { error: "invalid_file_lease", message: "repoId, filePath, leaseKind, ownerSessionId, and branchName are required." });
+            return;
+          }
+          const lease = editIntentService.requestFileLease({
+            repoId,
+            filePath,
+            leaseKind,
+            ownerSessionId,
+            ownerAgentRunId: stringValue(body.ownerAgentRunId) ?? stringValue(body.agentRunId),
+            ownerTaskId: stringValue(body.ownerTaskId) ?? stringValue(body.taskId),
+            ownerActorId: stringValue(body.ownerActorId) ?? requestContext.authContext.actor.id,
+            branchName,
+            workspaceLeaseId: stringValue(body.workspaceLeaseId),
+            status: isFileLeaseStatus(body.status) ? body.status : undefined,
+            metadata: recordValue(body.metadata)
+          }, {
+            actorId: requestContext.authContext.actor.id,
+            principalId: requestContext.authContext.principal.id,
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            source: "api",
+            metadata: { authMode: requestContext.authContext.authMode }
+          });
+          sendJson(response, lease.status === "blocked_overlap" ? 409 : 201, { fileLease: fileLeaseToDto(lease) });
+          return;
+        }
+
+        if (method === "POST" && segments[2] && segments[3] === "release") {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          try {
+            const lease = editIntentService.releaseFileLease(segments[2], {
+              actorId: requestContext.authContext.actor.id,
+              principalId: requestContext.authContext.principal.id,
+              requestId: requestContext.requestId,
+              correlationId: requestContext.correlationId,
+              source: "api",
+              metadata: { authMode: requestContext.authContext.authMode }
+            });
+            sendJson(response, 200, { fileLease: fileLeaseToDto(lease) });
+          } catch (error) {
+            sendJson(response, 404, { error: "file_lease_not_found", message: error instanceof Error ? error.message : "File lease not found" });
+          }
+          return;
+        }
+      }
+
+      if (method === "GET" && segments[1] === "edit-intent-graph") {
+        const repoId = url.searchParams.get("repoId") ?? undefined;
+        sendJson(response, 200, { graph: editIntentGraphToDto(context.editIntentGraphService.listGraph({ repoId })) });
+        return;
+      }
+
+      if (segments[1] === "edit-overlaps") {
+        const editIntentService = context.editIntentGraphService;
+        if (method === "GET" && segments[2] && segments[3] === "recommendation") {
+          try {
+            sendJson(response, 200, { overlap: editOverlapAssessmentToDto(editIntentService.recommendAction(segments[2])) });
+          } catch (error) {
+            sendJson(response, 404, { error: "edit_overlap_not_found", message: error instanceof Error ? error.message : "Edit overlap assessment not found" });
+          }
+          return;
+        }
+        if (method === "GET") {
+          sendJson(response, 200, {
+            overlaps: editIntentService.listOverlapAssessments({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              sessionId: url.searchParams.get("sessionId") ?? undefined,
+              severity: isEditOverlapSeverity(url.searchParams.get("severity")) ? url.searchParams.get("severity") as EditOverlapSeverity : undefined,
+              recommendation: isEditOverlapRecommendation(url.searchParams.get("recommendation")) ? url.searchParams.get("recommendation") as EditOverlapRecommendation : undefined,
+              overlapKind: isEditOverlapKind(url.searchParams.get("overlapKind")) ? url.searchParams.get("overlapKind") as EditOverlapKind : undefined
+            }).map(editOverlapAssessmentToDto)
+          });
+          return;
+        }
+      }
+
+      if (method === "GET" && segments[1] === "edit-intent-summary") {
+        sendJson(response, 200, { summary: editIntentOverlapSummaryToDto(context.editIntentGraphService.getOverlapSummary(url.searchParams.get("repoId") ?? undefined)) });
+        return;
+      }
+
+      if (segments[1] === "workspaces") {
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            workspaces: agentService.listWorkspaces().map(agentWorkspaceToDto),
+            workspaceLeases: agentService.listWorkspaceLeases({
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+              agentRunId: url.searchParams.get("agentRunId") ?? undefined,
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              branchLeaseId: url.searchParams.get("branchLeaseId") ?? undefined,
+              status: isAgentWorkspaceLifecycleStatus(url.searchParams.get("status")) ? url.searchParams.get("status") as AgentWorkspaceLifecycleStatus : undefined,
+              workspaceKind: isAgentWorkspaceKind(url.searchParams.get("workspaceKind")) ? url.searchParams.get("workspaceKind") as AgentWorkspaceKind : undefined
+            }).map(agentWorkspaceLeaseToDto),
+            cleanupDecisions: agentService.listWorkspaceCleanupDecisions().map(agentWorkspaceCleanupDecisionToDto)
+          });
+          return;
+        }
+
+        if (method === "POST" && segments[2] === "request") {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          const body = await readJson(request) as Record<string, unknown>;
+          const taskId = stringValue(body.taskId);
+          const agentRunId = stringValue(body.agentRunId);
+          const repoId = stringValue(body.repoId);
+          const branchName = stringValue(body.branchName);
+          const baseBranch = stringValue(body.baseBranch) ?? "main";
+          const workspaceKind = isAgentWorkspaceKind(body.workspaceKind) ? body.workspaceKind : "git_worktree_future";
+          if (!taskId || !agentRunId || !repoId || !branchName) {
+            sendJson(response, 400, { error: "invalid_workspace_request", message: "taskId, agentRunId, repoId, and branchName are required." });
+            return;
+          }
+          const lifecycleContext = {
+            actorId: requestContext.authContext.actor.id,
+            serviceAccountId: stringValue((requestContext.authContext.actor as { serviceAccountId?: unknown }).serviceAccountId),
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            metadata: {
+              source: "api",
+              authMode: requestContext.authContext.authMode,
+              principalId: requestContext.authContext.principal.id
+            }
+          };
+          const common = {
+            taskId,
+            taskRunId: stringValue(body.taskRunId),
+            agentRunId,
+            repoId,
+            branchLeaseId: stringValue(body.branchLeaseId),
+            branchName,
+            baseBranch,
+            ownerActorId: stringValue(body.ownerActorId) ?? requestContext.authContext.actor.id,
+            ownerServiceAccountId: stringValue(body.ownerServiceAccountId),
+            metadata: recordValue(body.metadata)
+          };
+          const workspacePath = stringValue(body.workspacePath);
+          const lease = workspaceKind === "fixture" && workspacePath
+            ? await agentService.allocateFixtureWorkspaceLease({ ...common, workspacePath }, lifecycleContext)
+            : agentService.requestWorkspaceLease({ ...common, workspaceKind, workspacePath }, lifecycleContext);
+          sendJson(response, lease.status === "failed" ? 409 : 201, { workspaceLease: agentWorkspaceLeaseToDto(lease) });
+          return;
+        }
+
         const workspaceId = segments[2];
         if (!workspaceId) {
           sendJson(response, 400, { error: "missing_workspace_id", message: "workspace id is required." });
           return;
         }
+
+        const workspaceLease = agentService.getWorkspaceLease(workspaceId);
+        if (method === "GET" && segments[3] === "events") {
+          if (!workspaceLease) notFound("agent workspace lease", workspaceId);
+          sendJson(response, 200, { events: agentService.listWorkspaceLifecycleEvents(workspaceId).map(agentWorkspaceLifecycleEventToDto) });
+          return;
+        }
+
+        if (method === "POST") {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          if (!workspaceLease) notFound("agent workspace lease", workspaceId);
+          const lifecycleContext = {
+            actorId: requestContext.authContext.actor.id,
+            requestId: requestContext.requestId,
+            correlationId: requestContext.correlationId,
+            metadata: { source: "api", authMode: requestContext.authContext.authMode }
+          };
+          if (segments[3] === "activate") {
+            sendJson(response, 200, { workspaceLease: agentWorkspaceLeaseToDto(agentService.markWorkspaceLeaseActive(workspaceId, lifecycleContext)) });
+            return;
+          }
+          if (segments[3] === "freeze") {
+            sendJson(response, 200, { workspaceLease: agentWorkspaceLeaseToDto(agentService.freezeWorkspaceLease(workspaceId, lifecycleContext)) });
+            return;
+          }
+          if (segments[3] === "ready-for-merge") {
+            sendJson(response, 200, { workspaceLease: agentWorkspaceLeaseToDto(agentService.markWorkspaceLeaseReadyForMerge(workspaceId, lifecycleContext)) });
+            return;
+          }
+          if (segments[3] === "merge-completed") {
+            sendJson(response, 200, { workspaceLease: agentWorkspaceLeaseToDto(agentService.recordWorkspaceLeaseMergeCompleted(workspaceId, lifecycleContext)) });
+            return;
+          }
+          if (segments[3] === "cleanup" && segments[4] === "check") {
+            const body = await readJson(request) as Record<string, unknown>;
+            agentService.requestWorkspaceLeaseCleanup(workspaceId, lifecycleContext);
+            const decision = agentService.evaluateWorkspaceLeaseCleanup(workspaceId, {
+              changedFiles: stringArrayValue(body.changedFiles),
+              dirty: typeof body.dirty === "boolean" ? body.dirty : undefined,
+              uncommittedChanges: typeof body.uncommittedChanges === "boolean" ? body.uncommittedChanges : undefined,
+              mergeStatus: isAgentWorkspaceMergeStatus(body.mergeStatus) ? body.mergeStatus : undefined,
+              policyAllowed: typeof body.policyAllowed === "boolean" ? body.policyAllowed : undefined,
+              policyDecisionId: stringValue(body.policyDecisionId),
+              reason: stringValue(body.reason),
+              metadata: recordValue(body.metadata)
+            }, lifecycleContext);
+            sendJson(response, 200, { cleanupDecision: agentWorkspaceCleanupDecisionToDto(decision) });
+            return;
+          }
+        }
+
         const workspace = agentService.getWorkspace(workspaceId);
-        if (!workspace) notFound("agent workspace", workspaceId);
+        if (!workspace && !workspaceLease) notFound("agent workspace", workspaceId);
         if (method === "GET") {
-          sendJson(response, 200, { workspace: agentWorkspaceToDto(workspace) });
+          const cleanupDecision = workspaceLease
+            ? agentService.listWorkspaceCleanupDecisions(workspaceLease.id).map(agentWorkspaceCleanupDecisionToDto).at(-1)
+            : undefined;
+          sendJson(response, 200, {
+            workspace: workspace ? agentWorkspaceToDto(workspace) : undefined,
+            workspaceLease: workspaceLease ? agentWorkspaceLeaseToDto(workspaceLease) : undefined,
+            cleanupDecision
+          });
           return;
         }
       }
@@ -4281,7 +5049,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             },
             branchRef: {
               repoId: stringValue(body.repoId) ?? "repo_demo_backend",
-              branchName: stringValue(body.branchName) ?? "mock-agent-run"
+              branchName: stringValue(body.branchName) ?? "mock-agent-run",
+              baseBranch: stringValue(body.baseBranch) ?? "main"
             },
             selectedModelRef,
             selectedSkillRefs: registryRefsValue(body.selectedSkillRefs, "skill", "mock-runner-skill"),
@@ -4297,7 +5066,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
               requestId: requestContext.requestId,
               correlationId: requestContext.correlationId,
               principalId: requestContext.authContext.principal.id,
-              authMode: requestContext.authContext.authMode
+              authMode: requestContext.authContext.authMode,
+              branchLeaseId: stringValue(body.branchLeaseId),
+              workspaceLeaseId: stringValue(body.workspaceLeaseId)
             }
           });
           sendJson(response, run.status === "blocked" ? 409 : 201, { agentRun: agentRunToDto(run) });
@@ -5401,8 +6172,210 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (segments[0] === "git") {
       const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
       const gitService = context.gitIntegrationService;
+      const branchOrchestratorService = context.branchOrchestratorService;
       const webhookService = context.gitWebhookReceiverService;
       const githubAppService = context.githubAppRuntimeService;
+
+      if (segments[1] === "merge-queue") {
+        const mergeQueuePolicyService = context.mergeQueuePolicyService;
+        const repoId = url.searchParams.get("repoId") ?? undefined;
+        if (method === "GET" && segments.length === 3 && segments[2] === "policy") {
+          sendJson(response, 200, { policy: mergeQueuePolicyService.getPolicy() });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "decisions") {
+          const preview = mergeQueuePolicyService.previewQueue(repoId, mergeQueuePolicyContextFromInput(requestContext, {
+            metadata: { source: "api_merge_queue_policy_decisions" }
+          }));
+          sendJson(response, 200, { decisions: preview.decisions });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "holds") {
+          const preview = mergeQueuePolicyService.previewQueue(repoId, mergeQueuePolicyContextFromInput(requestContext, {
+            metadata: { source: "api_merge_queue_policy_holds" }
+          }));
+          sendJson(response, 200, { holds: preview.holds });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          const preview = mergeQueuePolicyService.previewQueue(repoId, mergeQueuePolicyContextFromInput(requestContext, {
+            metadata: { source: "api_merge_queue_policy_summary" }
+          }));
+          sendJson(response, 200, { summary: preview.summary, decisions: preview.decisions, holds: preview.holds });
+          return;
+        }
+
+        const entryId = segments[2];
+        if (!entryId) {
+          sendJson(response, 400, { error: "missing_merge_queue_entry_id", message: "merge queue entry id is required." });
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "evaluate") {
+          const body = recordValue(await readJson(request));
+          const decision = mergeQueuePolicyService.evaluateEntry(entryId, mergeQueuePolicyContextFromInput(requestContext, body));
+          sendJson(response, decision.decision === "blocked" ? 409 : 200, { decision });
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "hold") {
+          const body = recordValue(await readJson(request));
+          const holdKind = isMergeQueueHoldKind(body.holdKind) ? body.holdKind : "human_review_required";
+          const severity = isMergeQueueHoldSeverity(body.severity) ? body.severity : "medium";
+          const reason = stringValue(body.reason) ?? holdKind;
+          const hold = mergeQueuePolicyService.holdEntry(entryId, {
+            holdKind,
+            severity,
+            reason,
+            metadata: recordValue(body.metadata)
+          }, mergeQueuePolicyContextFromInput(requestContext, body));
+          sendJson(response, hold.holdKind === "policy_denied" ? 403 : 201, { hold });
+          return;
+        }
+        if (method === "POST" && segments.length >= 4 && segments[3] === "release-hold") {
+          const body = recordValue(await readJson(request));
+          const holdId = segments[4] ?? stringValue(body.holdId);
+          if (!holdId) {
+            sendJson(response, 400, { error: "missing_merge_queue_hold_id", message: "holdId is required." });
+            return;
+          }
+          const hold = mergeQueuePolicyService.releaseHold(entryId, holdId, mergeQueuePolicyContextFromInput(requestContext, body));
+          sendJson(response, hold.holdKind === "policy_denied" ? 403 : 200, { hold });
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "merge_queue_policy_route_not_found" : "method_not_allowed",
+          message: "Merge queue policy endpoints are metadata-only and never execute merges."
+        });
+        return;
+      }
+
+      if (segments[1] === "branches" && segments[2] === "orchestrate" && method === "POST") {
+        const body = await readJson(request) as Record<string, unknown>;
+        const repoId = stringValue(body.repoId);
+        const agentRunId = stringValue(body.agentRunId);
+        if (!repoId || !agentRunId) {
+          sendJson(response, 400, { error: "invalid_branch_orchestration_request", message: "repoId and agentRunId are required." });
+          return;
+        }
+        const sourceScope = recordValue(body.sourceScope);
+        const decision = branchOrchestratorService.allocateBranch({
+          userId: stringValue(body.userId) ?? requestContext.authContext.principal.id,
+          actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
+          taskId: stringValue(body.taskId),
+          taskRunId: stringValue(body.taskRunId),
+          agentRunId,
+          sessionId: stringValue(body.sessionId),
+          repoId,
+          baseBranch: stringValue(body.baseBranch),
+          requestedBranchName: stringValue(body.requestedBranchName) ?? stringValue(body.branchName),
+          branchPurpose: isBranchPurpose(body.branchPurpose) ? body.branchPurpose : undefined,
+          targetFiles: stringArrayValue(body.targetFiles),
+          sourceScope: {
+            scopeKind: isAgentSessionSourceScopeKind(sourceScope.scopeKind) ? sourceScope.scopeKind : undefined,
+            paths: stringArrayValue(sourceScope.paths),
+            description: stringValue(sourceScope.description),
+            metadata: recordValue(sourceScope.metadata)
+          },
+          branchLeaseId: stringValue(body.branchLeaseId),
+          workspaceLeaseId: stringValue(body.workspaceLeaseId),
+          expiresAt: dateValue(body.expiresAt),
+          metadata: recordValue(body.metadata)
+        }, {
+          actorId: requestContext.authContext.actor.id,
+          principalId: requestContext.authContext.principal.id,
+          requestId: requestContext.requestId,
+          correlationId: requestContext.correlationId,
+          source: "api",
+          metadata: { authMode: requestContext.authContext.authMode }
+        });
+        const blocked = decision.decision === "blocked_collision" || decision.decision === "blocked_policy" || decision.decision === "blocked_same_workspace";
+        sendJson(response, decision.decision === "blocked_policy" ? 400 : blocked ? 409 : 201, {
+          decision: branchOrchestrationDecisionToDto(decision),
+          request: branchOrchestrationRequestToDto(branchOrchestratorService.getOrchestrationRequest(decision.requestId) ?? notFound("branch orchestration request", decision.requestId)),
+          summary: branchOrchestratorSummaryToDto(branchOrchestratorService.getSummary())
+        });
+        return;
+      }
+
+      if (segments[1] === "branches" && segments[2] === "orchestration") {
+        if (method === "GET" && segments.length === 3) {
+          const decisionFilter = url.searchParams.get("decision");
+          sendJson(response, 200, {
+            requests: branchOrchestratorService.listOrchestrationRequests({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              userId: url.searchParams.get("userId") ?? undefined,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              sessionId: url.searchParams.get("sessionId") ?? undefined,
+              decision: isBranchOrchestrationDecision(decisionFilter) ? decisionFilter : undefined
+            }).map(branchOrchestrationRequestToDto),
+            decisions: branchOrchestratorService.listOrchestrationDecisions({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              userId: url.searchParams.get("userId") ?? undefined,
+              taskId: url.searchParams.get("taskId") ?? undefined,
+              sessionId: url.searchParams.get("sessionId") ?? undefined,
+              decision: isBranchOrchestrationDecision(decisionFilter) ? decisionFilter : undefined
+            }).map(branchOrchestrationDecisionToDto)
+          });
+          return;
+        }
+        if (method === "GET" && segments[3] === "summary") {
+          sendJson(response, 200, { summary: branchOrchestratorSummaryToDto(branchOrchestratorService.getSummary()) });
+          return;
+        }
+        if (method === "GET" && segments[3] === "policies") {
+          sendJson(response, 200, { policies: branchOrchestratorService.listNamingPolicies().map(branchNamingPolicyToDto) });
+          return;
+        }
+        if (method === "GET" && segments[3] === "audit") {
+          sendJson(response, 200, {
+            auditEvents: branchOrchestratorService.listAuditEvents({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              branchName: url.searchParams.get("branchName") ?? undefined,
+              requestId: url.searchParams.get("requestId") ?? undefined
+            }).map(branchOrchestratorAuditEventToDto)
+          });
+          return;
+        }
+        if (method === "GET" && segments[3]) {
+          const id = segments[3];
+          const requestRecord = branchOrchestratorService.getOrchestrationRequest(id);
+          const decision = branchOrchestratorService.getOrchestrationDecision(id);
+          if (!requestRecord && !decision) notFound("branch orchestration record", id);
+          sendJson(response, 200, {
+            request: requestRecord ? branchOrchestrationRequestToDto(requestRecord) : undefined,
+            decision: decision ? branchOrchestrationDecisionToDto(decision) : undefined
+          });
+          return;
+        }
+      }
+
+      if (segments[1] === "branches" && segments[2] === "ownership" && method === "GET") {
+        const status = url.searchParams.get("status");
+        sendJson(response, 200, {
+          ownershipRecords: branchOrchestratorService.listBranchOwnershipRecords({
+            repoId: url.searchParams.get("repoId") ?? undefined,
+            userId: url.searchParams.get("userId") ?? undefined,
+            taskId: url.searchParams.get("taskId") ?? undefined,
+            taskRunId: url.searchParams.get("taskRunId") ?? undefined,
+            agentRunId: url.searchParams.get("agentRunId") ?? undefined,
+            sessionId: url.searchParams.get("sessionId") ?? undefined,
+            branchName: url.searchParams.get("branchName") ?? undefined,
+            status: isBranchOwnershipStatus(status) ? status : undefined
+          }).map(branchOwnershipRecordToDto)
+        });
+        return;
+      }
+
+      if (segments[1] === "branches" && segments[2] === "drift" && method === "GET") {
+        const status = url.searchParams.get("status");
+        sendJson(response, 200, {
+          driftStatuses: branchOrchestratorService.listBaseBranchDrift({
+            repoId: url.searchParams.get("repoId") ?? undefined,
+            branchName: url.searchParams.get("branchName") ?? undefined,
+            status: isBaseBranchDriftStatus(status) ? status : undefined
+          }).map(baseBranchDriftStatusToDto)
+        });
+        return;
+      }
 
       if (segments[1] === "github-app") {
         if (method === "GET" && segments.length === 3 && segments[2] === "config") {
@@ -6290,15 +7263,19 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
   const tenantScopeEnforcementService = createTenantScopeEnforcementService();
   const agentRunnerConfig = createAgentRunnerConfigFromEnv();
   const agentRunnerRepositories = createInMemoryAgentRunnerRepositories();
+  const agentRunnerWorkspaceManager = new LocalAgentWorkspaceManager({
+    workspaceRoot: agentRunnerConfig.workspaceRoot,
+    workspaceRepository: agentRunnerRepositories.workspaceRepository
+  });
+  const agentWorkspaceLifecycleService = new AgentWorkspaceLifecycleService({
+    workspaceManager: agentRunnerWorkspaceManager
+  });
   const agentRunner = agentRunnerConfig.runnerKind === "mock"
     ? new MockAgentRunner(llmGatewayService)
     : createAgentRunnerFromConfig(agentRunnerConfig, {
       llmGateway: llmGatewayService,
       commandResultRepository: agentRunnerRepositories.commandExecutionResultRepository,
-      workspaceManager: new LocalAgentWorkspaceManager({
-        workspaceRoot: agentRunnerConfig.workspaceRoot,
-        workspaceRepository: agentRunnerRepositories.workspaceRepository
-      })
+      workspaceManager: agentRunnerWorkspaceManager
     });
   const agentRunnerService = new AgentRunnerService({
     runner: agentRunner,
@@ -6308,8 +7285,143 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     instructionAssemblyRepository: agentRunnerRepositories.instructionAssemblyRepository,
     commandExecutionResultRepository: agentRunnerRepositories.commandExecutionResultRepository,
     workspaceRepository: agentRunnerRepositories.workspaceRepository,
+    workspaceLifecycleService: agentWorkspaceLifecycleService,
     policyService,
     securityService
+  });
+  const agentRunCoordinationService = new AgentRunCoordinationService({
+    repository: new InMemoryAgentRunCoordinationRepository(),
+    branchLeaseLookup: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+    workspaceLookup: (workspaceLeaseId) => agentRunnerService.getWorkspaceLease(workspaceLeaseId)
+  });
+  const branchOrchestratorService = new BranchOrchestratorService({
+    repository: new InMemoryBranchOrchestratorRepository(),
+    repoLookup: (repoId) => store.getRepo(repoId),
+    branchLeaseLookup: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+    activeBranchLeaseLookup: (repoId, branchName) => store.listBranchLeases(repoId, "active").filter((lease) => lease.branchName === branchName),
+    branchLeaseCreator: (input) => store.createBranchLease(input),
+    workspaceLeaseLookup: (workspaceLeaseId) => agentRunnerService.getWorkspaceLease(workspaceLeaseId),
+    sessionLookup: (query) => agentRunCoordinationService.listSessions({ repoId: query.repoId })
+      .filter((session) => query.branchName === undefined || session.branchName === query.branchName)
+      .map((session) => ({
+        id: session.id,
+        repoId: session.repoId,
+        branchName: session.branchName,
+        agentRunId: session.agentRunId,
+        status: session.status,
+        workspaceLeaseId: session.workspaceLeaseId
+      })),
+    mergeQueueLookup: (query) => store.listMergeQueueEntries(query.repoId)
+      .filter((entry) =>
+        (query.branchLeaseId === undefined || entry.branchLeaseId === query.branchLeaseId) &&
+        (query.branchName === undefined || entry.branchName === query.branchName) &&
+        (query.taskRunId === undefined || entry.taskRunId === query.taskRunId))
+  });
+  const editIntentGraphService = new EditIntentGraphService();
+  const mergeQueuePolicyService = new MergeQueuePolicyService({
+    dataSource: store,
+    workspaceSnapshotProvider: (entry, lease) => agentRunnerService.listWorkspaceLeases({ branchLeaseId: lease?.id ?? entry.branchLeaseId })
+      .map((workspace) => ({
+        id: workspace.id,
+        repoId: workspace.repoId,
+        branchLeaseId: workspace.branchLeaseId,
+        taskRunId: workspace.taskRunId,
+        branchName: workspace.branchName,
+        status: workspace.status,
+        isolationStatus: workspace.isolationStatus,
+        workspaceKind: workspace.workspaceKind,
+        updatedAt: workspace.updatedAt,
+        metadata: {
+          workspacePathRedacted: true,
+          metadataOnly: true
+        }
+      })),
+    editOverlapProvider: (entry, lease) => {
+      const sessions = agentRunCoordinationService.listSessions({ repoId: entry.repoId })
+        .filter((session) =>
+          session.branchLeaseId === (lease?.id ?? entry.branchLeaseId) ||
+          session.taskRunId === entry.taskRunId ||
+          session.branchName === entry.branchName);
+      const sessionIds = new Set(sessions.map((session) => session.id));
+      const coordinationOverlaps = [...sessionIds].flatMap((sessionId) =>
+        agentRunCoordinationService.listSessionOverlaps({ repoId: entry.repoId, sessionId })
+          .map((overlap) => ({
+            id: overlap.id,
+            repoId: overlap.repoId,
+            sessionAId: overlap.sessionAId,
+            sessionBId: overlap.sessionBId,
+            overlapKind: overlap.overlapKind,
+            files: overlap.files,
+            severity: overlap.severity,
+            recommendation: overlap.recommendation,
+            metadata: { source: "agent_run_coordination" }
+          })));
+      const editIntentOverlaps = [...sessionIds].flatMap((sessionId) =>
+        editIntentGraphService.listOverlapAssessments({ repoId: entry.repoId, sessionId })
+          .map((overlap) => ({
+            id: overlap.id,
+            repoId: overlap.repoId,
+            sessionAId: overlap.sessionIds[0] ?? sessionId,
+            sessionBId: overlap.sessionIds[1] ?? sessionId,
+            overlapKind: overlap.overlapKind,
+            files: overlap.files,
+            severity: overlap.severity,
+            recommendation: overlap.recommendation,
+            metadata: { source: "edit_intent_graph", reason: overlap.reason }
+          })));
+      const byId = new Map([...coordinationOverlaps, ...editIntentOverlaps].map((overlap) => [overlap.id, overlap]));
+      return [...byId.values()];
+    },
+    policyEvaluator: (input) => {
+      const decision = policyService.evaluate({
+        subject: createPolicySubject({
+          actorId: input.context.actorId,
+          actorKind: "system",
+          roles: ["system", "reviewer", "developer"],
+          serviceAccountId: input.context.serviceAccountId,
+          requestId: input.context.requestId,
+          correlationId: input.context.correlationId,
+          source: "merge_queue_policy_service",
+          metadata: { metadataOnly: true }
+        }),
+        action: input.action,
+        resource: createPolicyResource({
+          resourceKind: "merge_queue",
+          resourceId: input.entry?.id,
+          scopeKind: "repo",
+          scopeId: input.entry?.repoId ?? input.lease?.repoId,
+          metadata: input.metadata
+        }),
+        context: createPolicyContext({
+          taskId: input.entry?.taskId ?? input.lease?.taskId,
+          taskRunId: input.entry?.taskRunId ?? input.lease?.taskRunId,
+          repoId: input.entry?.repoId ?? input.lease?.repoId,
+          branchName: input.entry?.branchName ?? input.lease?.branchName,
+          riskScore: typeof input.metadata.riskScore === "number" ? input.metadata.riskScore : undefined,
+          environment: {
+            metadataOnly: true,
+            realMergeExecution: false,
+            remoteGitOperation: false,
+            autoMergeEnabled: false,
+            branchDeletionEnabled: false,
+            secretsExposed: false,
+            envValuesExposed: false
+          },
+          metadata: {
+            ...input.metadata,
+            requestId: input.context.requestId,
+            correlationId: input.context.correlationId
+          }
+        })
+      });
+      return {
+        allowed: decision.allowed,
+        decision: decision.decision,
+        reason: decision.reason,
+        policyDecisionId: decision.id,
+        matchedRuleIds: decision.matchedRuleIds
+      };
+    }
   });
   const observabilityService = createObservabilityService({
     sourceProvider: () => ({
@@ -6335,6 +7447,7 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       store,
       storageProvider: storage,
       gitIntegrationService,
+      branchOrchestratorService,
       gitProviderConfig: git.config,
       githubAppRuntimeService,
       githubAppRuntimeConfig: git.config.githubApp ?? createGitHubAppRuntimeConfigFromEnv(process.env),
@@ -6342,6 +7455,9 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       gitWebhookConfig: gitWebhook.config,
       llmGatewayService,
       agentRunnerService,
+      agentRunCoordinationService,
+      mergeQueuePolicyService,
+      editIntentGraphService,
       agentRunnerConfig,
       registryService,
       improvementServices,

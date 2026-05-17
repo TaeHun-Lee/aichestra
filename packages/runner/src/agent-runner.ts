@@ -166,6 +166,7 @@ export type AgentRunExecutionResult = {
   auditEventIds: string[];
   commandExecutionResultIds: string[];
   workspaceId?: string;
+  workspaceLeaseId?: string;
   createdAt: Date;
   completedAt?: Date;
   metadata: Record<string, unknown>;
@@ -228,6 +229,7 @@ export type AgentRunResult = {
   llmGatewayRequestIds?: string[];
   usageLedgerEntryIds?: string[];
   auditEventIds?: string[];
+  workspaceLeaseId?: string;
 };
 
 export type AgentRunner = {

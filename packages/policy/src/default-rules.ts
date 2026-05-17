@@ -527,6 +527,90 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_merge_queue_read_allow_mock_v2",
+      name: "Allow merge queue policy reads",
+      description: "Merge queue policy metadata may be read in the mock-first scaffold without merge execution.",
+      effect: "allow",
+      action: "merge_queue.read",
+      resourceKind: "merge_queue",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          realMergeExecution: false,
+          remoteGitOperation: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_merge_queue_evaluate_allow_mock_v2",
+      name: "Allow merge queue policy evaluation",
+      description: "Merge queue policy evaluation is metadata-only and must not execute merges or remote Git operations.",
+      effect: "allow",
+      action: "merge_queue.evaluate",
+      resourceKind: "merge_queue",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          realMergeExecution: false,
+          remoteGitOperation: false,
+          autoMergeEnabled: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_merge_queue_hold_allow_mock_v2",
+      name: "Allow merge queue holds",
+      description: "Merge queue holds may record safe local metadata without executing Git operations.",
+      effect: "allow",
+      action: "merge_queue.hold",
+      resourceKind: "merge_queue",
+      conditions: {
+        subjectRolesAny: ["reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          realMergeExecution: false,
+          remoteGitOperation: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_merge_queue_release_hold_allow_mock_v2",
+      name: "Allow merge queue hold release",
+      description: "Merge queue hold release only updates safe local metadata and requires re-evaluation before readiness.",
+      effect: "allow",
+      action: "merge_queue.release_hold",
+      resourceKind: "merge_queue",
+      conditions: {
+        subjectRolesAny: ["reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          realMergeExecution: false,
+          remoteGitOperation: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_merge_queue_merge_execute_future_deny_v2",
+      name: "Deny merge queue future merge execution",
+      description: "Merge Queue Policy v2 never executes merges, auto-merge, provider merge, rebase, force-push, or branch deletion.",
+      effect: "deny",
+      action: "merge_queue.merge_execute_future",
+      resourceKind: "merge_queue",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
       id: "policy_git_merge_deny",
       name: "Deny Git merge",
       description: "Provider merge is not implemented in Real Git Adapter v0.",
@@ -1143,6 +1227,39 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       enabled: true
     },
     {
+      id: "policy_local_cli_credential_cache_read_deny",
+      name: "Deny local CLI credential cache reads",
+      description: "Local CLI templates must not read vendor credential caches.",
+      effect: "deny",
+      action: "local_cli.credential_cache.read",
+      resourceKind: "local_cli",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_local_cli_secret_forward_deny",
+      name: "Deny local CLI secret forwarding",
+      description: "Secrets must not be forwarded into local CLI provider processes.",
+      effect: "deny",
+      action: "local_cli.secret.forward",
+      resourceKind: "local_cli",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_local_cli_execute_deny",
+      name: "Deny local CLI execution",
+      description: "Vendor CLI execution is not implemented in Local CLI Provider Templates v1.",
+      effect: "deny",
+      action: "local_cli.execute",
+      resourceKind: "local_cli",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
       id: "policy_local_cli_direct_invoke_deny",
       name: "Deny direct local CLI execution",
       description: "Aichestra Cloud must not execute local CLI providers directly.",
@@ -1151,6 +1268,21 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       resourceKind: "local_cli",
       conditions: {},
       priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_local_cli_template_read_allow_safe",
+      name: "Allow safe local CLI template reads",
+      description: "Read-only local CLI template metadata can be displayed when it contains no secret or env values.",
+      effect: "allow",
+      action: "local_cli.template.read",
+      resourceKind: "local_cli",
+      conditions: {
+        metadataEquals: {
+          secretOrEnvValuesExposed: false
+        }
+      },
+      priority: 200,
       enabled: true
     },
     {

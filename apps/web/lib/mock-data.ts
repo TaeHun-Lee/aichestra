@@ -1,9 +1,26 @@
 import { createSeededStore } from "@aichestra/db";
-import { GitHubGitProvider, GitIntegrationService, MockGitProvider } from "@aichestra/git-adapter";
+import { MergeQueuePolicyService } from "@aichestra/core";
+import { BranchOrchestratorService, GitHubGitProvider, GitIntegrationService, MockGitProvider } from "@aichestra/git-adapter";
 import { LocalAgentProtocolService, OpenAICompatibleLLMProvider, ProviderAbstractionService, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
 import { PolicyService, createPolicyContext, createPolicyResource, createPolicySubject } from "@aichestra/policy";
 import { PolicyBackedRegistryMutationAuthorizer, createRegistryService } from "@aichestra/registry";
-import { AgentRunnerService, MockAgentRunner, agentRunnerConfigToDto, createAgentRunnerConfigFromEnv } from "@aichestra/runner";
+import {
+  AgentRunCoordinationService,
+  AgentRunnerService,
+  EditIntentGraphService,
+  MockAgentRunner,
+  editIntentGraphToDto,
+  editIntentOverlapSummaryToDto,
+  editIntentToDto,
+  editOverlapAssessmentToDto,
+  fileLeaseToDto,
+  agentRunnerConfigToDto,
+  agentWorkspaceCleanupDecisionToDto,
+  agentWorkspaceLeaseToDto,
+  agentWorkspaceLifecycleEventToDto,
+  agentWorkspaceToDto,
+  createAgentRunnerConfigFromEnv
+} from "@aichestra/runner";
 import { SecurityControlService } from "@aichestra/security";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
 import { createImprovementDemoData } from "./improvement-demo.ts";
@@ -153,6 +170,199 @@ export async function getDashboardData() {
       allowedCommands: ["git push origin main"]
     })
     : undefined;
+  const dashboardWorkspaceLease = agentRunnerRun?.workspaceLeaseId
+    ? agentRunnerService.getWorkspaceLease(agentRunnerRun.workspaceLeaseId)
+    : undefined;
+  if (dashboardWorkspaceLease && agentRunnerRun) {
+    agentRunnerService.requestWorkspaceLeaseCleanup(dashboardWorkspaceLease.id, {
+      actorId: task.requesterUserId,
+      metadata: { source: "dashboard" }
+    });
+    agentRunnerService.evaluateWorkspaceLeaseCleanup(dashboardWorkspaceLease.id, {
+      changedFiles: agentRunnerRun.changedFiles,
+      mergeStatus: "unmerged",
+      reason: "dashboard_fixture_workspace_retained_for_review"
+    }, {
+      actorId: task.requesterUserId,
+      metadata: { source: "dashboard" }
+    });
+  }
+  const agentRunCoordinationService = new AgentRunCoordinationService({
+    branchLeaseLookup: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+    workspaceLookup: (workspaceLeaseId) => agentRunnerService.getWorkspaceLease(workspaceLeaseId)
+  });
+  const branchOrchestratorService = new BranchOrchestratorService({
+    repoLookup: (repoId) => store.getRepo(repoId),
+    branchLeaseLookup: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+    activeBranchLeaseLookup: (repoId, branchName) => store.listBranchLeases(repoId, "active").filter((lease) => lease.branchName === branchName),
+    branchLeaseCreator: (input) => store.createBranchLease(input),
+    workspaceLeaseLookup: (workspaceLeaseId) => agentRunnerService.getWorkspaceLease(workspaceLeaseId),
+    sessionLookup: (query) => agentRunCoordinationService.listSessions({ repoId: query.repoId })
+      .filter((session) => query.branchName === undefined || session.branchName === query.branchName)
+      .map((session) => ({
+        id: session.id,
+        repoId: session.repoId,
+        branchName: session.branchName,
+        agentRunId: session.agentRunId,
+        status: session.status,
+        workspaceLeaseId: session.workspaceLeaseId
+      })),
+    mergeQueueLookup: (query) => store.listMergeQueueEntries(query.repoId)
+      .filter((entry) =>
+        (query.branchLeaseId === undefined || entry.branchLeaseId === query.branchLeaseId) &&
+        (query.branchName === undefined || entry.branchName === query.branchName) &&
+        (query.taskRunId === undefined || entry.taskRunId === query.taskRunId))
+  });
+  if (agentRunnerRun) {
+    const sharedWorkspaceLeaseId = agentRunnerRun.workspaceLeaseId ?? dashboardWorkspaceLease?.id;
+    agentRunCoordinationService.registerSession({
+      userId: task.requesterUserId,
+      actorId: task.requesterUserId,
+      taskId: task.id,
+      taskRunId: latestTaskRun?.id,
+      agentRunId: agentRunnerRun.id,
+      repoId: task.repoId,
+      branchLeaseId: gitBranch.branchLease?.id,
+      workspaceLeaseId: sharedWorkspaceLeaseId,
+      baseBranch: task.baseBranch,
+      branchName: gitBranch.branch?.branchName ?? "codex/fix-login-timeout",
+      targetFiles: ["src/auth/session.ts", "tests/auth/session.test.ts"],
+      sourceScope: { scopeKind: "directory", paths: ["src/auth"], metadata: { source: "dashboard" } },
+      status: "running",
+      metadata: { source: "dashboard", noAgentExecution: true }
+    });
+    agentRunCoordinationService.registerSession({
+      userId: "user_dashboard_parallel",
+      actorId: "user_dashboard_parallel",
+      taskId: overlappingTask.id,
+      agentRunId: "agentrun_dashboard_parallel_session",
+      repoId: task.repoId,
+      workspaceLeaseId: sharedWorkspaceLeaseId,
+      baseBranch: task.baseBranch,
+      branchName: "codex/parallel-auth-session",
+      targetFiles: ["src/auth/session.ts", "src/auth/token.ts"],
+      sourceScope: { scopeKind: "directory", paths: ["src/auth"], metadata: { source: "dashboard" } },
+      status: "running",
+      metadata: { source: "dashboard", noAgentExecution: true }
+    });
+    const primaryBranchDecision = branchOrchestratorService.allocateBranch({
+      userId: task.requesterUserId,
+      actorId: task.requesterUserId,
+      taskId: task.id,
+      taskRunId: latestTaskRun?.id,
+      agentRunId: agentRunnerRun.id,
+      sessionId: "agentsession_dashboard_primary",
+      repoId: task.repoId,
+      baseBranch: task.baseBranch,
+      branchPurpose: "agent_work",
+      targetFiles: ["src/auth/session.ts", "tests/auth/session.test.ts"],
+      sourceScope: { scopeKind: "directory", paths: ["src/auth"], metadata: { source: "dashboard" } },
+      workspaceLeaseId: sharedWorkspaceLeaseId,
+      metadata: { source: "dashboard", currentBaseBranch: task.baseBranch, noRealGit: true }
+    });
+    branchOrchestratorService.markReadyForReview(primaryBranchDecision.branchName, {
+      actorId: task.requesterUserId,
+      source: "dashboard",
+      metadata: { mergeReadiness: "review_pending" }
+    });
+    branchOrchestratorService.allocateBranch({
+      userId: "user_dashboard_parallel",
+      actorId: "user_dashboard_parallel",
+      taskId: overlappingTask.id,
+      taskRunId: store.listTaskRuns(overlappingTask.id).at(-1)?.id,
+      agentRunId: "agentrun_dashboard_branch_collision",
+      sessionId: "agentsession_dashboard_collision",
+      repoId: task.repoId,
+      baseBranch: task.baseBranch,
+      requestedBranchName: primaryBranchDecision.branchName,
+      branchPurpose: "agent_work",
+      targetFiles: ["src/auth/session.ts"],
+      sourceScope: { scopeKind: "file", paths: ["src/auth/session.ts"], metadata: { source: "dashboard" } },
+      metadata: { source: "dashboard", noRealGit: true }
+    });
+    branchOrchestratorService.allocateBranch({
+      userId: "user_dashboard_workspace",
+      actorId: "user_dashboard_workspace",
+      taskId: overlappingTask.id,
+      agentRunId: "agentrun_dashboard_same_workspace",
+      sessionId: "agentsession_dashboard_same_workspace",
+      repoId: task.repoId,
+      baseBranch: task.baseBranch,
+      requestedBranchName: "aichestra/demo-backend/workspace-collision-check",
+      branchPurpose: "agent_work",
+      targetFiles: ["src/auth/token.ts"],
+      sourceScope: { scopeKind: "file", paths: ["src/auth/token.ts"], metadata: { source: "dashboard" } },
+      workspaceLeaseId: sharedWorkspaceLeaseId,
+      metadata: { source: "dashboard", noRealGit: true }
+    });
+    branchOrchestratorService.allocateBranch({
+      userId: "user_dashboard_drift",
+      actorId: "user_dashboard_drift",
+      taskId: task.id,
+      agentRunId: "agentrun_dashboard_base_drift",
+      sessionId: "agentsession_dashboard_base_drift",
+      repoId: task.repoId,
+      baseBranch: task.baseBranch,
+      requestedBranchName: "aichestra/demo-backend/base-drift-check",
+      branchPurpose: "review_fixup",
+      targetFiles: ["src/auth/session.ts"],
+      sourceScope: { scopeKind: "file", paths: ["src/auth/session.ts"], metadata: { source: "dashboard" } },
+      metadata: { source: "dashboard", currentBaseBranch: "develop", noRealGit: true }
+    });
+  }
+  const editIntentGraphService = new EditIntentGraphService();
+  editIntentGraphService.declareIntent({
+    repoId: task.repoId,
+    sessionId: "session_dashboard_primary",
+    agentRunId: agentRunnerRun?.id,
+    taskId: task.id,
+    branchName: gitBranch.branch?.branchName ?? "codex/fix-login-timeout",
+    workspaceLeaseId: agentRunnerRun?.workspaceLeaseId,
+    intentKind: "modify",
+    filePaths: ["src/auth/session.ts", "tests/auth/session.test.ts"],
+    directoryScopes: ["src/auth"],
+    confidence: "high",
+    status: "active",
+    metadata: { source: "dashboard" }
+  });
+  editIntentGraphService.declareIntent({
+    repoId: task.repoId,
+    sessionId: "session_dashboard_parallel",
+    agentRunId: "agentrun_dashboard_parallel_session",
+    taskId: overlappingTask.id,
+    branchName: "codex/parallel-auth-session",
+    workspaceLeaseId: agentRunnerRun?.workspaceLeaseId,
+    intentKind: "refactor",
+    filePaths: ["src/auth/session.ts", "src/auth/token.ts"],
+    directoryScopes: ["src/auth"],
+    confidence: "medium",
+    status: "active",
+    metadata: { source: "dashboard", apiToken: "OPENAI_API_KEY=sk-test" }
+  });
+  editIntentGraphService.requestFileLease({
+    repoId: task.repoId,
+    filePath: "src/auth/session.ts",
+    leaseKind: "write_intent",
+    ownerSessionId: "session_dashboard_primary",
+    ownerAgentRunId: agentRunnerRun?.id,
+    ownerTaskId: task.id,
+    ownerActorId: task.requesterUserId,
+    branchName: gitBranch.branch?.branchName ?? "codex/fix-login-timeout",
+    workspaceLeaseId: agentRunnerRun?.workspaceLeaseId,
+    metadata: { source: "dashboard" }
+  });
+  editIntentGraphService.requestFileLease({
+    repoId: task.repoId,
+    filePath: "src/auth/session.ts",
+    leaseKind: "write_intent",
+    ownerSessionId: "session_dashboard_parallel",
+    ownerAgentRunId: "agentrun_dashboard_parallel_session",
+    ownerTaskId: overlappingTask.id,
+    ownerActorId: "user_dashboard_parallel",
+    branchName: "codex/parallel-auth-session",
+    workspaceLeaseId: agentRunnerRun?.workspaceLeaseId,
+    metadata: { source: "dashboard" }
+  });
   const llmCompletion = latestTaskRun
     ? await llmService.routeCompletion({
       taskId: task.id,
@@ -323,6 +533,107 @@ export async function getDashboardData() {
   });
   providerAbstractionService.getCredentialReference("claude-code-local");
   providerAbstractionService.getCredentialReference("anthropic-api-key");
+  const mergeQueuePolicyService = new MergeQueuePolicyService({
+    dataSource: store,
+    workspaceSnapshotProvider: (entry, lease) => agentRunnerService.listWorkspaceLeases({ branchLeaseId: lease?.id ?? entry.branchLeaseId })
+      .map((workspace) => ({
+        id: workspace.id,
+        repoId: workspace.repoId,
+        branchLeaseId: workspace.branchLeaseId,
+        taskRunId: workspace.taskRunId,
+        branchName: workspace.branchName,
+        status: workspace.status,
+        isolationStatus: workspace.isolationStatus,
+        workspaceKind: workspace.workspaceKind,
+        updatedAt: workspace.updatedAt,
+        metadata: { workspacePathRedacted: true, metadataOnly: true }
+      })),
+    editOverlapProvider: (entry, lease) => {
+      const sessions = agentRunCoordinationService.listSessions({ repoId: entry.repoId })
+        .filter((session) =>
+          session.branchLeaseId === (lease?.id ?? entry.branchLeaseId) ||
+          session.taskRunId === entry.taskRunId ||
+          session.branchName === entry.branchName);
+      const sessionIds = new Set(sessions.map((session) => session.id));
+      const coordinationOverlaps = [...sessionIds].flatMap((sessionId) =>
+        agentRunCoordinationService.listSessionOverlaps({ repoId: entry.repoId, sessionId })
+          .map((overlap) => ({
+            id: overlap.id,
+            repoId: overlap.repoId,
+            sessionAId: overlap.sessionAId,
+            sessionBId: overlap.sessionBId,
+            overlapKind: overlap.overlapKind,
+            files: overlap.files,
+            severity: overlap.severity,
+            recommendation: overlap.recommendation,
+            metadata: { source: "agent_run_coordination" }
+          })));
+      const editIntentOverlaps = [...sessionIds].flatMap((sessionId) =>
+        editIntentGraphService.listOverlapAssessments({ repoId: entry.repoId, sessionId })
+          .map((overlap) => ({
+            id: overlap.id,
+            repoId: overlap.repoId,
+            sessionAId: overlap.sessionIds[0] ?? sessionId,
+            sessionBId: overlap.sessionIds[1] ?? sessionId,
+            overlapKind: overlap.overlapKind,
+            files: overlap.files,
+            severity: overlap.severity,
+            recommendation: overlap.recommendation,
+            metadata: { source: "edit_intent_graph", reason: overlap.reason }
+          })));
+      return [...new Map([...coordinationOverlaps, ...editIntentOverlaps].map((overlap) => [overlap.id, overlap])).values()];
+    },
+    policyEvaluator: (input) => {
+      const decision = policyService.evaluate({
+        subject: createPolicySubject({
+          actorId: input.context.actorId ?? "mock-dashboard",
+          actorKind: "system",
+          roles: ["system", "reviewer", "developer"],
+          serviceAccountId: input.context.serviceAccountId,
+          requestId: input.context.requestId,
+          correlationId: input.context.correlationId,
+          source: "dashboard_merge_queue_policy"
+        }),
+        action: input.action,
+        resource: createPolicyResource({
+          resourceKind: "merge_queue",
+          resourceId: input.entry?.id,
+          metadata: input.metadata
+        }),
+        context: createPolicyContext({
+          taskId: input.entry?.taskId ?? input.lease?.taskId,
+          taskRunId: input.entry?.taskRunId ?? input.lease?.taskRunId,
+          repoId: input.entry?.repoId ?? input.lease?.repoId,
+          branchName: input.entry?.branchName ?? input.lease?.branchName,
+          riskScore: typeof input.metadata.riskScore === "number" ? input.metadata.riskScore : undefined,
+          environment: {
+            metadataOnly: true,
+            realMergeExecution: false,
+            remoteGitOperation: false,
+            autoMergeEnabled: false,
+            branchDeletionEnabled: false,
+            secretsExposed: false,
+            envValuesExposed: false
+          },
+          metadata: { ...input.metadata, source: "dashboard" }
+        })
+      });
+      return {
+        allowed: decision.allowed,
+        decision: decision.decision,
+        reason: decision.reason,
+        policyDecisionId: decision.id,
+        matchedRuleIds: decision.matchedRuleIds
+      };
+    }
+  });
+  const mergeQueuePolicyPreview = mergeQueuePolicyService.previewQueue("repo_demo_backend", {
+    actorId: "mock-dashboard",
+    serviceAccountId: "dashboard_read_model",
+    validationStatus: "passed",
+    approvalStatus: "approved",
+    metadata: { source: "dashboard", releaseBlocker: true }
+  });
   const improvement = createImprovementDemoData();
 
   return {
@@ -341,6 +652,9 @@ export async function getDashboardData() {
     conflictRisks: store.computeRepoConflictRisks("repo_demo_backend"),
     mergeQueue: store.listMergeQueueEntries("repo_demo_backend"),
     mergeSimulations: store.listMergeSimulations({ repoId: "repo_demo_backend" }),
+    mergeQueuePolicy: mergeQueuePolicyPreview.policy,
+    mergeReadinessDecisions: mergeQueuePolicyPreview.decisions,
+    mergeQueueHolds: mergeQueuePolicyPreview.holds,
     skills: store.listSkills(),
     harnesses: store.listHarnesses(),
     instructions: store.listInstructions(),
@@ -362,8 +676,17 @@ export async function getDashboardData() {
       taskRunId: entry.taskRunId,
       mergeQueueEntryId: entry.id,
       pullRequestId: entry.pullRequestId,
-      recommendation: entry.recommendation
+      recommendation: entry.recommendation,
+      policyDecision: mergeQueuePolicyPreview.decisions.find((decision) => decision.queueEntryId === entry.id)?.decision ?? "not_evaluated",
+      mergeExecutionEnabled: false
     })),
+    branchOrchestrationRequests: branchOrchestratorService.listOrchestrationRequests(),
+    branchOrchestrationDecisions: branchOrchestratorService.listOrchestrationDecisions(),
+    branchOwnershipRecords: branchOrchestratorService.listBranchOwnershipRecords(),
+    branchDriftStatuses: branchOrchestratorService.listBaseBranchDrift(),
+    branchNamingPolicies: branchOrchestratorService.listNamingPolicies(),
+    branchOrchestratorAuditEvents: branchOrchestratorService.listAuditEvents(),
+    branchOrchestratorSummary: branchOrchestratorService.getSummary(),
     gitAuditEvents: gitService.listGitAuditEvents(),
     gitRemoteAuditEvents: gitService.listGitAuditEvents().filter((event) => event.action.includes("github_") || event.action.includes("remote_git")),
     remoteBlockedOperation,
@@ -385,7 +708,21 @@ export async function getDashboardData() {
     agentInstructionAssemblies: agentRunnerService.listInstructionAssemblies(),
     agentExecutors: agentRunnerService.listExecutors(),
     agentCommandResults: agentRunnerService.listCommandResults(),
-    agentWorkspaces: agentRunnerService.listWorkspaces(),
+    agentWorkspaces: agentRunnerService.listWorkspaces().map(agentWorkspaceToDto),
+    agentWorkspaceLeases: agentRunnerService.listWorkspaceLeases().map(agentWorkspaceLeaseToDto),
+    agentWorkspaceLifecycleEvents: agentRunnerService.listWorkspaceLifecycleEvents().map(agentWorkspaceLifecycleEventToDto),
+    agentWorkspaceCleanupDecisions: agentRunnerService.listWorkspaceCleanupDecisions().map(agentWorkspaceCleanupDecisionToDto),
+    agentCoordinationSessions: agentRunCoordinationService.listSessions(),
+    agentCoordinationGroups: agentRunCoordinationService.listCoordinationGroups(),
+    agentSessionOverlaps: agentRunCoordinationService.listSessionOverlaps(),
+    agentConcurrencyPolicies: agentRunCoordinationService.listConcurrencyPolicies(),
+    agentCoordinationAuditEvents: agentRunCoordinationService.listAuditEvents(),
+    agentCoordinationSummary: agentRunCoordinationService.getSummary(),
+    agentEditIntents: editIntentGraphService.listIntents().map(editIntentToDto),
+    agentFileLeases: editIntentGraphService.listLeases().map(fileLeaseToDto),
+    agentEditIntentGraph: editIntentGraphToDto(editIntentGraphService.listGraph({ repoId: task.repoId })),
+    agentEditOverlapAssessments: editIntentGraphService.listOverlapAssessments().map(editOverlapAssessmentToDto),
+    agentEditIntentSummary: editIntentOverlapSummaryToDto(editIntentGraphService.getOverlapSummary(task.repoId)),
     blockedCommandExample,
     localRunnerBlockedExample: await agentRunnerService.validateEnvironment({
       taskId: task.id,

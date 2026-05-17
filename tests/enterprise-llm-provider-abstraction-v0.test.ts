@@ -116,12 +116,15 @@ test("provider catalog lists disabled skeleton providers with billing and Local 
   assert.deepEqual(ids.includes("codex-cli-local"), true);
   assert.deepEqual(ids.includes("gemini-api-key"), true);
   assert.deepEqual(ids.includes("gemini-cli-local"), true);
+  assert.deepEqual(ids.includes("aider-local"), true);
+  assert.deepEqual(ids.includes("custom-local-cli"), true);
   assert.deepEqual(ids.includes("vertex-gemini-cloud"), true);
   assert.deepEqual(ids.includes("bedrock-anthropic-cloud"), true);
   assert.deepEqual(ids.includes("azure-foundry-cloud"), true);
   assert.equal(providers.some((provider) => provider.defaultEnabled), false);
-  assert.equal(localCli?.billingMode, "local_user_session");
+  assert.equal(localCli?.billingMode, "user_subscription_future");
   assert.equal(localCli?.metadata.localAgentRequired, true);
+  assert.equal(localCli?.metadata.directExecutionEnabled, false);
 });
 
 test("credential manager and token resolver never read provider credential caches or return raw tokens", () => {
@@ -212,7 +215,7 @@ test("provider output parsers normalize raw/json/jsonl/ndjson and redact sensiti
 
 test("local CLI config and Local Agent boundary fail closed", async () => {
   const service = new ProviderAbstractionService();
-  const template = service.listLocalCliTemplates().find((item) => item.id === "codex-cli-jsonl");
+  const template = service.listLocalCliProviderConfigs().find((item) => item.id === "codex-cli-jsonl");
   assert.ok(template);
   assert.equal(validateLocalCliProviderConfig(template).ok, true);
 
@@ -342,8 +345,9 @@ test("provider API exposes catalog, validation, templates, blocked invocation, a
     const authTypes = await getJson(address.port, "/providers/auth-types") as { authTypes: string[] };
     assert.equal(authTypes.authTypes.includes("external_cli_session"), true);
 
-    const templates = await getJson(address.port, "/providers/local-cli/templates") as { templates: { id: string }[] };
-    assert.equal(templates.templates.some((template) => template.id === "codex-cli-jsonl"), true);
+    const templates = await getJson(address.port, "/providers/local-cli/templates") as { templates: { id: string; providerId: string }[] };
+    assert.equal(templates.templates.some((template) => template.id === "codex-cli-template-v1"), true);
+    assert.equal(templates.templates.some((template) => template.providerId === "aider-local"), true);
 
     const invoke = await postJson(address.port, "/providers/invoke", {
       providerId: "claude-code-local",

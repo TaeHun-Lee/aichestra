@@ -49,6 +49,11 @@
 45. Policy Runtime Shadow Evaluation Planning v1 - implemented
 46. Production Auth Provider Skeleton v1 - implemented
 47. Phase 5 enterprise planning
+48. Local CLI Provider Templates v1 - implemented
+49. Agent Workspace Lifecycle v2 - implemented
+50. Multi-session Agent Run Coordination v1 - implemented
+51. Cross-session File Lease / Edit Intent Graph v1 - implemented
+52. Multi-user / Multi-session Branch Orchestrator v2 - implemented
 
 ## 1. Persistent DB Implementation v1
 
@@ -146,7 +151,7 @@ Goals:
 - Make Local CLI providers require Local Agent Protocol coordination.
 - Add redaction, parser, audit, and policy hook readiness before any real provider integration.
 
-Recommended next step: Secrets and Sandbox Design v0 and Local Agent Protocol v1 were completed after this milestone; no real daemon, provider secret, or vendor CLI work is enabled.
+Recommended next step: Secrets and Sandbox Design v0, Local Agent Protocol v1, and Local CLI Provider Templates v1 were completed after this milestone; no real daemon, provider secret, or vendor CLI work is enabled.
 
 ## 8. Secrets and Sandbox Design
 
@@ -747,3 +752,100 @@ Goals:
 - Real artifact registry.
 - Production RBAC.
 - Deployment and operational controls.
+
+## 48. Local CLI Provider Templates v1
+
+Implemented with `docs/features/local-cli-provider-templates/v1.md`, first-class metadata models in `packages/llm-gateway`, read-only provider API routes, Local Agent Protocol compatibility metadata, policy actions/rules, dashboard read models, and deterministic tests.
+
+Goals:
+
+- Define template-only Claude Code, OpenAI Codex CLI, Gemini CLI, Aider, and custom local CLI provider metadata.
+- Model required Local Agent capabilities, forbidden capabilities, parser expectations, compatibility rules, security constraints, and readiness.
+- Expose safe read-only API and dashboard surfaces.
+- Preserve `local_cli` as protocol-gated and disabled-by-default.
+- Keep direct execution, PTY automation, credential-cache reads, secret forwarding, real daemon behavior, external calls, and remote Git out of scope.
+
+Recommended next step: Local CLI Provider Integration-Test Profile v1, or Agent Workspace Lifecycle v2.
+
+## 49. Agent Workspace Lifecycle v2
+
+Implemented with `docs/features/agent-workspace-lifecycle/v2-plan.md`, `docs/features/agent-workspace-lifecycle/v2.md`, `packages/runner/src/workspace-lifecycle.ts`, runner service metadata linkage, safe `/agents/workspaces/*` API endpoints, dashboard/readiness visibility, DTO path/metadata sanitization, and deterministic tests.
+
+Goals:
+
+- Define per-AgentRun workspace leases with task, task run, repo, branch, optional `branchLeaseId`, workspace kind, lifecycle status, isolation status, owner attribution, and sanitized metadata.
+- Keep `BranchLease` and `AgentWorkspaceLease` separate: branch leases model Git/conflict scope, while workspace leases model per-agent-run filesystem isolation and cleanup eligibility.
+- Model future `git_worktree_future`, `clone_future`, and `remote_workspace_future` allocation without executing real worktree, clone, branch switch, merge, rebase, push, or cleanup commands.
+- Allow fixture-only allocation through existing workspace root validation.
+- Forbid/flag shared active workspace paths and keep one active workspace lease per AgentRun by default.
+- Expose cleanup decisions as metadata only, with dirty/uncommitted/unmerged/policy/manual-review blockers and no destructive deletion.
+- Surface active workspace leases, isolation state, branch lease linkage, lifecycle status, cleanup decisions, and explicit no-destructive-cleanup status in API/dashboard read models.
+- Preserve runtime safety: no remote Git, no vendor CLI execution, no LLM provider call, no credential-cache read, no secret/env exposure, no production deployment, and no weakening of Git, Runner, Local Agent, Auth/RBAC, Policy, SecretRef, Tenant Scope, Dashboard, Observability, or Safety gates.
+
+Recommended next step: Conflict Resolution Assistant v1, Merge Queue Live Integration-Test Profile v1, or Agent Worktree Allocation v1.
+
+## 50. Multi-session Agent Run Coordination v1
+
+Implemented with `docs/features/multi-session-agent-run-coordination/v1-plan.md`, `docs/features/multi-session-agent-run-coordination/v1.md`, `packages/runner/src/coordination.ts`, runner DTOs, metadata-only `/agents/sessions` and `/agents/coordination/*` API endpoints, dashboard visibility, and deterministic tests.
+
+Goals:
+
+- Define `AgentSession`, `AgentRunCoordinationGroup`, `AgentSessionOverlap`, and `AgentConcurrencyPolicy` models.
+- Group active sessions by repo, base branch, task/user metadata, and source scope.
+- Detect same workspace, same branch, same file, same directory, missing target files, and base branch drift using deterministic metadata only.
+- Link to `BranchLease` and Agent Workspace Lifecycle v2 `AgentWorkspaceLease` ids when available.
+- Recommend allow, warn, split files, serialize, require review, or block actions without mutating Git, workspaces, or merge queue entries.
+- Surface session coordination, overlap warnings, branch/workspace assignment, merge readiness counts, and no-destructive-action status in API/dashboard read models.
+- Preserve runtime safety: no agent execution, no remote Git, no branch/worktree creation, no branch switching, no vendor CLI execution, no LLM provider call, no credential-cache read, no secret/env exposure, and no weakening of Auth/RBAC, Policy, Git, LLM, Runner, Local Agent, Registry, Governance, Dashboard, Observability, Tenant Scope, or Secrets/Sandbox gates.
+
+Recommended next step: Conflict Resolution Assistant v1, Merge Queue Live Integration-Test Profile v1, or Agent Worktree Allocation v1.
+
+## 51. Cross-session File Lease / Edit Intent Graph v1
+
+Implemented with `docs/features/cross-session-file-lease-edit-intent/v1-plan.md`, `docs/features/cross-session-file-lease-edit-intent/v1.md`, `packages/runner/src/edit-intent.ts`, metadata-only `/agents/edit-intents`, `/agents/file-leases`, `/agents/edit-intent-graph`, `/agents/edit-overlaps`, and `/agents/edit-intent-summary` API endpoints, dashboard visibility, and deterministic tests.
+
+Goals:
+
+- Define `FileLease`, `EditIntent`, `EditIntentGraphNode`, `EditIntentGraphEdge`, and `EditOverlapAssessment` models.
+- Build deterministic session-to-file, file-to-session, directory, branch, workspace, and task graph metadata.
+- Detect same-file write intent, read/write overlap, same-directory overlap, broad refactor overlap, same-branch overlap, same-workspace blockers, and broad unknown target warnings.
+- Recommend allow, warn, split files, serialize, require review, or block without enforcing OS locks or merge queue state.
+- Integrate with existing session, branch, task, and workspace lease metadata through optional ids.
+- Surface active edit intents, file leases, graph counts, overlap assessments, recommendations, and no-file-lock/no-source-mutation status in API/dashboard/readiness metadata.
+- Preserve runtime safety: no OS-level file locks, no source file mutation, no remote Git, no branch/worktree creation, no branch switching, no vendor CLI execution, no LLM provider call, no credential-cache read, no secret/env exposure, and no weakening of Auth/RBAC, Policy, Git, LLM, Runner, Local Agent, Registry, Governance, Dashboard, Observability, Tenant Scope, or Secrets/Sandbox gates.
+
+Recommended next step: Conflict Resolution Assistant v1, or Merge Queue Live Integration-Test Profile v1.
+
+## 52. Multi-user / Multi-session Branch Orchestrator v2
+
+Implemented with `docs/features/multi-user-branch-orchestrator/v2-plan.md`, `docs/features/multi-user-branch-orchestrator/v2.md`, `packages/git-adapter/src/branch-orchestrator.ts`, metadata-only `/git/branches/orchestrate`, `/git/branches/orchestration*`, `/git/branches/ownership`, and `/git/branches/drift` API endpoints, dashboard visibility, and deterministic tests.
+
+Goals:
+
+- Define `BranchOrchestrationRequest`, `BranchOrchestrationDecision`, `BranchNamingPolicy`, `BranchOwnershipRecord`, and `BaseBranchDriftStatus` models.
+- Allocate deterministic safe `aichestra/` branch names without creating real Git branches.
+- Enforce safe prefix and reserved-name policy, sanitize unsafe branch segments, and reject path traversal-like names.
+- Detect active branch name collisions across users/sessions/task runs.
+- Block active branch ownership records that share a workspace lease id.
+- Link branch ownership to `BranchLease` and optional Agent Workspace Lifecycle v2 `WorkspaceLease` metadata.
+- Model base branch drift and merge readiness as metadata only.
+- Surface branch requests, decisions, ownership, drift, naming policy, collision blockers, same-workspace blockers, audit events, and no-destructive-Git status in API/dashboard read models.
+- Preserve runtime safety: no real Git branch creation, no checkout/switch, no fetch/push/merge/rebase/force-push/delete, no worktree mutation, no agent execution, no provider calls, no credential-cache reads, no secret/env exposure, and no weakening of existing Git, Runner, Auth/RBAC, Policy, SecretRef, Tenant Scope, Dashboard, Observability, Registry, Governance, Staging, CI/CD, or Secrets/Sandbox gates.
+
+Recommended next step: Conflict Resolution Assistant v1, or Merge Queue Live Integration-Test Profile v1.
+
+## 53. Merge Queue Policy v2
+
+Implemented with `docs/features/merge-queue-policy/v2-plan.md`, `docs/features/merge-queue-policy/v2.md`, `packages/core/src/conflicts/merge-queue-policy.ts`, Policy-as-code merge queue gates, safe `/git/merge-queue/*` API endpoints, dashboard conflict/readiness visibility, and deterministic tests.
+
+Goals:
+
+- Define `MergeQueuePolicy`, `MergeReadinessDecision`, `MergeQueuePriorityRule`, and `MergeQueueHold` models.
+- Evaluate existing merge queue entries using branch lease status, workspace lease status, coordination/edit-intent overlap, conflict risk, dry-run simulation, validation, approval, and Policy-as-code evidence.
+- Produce conservative readiness decisions: `ready`, `hold`, `blocked`, `warning`, `needs_human_review`, or `future_manual_merge`.
+- Hold risky entries for high conflict risk, failed or missing evidence, workspace not-ready state, expired branch leases, edit overlap, or policy denial.
+- Rank queue entries deterministically using decision class, entry priority, conflict risk, diff size, human priority, release blocker, and age.
+- Expose policy status, decisions, holds, priority order, blocking reasons, warnings, and explicit merge-execution-disabled state in API/dashboard read models.
+- Preserve runtime safety: no merge execution, no auto-merge, no remote Git, no fetch/push/rebase/force-push/delete, no remote PR updates, no provider calls, no LLM calls, no vendor CLI execution, no workspace mutation, no secret/env exposure, and no weakening of Git, Auth/RBAC, Policy, Tenant Scope, Branch Lease, Workspace Lifecycle, Multi-session Coordination, Dashboard, Observability, or Safety gates.
+
+Recommended next step: Conflict Resolution Assistant v1, or Merge Queue Live Integration-Test Profile v1.
