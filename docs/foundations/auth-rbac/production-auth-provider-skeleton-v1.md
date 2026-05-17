@@ -128,3 +128,7 @@ No event may contain tokens, cookies, session ids, passwords, raw assertions, cl
 ## Recommended Next Task
 
 OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+
+## OIDC provider skeleton hardening
+
+OIDC Provider Skeleton Hardening is `v1_implemented`. The `oidc_future` provider now has a metadata-only config shape, disabled verifier boundary, discovery/JWKS readiness DTOs, claims-mapping plan, token-validation boundary, and read-only readiness endpoints. This does not implement OIDC auth or production auth; MockAuthProvider remains the default and `oidc_future` selection fails closed.

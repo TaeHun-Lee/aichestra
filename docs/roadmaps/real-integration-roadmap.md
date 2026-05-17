@@ -795,3 +795,7 @@ Goals:
 - Real artifact registry.
 - Production RBAC.
 - Deployment and operational controls.
+
+## OIDC provider integration status
+
+OIDC Provider Skeleton Hardening is `v1_implemented` as readiness-only hardening. Real OIDC integration remains a future task and must start with an integration-test profile before any production login, callback, JWKS fetch, JWT validation, or session issuance work.

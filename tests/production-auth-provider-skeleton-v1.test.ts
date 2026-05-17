@@ -10,6 +10,7 @@ import {
   DisabledGithubEnterpriseAuthProvider,
   DisabledMicrosoftEntraAuthProvider,
   DisabledOidcAuthProvider,
+  DisabledOidcTokenVerifier,
   DisabledOktaAuthProvider,
   DisabledSamlAuthProvider,
   DisabledScimDirectoryProvider,
@@ -143,6 +144,84 @@ test("disabled future production auth providers cannot authenticate or validate 
   }
 });
 
+test("OIDC skeleton hardening exposes config, discovery, JWKS, claims, and token-boundary metadata only", () => {
+  const registry = new ProductionAuthProviderRegistry({
+    env: {
+      AICHESTRA_AUTH_PROVIDER: "oidc_future",
+      AICHESTRA_AUTH_OIDC_ISSUER: "raw-oidc-issuer-value",
+      AICHESTRA_AUTH_OIDC_AUDIENCE: "raw-oidc-audience-value",
+      AICHESTRA_AUTH_OIDC_CLIENT_ID: "raw-client-id-value",
+      AICHESTRA_AUTH_OIDC_JWKS_URI: "raw-jwks-value",
+      AICHESTRA_AUTH_OIDC_DISCOVERY_URL: "raw-discovery-value",
+      AICHESTRA_AUTH_OIDC_REQUIRED_SCOPES: "openid email profile",
+      AICHESTRA_AUTH_OIDC_GROUPS_CLAIM: "raw-groups-claim",
+      AICHESTRA_AUTH_OIDC_TENANT_CLAIM: "raw-tenant-claim",
+      OIDC_ID_TOKEN: "raw-id-token-value",
+      JWT_SECRET: "JWT_SECRET=raw-jwt-secret"
+    }
+  });
+  const config = registry.getOidcProviderConfig();
+  const discovery = registry.getOidcDiscoveryReadiness();
+  const jwks = registry.getOidcJwksReadiness();
+  const claims = registry.getOidcClaimsMappingPlan();
+  const boundary = registry.getOidcTokenValidationBoundary();
+  const summary = registry.getOidcProviderSkeletonSummary();
+
+  assert.equal(config.providerKind, "oidc_future");
+  assert.equal(config.status, "disabled");
+  assert.equal(config.issuerConfigured, true);
+  assert.equal(config.audienceConfigured, true);
+  assert.equal(config.clientIdConfigured, true);
+  assert.equal(config.clientSecretConfigured, false);
+  assert.equal(config.jwksUriConfigured, true);
+  assert.equal(config.discoveryUrlConfigured, true);
+  assert.equal(config.scopesConfigured, true);
+  assert.equal(config.groupMappingConfigured, true);
+  assert.equal(config.tenantMappingConfigured, true);
+  assert.equal(config.tokenValidationEnabled, false);
+  assert.equal(config.externalCallsEnabled, false);
+  assert.equal(discovery.discoveryFetchEnabled, false);
+  assert.equal(discovery.discoveryFetched, false);
+  assert.equal(jwks.jwksFetchEnabled, false);
+  assert.equal(jwks.jwksFetched, false);
+  assert.equal(boundary.idTokenValidationEnabled, false);
+  assert.equal(boundary.accessTokenValidationEnabled, false);
+  assert.equal(claims.mappingStatus, "planned");
+  assert.equal(claims.tenantClaim, "configured_boolean_only");
+  assert.equal(summary.status, "v1_implemented");
+  assert.equal(summary.productionAuthEnabled, false);
+  assert.equal(summary.noTokensStored, true);
+  assert.equal(summary.noSessionsIssued, true);
+  assert.equal(hasUnsafeAuthMaterial({ config, discovery, jwks, claims, boundary, summary }), false);
+});
+
+test("disabled OIDC token verifier fails closed without echoing token input or fetching JWKS", () => {
+  const verifier = new DisabledOidcTokenVerifier();
+  const idToken = verifier.validateIdToken({ token: "raw-id-token-value", nonce: "raw-nonce" });
+  const accessToken = verifier.validateAccessToken({ token: "raw-access-token-value" });
+  const readiness = verifier.getReadiness();
+
+  assert.equal(verifier.getProviderKind(), "oidc_future");
+  assert.equal(verifier.getStatus(), "disabled");
+  assert.equal(idToken.ok, false);
+  assert.equal(idToken.status, "disabled");
+  assert.equal(idToken.tokenValidationEnabled, false);
+  assert.equal(accessToken.ok, false);
+  assert.equal(accessToken.status, "disabled");
+  assert.equal(accessToken.jwtIssued, false);
+  assert.equal(readiness.tokenBoundary.idTokenValidationEnabled, false);
+  assert.equal(readiness.discovery.discoveryFetchEnabled, false);
+  assert.equal(readiness.jwks.jwksFetchEnabled, false);
+  assert.deepEqual(verifier.listRequiredConfig(), [
+    "AICHESTRA_AUTH_OIDC_ISSUER",
+    "AICHESTRA_AUTH_OIDC_AUDIENCE",
+    "AICHESTRA_AUTH_OIDC_CLIENT_ID",
+    "AICHESTRA_AUTH_OIDC_JWKS_URI",
+    "AICHESTRA_AUTH_OIDC_DISCOVERY_URL"
+  ]);
+  assert.equal(hasUnsafeAuthMaterial({ idToken, accessToken, readiness }), false);
+});
+
 test("production auth provider readiness models report future selection as blocked without exposing env values", () => {
   const service = createDeploymentReadinessService({
     env: {
@@ -190,6 +269,12 @@ test("auth provider readiness APIs, health, auth config, and middleware stay rea
     const sessionBoundary = await getJson(port, "/readiness/auth-providers/session-boundary");
     const identityMapping = await getJson(port, "/readiness/auth-providers/identity-mapping");
     const summary = await getJson(port, "/readiness/auth-providers/summary");
+    const oidcConfig = await getJson(port, "/readiness/auth-providers/oidc/config");
+    const oidcDiscovery = await getJson(port, "/readiness/auth-providers/oidc/discovery");
+    const oidcJwks = await getJson(port, "/readiness/auth-providers/oidc/jwks");
+    const oidcClaimsMapping = await getJson(port, "/readiness/auth-providers/oidc/claims-mapping");
+    const oidcTokenBoundary = await getJson(port, "/readiness/auth-providers/oidc/token-boundary");
+    const oidcSummary = await getJson(port, "/readiness/auth-providers/oidc/summary");
     const health = await getJson(port, "/health");
     const authConfig = await getJson(port, "/auth/config");
     const authMe = await getJson(port, "/auth/me", {
@@ -207,10 +292,23 @@ test("auth provider readiness APIs, health, auth config, and middleware stay rea
     assert.equal((summary.body.summary as Record<string, unknown>).activeProviderKind, "mock");
     assert.equal((summary.body.summary as Record<string, unknown>).productionAuthEnabled, false);
     assert.equal((summary.body.summary as Record<string, unknown>).tokenValidationEnabled, false);
+    assert.equal(oidcConfig.statusCode, 200);
+    assert.equal(((oidcConfig.body.oidcConfig as Record<string, unknown>).tokenValidationEnabled), false);
+    assert.equal(((oidcConfig.body.oidcConfig as Record<string, unknown>).externalCallsEnabled), false);
+    assert.equal(((oidcDiscovery.body.oidcDiscovery as Record<string, unknown>).discoveryFetchEnabled), false);
+    assert.equal(((oidcJwks.body.oidcJwks as Record<string, unknown>).jwksFetchEnabled), false);
+    assert.equal(((oidcClaimsMapping.body.oidcClaimsMapping as Record<string, unknown>).mappingStatus), "future");
+    assert.equal(((oidcTokenBoundary.body.oidcTokenBoundary as Record<string, unknown>).idTokenValidationEnabled), false);
+    assert.equal(((oidcSummary.body.oidcSummary as Record<string, unknown>).productionAuthEnabled), false);
     assert.equal(health.statusCode, 200);
     assert.equal((health.body.authProviderSkeleton as Record<string, unknown>).selectedProviderKind, "saml_future");
     assert.equal((health.body.authProviderSkeleton as Record<string, unknown>).productionAuthEnabled, false);
     assert.equal((health.body.authProviderSkeleton as Record<string, unknown>).cookiesStored, false);
+    assert.equal((health.body.oidcProviderSkeleton as Record<string, unknown>).productionAuthEnabled, false);
+    assert.equal((health.body.oidcProviderSkeleton as Record<string, unknown>).tokenValidationEnabled, false);
+    assert.equal((health.body.oidcProviderSkeleton as Record<string, unknown>).externalCallsEnabled, false);
+    assert.equal((health.body.oidcProviderSkeleton as Record<string, unknown>).jwksFetchEnabled, false);
+    assert.equal((health.body.oidcProviderSkeleton as Record<string, unknown>).discoveryFetchEnabled, false);
     assert.equal(authConfig.statusCode, 200);
     assert.equal(authConfig.body.productionAuthEnabled, false);
     assert.equal(authConfig.body.selectedProviderKind, "saml_future");
@@ -222,7 +320,7 @@ test("auth provider readiness APIs, health, auth config, and middleware stay rea
     assert.equal(JSON.stringify(authMe.body).includes("Bearer real-token"), false);
     assert.equal(JSON.stringify(authMe.body).includes("raw-cookie-value"), false);
     assert.equal(writeAttempt.statusCode, 405);
-    assert.equal(hasUnsafeAuthMaterial({ config, options, sessionBoundary, identityMapping, summary, health, authConfig, authMe }), false);
+    assert.equal(hasUnsafeAuthMaterial({ config, options, sessionBoundary, identityMapping, summary, oidcConfig, oidcDiscovery, oidcJwks, oidcClaimsMapping, oidcTokenBoundary, oidcSummary, health, authConfig, authMe }), false);
   }, {
     AICHESTRA_AUTH_PROVIDER: "saml_future",
     AICHESTRA_ENABLE_PRODUCTION_AUTH: "true",
@@ -244,6 +342,10 @@ test("auth provider dashboard panel renders disabled skeleton status without tok
     assert.equal((panel.summary as Record<string, unknown>).tokenValidationEnabled, false);
     assert.equal((panel.noTokenStatus as Record<string, unknown>).authorizationHeadersStored, false);
     assert.equal((panel.noTokenStatus as Record<string, unknown>).cookiesStored, false);
+    assert.equal(((panel.oidc as Record<string, unknown>).summary as Record<string, unknown>).productionAuthEnabled, false);
+    assert.equal(((panel.oidc as Record<string, unknown>).tokenBoundary as Record<string, unknown>).idTokenValidationEnabled, false);
+    assert.equal(((panel.oidc as Record<string, unknown>).discovery as Record<string, unknown>).discoveryFetchEnabled, false);
+    assert.equal(((panel.oidc as Record<string, unknown>).jwks as Record<string, unknown>).jwksFetchEnabled, false);
     assert.equal(Array.isArray(panel.configs), true);
     assert.equal(Array.isArray(panel.sessionBoundary), true);
     assert.equal(Array.isArray(panel.identityMapping), true);
@@ -257,6 +359,8 @@ test("auth provider dashboard panel renders disabled skeleton status without tok
   const html = await renderDashboardHtml(new DemoDashboardDataProvider());
   assert.equal(html.includes("Production Auth Provider Skeleton"), true);
   assert.equal(html.includes("Future providers"), true);
+  assert.equal(html.includes("OIDC skeleton"), true);
+  assert.equal(html.includes("OIDC readiness"), true);
   assert.equal(html.includes("Session boundary"), true);
   assert.equal(html.includes("Identity mapping"), true);
   assert.equal(html.includes("No-token/no-session status"), true);

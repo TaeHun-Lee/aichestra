@@ -159,6 +159,12 @@ import {
   authAuditEventToDto,
   authContextToDto,
   authorizationDecisionToDto,
+  buildOidcClaimsMappingPlan,
+  buildOidcDiscoveryReadiness,
+  buildOidcJwksReadiness,
+  buildOidcProviderConfig,
+  buildOidcProviderSkeletonSummary,
+  buildOidcTokenValidationBoundary,
   createTenantScopeEnforcementService,
   identityProviderToDto,
   listMockScopeCatalog,
@@ -1156,6 +1162,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const secretBackendDecision = context.deploymentReadinessService.getSecretBackendOptionDecisionSummary();
       const authRbacProduction = context.deploymentReadinessService.getAuthRbacProductionSummary();
       const productionAuthProvider = context.deploymentReadinessService.getProductionAuthProviderSkeletonSummary();
+      const oidcProviderSkeleton = buildOidcProviderSkeletonSummary(process.env);
+      const oidcProviderConfig = buildOidcProviderConfig(process.env);
+      const oidcDiscovery = buildOidcDiscoveryReadiness(process.env);
+      const oidcJwks = buildOidcJwksReadiness(process.env);
+      const oidcClaimsMapping = buildOidcClaimsMappingPlan(process.env);
+      const oidcTokenBoundary = buildOidcTokenValidationBoundary(process.env);
       const policyBundleReadiness = context.deploymentReadinessService.getPolicyBundleReadinessSummary();
       const policyShadowEvaluation = context.deploymentReadinessService.getPolicyShadowEvaluationSummary();
       const policyRuntimePoc = context.deploymentReadinessService.getPolicyRuntimePocSummary();
@@ -1677,6 +1689,33 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           externalIdpCallsEnabled: productionAuthProvider.externalIdpCallsEnabled,
           productionReady: productionAuthProvider.productionReady
         },
+        oidcProviderSkeleton: {
+          status: oidcProviderSkeleton.status,
+          selected: oidcProviderSkeleton.selected,
+          enabled: false,
+          providerKind: oidcProviderSkeleton.providerKind,
+          providerStatus: oidcProviderSkeleton.providerStatus,
+          productionAuthEnabled: oidcProviderSkeleton.productionAuthEnabled,
+          tokenValidationEnabled: oidcProviderSkeleton.tokenValidationEnabled,
+          externalCallsEnabled: oidcProviderSkeleton.externalCallsEnabled,
+          issuerConfigured: oidcProviderConfig.issuerConfigured,
+          audienceConfigured: oidcProviderConfig.audienceConfigured,
+          clientIdConfigured: oidcProviderConfig.clientIdConfigured,
+          jwksUriConfigured: oidcJwks.jwksUriConfigured,
+          discoveryUrlConfigured: oidcProviderConfig.discoveryUrlConfigured,
+          claimsMappingConfigured: oidcProviderConfig.claimsMappingConfigured,
+          discoveryFetchEnabled: oidcDiscovery.discoveryFetchEnabled,
+          jwksFetchEnabled: oidcJwks.jwksFetchEnabled,
+          claimsMappingStatus: oidcClaimsMapping.mappingStatus,
+          tenantMappingStatus: oidcProviderConfig.tenantMappingConfigured ? "planned" : "not_configured",
+          idTokenValidationEnabled: oidcTokenBoundary.idTokenValidationEnabled,
+          accessTokenValidationEnabled: oidcTokenBoundary.accessTokenValidationEnabled,
+          noTokensStored: oidcProviderSkeleton.noTokensStored,
+          noSessionsIssued: oidcProviderSkeleton.noSessionsIssued,
+          noCookiesStored: oidcProviderSkeleton.noCookiesStored,
+          noSecretsExposed: oidcProviderSkeleton.noSecretsExposed,
+          noEnvValuesExposed: true
+        },
         providerAbstraction: {
           status: context.providerAbstractionService.getConfig().status,
           providerCatalogCount: context.providerAbstractionService.getConfig().providerCatalogCount,
@@ -2096,6 +2135,30 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       const readiness = context.deploymentReadinessService;
+      if (segments.length === 4 && segments[2] === "oidc" && segments[3] === "config") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", { oidcConfig: buildOidcProviderConfig(process.env) }));
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "oidc" && segments[3] === "discovery") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", { oidcDiscovery: buildOidcDiscoveryReadiness(process.env) }));
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "oidc" && segments[3] === "jwks") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", { oidcJwks: buildOidcJwksReadiness(process.env) }));
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "oidc" && segments[3] === "claims-mapping") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", { oidcClaimsMapping: buildOidcClaimsMappingPlan(process.env) }));
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "oidc" && segments[3] === "token-boundary") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", { oidcTokenBoundary: buildOidcTokenValidationBoundary(process.env) }));
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "oidc" && segments[3] === "summary") {
+        sendJson(response, 200, readinessScopedPayload(context, "auth", { oidcSummary: buildOidcProviderSkeletonSummary(process.env) }));
+        return;
+      }
       if (segments.length === 3 && segments[2] === "config") {
         sendJson(response, 200, readinessScopedPayload(context, "auth", {
           selectedProvider: productionAuthProviderConfigToDto(readiness.listProductionAuthProviderConfigs().find((config) => config.metadata.selected === true) ?? readiness.listProductionAuthProviderConfigs()[0]),

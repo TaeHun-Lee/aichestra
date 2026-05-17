@@ -147,3 +147,7 @@ Regression coverage remains in RequestContext Propagation v1, Auth/RBAC, Policy,
 ## Recommended Next Task
 
 Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+
+## OIDC metadata boundary
+
+OIDC Provider Skeleton Hardening v1 may surface only safe provider metadata in AuthContext/API summaries: `authProviderKind: oidc_future`, provider/readiness statuses, `tokenValidationEnabled:false`, claims/tenant mapping statuses, and `productionAuthEnabled:false`. Raw claims, tokens, Authorization headers, cookies, sessions, and env values remain forbidden.

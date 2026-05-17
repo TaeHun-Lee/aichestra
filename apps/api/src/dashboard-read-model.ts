@@ -1,4 +1,13 @@
-import { listMockScopeCatalog, scopeSummary } from "@aichestra/auth";
+import {
+  buildOidcClaimsMappingPlan,
+  buildOidcDiscoveryReadiness,
+  buildOidcJwksReadiness,
+  buildOidcProviderConfig,
+  buildOidcProviderSkeletonSummary,
+  buildOidcTokenValidationBoundary,
+  listMockScopeCatalog,
+  scopeSummary
+} from "@aichestra/auth";
 import type { AuthorizationService } from "@aichestra/auth";
 import type { TenantScopeEnforcementService } from "@aichestra/auth";
 import type { InMemoryAichestraStore } from "@aichestra/db";
@@ -1310,6 +1319,16 @@ function buildAuthProviders(context: DashboardReadModelContext): ProductionAuthP
     sessionBoundary: sanitizeDashboardArray(readiness.listSessionTokenBoundaryPlans()),
     identityMapping: sanitizeDashboardArray(readiness.listIdentityMappingPlans()),
     selectedProvider: sanitizeDashboardObject(selectedProvider),
+    oidc: sanitizeDashboardObject({
+      config: buildOidcProviderConfig(process.env),
+      discovery: buildOidcDiscoveryReadiness(process.env),
+      jwks: buildOidcJwksReadiness(process.env),
+      claimsMapping: buildOidcClaimsMappingPlan(process.env),
+      tokenBoundary: buildOidcTokenValidationBoundary(process.env),
+      summary: buildOidcProviderSkeletonSummary(process.env),
+      blockers: ["oidc_verifier_disabled", "oidc_auth_not_implemented", "production_auth_disabled"],
+      nextSteps: ["create_integration_test_profile", "add_mock_idp_fixture", "keep_external_calls_gated"]
+    }),
     blockers: sanitizeDashboardArray(checks.flatMap((check) => check.blockers.map((blocker) => ({
       providerKind: check.providerKind,
       blocker

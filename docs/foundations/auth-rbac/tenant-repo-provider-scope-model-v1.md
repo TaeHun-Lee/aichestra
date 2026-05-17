@@ -190,3 +190,7 @@ Coverage lives in `tests/tenant-repo-provider-scope-model-v1.test.ts` and `tests
 
 Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
 Recommended next task: Policy Runtime Shadow Evaluator Skeleton v1, or Tenant Scope Enforcement v1. Production tenant enforcement remains future work.
+
+## OIDC claims mapping plan
+
+OIDC Provider Skeleton Hardening v1 defines future-only mapping placeholders for tenant, team, project, repo scope, provider scope, and service-account claims. These mappings are planning metadata only and do not parse real claims or enforce production tenant scope.

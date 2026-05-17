@@ -135,3 +135,7 @@ Future production auth must provide trusted tenant/team/project/repo/provider/mo
 ## Recommended Next Task
 
 OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+
+## OIDC tenant mapping boundary
+
+OIDC tenant/team/project/repo/provider mapping remains planned metadata only. Tenant Scope Enforcement must continue to rely on existing mock/request-context boundaries and must not trust OIDC claims until a future implementation explicitly validates tokens and mapping rules.

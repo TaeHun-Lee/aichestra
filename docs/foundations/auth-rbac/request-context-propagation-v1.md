@@ -172,3 +172,7 @@ Coverage includes:
 ## Recommended Next Task
 
 Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+
+## OIDC readiness metadata
+
+RequestContext propagation may carry only safe OIDC readiness metadata such as provider kind/status and disabled token-validation status. It must not carry token values, raw claims, cookies, Authorization headers, sessions, or env/secret values.

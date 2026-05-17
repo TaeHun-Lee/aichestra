@@ -40,6 +40,10 @@ export type ProductionAuthProviderKind =
 export type AuthProviderKind = AuthMode | Exclude<ProductionAuthProviderKind, "mock">;
 export type ProductionAuthProviderStatus = "active_mock" | "disabled" | "not_configured" | "future";
 export type ProductionAuthProviderReadinessStatus = "ready_mock" | "disabled" | "missing_config" | "blocked" | "future";
+export type OidcProviderStatus = "disabled" | "not_configured" | "future" | "blocked";
+export type OidcTokenBoundaryStatus = "disabled" | "future" | "not_configured";
+export type OidcClaimsMappingStatus = "planned" | "not_configured" | "future";
+export type OidcValidationResultStatus = "disabled" | "future" | "not_configured" | "blocked";
 export type SessionTokenBoundaryKind =
   | "cookie_session_future"
   | "bearer_jwt_future"
@@ -292,6 +296,131 @@ export type ProductionAuthProviderConfig = {
   externalCallsEnabled: false;
   productionReady: false;
   metadata: Record<string, unknown>;
+};
+
+export type OidcProviderConfig = {
+  id: string;
+  providerKind: "oidc_future";
+  status: OidcProviderStatus;
+  issuerConfigured: boolean;
+  audienceConfigured: boolean;
+  clientIdConfigured: boolean;
+  clientSecretConfigured: false;
+  jwksUriConfigured: boolean;
+  discoveryUrlConfigured: boolean;
+  scopesConfigured: boolean;
+  claimsMappingConfigured: boolean;
+  tenantMappingConfigured: boolean;
+  groupMappingConfigured: boolean;
+  tokenValidationEnabled: false;
+  externalCallsEnabled: false;
+  productionReady: false;
+  metadata: Record<string, unknown>;
+};
+
+export type OidcDiscoveryReadiness = {
+  id: string;
+  issuerMetadataConfigured: boolean;
+  authorizationEndpointConfigured: boolean;
+  tokenEndpointConfigured: boolean;
+  jwksUriConfigured: boolean;
+  userInfoEndpointConfigured: boolean;
+  discoveryFetchEnabled: false;
+  discoveryFetched: false;
+  metadata: Record<string, unknown>;
+};
+
+export type OidcJwksReadiness = {
+  id: string;
+  jwksUriConfigured: boolean;
+  jwksFetchEnabled: false;
+  jwksFetched: false;
+  keyRotationPlanStatus: "planned" | "future" | "not_configured";
+  metadata: Record<string, unknown>;
+};
+
+export type OidcTokenValidationBoundary = {
+  id: string;
+  status: OidcTokenBoundaryStatus;
+  idTokenValidationEnabled: false;
+  accessTokenValidationEnabled: false;
+  signatureValidationEnabled: false;
+  issuerValidationEnabled: false;
+  audienceValidationEnabled: false;
+  expiryValidationEnabled: false;
+  nonceValidationEnabled: false;
+  metadata: Record<string, unknown>;
+};
+
+export type OidcClaimsMappingPlan = {
+  id: string;
+  subjectClaim: string;
+  emailClaim: string;
+  displayNameClaim: string;
+  groupsClaim: string;
+  rolesClaim: string;
+  tenantClaim: string;
+  teamClaim: string;
+  projectClaim: string;
+  repoScopeClaim: string;
+  providerScopeClaim: string;
+  serviceAccountClaim: string;
+  mappingStatus: OidcClaimsMappingStatus;
+  risks: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type OidcTokenValidationResult = {
+  ok: false;
+  status: OidcValidationResultStatus;
+  reason: string;
+  tokenValidationEnabled: false;
+  tokenStored: false;
+  tokenEchoed: false;
+  sessionIssued: false;
+  jwtIssued: false;
+  externalCallsEnabled: false;
+  metadata: Record<string, unknown>;
+};
+
+export type OidcProviderSkeletonSummary = {
+  id: string;
+  status: "v1_implemented";
+  providerKind: "oidc_future";
+  selected: boolean;
+  providerStatus: OidcProviderStatus;
+  productionAuthEnabled: false;
+  tokenValidationEnabled: false;
+  externalCallsEnabled: false;
+  discoveryFetchEnabled: false;
+  jwksFetchEnabled: false;
+  claimsMappingStatus: OidcClaimsMappingStatus;
+  tenantMappingStatus: OidcClaimsMappingStatus;
+  noTokensStored: true;
+  noSessionsIssued: true;
+  noCookiesStored: true;
+  noSecretsExposed: true;
+  productionReady: false;
+  blockerCount: number;
+  metadata: Record<string, unknown>;
+};
+
+export type OidcVerifierReadiness = {
+  config: OidcProviderConfig;
+  discovery: OidcDiscoveryReadiness;
+  jwks: OidcJwksReadiness;
+  tokenBoundary: OidcTokenValidationBoundary;
+  claimsMapping: OidcClaimsMappingPlan;
+  summary: OidcProviderSkeletonSummary;
+};
+
+export type OidcTokenVerifier = {
+  getProviderKind(): "oidc_future";
+  getStatus(): OidcProviderStatus;
+  validateIdToken(input: Record<string, unknown>): OidcTokenValidationResult;
+  validateAccessToken(input: Record<string, unknown>): OidcTokenValidationResult;
+  getReadiness(): OidcVerifierReadiness;
+  listRequiredConfig(): string[];
 };
 
 export type ProductionAuthProviderReadiness = {

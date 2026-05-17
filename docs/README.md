@@ -161,3 +161,6 @@ Architecture Decision Records.
 - **cross-reference**: 다른 문서 참조 시 풀 경로(`docs/features/.../v0.md`)로 작성. 코드 내 import는 영향 없음(이 reorg는 docs/만 변경).
 - **새 feature 추가**: `docs/features/<slug>/` 폴더 생성, `v0-plan.md`로 시작, 구현 완료 후 `v0.md`로 마무리. feature 단위 audit은 `<slug>/audits/`로.
 - **새 audit 작성**: `docs/audits/YYYY-MM-DD-<topic>.md` 형식. cross-cutting이면 audits/, 단일 feature면 features/<feature>/audits/.
+
+- `foundations/auth-rbac/oidc-provider-skeleton-hardening-v1.md` — OIDC future-provider hardening status `v1_implemented`; disabled verifier, config/discovery/JWKS/claims/token-boundary readiness, safe readiness APIs, and no-token/no-session/no-secret guarantees.
+- `foundations/auth-rbac/oidc-provider-skeleton-hardening-v1-plan.md` — pre-implementation plan for the OIDC skeleton hardening task.

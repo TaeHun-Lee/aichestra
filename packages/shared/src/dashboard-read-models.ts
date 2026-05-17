@@ -293,6 +293,7 @@ export type ProductionAuthProviderSkeletonReadModel = {
   sessionBoundary: DashboardJsonObject[];
   identityMapping: DashboardJsonObject[];
   selectedProvider: DashboardJsonObject;
+  oidc?: DashboardJsonObject;
   blockers: DashboardJsonObject[];
   noTokenStatus: DashboardJsonObject;
 };

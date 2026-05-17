@@ -145,3 +145,10 @@ The detailed CI/CD planning surface lives in `docs/roadmaps/staging-ci-cd-pipeli
 - Production pooling, backup/restore, migration governance, retention/legal hold, durable webhook replay/dead-letter persistence, and tenant scoping remain required before production.
 - Mock auth, legacy env credentials, env secret fallback, real MCP transport without allowlists, unbounded LLM fallback, local command execution, and vendor CLI credential cache reads must be rejected.
 - Health and dashboard may expose booleans, counts, ids, and statuses only.
+
+## OIDC future-provider gates
+
+- `AICHESTRA_AUTH_PROVIDER=oidc_future`: selects disabled future metadata only; must fail closed without production auth.
+- `AICHESTRA_ENABLE_PRODUCTION_AUTH=false`: required default.
+- OIDC issuer/audience/client-id/JWKS/discovery/scopes/group/tenant placeholders are represented as configured booleans only. Values and client secrets are not exposed or used.
+- External calls, discovery fetch, JWKS fetch, token validation, and session issuance remain disabled.

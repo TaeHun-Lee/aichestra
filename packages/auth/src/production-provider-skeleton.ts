@@ -5,6 +5,16 @@ import type {
   AuthProviderKind,
   AuthProviderResolveRequest,
   IdentityMappingPlan,
+  OidcClaimsMappingPlan,
+  OidcDiscoveryReadiness,
+  OidcJwksReadiness,
+  OidcProviderConfig,
+  OidcProviderSkeletonSummary,
+  OidcProviderStatus,
+  OidcTokenValidationBoundary,
+  OidcTokenValidationResult,
+  OidcTokenVerifier,
+  OidcVerifierReadiness,
   Permission,
   ProductionAuthProviderConfig,
   ProductionAuthProviderKind,
@@ -83,6 +93,13 @@ const providerDefinitions: ProviderDefinition[] = [
 ];
 
 const providerByKind = new Map(providerDefinitions.map((definition) => [definition.providerKind, definition]));
+const oidcRequiredConfig = [
+  "AICHESTRA_AUTH_OIDC_ISSUER",
+  "AICHESTRA_AUTH_OIDC_AUDIENCE",
+  "AICHESTRA_AUTH_OIDC_CLIENT_ID",
+  "AICHESTRA_AUTH_OIDC_JWKS_URI",
+  "AICHESTRA_AUTH_OIDC_DISCOVERY_URL"
+];
 
 export type ProductionAuthProviderRegistryInput = {
   env?: Record<string, string | undefined>;
@@ -166,6 +183,249 @@ export class DisabledOidcAuthProvider extends DisabledProductionAuthProvider {
   constructor() {
     super("oidc_future");
   }
+}
+
+export class DisabledOidcTokenVerifier implements OidcTokenVerifier {
+  private readonly env: Record<string, string | undefined>;
+
+  constructor(input: { env?: Record<string, string | undefined> } = {}) {
+    this.env = input.env ?? {};
+  }
+
+  getProviderKind(): "oidc_future" {
+    return "oidc_future";
+  }
+
+  getStatus(): OidcProviderStatus {
+    return "disabled";
+  }
+
+  validateIdToken(_input: Record<string, unknown>): OidcTokenValidationResult {
+    return disabledOidcValidationResult("id_token_validation_disabled_not_implemented");
+  }
+
+  validateAccessToken(_input: Record<string, unknown>): OidcTokenValidationResult {
+    return disabledOidcValidationResult("access_token_validation_disabled_not_implemented");
+  }
+
+  getReadiness(): OidcVerifierReadiness {
+    return buildOidcVerifierReadiness(this.env);
+  }
+
+  getConfig(): OidcProviderConfig {
+    return buildOidcProviderConfig(this.env);
+  }
+
+  listRequiredConfig(): string[] {
+    return [...oidcRequiredConfig];
+  }
+}
+
+export class MockOidcTokenVerifier extends DisabledOidcTokenVerifier {
+  validateIdToken(_input: Record<string, unknown>): OidcTokenValidationResult {
+    return disabledOidcValidationResult("mock_oidc_verifier_metadata_only_no_token_validation");
+  }
+
+  validateAccessToken(_input: Record<string, unknown>): OidcTokenValidationResult {
+    return disabledOidcValidationResult("mock_oidc_verifier_metadata_only_no_token_validation");
+  }
+}
+
+export function buildOidcProviderConfig(env: Record<string, string | undefined> = {}, selected = normalizeProductionAuthProviderKind(env.AICHESTRA_AUTH_PROVIDER) === "oidc_future"): OidcProviderConfig {
+  const missing = oidcRequiredConfig.filter((key) => !configured(env[key]));
+  const status: OidcProviderStatus = selected && missing.length > 0 ? "not_configured" : selected ? "disabled" : "future";
+  const claimsMappingConfigured = configured(env.AICHESTRA_AUTH_OIDC_GROUPS_CLAIM) || configured(env.AICHESTRA_AUTH_OIDC_TENANT_CLAIM);
+  return {
+    id: "oidc_provider_config_v1",
+    providerKind: "oidc_future",
+    status,
+    issuerConfigured: configured(env.AICHESTRA_AUTH_OIDC_ISSUER),
+    audienceConfigured: configured(env.AICHESTRA_AUTH_OIDC_AUDIENCE),
+    clientIdConfigured: configured(env.AICHESTRA_AUTH_OIDC_CLIENT_ID),
+    clientSecretConfigured: false,
+    jwksUriConfigured: configured(env.AICHESTRA_AUTH_OIDC_JWKS_URI),
+    discoveryUrlConfigured: configured(env.AICHESTRA_AUTH_OIDC_DISCOVERY_URL),
+    scopesConfigured: configured(env.AICHESTRA_AUTH_OIDC_REQUIRED_SCOPES),
+    claimsMappingConfigured,
+    tenantMappingConfigured: configured(env.AICHESTRA_AUTH_OIDC_TENANT_CLAIM),
+    groupMappingConfigured: configured(env.AICHESTRA_AUTH_OIDC_GROUPS_CLAIM),
+    tokenValidationEnabled: false,
+    externalCallsEnabled: false,
+    productionReady: false,
+    metadata: {
+      selected,
+      requiredConfig: [...oidcRequiredConfig],
+      missingConfig: selected ? missing : [],
+      rawEnvValuesReturned: false,
+      clientSecretSupported: false,
+      clientSecretFutureSecretRefOnly: true,
+      noTokenValidation: true,
+      noTokenStorage: true,
+      noSessionIssuance: true,
+      noCookieStorage: true,
+      noJwtIssuance: true,
+      noExternalCalls: true
+    }
+  };
+}
+
+export function buildOidcDiscoveryReadiness(env: Record<string, string | undefined> = {}): OidcDiscoveryReadiness {
+  const configuredDiscovery = configured(env.AICHESTRA_AUTH_OIDC_DISCOVERY_URL);
+  return {
+    id: "oidc_discovery_readiness_v1",
+    issuerMetadataConfigured: configured(env.AICHESTRA_AUTH_OIDC_ISSUER),
+    authorizationEndpointConfigured: configuredDiscovery,
+    tokenEndpointConfigured: configuredDiscovery,
+    jwksUriConfigured: configured(env.AICHESTRA_AUTH_OIDC_JWKS_URI),
+    userInfoEndpointConfigured: configuredDiscovery,
+    discoveryFetchEnabled: false,
+    discoveryFetched: false,
+    metadata: {
+      discoveryUrlConfigured: configuredDiscovery,
+      rawDiscoveryUrlReturned: false,
+      externalIdentityProviderCallsEnabled: false,
+      discoveryFetchAttempted: false
+    }
+  };
+}
+
+export function buildOidcJwksReadiness(env: Record<string, string | undefined> = {}): OidcJwksReadiness {
+  const jwksConfigured = configured(env.AICHESTRA_AUTH_OIDC_JWKS_URI);
+  return {
+    id: "oidc_jwks_readiness_v1",
+    jwksUriConfigured: jwksConfigured,
+    jwksFetchEnabled: false,
+    jwksFetched: false,
+    keyRotationPlanStatus: jwksConfigured ? "planned" : "not_configured",
+    metadata: {
+      rawJwksUriReturned: false,
+      jwksFetchAttempted: false,
+      externalIdentityProviderCallsEnabled: false,
+      keyMaterialStored: false
+    }
+  };
+}
+
+export function buildOidcTokenValidationBoundary(env: Record<string, string | undefined> = {}): OidcTokenValidationBoundary {
+  const selected = normalizeProductionAuthProviderKind(env.AICHESTRA_AUTH_PROVIDER) === "oidc_future";
+  return {
+    id: "oidc_token_validation_boundary_v1",
+    status: selected ? "disabled" : "future",
+    idTokenValidationEnabled: false,
+    accessTokenValidationEnabled: false,
+    signatureValidationEnabled: false,
+    issuerValidationEnabled: false,
+    audienceValidationEnabled: false,
+    expiryValidationEnabled: false,
+    nonceValidationEnabled: false,
+    metadata: {
+      tokenInputEchoed: false,
+      tokenStored: false,
+      authorizationHeaderStored: false,
+      cookiesStored: false,
+      sessionIssued: false,
+      jwtIssued: false,
+      apiKeyIssued: false,
+      serviceAccountCredentialIssued: false
+    }
+  };
+}
+
+export function buildOidcClaimsMappingPlan(env: Record<string, string | undefined> = {}): OidcClaimsMappingPlan {
+  const mappingStatus = configured(env.AICHESTRA_AUTH_OIDC_GROUPS_CLAIM) || configured(env.AICHESTRA_AUTH_OIDC_TENANT_CLAIM) ? "planned" : "future";
+  return {
+    id: "oidc_claims_mapping_plan_v1",
+    subjectClaim: "sub",
+    emailClaim: "email",
+    displayNameClaim: "name",
+    groupsClaim: configured(env.AICHESTRA_AUTH_OIDC_GROUPS_CLAIM) ? "configured_boolean_only" : "groups_future",
+    rolesClaim: "roles_future",
+    tenantClaim: configured(env.AICHESTRA_AUTH_OIDC_TENANT_CLAIM) ? "configured_boolean_only" : "tenant_future",
+    teamClaim: "team_future",
+    projectClaim: "project_future",
+    repoScopeClaim: "repo_scope_future",
+    providerScopeClaim: "provider_scope_future",
+    serviceAccountClaim: "service_account_future",
+    mappingStatus,
+    risks: [
+      "claims_untrusted_until_signature_issuer_audience_expiry_validation_exists",
+      "tenant_team_project_repo_scope_mapping_requires_policy_review",
+      "service_account_mapping_requires_credential_lifecycle_design"
+    ],
+    metadata: {
+      rawClaimValuesParsed: false,
+      tokenClaimsStored: false,
+      externalClaimsParsed: false,
+      tenantMappingConfigured: configured(env.AICHESTRA_AUTH_OIDC_TENANT_CLAIM),
+      groupMappingConfigured: configured(env.AICHESTRA_AUTH_OIDC_GROUPS_CLAIM)
+    }
+  };
+}
+
+export function buildOidcProviderSkeletonSummary(env: Record<string, string | undefined> = {}): OidcProviderSkeletonSummary {
+  const config = buildOidcProviderConfig(env);
+  return {
+    id: "oidc_provider_skeleton_hardening_v1",
+    status: "v1_implemented",
+    providerKind: "oidc_future",
+    selected: normalizeProductionAuthProviderKind(env.AICHESTRA_AUTH_PROVIDER) === "oidc_future",
+    providerStatus: config.status,
+    productionAuthEnabled: false,
+    tokenValidationEnabled: false,
+    externalCallsEnabled: false,
+    discoveryFetchEnabled: false,
+    jwksFetchEnabled: false,
+    claimsMappingStatus: buildOidcClaimsMappingPlan(env).mappingStatus,
+    tenantMappingStatus: configured(env.AICHESTRA_AUTH_OIDC_TENANT_CLAIM) ? "planned" : "future",
+    noTokensStored: true,
+    noSessionsIssued: true,
+    noCookiesStored: true,
+    noSecretsExposed: true,
+    productionReady: false,
+    blockerCount: config.status === "disabled" || config.status === "not_configured" ? 2 : 0,
+    metadata: {
+      docs: "docs/foundations/auth-rbac/oidc-provider-skeleton-hardening-v1.md",
+      planDocs: "docs/foundations/auth-rbac/oidc-provider-skeleton-hardening-v1-plan.md",
+      mockProviderDefault: true,
+      oidcAuthImplemented: false,
+      failClosedIfSelected: true,
+      noExternalIdentityProviderCalls: true,
+      rawEnvValuesReturned: false
+    }
+  };
+}
+
+export function buildOidcVerifierReadiness(env: Record<string, string | undefined> = {}): OidcVerifierReadiness {
+  return {
+    config: buildOidcProviderConfig(env),
+    discovery: buildOidcDiscoveryReadiness(env),
+    jwks: buildOidcJwksReadiness(env),
+    tokenBoundary: buildOidcTokenValidationBoundary(env),
+    claimsMapping: buildOidcClaimsMappingPlan(env),
+    summary: buildOidcProviderSkeletonSummary(env)
+  };
+}
+
+function disabledOidcValidationResult(reason: string): OidcTokenValidationResult {
+  return {
+    ok: false,
+    status: "disabled",
+    reason,
+    tokenValidationEnabled: false,
+    tokenStored: false,
+    tokenEchoed: false,
+    sessionIssued: false,
+    jwtIssued: false,
+    externalCallsEnabled: false,
+    metadata: {
+      sanitized: true,
+      noTokenEcho: true,
+      noJwtValidation: true,
+      noJwksFetch: true,
+      noSessionIssued: true,
+      noExternalCalls: true
+    }
+  };
 }
 
 export class DisabledSamlAuthProvider extends DisabledProductionAuthProvider {
@@ -269,6 +529,38 @@ export class ProductionAuthProviderRegistry {
       identityMappingPlan("repo_claim_to_repo_scope", ["repo", "repository"], "RepoScope", ["repo_rename_drift"]),
       identityMappingPlan("service_account_mapping", ["client_id", "service_account_id"], "ServiceAccount", ["credential_lifecycle_required"])
     ];
+  }
+
+  getOidcProviderConfig(): OidcProviderConfig {
+    return buildOidcProviderConfig(this.env, this.getSelectedProviderKind() === "oidc_future");
+  }
+
+  getOidcDiscoveryReadiness(): OidcDiscoveryReadiness {
+    return buildOidcDiscoveryReadiness(this.env);
+  }
+
+  getOidcJwksReadiness(): OidcJwksReadiness {
+    return buildOidcJwksReadiness(this.env);
+  }
+
+  getOidcTokenValidationBoundary(): OidcTokenValidationBoundary {
+    return buildOidcTokenValidationBoundary(this.env);
+  }
+
+  getOidcClaimsMappingPlan(): OidcClaimsMappingPlan {
+    return buildOidcClaimsMappingPlan(this.env);
+  }
+
+  getOidcProviderSkeletonSummary(): OidcProviderSkeletonSummary {
+    return buildOidcProviderSkeletonSummary(this.env);
+  }
+
+  getOidcVerifierReadiness(): OidcVerifierReadiness {
+    return buildOidcVerifierReadiness(this.env);
+  }
+
+  createOidcTokenVerifier(): OidcTokenVerifier {
+    return new DisabledOidcTokenVerifier({ env: this.env });
   }
 
   getSummary(): ProductionAuthProviderSkeletonSummary {
