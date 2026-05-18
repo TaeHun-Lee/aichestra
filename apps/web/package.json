@@ -7,7 +7,9 @@
     ".": "./src/main.ts"
   },
   "scripts": {
-    "dev": "node src/main.ts"
+    "dev": "vite --host 127.0.0.1 --port 3001",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 3001"
   },
   "dependencies": {
     "@aichestra/core": "workspace:*",
@@ -20,6 +22,17 @@
     "@aichestra/registry": "workspace:*",
     "@aichestra/security": "workspace:*",
     "@aichestra/shared": "workspace:*",
-    "@aichestra/worker": "workspace:*"
+    "@aichestra/worker": "workspace:*",
+    "@tanstack/react-table": "^8.21.3",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.0"
   }
 }
