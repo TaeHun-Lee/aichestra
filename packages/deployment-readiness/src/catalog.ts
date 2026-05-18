@@ -4873,10 +4873,14 @@ export const defaultPolicyShadowEvaluationPlan: PolicyShadowEvaluationPlan = {
   enforcementMode: "shadow_only",
   metadata: {
     docs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1.md",
+    evaluatorSkeletonDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluator-skeleton-v1.md",
     planDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1-plan.md",
     candidateRuntimeInterfaceDocs: "docs/roadmaps/policy-bundle-runtime-poc/candidate-runtime-interface-v1.md",
     staticPolicyEngineAuthoritative: true,
     enforcementChanged: false,
+    shadowEvaluatorSkeletonImplemented: true,
+    shadowEvaluatorEnabled: false,
+    mockComparisonSupported: true,
     shadowEvaluatorImplemented: false,
     candidateRuntimeImplemented: false,
     dynamicPolicyExecutionEnabled: false,
@@ -5081,6 +5085,22 @@ export const defaultPolicyShadowReadinessChecks: PolicyShadowReadinessCheck[] = 
     description: "No candidate policy runtime is implemented or executed in this milestone; shadow evaluation cannot run yet.",
     remediation: "Implement a candidate runtime only in a future explicit task and keep it shadow-only.",
     metadata: { candidateRuntimeImplemented: false, candidateRuntimeExecuted: false, shadowEvaluationCanRun: false }
+  },
+  {
+    id: "policy_shadow_evaluator_skeleton_ready",
+    category: "candidate_runtime",
+    status: "pass",
+    severity: "medium",
+    description: "DisabledPolicyShadowEvaluator and deterministic MockPolicyShadowEvaluator skeletons exist while runtime enforcement remains unchanged.",
+    remediation: "Keep the disabled evaluator as the default until an explicit future implementation planning task approves a candidate runtime.",
+    metadata: {
+      shadowEvaluatorSkeletonImplemented: true,
+      shadowEvaluatorEnabled: false,
+      mockComparisonSupported: true,
+      candidateRuntimeImplemented: false,
+      candidateRuntimeExecuted: false,
+      enforcementChanged: false
+    }
   },
   {
     id: "policy_shadow_comparison_rules_defined",

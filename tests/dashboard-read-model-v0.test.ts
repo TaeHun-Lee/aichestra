@@ -127,6 +127,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const localAgents = await getJson(port, "/dashboard/local-agents") as { localAgents: { config: { realTransportEnabled: boolean; vendorCliExecutionEnabled: boolean }; blockedExamples: unknown[] } };
     const readiness = await getJson(port, "/dashboard/readiness") as { readiness: { summary: { productionReady: boolean; criticalBlockerCount: number }; environmentWarnings: unknown[]; noSecretsExposed: boolean } };
     const database = await getJson(port, "/dashboard/database") as { database: { summary: { productionReady: boolean; databaseUrlExposed: boolean; productionDbConnectionAttempted: boolean }; migrations: unknown[]; indexReview: unknown[]; noSecretStatus: { databaseUrlExposed: boolean } } };
+    const collaborationStores = await getJson(port, "/dashboard/collaboration-stores") as { collaborationStores: DashboardReadModels["collaborationStores"] };
     const secretBackend = await getJson(port, "/dashboard/secret-backend") as { secretBackend: { summary: { productionReady: boolean; realSecretBackendConfigured: boolean; externalCallsEnabled: boolean }; backendOptions: unknown[]; blockers: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const secretBackendDecision = await getJson(port, "/dashboard/secret-backend-decision") as { secretBackendDecision: { summary: { recommendedBackend: string; productionSecretBackendImplemented: boolean; envFallbackProductionAllowed: boolean; externalCallsEnabled: boolean }; criteria: unknown[]; scores: unknown[]; implementationScopes: unknown[]; providerMappings: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const vaultSecretBackend = await getJson(port, "/dashboard/vault-secret-backend") as { vaultSecretBackend: { summary: { selectedProvider: string; vaultProviderEnabled: boolean; productionSecretBackendImplemented: boolean }; config: { vaultAddressConfigured: boolean; vaultTokenConfigured: boolean }; health: { clientKind: string; liveCallAttempted: boolean }; checks: unknown[]; noSecretStatus: { noSecretsExposed: boolean; noEnvValuesExposed: boolean; vaultTokenExposed: boolean; vaultSecretValueExposed: boolean } } };
@@ -136,7 +137,7 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     const stagingReleaseCandidate = await getJson(port, "/dashboard/staging-rc") as { stagingReleaseCandidate: { summary: { productionReady: boolean; stagingDeployed: boolean; releaseCreated: boolean; gitTagCreated: boolean; githubReleaseCreated: boolean; deploymentExecuted: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean }; requiredGates: unknown[]; blockers: unknown[]; signoffs: unknown[]; releaseNoteRequirements: unknown[]; rollbackChecklist: unknown[]; skippedTests: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const stagingExecution = await getJson(port, "/dashboard/staging-execution") as { stagingExecution: { summary: { productionReady: boolean; stagingDeployed: boolean; deploymentExecuted: boolean; releaseCreated: boolean; gitTagCreated: boolean; externalCallsEnabled: boolean; remoteIntegrationTestsExecuted: boolean; goNoGoStatus: string; signoffPackAvailable: boolean; requiredSignoffCount: number; pendingSignoffCount: number; approvedSignoffCount: number; signoffStatus: string; actualDeploymentBlocked: boolean }; steps: unknown[]; requiredGates: unknown[]; blockers: unknown[]; signoffPack: { available: boolean; status: string; requiredRoleCount: number; pendingRoleCount: number; approvedRoleCount: number; actualDeploymentBlocked: boolean }; pendingSignoffs: unknown[]; optionalIntegrationDecisions: unknown[]; rollbackSteps: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
     const cicd = await getJson(port, "/dashboard/ci-cd") as { cicd: { summary: { productionReady: boolean; stagingDeployed: boolean; activeWorkflowCreated: boolean; remoteIntegrationTestsEnabledByDefault: boolean; externalCallsEnabledByDefault: boolean }; jobs: unknown[]; integrationGates: unknown[]; noSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean } } };
-    const observability = await getJson(port, "/dashboard/observability") as { observability: { config: { externalBackendEnabled: boolean }; sourceCoverage: unknown[]; noSecretStatus: { noSecretsExposed: boolean } } };
+    const observability = await getJson(port, "/dashboard/observability") as { observability: { config: { externalBackendEnabled: boolean }; sourceCoverage: unknown[]; futureBackends: unknown[]; exportSafetyChecks: unknown[]; exportReadinessSummary: { exporterEnabled: boolean; externalCallsEnabled: boolean; rawPayloadExportAllowed: boolean; secretExportAllowed: boolean; failedSafetyCheckCount: number }; exportNoSecretStatus: { noSecretsExposed: boolean; envValuesExposed: boolean; endpointValuesExposed: boolean; authValuesExposed: boolean }; noSecretStatus: { noSecretsExposed: boolean } } };
     const audit = await getJson(port, "/dashboard/audit") as { audit: { auditGroups: unknown[]; summary: { noSecretsExposed: boolean } } };
 
     assert.equal(overview.overview.source, "api");
@@ -251,6 +252,15 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(database.database.noSecretStatus.databaseUrlExposed, false);
     assert.equal(database.database.migrations.length > 0, true);
     assert.equal(database.database.indexReview.length > 0, true);
+    assert.equal(collaborationStores.collaborationStores.summary.status, "v1_implemented");
+    assert.equal(collaborationStores.collaborationStores.summary.defaultRuntime, "in_memory");
+    assert.equal(collaborationStores.collaborationStores.summary.durableCollaborationStoreConfigured, false);
+    assert.equal(collaborationStores.collaborationStores.summary.productionReady, false);
+    assert.equal(collaborationStores.collaborationStores.repositories.length, 9);
+    assert.equal(collaborationStores.collaborationStores.schema.tableCount, 28);
+    assert.equal(collaborationStores.collaborationStores.noSecretStatus.noSecretsExposed, true);
+    assert.equal(collaborationStores.collaborationStores.noSecretStatus.envValuesExposed, false);
+    assert.equal(collaborationStores.collaborationStores.noSecretStatus.databaseUrlExposed, false);
     assert.equal(secretBackend.secretBackend.summary.productionReady, false);
     assert.equal(secretBackend.secretBackend.summary.realSecretBackendConfigured, false);
     assert.equal(secretBackend.secretBackend.summary.externalCallsEnabled, false);
@@ -372,6 +382,17 @@ test("dashboard read-model API exposes safe read-only sections", async () => {
     assert.equal(cicd.cicd.noSecretStatus.envValuesExposed, false);
     assert.equal(observability.observability.config.externalBackendEnabled, false);
     assert.equal(observability.observability.sourceCoverage.length > 0, true);
+    assert.equal(observability.observability.futureBackends.length > 0, true);
+    assert.equal(observability.observability.exportSafetyChecks.length > 0, true);
+    assert.equal(observability.observability.exportReadinessSummary.exporterEnabled, false);
+    assert.equal(observability.observability.exportReadinessSummary.externalCallsEnabled, false);
+    assert.equal(observability.observability.exportReadinessSummary.rawPayloadExportAllowed, false);
+    assert.equal(observability.observability.exportReadinessSummary.secretExportAllowed, false);
+    assert.equal(observability.observability.exportReadinessSummary.failedSafetyCheckCount, 0);
+    assert.equal(observability.observability.exportNoSecretStatus.noSecretsExposed, true);
+    assert.equal(observability.observability.exportNoSecretStatus.envValuesExposed, false);
+    assert.equal(observability.observability.exportNoSecretStatus.endpointValuesExposed, false);
+    assert.equal(observability.observability.exportNoSecretStatus.authValuesExposed, false);
     assert.equal(observability.observability.noSecretStatus.noSecretsExposed, true);
     assert.equal(audit.audit.auditGroups.length > 0, true);
     assert.equal(audit.audit.summary.noSecretsExposed, true);
@@ -442,6 +463,7 @@ test("dashboard data providers support demo, API, and explicit fallback modes", 
     ["/dashboard/mcp", { mcp: demo.mcp }],
     ["/dashboard/readiness", { readiness: demo.readiness }],
     ["/dashboard/database", { database: demo.database }],
+    ["/dashboard/collaboration-stores", { collaborationStores: demo.collaborationStores }],
     ["/dashboard/secret-backend", { secretBackend: demo.secretBackend }],
     ["/dashboard/secret-backend-decision", { secretBackendDecision: demo.secretBackendDecision }],
     ["/dashboard/vault-secret-backend", { vaultSecretBackend: demo.vaultSecretBackend }],
@@ -520,6 +542,7 @@ test("dashboard renderer consumes read models and preserves static demo fallback
   assert.equal(html.includes("Dashboard Tenant Scope Planning"), true);
   assert.equal(html.includes("tenant filtering implemented false"), true);
   assert.equal(html.includes("Observability"), true);
+  assert.equal(html.includes("External Observability Export"), true);
   assert.equal(html.includes("credential cache paths redacted"), true);
   assert.equal(html.includes("sk-dashboard-secret"), false);
   assert.equal(html.includes("auth.json"), false);

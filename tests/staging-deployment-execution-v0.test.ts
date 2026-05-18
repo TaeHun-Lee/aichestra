@@ -642,6 +642,11 @@ test("staging signoff collection page records explicit approvals and rejections 
 
 test("web server exposes staging signoff collection on the dashboard port", async () => {
   await withWebServer(async (port) => {
+    const health = await getJson(port, "/health");
+    assert.equal(health.statusCode, 200);
+    assert.equal(health.body.service, "aichestra-web");
+    assert.equal(health.body.status, "ok");
+
     const page = await getText(port, "/staging/signoffs");
     assert.equal(page.statusCode, 200);
     assert.equal(page.contentType.includes("text/html"), true);
@@ -672,7 +677,7 @@ test("web server exposes staging signoff collection on the dashboard port", asyn
     assert.equal((evidence.body.evidence as unknown[]).length, 1);
     assert.equal((evidence.body.decision as Record<string, unknown>).status, "not_ready");
     assert.equal((evidence.body.scopeReview as Record<string, unknown>).status, "pending");
-    assert.equal(hasSecretOrEnvValue({ page, approval, evidence }), false);
+    assert.equal(hasSecretOrEnvValue({ health, page, approval, evidence }), false);
   });
 });
 

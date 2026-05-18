@@ -178,6 +178,80 @@ test("Vault integration-test profile can become runnable only when all explicit 
   assert.equal(hasVaultSecretOrEnvValue({ summary, profile, safetyChecks }), false);
 });
 
+test("Vault live integration enablement is skipped by default and keeps forbidden operations disabled", () => {
+  const service = createDeploymentReadinessService({
+    env: {
+      AICHESTRA_VAULT_ADDR: "https://vault-it.example.invalid",
+      AICHESTRA_VAULT_TOKEN: "hvs.vaultintegrationtest"
+    },
+    now: () => fixedNow
+  });
+
+  const readiness = service.getVaultLiveIntegrationReadiness();
+  const checks = service.listVaultLiveValidationChecks();
+  const summary = service.getVaultLiveIntegrationSummary();
+  const runRecord = service.getVaultLiveValidationRunRecord();
+  const runbook = service.getVaultLiveIntegrationRunbook();
+
+  assert.equal(readiness.status, "skipped");
+  assert.equal(readiness.missingGates.includes("AICHESTRA_VAULT_INTEGRATION_TESTS"), true);
+  assert.equal(readiness.writeOperationsAllowed, false);
+  assert.equal(readiness.deleteOperationsAllowed, false);
+  assert.equal(readiness.rotationAllowed, false);
+  assert.equal(readiness.broadListAllowed, false);
+  assert.equal(service.canRunVaultLiveValidation(), false);
+  assert.equal(summary.readinessStatus, "skipped");
+  assert.equal(summary.canRunLiveValidation, false);
+  assert.equal(summary.productionVaultRolloutImplemented, false);
+  assert.equal(summary.noSecretsExposed, true);
+  assert.equal(summary.envValuesExposed, false);
+  assert.equal(runRecord.status, "skipped");
+  assert.equal(runRecord.secretValueExposed, false);
+  assert.equal(runRecord.writeAttempted, false);
+  assert.equal(runRecord.deleteAttempted, false);
+  assert.equal(runRecord.broadListAttempted, false);
+  assert.equal(runbook.requiredEnvVars.includes("AICHESTRA_VAULT_TOKEN"), true);
+  assert.equal(checks.some((check) => check.checkKind === "env_gates" && check.status === "skipped"), true);
+  assert.equal(checks.some((check) => check.checkKind === "no_write" && check.status === "pass"), true);
+  assert.equal(hasVaultSecretOrEnvValue({ readiness, checks, summary, runRecord, runbook }), false);
+});
+
+test("Vault live integration enablement becomes ready for manual live test only with safe gates", () => {
+  const service = createDeploymentReadinessService({
+    env: {
+      AICHESTRA_VAULT_INTEGRATION_TESTS: "true",
+      AICHESTRA_SECRET_BACKEND_PROVIDER: "vault",
+      AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER: "true",
+      AICHESTRA_VAULT_ADDR: "https://vault-it.example.invalid",
+      AICHESTRA_VAULT_AUTH_METHOD: "token",
+      AICHESTRA_VAULT_TOKEN: "hvs.vaultintegrationtest",
+      AICHESTRA_VAULT_KV_MOUNT: "secret",
+      AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES: "aichestra/test",
+      AICHESTRA_TEST_VAULT_SECRET_PATH: "aichestra/test/vault-it",
+      AICHESTRA_TEST_VAULT_SECRET_KEY: "test-only-api-key-value",
+      AICHESTRA_VAULT_NAMESPACE: "sandbox"
+    },
+    now: () => fixedNow
+  });
+
+  const readiness = service.getVaultLiveIntegrationReadiness();
+  const checks = service.listVaultLiveValidationChecks();
+  const summary = service.getVaultLiveIntegrationSummary();
+  const runRecord = service.getVaultLiveValidationRunRecord();
+
+  assert.equal(readiness.status, "ready_for_manual_live_test");
+  assert.equal(readiness.configuredGateCount, readiness.requiredGateCount);
+  assert.deepEqual(readiness.missingGates, []);
+  assert.deepEqual(readiness.unsafeGates, []);
+  assert.equal(readiness.testPathAllowlisted, true);
+  assert.equal(readiness.testPathLooksSafe, true);
+  assert.equal(service.canRunVaultLiveValidation(), true);
+  assert.equal(summary.canRunLiveValidation, true);
+  assert.equal(runRecord.status, "ready");
+  assert.equal(checks.every((check) => check.status === "pass"), true);
+  assert.equal(hasVaultSecretOrEnvValue({ readiness, checks, summary, runRecord }), false);
+});
+
 test("Vault integration-test readiness blocks unsafe paths, auth methods, broad listing, writes, deletes, rotates, and credential caches", () => {
   const service = createDeploymentReadinessService({
     env: {
@@ -224,14 +298,74 @@ test("Vault integration-test readiness blocks unsafe paths, auth methods, broad 
   assert.equal(hasVaultSecretOrEnvValue({ summary, safetyChecks }), false);
 });
 
+test("Vault live integration enablement blocks paths outside the allowlist", () => {
+  const service = createDeploymentReadinessService({
+    env: {
+      AICHESTRA_VAULT_INTEGRATION_TESTS: "true",
+      AICHESTRA_SECRET_BACKEND_PROVIDER: "vault",
+      AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER: "true",
+      AICHESTRA_VAULT_ADDR: "https://vault-it.example.invalid",
+      AICHESTRA_VAULT_AUTH_METHOD: "token",
+      AICHESTRA_VAULT_TOKEN: "hvs.vaultintegrationtest",
+      AICHESTRA_VAULT_KV_MOUNT: "secret",
+      AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES: "aichestra/test",
+      AICHESTRA_TEST_VAULT_SECRET_PATH: "aichestra/dev/vault-it",
+      AICHESTRA_TEST_VAULT_SECRET_KEY: "test-only-api-key-value"
+    },
+    now: () => fixedNow
+  });
+
+  const readiness = service.getVaultLiveIntegrationReadiness();
+  const checks = service.listVaultLiveValidationChecks();
+
+  assert.equal(readiness.status, "blocked_unsafe");
+  assert.equal(readiness.unsafeGates.includes("test_secret_path_not_allowlisted"), true);
+  assert.equal(readiness.testPathAllowlisted, false);
+  assert.equal(checks.some((check) => check.checkKind === "path_allowlist" && check.status === "fail"), true);
+  assert.equal(hasVaultSecretOrEnvValue({ readiness, checks }), false);
+});
+
+test("Vault live integration enablement blocks production-looking paths and sensitive unmarked keys", () => {
+  const service = createDeploymentReadinessService({
+    env: {
+      AICHESTRA_VAULT_INTEGRATION_TESTS: "true",
+      AICHESTRA_SECRET_BACKEND_PROVIDER: "vault",
+      AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER: "true",
+      AICHESTRA_VAULT_ADDR: "https://vault-it.example.invalid",
+      AICHESTRA_VAULT_AUTH_METHOD: "token",
+      AICHESTRA_VAULT_TOKEN: "hvs.vaultintegrationtest",
+      AICHESTRA_VAULT_KV_MOUNT: "secret",
+      AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES: "aichestra/test",
+      AICHESTRA_TEST_VAULT_SECRET_PATH: "aichestra/test/prod/customer-secret",
+      AICHESTRA_TEST_VAULT_SECRET_KEY: "api_key"
+    },
+    now: () => fixedNow
+  });
+
+  const readiness = service.getVaultLiveIntegrationReadiness();
+  const checks = service.listVaultLiveValidationChecks();
+
+  assert.equal(readiness.status, "blocked_unsafe");
+  assert.equal(readiness.unsafeGates.includes("production_like_test_path_configured"), true);
+  assert.equal(readiness.unsafeGates.includes("test_secret_key_not_test_marker"), true);
+  assert.equal(readiness.testPathLooksSafe, false);
+  assert.equal(checks.some((check) => check.checkKind === "test_path_safe" && check.status === "fail"), true);
+  assert.equal(hasVaultSecretOrEnvValue({ readiness, checks }), false);
+});
+
 test("Vault integration-test readiness APIs and health metadata are read-only and sanitized", async () => {
   await withApiServer(async (port) => {
     const profile = await getJson(port, "/readiness/vault-integration/profile");
     const testCases = await getJson(port, "/readiness/vault-integration/test-cases");
     const safetyChecks = await getJson(port, "/readiness/vault-integration/safety-checks?category=no_write");
     const summary = await getJson(port, "/readiness/vault-integration/summary");
+    const liveReadiness = await getJson(port, "/readiness/secrets/vault/live-readiness");
+    const liveChecks = await getJson(port, "/readiness/secrets/vault/live-checks");
+    const liveRunbook = await getJson(port, "/readiness/secrets/vault/live-runbook");
+    const liveSummary = await getJson(port, "/readiness/secrets/vault/live-summary");
     const health = await getJson(port, "/health");
     const writeAttempt = await postJson(port, "/readiness/vault-integration/summary");
+    const liveWriteAttempt = await postJson(port, "/readiness/secrets/vault/live-summary");
 
     assert.equal(profile.statusCode, 200);
     assert.equal((profile.body.profile as Record<string, unknown>).backendKind, "vault");
@@ -244,8 +378,20 @@ test("Vault integration-test readiness APIs and health metadata are read-only an
     assert.equal((summary.body.summary as Record<string, unknown>).canRunLiveTests, false);
     assert.equal((summary.body.summary as Record<string, unknown>).noSecretsExposed, true);
     assert.equal((summary.body.summary as Record<string, unknown>).envValuesExposed, false);
+    assert.equal(liveReadiness.statusCode, 200);
+    assert.equal((liveReadiness.body.readiness as Record<string, unknown>).status, "blocked_unsafe");
+    assert.equal(liveChecks.statusCode, 200);
+    assert.equal((liveChecks.body.checks as Array<Record<string, unknown>>).some((check) => check.checkKind === "test_path_safe" && check.status === "fail"), true);
+    assert.equal(liveRunbook.statusCode, 200);
+    assert.equal((liveRunbook.body.runbook as Record<string, unknown>).status, "metadata_only");
+    assert.equal(liveSummary.statusCode, 200);
+    assert.equal((liveSummary.body.summary as Record<string, unknown>).readinessStatus, "blocked_unsafe");
+    assert.equal((liveSummary.body.runRecord as Record<string, unknown>).status, "blocked");
     assert.equal(health.statusCode, 200);
     assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).enabled, true);
+    assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).liveEnablementStatus, "blocked_unsafe");
+    assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).canRunLiveValidation, false);
+    assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).productionVaultRolloutImplemented, false);
     assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).canRunLiveTests, false);
     assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).vaultAddressConfigured, true);
     assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).vaultTokenConfigured, true);
@@ -256,7 +402,8 @@ test("Vault integration-test readiness APIs and health metadata are read-only an
     assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).vaultSecretValueExposed, false);
     assert.equal((health.body.vaultIntegrationTests as Record<string, unknown>).vaultCallsInDefaultTests, false);
     assert.equal(writeAttempt.statusCode, 405);
-    assert.equal(hasVaultSecretOrEnvValue({ profile, testCases, safetyChecks, summary, health }), false);
+    assert.equal(liveWriteAttempt.statusCode, 405);
+    assert.equal(hasVaultSecretOrEnvValue({ profile, testCases, safetyChecks, summary, liveReadiness, liveChecks, liveRunbook, liveSummary, health }), false);
   }, {
     AICHESTRA_VAULT_INTEGRATION_TESTS: "true",
     AICHESTRA_SECRET_BACKEND_PROVIDER: "vault",
@@ -280,6 +427,10 @@ test("Vault integration-test dashboard panel renders gate, safety, path, and no-
     assert.equal((panel.summary as Record<string, unknown>).productionReady, false);
     assert.equal((panel.summary as Record<string, unknown>).defaultLiveTestsSkipped, true);
     assert.equal((panel.summary as Record<string, unknown>).vaultCallsInDefaultTests, false);
+    assert.equal((panel.liveSummary as Record<string, unknown>).readinessStatus, "skipped");
+    assert.equal((panel.liveSummary as Record<string, unknown>).productionVaultRolloutImplemented, false);
+    assert.equal((panel.liveRunRecord as Record<string, unknown>).status, "skipped");
+    assert.equal(Array.isArray(panel.liveChecks), true);
     assert.equal((panel.noSecretStatus as Record<string, unknown>).noSecretsExposed, true);
     assert.equal((panel.noSecretStatus as Record<string, unknown>).envValuesExposed, false);
     assert.equal((panel.noSecretStatus as Record<string, unknown>).vaultTokenExposed, false);
@@ -302,6 +453,8 @@ test("Vault integration-test dashboard panel renders gate, safety, path, and no-
 
   const html = await renderDashboardHtml(new DemoDashboardDataProvider());
   assert.equal(html.includes("Vault Integration Tests"), true);
+  assert.equal(html.includes("Live enablement"), true);
+  assert.equal(html.includes("Live checks"), true);
   assert.equal(html.includes("Forbidden behavior"), true);
   assert.equal(html.includes("broad list"), true);
   assert.equal(hasVaultSecretOrEnvValue(html), false);
@@ -315,4 +468,14 @@ test("optional live Vault integration-test profile skeleton is skipped in defaul
     : `missing gates: ${liveGateSummary.missingRequiredEnvVars.join(",") || "unsafe gates present"}`
 }, () => {
   assert.fail("Live Vault integration skeleton must never run in default tests.");
+});
+
+const liveEnablementSummary = createDeploymentReadinessService({ env: process.env, now: () => fixedNow }).getVaultLiveIntegrationSummary();
+
+test("optional Vault live enablement validation skeleton is skipped in default runs", {
+  skip: liveEnablementSummary.canRunLiveValidation
+    ? "manual live validation is enabled only for an explicitly requested gated run"
+    : `live readiness status: ${liveEnablementSummary.readinessStatus}`
+}, () => {
+  assert.fail("Vault live enablement skeleton must never run in default tests.");
 });

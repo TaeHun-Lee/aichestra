@@ -7,7 +7,7 @@ Runtime impact: none
 
 `StaticPolicyEngine` remains the source of truth. A future PoC runtime may run only in shadow mode until explicit follow-up work implements and validates it.
 
-Policy Runtime Shadow Evaluation Planning v1 now refines this v0 outline with future architecture, candidate runtime interface expectations, comparison rules, mismatch taxonomy, reporting, rollout/rollback, and read-only readiness/dashboard metadata. It still does not implement a shadow evaluator.
+Policy Runtime Shadow Evaluation Planning v1 now refines this v0 outline with future architecture, candidate runtime interface expectations, comparison rules, mismatch taxonomy, reporting, rollout/rollback, and read-only readiness/dashboard metadata. Policy Runtime Shadow Evaluator Skeleton v1 adds disabled/mock evaluator metadata and fixture reports; no live shadow evaluator or candidate runtime execution exists.
 
 ## Shadow Mode Rules
 

@@ -7,6 +7,8 @@ Enforcement mode: `shadow_only`
 
 Policy Runtime Shadow Evaluation Planning v1 defines how a future candidate policy runtime will be compared against `StaticPolicyEngine` without changing enforcement.
 
+Update: Policy Runtime Shadow Evaluator Skeleton v1 is implemented as a disabled/mock boundary in `packages/policy`. The default evaluator is disabled, the mock evaluator is deterministic test-only, and no candidate runtime is implemented or executed.
+
 ## What v1 Implements
 
 - Shadow evaluation planning architecture.
@@ -23,12 +25,13 @@ Policy Runtime Shadow Evaluation Planning v1 defines how a future candidate poli
 - Dashboard/readiness reporting plan.
 - Rollout and rollback stage plan.
 - Sanitized read-only `/readiness/policy-shadow/*` endpoints.
+- Disabled/mock evaluator skeleton metadata through `/readiness/policy-shadow/evaluator/*`.
 - Read-only `/dashboard/policy-shadow` panel.
 - Deterministic tests for model/API/dashboard/no-secret/no-env/no-execution behavior.
 
 ## What v1 Does Not Implement
 
-- Shadow evaluator.
+- Live/running shadow evaluator.
 - Candidate runtime implementation.
 - Candidate runtime execution.
 - OPA/Rego runtime.
@@ -89,7 +92,7 @@ Severity values are `info`, `low`, `medium`, `high`, and `critical`. Default act
 
 ## Reporting Plan
 
-Reports include case, match, mismatch, and critical mismatch counts by domain and candidate runtime kind. v1 includes a planning-only report with zero executed cases because no candidate runtime exists.
+Reports include case, match, mismatch, and critical mismatch counts by domain and candidate runtime kind. The planning report remains zero executed cases because no candidate runtime exists. Skeleton v1 also exposes a static fixture mock report derived from Golden Test Harness v1 cases; it is local, deterministic, and never changes enforcement.
 
 Dashboard and readiness surfaces show source of truth, counts, critical examples, rollout stage, no-enforcement guarantee, and no-secret/no-env status.
 
@@ -117,6 +120,10 @@ Readiness endpoints:
 - `GET /readiness/policy-shadow/reports`
 - `GET /readiness/policy-shadow/checks`
 - `GET /readiness/policy-shadow/summary`
+- `GET /readiness/policy-shadow/evaluator/status`
+- `GET /readiness/policy-shadow/evaluator/summary`
+- `GET /readiness/policy-shadow/evaluator/mismatch-types`
+- `GET /readiness/policy-shadow/evaluator/mock-report`
 
 Dashboard endpoint:
 
@@ -150,7 +157,7 @@ No external observability export is implemented.
 ## Known Limitations
 
 - No candidate runtime exists.
-- No shadow evaluator exists.
+- A disabled/mock skeleton exists, but no live shadow evaluator or candidate runtime exists.
 - Golden cases are the only current compatibility baseline.
 - Reports are planning/readiness metadata only.
 - Production Auth/RBAC and tenant-scoped enforcement are not implemented.
@@ -158,4 +165,4 @@ No external observability export is implemented.
 
 ## Recommended Next Task
 
-Policy Runtime Shadow Evaluator Skeleton v1.
+Policy Runtime Shadow Evaluator Implementation Planning v1, or Signed JSON/YAML Bundle Schema v1.

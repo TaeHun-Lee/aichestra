@@ -260,7 +260,7 @@ export const defaultMetricDefinitions: MetricDefinition[] = [
   {
     id: "metric_observability_external_exporter_enabled",
     name: "observability.external_exporter.enabled",
-    description: "External observability exporter enabled flag. Always zero in v0.",
+    description: "External observability exporter enabled flag. Always zero in v0 and External Observability Export v1 skeleton.",
     unit: "boolean",
     category: "observability",
     dimensions: ["exporter"],

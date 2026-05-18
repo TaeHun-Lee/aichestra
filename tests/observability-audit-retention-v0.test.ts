@@ -409,13 +409,19 @@ test("dashboard observability panel renders normalized audit and no-secret statu
     assert.equal(dashboard.statusCode, 200);
     assert.equal((observability.config as Record<string, unknown>).externalBackendEnabled, false);
     assert.equal((observability.noSecretStatus as Record<string, unknown>).noSecretsExposed, true);
+    assert.equal((observability.exportReadinessSummary as Record<string, unknown>).exporterEnabled, false);
+    assert.equal((observability.exportReadinessSummary as Record<string, unknown>).externalCallsEnabled, false);
+    assert.equal((observability.exportReadinessSummary as Record<string, unknown>).rawPayloadExportAllowed, false);
+    assert.equal((observability.exportReadinessSummary as Record<string, unknown>).secretExportAllowed, false);
     assert.equal(Array.isArray(observability.sourceCoverage), true);
     assert.equal(Array.isArray(observability.retentionClasses), true);
+    assert.equal(Array.isArray(observability.exportSafetyChecks), true);
     assert.equal(hasUnsafeSecret(dashboard), false);
   });
 
   const html = await renderDashboardHtml(new DemoDashboardDataProvider());
   assert.equal(html.includes("Observability"), true);
+  assert.equal(html.includes("External Observability Export"), true);
   assert.equal(html.includes("external exporter disabled"), true);
   assert.equal(html.includes("sk-observability-secret"), false);
   assert.equal(html.includes("auth.json"), false);

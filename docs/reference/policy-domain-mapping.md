@@ -24,9 +24,9 @@ All future bundles must preserve deny-by-default behavior and must not bypass Au
 
 ## Shadow Evaluation Planning v1
 
-Policy Runtime Shadow Evaluation Planning v1 uses this mapping as the domain inventory for future static-vs-candidate comparisons. Shadow comparison must preserve `StaticPolicyEngine` as source of truth, compare effect/reason/rule id/obligation/redaction/audit metadata, record mismatches only, and keep `enforcementChanged: false`.
+Policy Runtime Shadow Evaluation Planning v1 uses this mapping as the domain inventory for future static-vs-candidate comparisons. Policy Runtime Shadow Evaluator Skeleton v1 consumes the Golden Test Harness v1 fixture domains for disabled/mock comparison reports. Shadow comparison must preserve `StaticPolicyEngine` as source of truth, compare effect/reason/rule id/obligation/redaction/audit metadata, record mismatches only, and keep `enforcementChanged: false`.
 
-No candidate runtime, OPA/Rego runtime, Cedar runtime, signed bundle verification runtime, dynamic policy execution, remote bundle loading, external policy service call, or production policy enforcement exists in v1.
+No candidate runtime, live shadow evaluator, OPA/Rego runtime, Cedar runtime, signed bundle verification runtime, dynamic policy execution, remote bundle loading, external policy service call, or production policy enforcement exists in v1.
 ## Runtime PoC Planning v0 Crosswalk
 
 Policy Bundle Runtime PoC Planning v0 refines this inventory into executable-future fixture domains under `docs/roadmaps/policy-bundle-runtime-poc/domain-poc-mapping-v0.md`.
@@ -39,4 +39,4 @@ Policy Runtime PoC Golden Test Harness v1 now stores 42 reviewable static fixtur
 
 Policy Runtime Shadow Evaluation Planning v1 defines how a future candidate runtime will compare against these static domains without changing enforcement. The planned comparison rules cover effect, reason, rule id, obligations, redaction requirements, and audit metadata. Critical mismatch examples are static-denied destructive Git, `secret.read`, credential-cache read, runner secret injection, MCP critical/high-risk tool invocation, and governance apply that a candidate runtime would allow.
 
-The read-only planning surface lives at `/readiness/policy-shadow/*` and in the existing `/dashboard/policy-runtime-poc` panel. It does not implement a shadow evaluator, candidate runtime, OPA/Rego, Cedar, signed JSON/YAML evaluator, external policy service, dynamic policy execution, remote bundle loading, hot reload, or enforcement change. `StaticPolicyEngine` remains source of truth.
+The read-only planning surface lives at `/readiness/policy-shadow/*`, `/readiness/policy-shadow/evaluator/*`, and in dashboard policy-shadow/policy-runtime-poc panels. It implements only disabled/mock evaluator metadata and fixture reports; it does not implement a live shadow evaluator, candidate runtime, OPA/Rego, Cedar, signed JSON/YAML evaluator, external policy service, dynamic policy execution, remote bundle loading, hot reload, or enforcement change. `StaticPolicyEngine` remains source of truth.

@@ -9,6 +9,8 @@
     "build": "node scripts/build.mjs",
     "db:migrate": "node scripts/db/migrate.mjs",
     "dev": "pnpm --filter @aichestra/api dev",
+    "docker:down": "docker compose down",
+    "docker:up": "docker compose up --build",
     "lint": "node scripts/lint.mjs",
     "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json"

@@ -11,7 +11,7 @@ import {
 import type { AuthorizationService } from "@aichestra/auth";
 import type { ConflictResolutionAssistantService, MergeQueuePolicyService, PrOwnershipService, RealMergeExecutionPolicyService } from "@aichestra/core";
 import type { TenantScopeEnforcementService } from "@aichestra/auth";
-import type { InMemoryAichestraStore } from "@aichestra/db";
+import type { DurableCollaborationRepositories, InMemoryAichestraStore } from "@aichestra/db";
 import type { DashboardReadinessTenantScopePlanningService, DashboardScopeFilterContext, DashboardScopeFilteringService, DeploymentReadinessService } from "@aichestra/deployment-readiness";
 import {
   baseBranchDriftStatusToDto,
@@ -27,8 +27,8 @@ import type { ImprovementServices } from "@aichestra/improvement";
 import { providerCatalogEntryToDto } from "@aichestra/llm-gateway";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
 import type { MCPGateway } from "@aichestra/mcp-gateway";
-import type { AuditQueryScopeEnforcementService, ObservabilityService } from "@aichestra/observability";
-import { runPolicyRuntimeGoldenHarness, type PolicyService } from "@aichestra/policy";
+import type { AuditQueryScopeEnforcementService, ExternalObservabilityExportReadinessService, ObservabilityService } from "@aichestra/observability";
+import { createDisabledPolicyShadowEvaluator, policyShadowEvaluatorMismatchTypes, runPolicyShadowGoldenMockReport, runPolicyRuntimeGoldenHarness, type PolicyService } from "@aichestra/policy";
 import type { ApplyWorkflowService, CanaryExecutionService, EvalSuiteExecutionService, RegistryArtifactTrustService, RegistryCanaryApplySummary, RegistryCompatibilityService, RegistryDriftDetectionService, RegistryService, RegistryTenantScopeEnforcementService } from "@aichestra/registry";
 import {
   registryEvalAttachmentToDto,
@@ -87,6 +87,7 @@ import {
   type DashboardReadModels,
   type DashboardReadModelSource,
   type DashboardTenantScopePlanningReadModel,
+  type DurableCollaborationStoresReadModel,
   type TenantScopeEnforcementReadModel,
   type DatabaseOperationsReadModel,
   type DeploymentReadinessReadModel,
@@ -128,6 +129,7 @@ import {
 
 export type DashboardReadModelContext = {
   store: InMemoryAichestraStore;
+  durableCollaborationRepositories: DurableCollaborationRepositories;
   gitIntegrationService: GitIntegrationService;
   branchOrchestratorService: BranchOrchestratorService;
   gitProviderConfig: GitProviderRuntimeConfig;
@@ -166,6 +168,7 @@ export type DashboardReadModelContext = {
   dashboardScopeFilterContext?: DashboardScopeFilterContext;
   tenantScopeEnforcementService: TenantScopeEnforcementService;
   observabilityService: ObservabilityService;
+  externalObservabilityExportService: ExternalObservabilityExportReadinessService;
   auditQueryScopeEnforcementService: AuditQueryScopeEnforcementService;
 };
 
@@ -670,6 +673,41 @@ function buildDatabase(context: DashboardReadModelContext): DatabaseOperationsRe
   };
 }
 
+function buildCollaborationStores(context: DashboardReadModelContext): DurableCollaborationStoresReadModel {
+  const repositories = context.durableCollaborationRepositories;
+  const summary = repositories.getSummary({
+    optionalPostgresTestsConfigured: Boolean(process.env.AICHESTRA_TEST_DATABASE_URL)
+  });
+  const repositorySummaries = repositories.listRepositorySummaries();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    inventory: sanitizeDashboardArray(repositories.listInventory()),
+    repositories: sanitizeDashboardArray(repositorySummaries),
+    schema: sanitizeDashboardObject(repositories.getSchemaStatus()),
+    safety: sanitizeDashboardObject({
+      defaultRuntime: summary.defaultRuntime,
+      durableCollaborationStoreConfigured: summary.durableCollaborationStoreConfigured,
+      productionReady: summary.productionReady,
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      databaseUrlExposed: summary.databaseUrlExposed,
+      remoteGitOperationsExecuted: summary.remoteGitOperationsExecuted,
+      workspaceMutationExecuted: summary.workspaceMutationExecuted,
+      externalCallsExecuted: summary.externalCallsExecuted,
+      rawPayloadStorageAllowed: summary.metadata.rawPayloadStorageAllowed,
+      credentialStorageAllowed: summary.metadata.credentialStorageAllowed
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      databaseUrlExposed: summary.databaseUrlExposed,
+      databaseUrlValueReturned: false,
+      credentialStorageAllowed: summary.metadata.credentialStorageAllowed,
+      rawPayloadStorageAllowed: summary.metadata.rawPayloadStorageAllowed
+    })
+  };
+}
+
 function buildSecretBackend(context: DashboardReadModelContext): SecretBackendMigrationReadModel {
   const readiness = context.deploymentReadinessService;
   const summary = readiness.getSecretBackendMigrationSummary();
@@ -816,6 +854,8 @@ function buildVaultIntegration(context: DashboardReadModelContext): VaultIntegra
   const summary = readiness.getVaultIntegrationTestReadinessSummary();
   const safetyChecks = readiness.listVaultIntegrationTestSafetyChecks();
   const testCases = readiness.listVaultIntegrationTestCases();
+  const liveReadiness = readiness.getVaultLiveIntegrationReadiness();
+  const liveChecks = readiness.listVaultLiveValidationChecks();
   return {
     summary: sanitizeDashboardObject(summary),
     profile: sanitizeDashboardObject(readiness.getVaultIntegrationTestProfile()),
@@ -823,8 +863,19 @@ function buildVaultIntegration(context: DashboardReadModelContext): VaultIntegra
     gatedLiveTestCases: sanitizeDashboardArray(testCases.filter((testCase) => testCase.requiresLiveVault)),
     mockTestCases: sanitizeDashboardArray(testCases.filter((testCase) => !testCase.requiresLiveVault)),
     safetyChecks: sanitizeDashboardArray(safetyChecks),
-    blockers: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "fail")),
-    warnings: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "warning")),
+    liveReadiness: sanitizeDashboardObject(liveReadiness),
+    liveChecks: sanitizeDashboardArray(liveChecks),
+    liveRunbook: sanitizeDashboardObject(readiness.getVaultLiveIntegrationRunbook()),
+    liveRunRecord: sanitizeDashboardObject(readiness.getVaultLiveValidationRunRecord()),
+    liveSummary: sanitizeDashboardObject(readiness.getVaultLiveIntegrationSummary()),
+    blockers: sanitizeDashboardArray([
+      ...safetyChecks.filter((check) => check.status === "fail"),
+      ...liveChecks.filter((check) => check.status === "fail")
+    ]),
+    warnings: sanitizeDashboardArray([
+      ...safetyChecks.filter((check) => check.status === "warning"),
+      ...liveChecks.filter((check) => check.status === "warning")
+    ]),
     gateStatus: sanitizeDashboardObject({
       configuredGateCount: summary.configuredGateCount,
       missingGateCount: summary.missingGateCount,
@@ -1733,6 +1784,8 @@ function buildPolicyShadow(context: DashboardReadModelContext): PolicyShadowEval
   const summary = readiness.getPolicyShadowEvaluationSummary();
   const plan = readiness.getPolicyShadowEvaluationPlan();
   const mismatches = readiness.listPolicyShadowMismatches();
+  const evaluatorStatus = createDisabledPolicyShadowEvaluator().getStatus();
+  const evaluatorMockReport = runPolicyShadowGoldenMockReport();
   return {
     summary: sanitizeDashboardObject(summary),
     plan: sanitizeDashboardObject(plan),
@@ -1740,6 +1793,23 @@ function buildPolicyShadow(context: DashboardReadModelContext): PolicyShadowEval
     mismatchTaxonomy: sanitizeDashboardArray(mismatches),
     readinessChecks: sanitizeDashboardArray(readiness.listPolicyShadowReadinessChecks()),
     reports: sanitizeDashboardArray(readiness.listPolicyShadowEvaluationReports()),
+    evaluatorStatus: sanitizeDashboardObject(evaluatorStatus),
+    evaluatorSummary: sanitizeDashboardObject(evaluatorMockReport.summary),
+    evaluatorMismatchTypes: sanitizeDashboardArray(policyShadowEvaluatorMismatchTypes),
+    evaluatorMockReport: sanitizeDashboardObject({
+      fixtureReport: evaluatorMockReport.fixtureReport,
+      summary: evaluatorMockReport.summary,
+      previewCount: Math.min(evaluatorMockReport.results.length, 5),
+      resultPreview: evaluatorMockReport.results.slice(0, 5).map((result) => ({
+        id: result.id,
+        status: result.status,
+        sourceOfTruthRuntime: result.sourceOfTruthRuntime,
+        candidateRuntimeKind: result.candidateRuntimeKind,
+        enforcementChanged: result.enforcementChanged,
+        mismatchCount: result.mismatches.length,
+        comparison: result.comparison
+      }))
+    }),
     criticalMismatchExamples: sanitizeDashboardArray(mismatches.filter((mismatch) => mismatch.severity === "critical")),
     rollout: sanitizeDashboardObject({
       currentStage: plan.rolloutStages[0] ?? "docs_planning",
@@ -2229,6 +2299,9 @@ function buildReadiness(context: DashboardReadModelContext): DeploymentReadiness
 
 function buildObservability(context: DashboardReadModelContext): ObservabilityReadModel {
   const observability = context.observabilityService.buildDashboardObservabilityReadModel();
+  const externalExport = context.externalObservabilityExportService;
+  const exportSafetyChecks = externalExport.getSafetyChecks();
+  const exportReadinessSummary = externalExport.getSummary(exportSafetyChecks);
   const auditScopeDecision = context.auditQueryScopeEnforcementService.evaluateAuditQuery({
     roles: ["viewer"],
     requestedDetailLevel: "detail",
@@ -2251,6 +2324,11 @@ function buildObservability(context: DashboardReadModelContext): ObservabilityRe
     traceSummary: sanitizeDashboardObject(observability.traceSummary),
     sourceCoverage: sanitizeDashboardArray(observability.sourceCoverage),
     productionReadinessBlockers: sanitizeDashboardArray(observability.productionReadinessBlockers),
+    exporterConfigs: sanitizeDashboardArray(externalExport.getExporterConfigs()),
+    futureBackends: sanitizeDashboardArray(externalExport.listFutureBackends()),
+    exportSafetyChecks: sanitizeDashboardArray(exportSafetyChecks),
+    exportReadinessSummary: sanitizeDashboardObject(exportReadinessSummary),
+    exportNoSecretStatus: sanitizeDashboardObject(externalExport.getNoSecretStatus()),
     auditScopeSummary: sanitizeDashboardObject(auditScopeSummary),
     auditScopeDecision: sanitizeDashboardObject(auditScopeDecisionSummary),
     auditScopeRedactionPlans: sanitizeDashboardArray(context.auditQueryScopeEnforcementService.listRedactionPlans()),
@@ -2346,6 +2424,7 @@ function buildOverview(
   tenantScopeEnforcement: TenantScopeEnforcementReadModel,
   readiness: DeploymentReadinessReadModel,
   database: DatabaseOperationsReadModel,
+  collaborationStores: DurableCollaborationStoresReadModel,
   secretBackend: SecretBackendMigrationReadModel,
   secretBackendDecision: SecretBackendDecisionReadModel,
   vaultSecretBackend: VaultSecretBackendReadModel,
@@ -2472,6 +2551,9 @@ function buildOverview(
       databaseOperationsCriticalBlockers: database.summary.criticalBlockerCount ?? database.blockers.length,
       databaseMigrationFiles: database.migrations.length,
       databaseIndexReviewItems: database.indexReview.length,
+      durableCollaborationRepositoryGroups: collaborationStores.repositories.length,
+      durableCollaborationRequiredRecords: collaborationStores.summary.requiredDurableRecordCount ?? 0,
+      durableCollaborationPostgresTables: collaborationStores.schema.tableCount ?? 0,
       secretBackendReadinessBlockers: secretBackend.blockers.length,
       secretBackendOptions: secretBackend.backendOptions.length,
       secretRotationPlans: secretBackend.rotationPlans.length,
@@ -2499,6 +2581,8 @@ function buildOverview(
       normalizedAuditEvents: observability.auditSummary.totalEvents ?? 0,
       auditSourcesCovered: observability.sourceCoverage.filter((source) => source.normalized === "yes").length,
       observabilityTraceSpans: observability.traceSpans.length,
+      observabilityExportFutureBackends: observability.futureBackends.length,
+      observabilityExportFailedSafetyChecks: observability.exportReadinessSummary.failedSafetyCheckCount ?? 0,
       auditEvents: audit.summary.totalEvents ?? 0
     }),
     sections: {
@@ -2520,8 +2604,8 @@ function buildOverview(
       agents: { status: "available", count: agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: policy.rules.length, notes: [] },
       policyBundles: { status: "available", count: policyBundles.blockers.length, notes: ["Policy Bundle / OPA-Cedar v0 is planning-only; StaticPolicyEngine remains the runtime and no external policy engine is enabled."] },
-      policyShadow: { status: "available", count: policyShadow.mismatchTaxonomy.length, notes: ["Policy Runtime Shadow Evaluation Planning v1 is planning-only; no shadow evaluator or candidate runtime is running."] },
-      policyRuntimePoc: { status: "available", count: policyRuntimePoc.blockers.length, notes: ["Policy Bundle Runtime PoC Planning v0 and Shadow Evaluation Planning v1 are read-only; StaticPolicyEngine remains source of truth and no runtime evaluator is implemented."] },
+      policyShadow: { status: "available", count: policyShadow.mismatchTaxonomy.length, notes: ["Policy Runtime Shadow Evaluator Skeleton v1 exposes disabled/mock metadata only; no live shadow evaluator or candidate runtime is running."] },
+      policyRuntimePoc: { status: "available", count: policyRuntimePoc.blockers.length, notes: ["Policy Bundle Runtime PoC Planning v0 and Shadow Evaluation Planning v1 are read-only; StaticPolicyEngine remains source of truth and no candidate policy runtime is implemented."] },
       auth: { status: "available", count: auth.actors.length, notes: ["Mock auth is not production authentication."] },
       authProduction: { status: "available", count: authProduction.blockers.length, notes: ["Production Auth/RBAC v1 is planning-only; no real IdP, sessions, JWTs, cookies, or login flow is implemented."] },
       authProviders: { status: "available", count: authProviders.configs.length, notes: ["Production Auth Provider Skeleton v1 is disabled-by-default; MockAuthProvider remains active and no token/session validation is running."] },
@@ -2534,6 +2618,7 @@ function buildOverview(
       tenantScopeEnforcement: { status: "available", count: tenantScopeEnforcement.modes.length, notes: ["Tenant Scope Enforcement v1 is partial/representative metadata; tenant filtering and production enforcement remain false."] },
       readiness: { status: "available", count: readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       database: { status: "available", count: database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
+      collaborationStores: { status: "available", count: collaborationStores.repositories.length, notes: ["Durable Collaboration Stores v1 exposes repository and schema metadata; default runtime remains in-memory and optional Postgres is gated."] },
       secretBackend: { status: "available", count: secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
       secretBackendDecision: { status: "available", count: secretBackendDecision.risks.length, notes: ["Production Secret Backend Option Decision v0 selects Vault for v1 planning only; no backend is contacted and no secret values are read."] },
       vaultSecretBackend: { status: "available", count: vaultSecretBackend.checks.length, notes: ["Vault Secret Backend v1 is gated and non-default; dashboard data is metadata-only and does not read Vault."] },
@@ -2542,7 +2627,7 @@ function buildOverview(
       stagingReleaseCandidate: { status: "available", count: stagingReleaseCandidate.blockers.length, notes: ["Staging Release Candidate Checklist v0 is read-only; it does not create releases, tags, GitHub releases, deployments, or run integration tests."] },
       stagingExecution: { status: "available", count: stagingExecution.blockers.length, notes: ["Staging Deployment Execution Plan v0 is planning-only; it does not deploy, create releases or tags, call providers, or run integration tests."] },
       cicd: { status: "available", count: cicd.blockers.length, notes: ["Staging CI/CD Pipeline Planning v0 is read-only; it does not create active workflows, deploy, or enable remote integration tests by default."] },
-      observability: { status: "available", count: typeof observability.auditSummary.totalEvents === "number" ? observability.auditSummary.totalEvents : 0, notes: ["Observability v0 is in-memory/read-only and has no external exporter."] },
+      observability: { status: "available", count: typeof observability.auditSummary.totalEvents === "number" ? observability.auditSummary.totalEvents : 0, notes: ["Observability v0 is in-memory/read-only. External Observability Export v1 is skeleton-only; external calls, raw-payload export, and secret export remain disabled."] },
       audit: { status: "available", count: typeof audit.summary.totalEvents === "number" ? audit.summary.totalEvents : 0, notes: [] }
     },
     safety: {
@@ -2569,10 +2654,7 @@ function buildOverview(
 }
 
 export function buildDashboardReadModels(context: DashboardReadModelContext, source: DashboardReadModelSource = "api", filterContext?: DashboardScopeFilterContext): DashboardReadModels {
-  const effectiveContext: DashboardReadModelContext = filterContext
-    ? { ...context, dashboardScopeFilterContext: filterContext }
-    : context;
-  context = effectiveContext;
+  context = dashboardContextWithFilter(context, filterContext);
   const tasks = buildTasks(context);
   const git = buildGit(context);
   const githubApp = buildGitHubApp(context);
@@ -2604,6 +2686,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const tenantScopeEnforcement = buildTenantScopeEnforcement(context);
   const readiness = buildReadiness(context);
   const database = buildDatabase(context);
+  const collaborationStores = buildCollaborationStores(context);
   const secretBackend = buildSecretBackend(context);
   const secretBackendDecision = buildSecretBackendDecision(context);
   const vaultSecretBackend = buildVaultSecretBackend(context);
@@ -2614,15 +2697,8 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const cicd = buildCicd(context);
   const observability = buildObservability(context);
   const audit = buildAudit(context);
-  const { readModel: dashboardScopeFilter, decisionsByPanel: filterDecisionsByPanel } = buildDashboardScopeFilter(context);
-  const filterService = context.dashboardScopeFilteringService;
-  const applyFilter = <T extends Record<string, unknown>>(panel: T, panelId: string): T => {
-    const decision = filterDecisionsByPanel.get(panelId);
-    if (!decision) return panel;
-    const filtered = filterService.filterPanelBody(panel, decision);
-    return filtered as T;
-  };
-  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, mergeQueueIntegration, branchCleanup, registryCompatibility, registryDrift, registryCanaryApply, agents, policy, policyBundles, policyShadow, policyRuntimePoc, auth, authProduction, authProviders, providers, security, localAgents, mcp, scopes, tenantScopePlanning, tenantScopeEnforcement, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
+  const { dashboardScopeFilter, applyFilter } = buildDashboardPanelFilter(context);
+  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, mergeQueueIntegration, branchCleanup, registryCompatibility, registryDrift, registryCanaryApply, agents, policy, policyBundles, policyShadow, policyRuntimePoc, auth, authProduction, authProviders, providers, security, localAgents, mcp, scopes, tenantScopePlanning, tenantScopeEnforcement, readiness, database, collaborationStores, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
 
   return {
     overview: withScopeMetadata(overview, dashboardScopeMetadata(context, "overview")),
@@ -2656,6 +2732,7 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     tenantScopeEnforcement,
     readiness: withScopeMetadata(readiness, dashboardScopeMetadata(context, "production_readiness")),
     database: withScopeMetadata(database, dashboardScopeMetadata(context, "database")),
+    collaborationStores: withScopeMetadata(collaborationStores, dashboardScopeMetadata(context, "collaboration_stores")),
     secretBackend: withScopeMetadata(secretBackend, dashboardScopeMetadata(context, "secret_backend")),
     secretBackendDecision: withScopeMetadata(secretBackendDecision, dashboardScopeMetadata(context, "secret_backend_decision")),
     vaultSecretBackend: applyFilter(withScopeMetadata(vaultSecretBackend, dashboardScopeMetadata(context, "vault_secret_backend")), "vault_secret_backend"),
@@ -2669,4 +2746,147 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     policyRuntimePoc: withScopeMetadata(policyRuntimePoc, dashboardScopeMetadata(context, "policy_runtime_poc")),
     dashboardScopeFilter: withScopeMetadata(dashboardScopeFilter, dashboardScopeMetadata(context, "tenant_scope_enforcement"))
   };
+}
+
+export type DashboardSectionReadModelResponse = {
+  section: string;
+  body: Record<string, unknown>;
+};
+
+function dashboardContextWithFilter(
+  context: DashboardReadModelContext,
+  filterContext?: DashboardScopeFilterContext
+): DashboardReadModelContext {
+  return filterContext
+    ? { ...context, dashboardScopeFilterContext: filterContext }
+    : context;
+}
+
+function buildDashboardPanelFilter(context: DashboardReadModelContext): {
+  dashboardScopeFilter: DashboardScopeFilterReadModel;
+  applyFilter: <T extends object>(panel: T, panelId: string) => T;
+} {
+  const { readModel: dashboardScopeFilter, decisionsByPanel: filterDecisionsByPanel } = buildDashboardScopeFilter(context);
+  const filterService = context.dashboardScopeFilteringService;
+  const applyFilter = <T extends object>(panel: T, panelId: string): T => {
+    const decision = filterDecisionsByPanel.get(panelId);
+    if (!decision) return panel;
+    const filtered = filterService.filterPanelBody(panel as Record<string, unknown>, decision);
+    return filtered as T;
+  };
+  return { dashboardScopeFilter, applyFilter };
+}
+
+export function buildDashboardReadModelSection(
+  context: DashboardReadModelContext,
+  section: string = "overview",
+  source: DashboardReadModelSource = "api",
+  filterContext?: DashboardScopeFilterContext
+): DashboardSectionReadModelResponse | undefined {
+  context = dashboardContextWithFilter(context, filterContext);
+  const withPanelScope = <T extends object>(readModel: T, panelId: string): T & { scopeMetadata: ScopedReadModelMetadata } =>
+    withScopeMetadata(readModel, dashboardScopeMetadata(context, panelId));
+  const withFilteredPanelScope = <T extends object>(
+    readModel: T,
+    panelId: string,
+    filterPanelId: string = panelId
+  ): T & { scopeMetadata: ScopedReadModelMetadata } => {
+    const { applyFilter } = buildDashboardPanelFilter(context);
+    return applyFilter(withPanelScope(readModel, panelId), filterPanelId);
+  };
+
+  switch (section) {
+    case "overview":
+      return { section, body: { overview: buildDashboardReadModels(context, source).overview } };
+    case "tasks":
+      return { section, body: { tasks: withPanelScope(buildTasks(context), "tasks") } };
+    case "git":
+      return { section, body: { git: withPanelScope(buildGit(context), "git") } };
+    case "github-app":
+      return { section, body: { githubApp: withFilteredPanelScope(buildGitHubApp(context), "github_app") } };
+    case "github-app-integration":
+      return { section, body: { githubAppIntegration: withFilteredPanelScope(buildGitHubAppIntegration(context), "github_app_integration") } };
+    case "conflicts":
+      return { section, body: { conflicts: withPanelScope(buildConflicts(context), "conflict_risks") } };
+    case "registry":
+      return { section, body: { registry: withPanelScope(buildRegistry(context), "registry") } };
+    case "llm":
+      return { section, body: { llm: withPanelScope(buildLlm(context), "llm_gateway") } };
+    case "llm-integration":
+      return { section, body: { llmIntegration: withFilteredPanelScope(buildLlmIntegration(context), "llm_integration") } };
+    case "vault-integration":
+      return { section, body: { vaultIntegration: withPanelScope(buildVaultIntegration(context), "vault_integration") } };
+    case "merge-queue-integration":
+      return { section, body: { mergeQueueIntegration: withPanelScope(buildMergeQueueIntegration(context), "merge_queue_integration") } };
+    case "git-cleanup":
+      return { section, body: { branchCleanup: withPanelScope(buildBranchCleanup(context), "branch_cleanup") } };
+    case "registry-compatibility":
+      return { section, body: { registryCompatibility: withPanelScope(buildRegistryCompatibility(context), "registry_compatibility") } };
+    case "registry-drift":
+      return { section, body: { registryDrift: withPanelScope(buildRegistryDrift(context), "registry_drift") } };
+    case "registry-canary-apply":
+      return { section, body: { registryCanaryApply: withPanelScope(buildRegistryCanaryApply(context), "registry_canary_apply") } };
+    case "agents":
+      return { section, body: { agents: withPanelScope(buildAgents(context), "local_agent_runner") } };
+    case "policy":
+      return { section, body: { policy: withPanelScope(buildPolicy(context), "policy") } };
+    case "policy-bundles":
+      return { section, body: { policyBundles: withPanelScope(buildPolicyBundles(context), "policy_bundles") } };
+    case "policy-shadow":
+      return { section, body: { policyShadow: withPanelScope(buildPolicyShadow(context), "policy_shadow") } };
+    case "policy-runtime-poc":
+      return { section, body: { policyRuntimePoc: withPanelScope(buildPolicyRuntimePoc(context), "policy_runtime_poc") } };
+    case "auth":
+      return { section, body: { auth: withPanelScope(buildAuth(context), "auth") } };
+    case "auth-production":
+      return { section, body: { authProduction: withPanelScope(buildAuthProduction(context), "auth_production") } };
+    case "auth-providers":
+      return { section, body: { authProviders: withPanelScope(buildAuthProviders(context), "auth_provider_skeleton") } };
+    case "providers":
+      return { section, body: { providers: withPanelScope(buildProviders(context), "providers") } };
+    case "security":
+      return { section, body: { security: withFilteredPanelScope(buildSecurity(context), "security") } };
+    case "local-agents":
+      return { section, body: { localAgents: withPanelScope(buildLocalAgents(context), "local_agent_protocol") } };
+    case "mcp":
+      return { section, body: { mcp: withFilteredPanelScope(buildMcp(context), "mcp_gateway") } };
+    case "scopes":
+      return { section, body: { scopes: withPanelScope(buildScopes(context), "scope_model") } };
+    case "tenant-scope":
+      return { section, body: { tenantScopePlanning: buildTenantScopePlanning(context) } };
+    case "tenant-enforcement":
+      return { section, body: { tenantScopeEnforcement: buildTenantScopeEnforcement(context) } };
+    case "scope-filter": {
+      const { dashboardScopeFilter } = buildDashboardPanelFilter(context);
+      return { section, body: { dashboardScopeFilter: withPanelScope(dashboardScopeFilter, "tenant_scope_enforcement") } };
+    }
+    case "readiness":
+      return { section, body: { readiness: withPanelScope(buildReadiness(context), "production_readiness") } };
+    case "database":
+      return { section, body: { database: withPanelScope(buildDatabase(context), "database") } };
+    case "collaboration-stores":
+      return { section, body: { collaborationStores: withPanelScope(buildCollaborationStores(context), "collaboration_stores") } };
+    case "secret-backend":
+      return { section, body: { secretBackend: withPanelScope(buildSecretBackend(context), "secret_backend") } };
+    case "secret-backend-decision":
+      return { section, body: { secretBackendDecision: withPanelScope(buildSecretBackendDecision(context), "secret_backend_decision") } };
+    case "vault-secret-backend":
+      return { section, body: { vaultSecretBackend: withFilteredPanelScope(buildVaultSecretBackend(context), "vault_secret_backend") } };
+    case "staging":
+      return { section, body: { staging: withFilteredPanelScope(buildStaging(context), "staging") } };
+    case "staging-dry-run":
+      return { section, body: { stagingDryRun: withFilteredPanelScope(buildStagingDryRun(context), "staging_dry_run") } };
+    case "staging-rc":
+      return { section, body: { stagingReleaseCandidate: withFilteredPanelScope(buildStagingReleaseCandidate(context), "staging_rc") } };
+    case "staging-execution":
+      return { section, body: { stagingExecution: withFilteredPanelScope(buildStagingExecution(context), "staging_execution") } };
+    case "ci-cd":
+      return { section, body: { cicd: withPanelScope(buildCicd(context), "ci_cd") } };
+    case "observability":
+      return { section, body: { observability: withFilteredPanelScope(buildObservability(context), "observability") } };
+    case "audit":
+      return { section, body: { audit: withFilteredPanelScope(buildAudit(context), "audit") } };
+    default:
+      return undefined;
+  }
 }

@@ -1262,3 +1262,642 @@ CREATE INDEX IF NOT EXISTS idx_security_audit_event_type ON security_audit_event
 CREATE INDEX IF NOT EXISTS idx_security_audit_target ON security_audit_events (target_kind, target_id);
 CREATE INDEX IF NOT EXISTS idx_security_audit_actor ON security_audit_events (actor_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_security_audit_task_run ON security_audit_events (task_id, task_run_id);
+
+-- Durable Collaboration Stores v1
+-- Safe metadata-only tables for collaborative agent/Git coordination records.
+-- No credential, database URL, endpoint/auth, raw payload, or env-value columns are present.
+
+CREATE TABLE IF NOT EXISTS branch_orchestration_requests (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS branch_orchestration_decisions (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS branch_ownership_records (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_run_coordination_groups (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_overlaps (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_workspace_leases (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_workspace_lifecycle_events (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_workspace_cleanup_decisions (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_worktree_allocation_requests (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agent_worktree_allocation_results (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS file_leases (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS edit_intents (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS edit_overlap_assessments (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS merge_queue_policies (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS merge_readiness_decisions (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS merge_queue_holds (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conflict_resolution_requests (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conflict_summaries (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conflict_resolution_plans (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS conflict_resolution_recommendations (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS pr_ownership_records (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS pr_handoff_requests (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS pr_handoff_decisions (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS orphan_lease_records (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS cleanup_recommendations (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS cleanup_decisions (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recovery_actions (
+  id text PRIMARY KEY,
+  repo_id text,
+  task_id text,
+  task_run_id text,
+  agent_run_id text,
+  branch_name text,
+  branch_lease_id text,
+  workspace_lease_id text,
+  status text,
+  decision text,
+  severity text,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS durable_collaboration_events (
+  id text PRIMARY KEY,
+  group_name text NOT NULL,
+  record_kind text NOT NULL,
+  record_table text NOT NULL,
+  record_id text NOT NULL,
+  event_type text NOT NULL,
+  request_id text,
+  correlation_id text,
+  actor_id text,
+  service_account_id text,
+  metadata_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_branch_orchestration_requests_scope ON branch_orchestration_requests (repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_branch_orchestration_decisions_scope ON branch_orchestration_decisions (repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_branch_ownership_records_scope ON branch_ownership_records (repo_id, branch_name, status);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_scope ON agent_sessions (repo_id, task_run_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_run_coordination_groups_scope ON agent_run_coordination_groups (repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_session_overlaps_scope ON agent_session_overlaps (repo_id, severity, status);
+CREATE INDEX IF NOT EXISTS idx_agent_workspace_leases_scope ON agent_workspace_leases (workspace_lease_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_workspace_lifecycle_events_scope ON agent_workspace_lifecycle_events (workspace_lease_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_workspace_cleanup_decisions_scope ON agent_workspace_cleanup_decisions (workspace_lease_id, decision);
+CREATE INDEX IF NOT EXISTS idx_agent_worktree_allocation_requests_scope ON agent_worktree_allocation_requests (repo_id, task_run_id, status);
+CREATE INDEX IF NOT EXISTS idx_agent_worktree_allocation_results_scope ON agent_worktree_allocation_results (workspace_lease_id, status);
+CREATE INDEX IF NOT EXISTS idx_file_leases_scope ON file_leases (repo_id, branch_name, status);
+CREATE INDEX IF NOT EXISTS idx_edit_intents_scope ON edit_intents (repo_id, task_run_id, status);
+CREATE INDEX IF NOT EXISTS idx_edit_overlap_assessments_scope ON edit_overlap_assessments (repo_id, severity, status);
+CREATE INDEX IF NOT EXISTS idx_merge_queue_policies_scope ON merge_queue_policies (repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_merge_readiness_decisions_scope ON merge_readiness_decisions (repo_id, decision, status);
+CREATE INDEX IF NOT EXISTS idx_merge_queue_holds_scope ON merge_queue_holds (repo_id, status, severity);
+CREATE INDEX IF NOT EXISTS idx_conflict_resolution_requests_scope ON conflict_resolution_requests (repo_id, task_run_id, status);
+CREATE INDEX IF NOT EXISTS idx_conflict_summaries_scope ON conflict_summaries (repo_id, severity, status);
+CREATE INDEX IF NOT EXISTS idx_conflict_resolution_plans_scope ON conflict_resolution_plans (repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_conflict_resolution_recommendations_scope ON conflict_resolution_recommendations (repo_id, decision, status);
+CREATE INDEX IF NOT EXISTS idx_pr_ownership_records_scope ON pr_ownership_records (repo_id, branch_name, status);
+CREATE INDEX IF NOT EXISTS idx_pr_handoff_requests_scope ON pr_handoff_requests (repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_pr_handoff_decisions_scope ON pr_handoff_decisions (repo_id, decision);
+CREATE INDEX IF NOT EXISTS idx_orphan_lease_records_scope ON orphan_lease_records (repo_id, severity, status);
+CREATE INDEX IF NOT EXISTS idx_cleanup_recommendations_scope ON cleanup_recommendations (repo_id, decision, status);
+CREATE INDEX IF NOT EXISTS idx_cleanup_decisions_scope ON cleanup_decisions (repo_id, decision);
+CREATE INDEX IF NOT EXISTS idx_recovery_actions_scope ON recovery_actions (repo_id, status);
+CREATE INDEX IF NOT EXISTS idx_durable_collaboration_events_record ON durable_collaboration_events (record_table, record_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_durable_collaboration_events_group ON durable_collaboration_events (group_name, created_at);
+CREATE INDEX IF NOT EXISTS idx_durable_collaboration_events_correlation ON durable_collaboration_events (request_id, correlation_id);

@@ -1879,6 +1879,9 @@ export type PolicyShadowEvaluationSummary = {
   enforcementMode: PolicyShadowEnforcementMode;
   enforcementChanged: false;
   staticPolicyEngineAuthoritative: true;
+  shadowEvaluatorSkeletonImplemented: true;
+  shadowEvaluatorEnabled: false;
+  mockComparisonSupported: true;
   shadowEvaluatorImplemented: false;
   candidateRuntimeImplemented: false;
   candidateRuntimeExecuted: false;
@@ -2384,6 +2387,112 @@ export type VaultIntegrationTestReadinessSummary = {
   vaultAddressExposed: false;
   vaultSecretValueExposed: false;
   vaultCallsInDefaultTests: false;
+  metadata: Record<string, unknown>;
+};
+
+export type VaultLiveIntegrationReadinessStatus =
+  | "skipped"
+  | "ready_if_configured"
+  | "blocked_unsafe"
+  | "ready_for_manual_live_test"
+  | "future";
+
+export type VaultLiveValidationCheckKind =
+  | "env_gates"
+  | "provider_selected"
+  | "enable_flag"
+  | "vault_addr_configured"
+  | "token_configured"
+  | "mount_configured"
+  | "path_allowlist"
+  | "test_path_safe"
+  | "no_write"
+  | "no_delete"
+  | "no_rotate"
+  | "no_broad_list"
+  | "no_secret_exposure";
+
+export type VaultLiveValidationCheckStatus = "pass" | "warning" | "fail" | "skipped";
+
+export type VaultLiveValidationRunStatus =
+  | "skipped"
+  | "ready"
+  | "passed_future"
+  | "failed_future"
+  | "blocked";
+
+export type VaultLiveValidationCheck = {
+  id: string;
+  checkKind: VaultLiveValidationCheckKind;
+  status: VaultLiveValidationCheckStatus;
+  severity: ReadinessSeverity;
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type VaultLiveValidationRunRecord = {
+  id: string;
+  status: VaultLiveValidationRunStatus;
+  ranAt?: Date;
+  secretValueExposed: false;
+  writeAttempted: false;
+  deleteAttempted: false;
+  broadListAttempted: false;
+  metadata: Record<string, unknown>;
+};
+
+export type VaultLiveIntegrationReadiness = {
+  id: string;
+  status: VaultLiveIntegrationReadinessStatus;
+  requiredGateCount: number;
+  configuredGateCount: number;
+  missingGates: string[];
+  unsafeGates: string[];
+  testPathAllowlisted: boolean;
+  testPathLooksSafe: boolean;
+  writeOperationsAllowed: false;
+  deleteOperationsAllowed: false;
+  rotationAllowed: false;
+  broadListAllowed: false;
+  metadata: Record<string, unknown>;
+};
+
+export type VaultLiveIntegrationRunbook = {
+  id: string;
+  title: string;
+  status: "metadata_only";
+  requiredEnvVars: string[];
+  optionalEnvVars: string[];
+  preparationSteps: string[];
+  validationSteps: string[];
+  forbiddenOperations: string[];
+  expectedSkipBehavior: string;
+  troubleshooting: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type VaultLiveIntegrationSummary = {
+  id: string;
+  status: "v1_implemented";
+  readinessStatus: VaultLiveIntegrationReadinessStatus;
+  canRunLiveValidation: boolean;
+  requiredGateCount: number;
+  configuredGateCount: number;
+  missingGateCount: number;
+  unsafeGateCount: number;
+  testPathAllowlisted: boolean;
+  testPathLooksSafe: boolean;
+  productionVaultRolloutImplemented: false;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  vaultTokenExposed: false;
+  vaultAddressExposed: false;
+  vaultPathExposed: false;
+  vaultKeyExposed: false;
+  writeOperationsAllowed: false;
+  deleteOperationsAllowed: false;
+  rotationAllowed: false;
+  broadListAllowed: false;
   metadata: Record<string, unknown>;
 };
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Observability / Audit Retention v0 foundation is implemented in `docs/foundations/observability-audit-retention/v0.md` and `packages/observability`.
+Observability / Audit Retention v0 foundation is implemented in `docs/foundations/observability-audit-retention/v0.md` and `packages/observability`. External Observability Export v1 is implemented as a disabled/check-only skeleton in `docs/features/external-observability-export/v1.md`.
 
 This roadmap document remains a production-readiness plan. The v0 implementation reduces schema, taxonomy, redaction, retention, API, and dashboard gaps, but production observability is still not implemented.
 
@@ -16,6 +16,7 @@ This roadmap document remains a production-readiness plan. The v0 implementation
 - Metric definitions and deterministic metric snapshots.
 - Trace-span and correlation-context skeleton models.
 - Read-only `/observability/*` endpoints.
+- Disabled/check-only `/observability/export/*` endpoints.
 - Dashboard Observability panel.
 - No-secret/no-token/no-raw-payload tests.
 
@@ -58,7 +59,8 @@ Implemented v0 metrics are deterministic read models, not backend time series:
 - security-relevant event counts;
 - audit source coverage;
 - retention policy count;
-- external exporter enabled flag, always `0`.
+- external exporter enabled flag, always `0`;
+- External Observability Export v1 readiness summary with exporter enabled false, external calls false, raw payload export false, and secret export false.
 
 Future production metrics should add API request count/error/latency, worker queue depth, run duration, retry count, auth context resolution count, authorization deny count, mock actor usage count, service account usage count, role binding evaluation count, unknown actor deny count, policy/auth denial counts, secret resolution allow/deny counts, Git webhook verification counts, LLM cost/provider error counts, MCP invocation counts, runner command blocked/timeout counts, Local Agent connection/consent counts, audit export lag, and retention partition size.
 
@@ -78,7 +80,7 @@ v0 defines `TraceSpan` and `CorrelationContext` read models only. Future distrib
 - authorization decision id
 - credential resolution id
 
-There is no OpenTelemetry backend or collector in v0.
+There is no OpenTelemetry backend or collector in v0. External Observability Export v1 defines future backend metadata only and still performs no export.
 
 ## Retention Classes
 
@@ -100,7 +102,7 @@ Tests verify no raw secrets in the envelope, observability API, and dashboard re
 
 ## Operational Dashboards
 
-The current dashboard adds an Observability panel for audit summary, source coverage, retention/redaction summaries, metric snapshot, trace skeleton summary, observability readiness blockers, and no-secret status.
+The current dashboard adds an Observability panel for audit summary, source coverage, retention/redaction summaries, metric snapshot, trace skeleton summary, observability readiness blockers, External Observability Export v1 disabled/future-backend/safety-check status, and no-secret status.
 
 Future production dashboards still need API health/error rates, workflow throughput/failures, webhook delivery status, LLM cost/provider errors, MCP risk and block rates, secret resolution and policy denial rates, Local Agent connection/consent, audit export lag, and retention health.
 
@@ -112,7 +114,7 @@ Future alerting should cover API error rate/latency, worker backlog, migration f
 
 ## Audit Export Requirements
 
-No audit export is implemented in v0.
+No real audit export is implemented. External Observability Export v1 is a disabled/check-only skeleton and sends nothing externally.
 
 Future export must:
 
@@ -122,9 +124,10 @@ Future export must:
 - support tenant/org filtering once tenant isolation exists;
 - support replay-safe export checkpoints;
 - avoid raw secrets, raw prompts, raw payloads, and credential cache content.
+- expose endpoint/auth configuration as booleans/status only, never values.
 
 ## Future OpenTelemetry Plan
 
-Adopt OpenTelemetry-compatible logs, metrics, and traces only after production profile boundaries exist. Initial future work should use local exporters and tests without sending data to external backends by default.
+Adopt OpenTelemetry-compatible logs, metrics, and traces only after production profile boundaries exist. Initial future work should start with an External Observability Export Integration-Test Profile v1 and tests without sending data to external backends by default.
 
 Production remains blocked until structured logs, durable metrics/traces, alerting, audit export, retention enforcement, tenant scoping, and secure backend credentials are implemented.

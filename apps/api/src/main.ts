@@ -11,7 +11,7 @@ import {
   createPostgresStorageProviderFromEnv,
   createSeededStore
 } from "@aichestra/db";
-import type { StorageProvider } from "@aichestra/db";
+import type { DurableCollaborationRepositories, StorageProvider } from "@aichestra/db";
 import {
   authProviderOptionToDto,
   productionAuthProviderConfigToDto,
@@ -75,6 +75,11 @@ import {
   vaultIntegrationTestProfileToDto,
   vaultIntegrationTestReadinessSummaryToDto,
   vaultIntegrationTestSafetyCheckToDto,
+  vaultLiveIntegrationReadinessToDto,
+  vaultLiveIntegrationRunbookToDto,
+  vaultLiveIntegrationSummaryToDto,
+  vaultLiveValidationCheckToDto,
+  vaultLiveValidationRunRecordToDto,
   mergeQueueIntegrationTestCaseToDto,
   mergeQueueIntegrationTestProfileToDto,
   mergeQueueIntegrationTestReadinessSummaryToDto,
@@ -271,13 +276,18 @@ import {
   auditSourceCoverageToDto,
   auditSummaryToDto,
   createAuditQueryScopeEnforcementService,
+  createExternalObservabilityExportReadinessService,
   createObservabilityService,
   metricDefinitionToDto,
   metricSnapshotToDto,
   observabilityConfigToDto,
+  observabilityExportEnvelopeToDto,
+  observabilityExporterConfigToDto,
+  observabilityExportReadinessSummaryToDto,
+  observabilityExportSafetyCheckToDto,
   traceSpanToDto
 } from "@aichestra/observability";
-import type { AuditCategory, AuditQueryRequestedDetailLevel, AuditOutcome, AuditSeverity, ObservabilityService, AuditQueryScopeEnforcementService } from "@aichestra/observability";
+import type { AuditCategory, AuditQueryRequestedDetailLevel, AuditOutcome, AuditSeverity, ObservabilityService, AuditQueryScopeEnforcementService, ExternalObservabilityExportReadinessService, ObservabilityExportEnvelopeInput } from "@aichestra/observability";
 import {
   AgentRunnerService,
   AgentRunCoordinationService,
@@ -367,14 +377,17 @@ import {
 import type { ImprovementServices } from "@aichestra/improvement";
 import {
   PolicyService,
+  createDisabledPolicyShadowEvaluator,
   createPolicyContext,
   createPolicyResource,
   createPolicySubject,
   isPolicyAction,
   isPolicyResourceKind,
+  policyShadowEvaluatorMismatchTypes,
   policyDecisionAuditEntryToDto,
   policyDecisionToDto,
   policyRuleToDto,
+  runPolicyShadowGoldenMockReport,
   runPolicyRuntimeGoldenHarness
 } from "@aichestra/policy";
 import type { PolicyActorKind } from "@aichestra/policy";
@@ -450,13 +463,14 @@ import {
 } from "@aichestra/security";
 import type { SecretKind, SecretProviderKind, SecretRefStatus } from "@aichestra/security";
 import { runAgentTaskWorkflow } from "@aichestra/worker";
-import { buildDashboardReadModels } from "./dashboard-read-model.ts";
+import { buildDashboardReadModelSection } from "./dashboard-read-model.ts";
 import { ApiRequestContextMiddleware } from "./request-context-middleware.ts";
 export { ApiRequestContextMiddleware } from "./request-context-middleware.ts";
 
 type RouteContext = {
   store: InMemoryAichestraStore;
   storageProvider: StorageProvider;
+  durableCollaborationRepositories: DurableCollaborationRepositories;
   gitIntegrationService: GitIntegrationService;
   branchOrchestratorService: BranchOrchestratorService;
   gitProviderConfig: GitProviderRuntimeConfig;
@@ -498,6 +512,7 @@ type RouteContext = {
   dashboardScopeFilteringService: import("@aichestra/deployment-readiness").DashboardScopeFilteringService;
   tenantScopeEnforcementService: TenantScopeEnforcementService;
   observabilityService: ObservabilityService;
+  externalObservabilityExportService: ExternalObservabilityExportReadinessService;
   auditQueryScopeEnforcementService: AuditQueryScopeEnforcementService;
 };
 
@@ -1433,6 +1448,53 @@ function stringArrayValue(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+const observabilityExportEnvelopeKinds: Array<NonNullable<ObservabilityExportEnvelopeInput["envelopeKind"]>> = [
+  "audit",
+  "metric",
+  "trace",
+  "readiness",
+  "policy_shadow_future"
+];
+
+const observabilityExportRedactionClasses: Array<NonNullable<ObservabilityExportEnvelopeInput["redactionClass"]>> = [
+  "public_metadata",
+  "internal_metadata",
+  "sensitive_metadata",
+  "secret_adjacent",
+  "contains_user_content_redacted",
+  "never_store_raw"
+];
+
+const observabilityExportRetentionClasses: Array<NonNullable<ObservabilityExportEnvelopeInput["retentionClass"]>> = [
+  "short_debug",
+  "operational",
+  "security",
+  "compliance",
+  "ephemeral"
+];
+
+function observabilityExportEnvelopeInputFromBody(body: Record<string, unknown>): ObservabilityExportEnvelopeInput {
+  const envelopeKind = observabilityExportEnvelopeKinds.find((kind) => kind === body.envelopeKind);
+  const redactionClass = observabilityExportRedactionClasses.find((redaction) => redaction === body.redactionClass);
+  const retentionClass = observabilityExportRetentionClasses.find((retention) => retention === body.retentionClass);
+  const resourceScope = recordValue(body.resourceScope);
+  return {
+    id: stringValue(body.id),
+    envelopeKind,
+    source: stringValue(body.source),
+    tenantId: stringValue(body.tenantId),
+    teamId: stringValue(body.teamId),
+    projectId: stringValue(body.projectId),
+    resourceScope: Object.keys(resourceScope).length > 0 ? resourceScope : undefined,
+    redactionClass,
+    retentionClass,
+    payloadSummary: stringValue(body.payloadSummary),
+    rawPayloadIncluded: body.rawPayloadIncluded === true,
+    rawPayload: body.rawPayload,
+    metadata: recordValue(body.metadata)
+  };
+}
+
 const stagingSignoffRoles: StagingReleaseCandidateSignoffRole[] = [
   "engineering_owner",
   "platform_owner",
@@ -1942,6 +2004,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     if (method === "GET" && url.pathname === "/health") {
       const storage = await context.storageProvider.healthCheck();
       const databaseOperations = context.deploymentReadinessService.getDatabaseOperationsSummary();
+      const durableCollaborationStores = context.durableCollaborationRepositories.getSummary({
+        optionalPostgresTestsConfigured: Boolean(process.env.AICHESTRA_TEST_DATABASE_URL)
+      });
       const secretBackendMigration = context.deploymentReadinessService.getSecretBackendMigrationSummary();
       const secretBackendDecision = context.deploymentReadinessService.getSecretBackendOptionDecisionSummary();
       const authRbacProduction = context.deploymentReadinessService.getAuthRbacProductionSummary();
@@ -1972,6 +2037,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const realMergeExecution = context.realMergeExecutionPolicyService.getSummary();
       const worktreeAllocation = context.agentWorktreeAllocationService.getSummary();
       const auditQueryScope = context.auditQueryScopeEnforcementService.getSummary();
+      const externalObservabilityExport = context.externalObservabilityExportService.getSummary();
       sendJson(response, storage.healthy ? 200 : 503, {
         status: storage.healthy ? "ok" : "degraded",
         service: "aichestra-api",
@@ -1997,6 +2063,27 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           retentionDeletionJobsEnabled: false,
           productionDbConnectionAttempted: false,
           noSecretsExposed: true
+        },
+        durableCollaborationStores: {
+          status: durableCollaborationStores.status,
+          providerKind: durableCollaborationStores.providerKind,
+          defaultRuntime: durableCollaborationStores.defaultRuntime,
+          durableCollaborationStoreConfigured: durableCollaborationStores.durableCollaborationStoreConfigured,
+          productionReady: durableCollaborationStores.productionReady,
+          repositoryGroupCount: durableCollaborationStores.repositoryGroupCount,
+          implementedRepositoryGroupCount: durableCollaborationStores.implementedRepositoryGroupCount,
+          requiredDurableRecordCount: durableCollaborationStores.requiredDurableRecordCount,
+          recommendedDurableRecordCount: durableCollaborationStores.recommendedDurableRecordCount,
+          postgresTableCount: durableCollaborationStores.postgresTableCount,
+          migrationCoverage: durableCollaborationStores.migrationCoverage,
+          optionalPostgresSupported: durableCollaborationStores.optionalPostgresSupported,
+          optionalPostgresTestsConfigured: durableCollaborationStores.optionalPostgresTestsConfigured,
+          noSecretsExposed: durableCollaborationStores.noSecretsExposed,
+          envValuesExposed: durableCollaborationStores.envValuesExposed,
+          databaseUrlExposed: durableCollaborationStores.databaseUrlExposed,
+          remoteGitOperationsExecuted: durableCollaborationStores.remoteGitOperationsExecuted,
+          workspaceMutationExecuted: durableCollaborationStores.workspaceMutationExecuted,
+          externalCallsExecuted: durableCollaborationStores.externalCallsExecuted
         },
         secretBackendMigration: {
           status: secretBackendMigration.status,
@@ -2241,6 +2328,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           enforcementMode: policyShadowEvaluation.enforcementMode,
           enforcementChanged: policyShadowEvaluation.enforcementChanged,
           staticPolicyEngineAuthoritative: policyShadowEvaluation.staticPolicyEngineAuthoritative,
+          shadowEvaluatorSkeletonImplemented: policyShadowEvaluation.shadowEvaluatorSkeletonImplemented,
+          shadowEvaluatorEnabled: policyShadowEvaluation.shadowEvaluatorEnabled,
+          mockComparisonSupported: policyShadowEvaluation.mockComparisonSupported,
           shadowEvaluatorImplemented: policyShadowEvaluation.shadowEvaluatorImplemented,
           candidateRuntimeImplemented: policyShadowEvaluation.candidateRuntimeImplemented,
           candidateRuntimeExecuted: policyShadowEvaluation.candidateRuntimeExecuted,
@@ -2471,6 +2561,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           status: vaultIntegration.status,
           planningOnly: vaultIntegration.planningOnly,
           productionReady: vaultIntegration.productionReady,
+          liveEnablementStatus: context.deploymentReadinessService.getVaultLiveIntegrationReadiness().status,
+          canRunLiveValidation: context.deploymentReadinessService.canRunVaultLiveValidation(),
+          productionVaultRolloutImplemented: false,
           profileStatus: vaultIntegration.profileStatus,
           enabled: vaultIntegration.liveTestsEnabled,
           canRunLiveTests: vaultIntegration.canRunLiveTests,
@@ -2878,6 +2971,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           rawPayloadStorageEnabled: false,
           secretsExposed: false,
           tokensExposed: false
+        },
+        observabilityExport: {
+          status: externalObservabilityExport.metadata.status,
+          exporterEnabled: externalObservabilityExport.exporterEnabled,
+          externalCallsEnabled: externalObservabilityExport.externalCallsEnabled,
+          configuredExporterCount: externalObservabilityExport.configuredExporterCount,
+          futureExporterCount: externalObservabilityExport.futureExporterCount,
+          safetyCheckCount: externalObservabilityExport.safetyCheckCount,
+          failedSafetyCheckCount: externalObservabilityExport.failedSafetyCheckCount,
+          rawPayloadExportAllowed: externalObservabilityExport.rawPayloadExportAllowed,
+          secretExportAllowed: externalObservabilityExport.secretExportAllowed,
+          endpointValuesExposed: false,
+          authValuesExposed: false,
+          envValuesExposed: false,
+          noSecretsExposed: true
         },
         auditQueryScope: {
           status: auditQueryScope.status,
@@ -3428,6 +3536,42 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "collaboration-stores") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Durable collaboration store readiness endpoints are read-only metadata." });
+        return;
+      }
+      const repositories = context.durableCollaborationRepositories;
+      if (segments.length === 3 && segments[2] === "inventory") {
+        sendJson(response, 200, readinessScopedPayload(context, "collaboration_stores", {
+          inventory: repositories.listInventory()
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "repositories") {
+        sendJson(response, 200, readinessScopedPayload(context, "collaboration_stores", {
+          repositories: repositories.listRepositorySummaries()
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "schema") {
+        sendJson(response, 200, readinessScopedPayload(context, "collaboration_stores", {
+          schema: repositories.getSchemaStatus()
+        }));
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, readinessScopedPayload(context, "collaboration_stores", {
+          summary: repositories.getSummary({
+            optionalPostgresTestsConfigured: Boolean(process.env.AICHESTRA_TEST_DATABASE_URL)
+          })
+        }));
+        return;
+      }
+      sendJson(response, 404, { error: "collaboration_stores_readiness_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "auth") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Production Auth/RBAC readiness endpoints are read-only planning models." });
@@ -3590,6 +3734,31 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (segments.length === 4 && segments[2] === "vault" && segments[3] === "summary") {
         sendJson(response, 200, readinessScopedPayload(context, "vault_secret_backend", { summary: context.securityService.getVaultSummary() }));
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "vault" && segments[3] === "live-readiness") {
+        sendJson(response, 200, readinessScopedPayload(context, "vault_integration", {
+          readiness: vaultLiveIntegrationReadinessToDto(readiness.getVaultLiveIntegrationReadiness())
+        }));
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "vault" && segments[3] === "live-checks") {
+        sendJson(response, 200, {
+          checks: readiness.listVaultLiveValidationChecks().map(vaultLiveValidationCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "vault" && segments[3] === "live-runbook") {
+        sendJson(response, 200, {
+          runbook: vaultLiveIntegrationRunbookToDto(readiness.getVaultLiveIntegrationRunbook())
+        });
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "vault" && segments[3] === "live-summary") {
+        sendJson(response, 200, readinessScopedPayload(context, "vault_integration", {
+          summary: vaultLiveIntegrationSummaryToDto(readiness.getVaultLiveIntegrationSummary()),
+          runRecord: vaultLiveValidationRunRecordToDto(readiness.getVaultLiveValidationRunRecord())
+        }));
         return;
       }
       sendJson(response, 404, { error: "secret_backend_readiness_route_not_found" });
@@ -3922,6 +4091,47 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       const readiness = context.deploymentReadinessService;
+      if (segments.length === 4 && segments[2] === "evaluator" && segments[3] === "status") {
+        const evaluator = createDisabledPolicyShadowEvaluator();
+        sendJson(response, 200, { status: evaluator.getStatus() });
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "evaluator" && segments[3] === "summary") {
+        const mockReport = runPolicyShadowGoldenMockReport();
+        sendJson(response, 200, {
+          summary: {
+            ...mockReport.summary,
+            evaluatorStatus: createDisabledPolicyShadowEvaluator().getStatus()
+          }
+        });
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "evaluator" && segments[3] === "mismatch-types") {
+        sendJson(response, 200, {
+          mismatchTypes: policyShadowEvaluatorMismatchTypes,
+          defaultActionPolicy: "record_only_or_block_rollout_future",
+          enforcementChanged: false
+        });
+        return;
+      }
+      if (segments.length === 4 && segments[2] === "evaluator" && segments[3] === "mock-report") {
+        const mockReport = runPolicyShadowGoldenMockReport();
+        sendJson(response, 200, {
+          fixtureReport: mockReport.fixtureReport,
+          summary: mockReport.summary,
+          resultPreview: mockReport.results.slice(0, 5).map((result) => ({
+            id: result.id,
+            status: result.status,
+            sourceOfTruthRuntime: result.sourceOfTruthRuntime,
+            candidateRuntimeKind: result.candidateRuntimeKind,
+            enforcementChanged: result.enforcementChanged,
+            comparison: result.comparison,
+            mismatchCount: result.mismatches.length,
+            createdAt: result.createdAt
+          }))
+        });
+        return;
+      }
       if (segments.length === 3 && segments[2] === "plan") {
         sendJson(response, 200, { plan: policyShadowEvaluationPlanToDto(readiness.getPolicyShadowEvaluationPlan()) });
         return;
@@ -4201,6 +4411,74 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         } as JsonValue);
         return;
       }
+      if (segments[1] === "export") {
+        const exportService = context.externalObservabilityExportService;
+        if (segments.length === 3 && segments[2] === "config") {
+          if (method !== "GET") {
+            sendJson(response, 405, { error: "method_not_allowed", message: "External observability export config is read-only." });
+            return;
+          }
+          sendJson(response, 200, {
+            configs: exportService.getExporterConfigs().map(observabilityExporterConfigToDto),
+            summary: observabilityExportReadinessSummaryToDto(exportService.getSummary())
+          } as JsonValue);
+          return;
+        }
+        if (segments.length === 3 && segments[2] === "backends") {
+          if (method !== "GET") {
+            sendJson(response, 405, { error: "method_not_allowed", message: "External observability export backends are read-only." });
+            return;
+          }
+          sendJson(response, 200, {
+            backends: exportService.listFutureBackends().map(observabilityExporterConfigToDto),
+            externalCallsEnabled: false
+          } as JsonValue);
+          return;
+        }
+        if (segments.length === 3 && segments[2] === "safety-checks") {
+          if (method !== "GET") {
+            sendJson(response, 405, { error: "method_not_allowed", message: "External observability export safety checks are read-only." });
+            return;
+          }
+          const checks = exportService.getSafetyChecks();
+          sendJson(response, 200, {
+            safetyChecks: checks.map(observabilityExportSafetyCheckToDto),
+            summary: observabilityExportReadinessSummaryToDto(exportService.getSummary(checks))
+          } as JsonValue);
+          return;
+        }
+        if (segments.length === 3 && segments[2] === "summary") {
+          if (method !== "GET") {
+            sendJson(response, 405, { error: "method_not_allowed", message: "External observability export summary is read-only." });
+            return;
+          }
+          sendJson(response, 200, {
+            summary: observabilityExportReadinessSummaryToDto(exportService.getSummary())
+          } as JsonValue);
+          return;
+        }
+        if (segments.length === 4 && segments[2] === "mock-envelope" && segments[3] === "check") {
+          if (method !== "POST") {
+            sendJson(response, 405, { error: "method_not_allowed", message: "Mock export envelope checks use POST and do not export externally." });
+            return;
+          }
+          const body = recordValue(await readJson(request));
+          const envelope = exportService.buildSafeExportEnvelope(observabilityExportEnvelopeInputFromBody(body));
+          const safetyChecks = exportService.validateEnvelope(envelope);
+          sendJson(response, 200, {
+            envelope: observabilityExportEnvelopeToDto(envelope),
+            safetyChecks: safetyChecks.map(observabilityExportSafetyCheckToDto),
+            summary: observabilityExportReadinessSummaryToDto(exportService.getSummary(safetyChecks)),
+            exportAttempted: false,
+            externalCallAttempted: false,
+            rawPayloadExported: false,
+            secretExported: false
+          } as JsonValue);
+          return;
+        }
+        sendJson(response, 404, { error: "observability_export_route_not_found" });
+        return;
+      }
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Observability endpoints are read-only." });
         return;
@@ -4295,182 +4573,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           authMode: "demo_request_header"
         })
         : undefined;
-      const dashboard = buildDashboardReadModels(context, "api", filterContext);
       const section = segments[1] ?? "overview";
-      if (section === "scope-filter") {
-        sendJson(response, 200, { dashboardScopeFilter: dashboard.dashboardScopeFilter });
-        return;
-      }
-      if (section === "overview" && segments.length <= 2) {
-        sendJson(response, 200, { overview: dashboard.overview });
-        return;
-      }
-      if (section === "tasks") {
-        sendJson(response, 200, { tasks: dashboard.tasks });
-        return;
-      }
-      if (section === "git") {
-        sendJson(response, 200, { git: dashboard.git });
-        return;
-      }
-      if (section === "github-app") {
-        sendJson(response, 200, { githubApp: dashboard.githubApp });
-        return;
-      }
-      if (section === "github-app-integration") {
-        sendJson(response, 200, { githubAppIntegration: dashboard.githubAppIntegration });
-        return;
-      }
-      if (section === "conflicts") {
-        sendJson(response, 200, { conflicts: dashboard.conflicts });
-        return;
-      }
-      if (section === "registry") {
-        sendJson(response, 200, { registry: dashboard.registry });
-        return;
-      }
-      if (section === "llm") {
-        sendJson(response, 200, { llm: dashboard.llm });
-        return;
-      }
-      if (section === "llm-integration") {
-        sendJson(response, 200, { llmIntegration: dashboard.llmIntegration });
-        return;
-      }
-      if (section === "agents") {
-        sendJson(response, 200, { agents: dashboard.agents });
-        return;
-      }
-      if (section === "policy") {
-        sendJson(response, 200, { policy: dashboard.policy });
-        return;
-      }
-      if (section === "policy-bundles") {
-        sendJson(response, 200, { policyBundles: dashboard.policyBundles });
-        return;
-      }
-      if (section === "policy-shadow") {
-        sendJson(response, 200, { policyShadow: dashboard.policyShadow });
-        return;
-      }
-      if (section === "policy-runtime-poc") {
-        sendJson(response, 200, { policyRuntimePoc: dashboard.policyRuntimePoc });
-        return;
-      }
-      if (section === "auth") {
-        sendJson(response, 200, { auth: dashboard.auth });
-        return;
-      }
-      if (section === "auth-production") {
-        sendJson(response, 200, { authProduction: dashboard.authProduction });
-        return;
-      }
-      if (section === "auth-providers") {
-        sendJson(response, 200, { authProviders: dashboard.authProviders });
-        return;
-      }
-      if (section === "providers") {
-        sendJson(response, 200, { providers: dashboard.providers });
-        return;
-      }
-      if (section === "security") {
-        sendJson(response, 200, { security: dashboard.security });
-        return;
-      }
-      if (section === "local-agents") {
-        sendJson(response, 200, { localAgents: dashboard.localAgents });
-        return;
-      }
-      if (section === "mcp") {
-        sendJson(response, 200, { mcp: dashboard.mcp });
-        return;
-      }
-      if (section === "scopes") {
-        sendJson(response, 200, { scopes: dashboard.scopes });
-        return;
-      }
-      if (section === "tenant-scope") {
-        sendJson(response, 200, { tenantScopePlanning: dashboard.tenantScopePlanning });
-        return;
-      }
-      if (section === "tenant-enforcement") {
-        sendJson(response, 200, { tenantScopeEnforcement: dashboard.tenantScopeEnforcement });
-        return;
-      }
-      if (section === "scope-filter") {
-        sendJson(response, 200, { dashboardScopeFilter: dashboard.dashboardScopeFilter });
-        return;
-      }
-      if (section === "readiness") {
-        sendJson(response, 200, { readiness: dashboard.readiness });
-        return;
-      }
-      if (section === "database") {
-        sendJson(response, 200, { database: dashboard.database });
-        return;
-      }
-      if (section === "secret-backend") {
-        sendJson(response, 200, { secretBackend: dashboard.secretBackend });
-        return;
-      }
-      if (section === "secret-backend-decision") {
-        sendJson(response, 200, { secretBackendDecision: dashboard.secretBackendDecision });
-        return;
-      }
-      if (section === "vault-secret-backend") {
-        sendJson(response, 200, { vaultSecretBackend: dashboard.vaultSecretBackend });
-        return;
-      }
-      if (section === "vault-integration") {
-        sendJson(response, 200, { vaultIntegration: dashboard.vaultIntegration });
-        return;
-      }
-      if (section === "merge-queue-integration") {
-        sendJson(response, 200, { mergeQueueIntegration: dashboard.mergeQueueIntegration });
-        return;
-      }
-      if (section === "git-cleanup") {
-        sendJson(response, 200, { branchCleanup: dashboard.branchCleanup });
-        return;
-      }
-      if (section === "registry-compatibility") {
-        sendJson(response, 200, { registryCompatibility: dashboard.registryCompatibility });
-        return;
-      }
-      if (section === "registry-drift") {
-        sendJson(response, 200, { registryDrift: dashboard.registryDrift });
-        return;
-      }
-      if (section === "registry-canary-apply") {
-        sendJson(response, 200, { registryCanaryApply: dashboard.registryCanaryApply });
-        return;
-      }
-      if (section === "staging") {
-        sendJson(response, 200, { staging: dashboard.staging });
-        return;
-      }
-      if (section === "staging-dry-run") {
-        sendJson(response, 200, { stagingDryRun: dashboard.stagingDryRun });
-        return;
-      }
-      if (section === "staging-rc") {
-        sendJson(response, 200, { stagingReleaseCandidate: dashboard.stagingReleaseCandidate });
-        return;
-      }
-      if (section === "staging-execution") {
-        sendJson(response, 200, { stagingExecution: dashboard.stagingExecution });
-        return;
-      }
-      if (section === "ci-cd") {
-        sendJson(response, 200, { cicd: dashboard.cicd });
-        return;
-      }
-      if (section === "observability") {
-        sendJson(response, 200, { observability: dashboard.observability });
-        return;
-      }
-      if (section === "audit") {
-        sendJson(response, 200, { audit: dashboard.audit });
+      const sectionReadModel = section === "overview" && segments.length > 2
+        ? undefined
+        : buildDashboardReadModelSection(context, section, "api", filterContext);
+      if (sectionReadModel) {
+        sendJson(response, 200, sectionReadModel.body as JsonValue);
         return;
       }
       sendJson(response, 404, { error: "dashboard_read_model_not_found", message: `Dashboard read model not found: ${section}` });
@@ -10900,10 +11008,13 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     })
   });
   const auditQueryScopeEnforcementService = createAuditQueryScopeEnforcementService();
+  const externalObservabilityExportService = createExternalObservabilityExportReadinessService();
+  const durableCollaborationRepositories = storage.repositoryFactory.createDurableCollaborationRepositories();
   return createServer((request, response) => {
     void handleRequest(request, response, {
       store,
       storageProvider: storage,
+      durableCollaborationRepositories,
       gitIntegrationService,
       branchOrchestratorService,
       gitProviderConfig: git.config,
@@ -10945,6 +11056,7 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       dashboardScopeFilteringService,
       tenantScopeEnforcementService,
       observabilityService,
+      externalObservabilityExportService,
       auditQueryScopeEnforcementService
     });
   });

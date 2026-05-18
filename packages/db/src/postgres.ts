@@ -43,6 +43,26 @@ import type {
 } from "@aichestra/core";
 import { InMemoryImprovementRepository, type ImprovementRepository } from "@aichestra/improvement";
 import type { RegistryServiceInput } from "@aichestra/registry";
+import {
+  createDurableCollaborationRepositorySet,
+  DURABLE_COLLABORATION_GROUP_LABELS,
+  DURABLE_COLLABORATION_RECORD_KINDS_BY_GROUP,
+  DURABLE_COLLABORATION_RECORD_TABLES,
+  DURABLE_COLLABORATION_REPOSITORY_GROUPS,
+  getDurableCollaborationRecordGroup,
+  sanitizeDurableCollaborationMetadata,
+  type CreateDurableCollaborationEventInput,
+  type CreateDurableCollaborationRecordInput,
+  type DurableCollaborationEvent,
+  type DurableCollaborationGroupRepository,
+  type DurableCollaborationMetadata,
+  type DurableCollaborationRecord,
+  type DurableCollaborationRecordKind,
+  type DurableCollaborationRepositories,
+  type DurableCollaborationRepositoryGroup,
+  type DurableCollaborationRepositorySummary,
+  type UpdateDurableCollaborationStatusInput
+} from "./durable-collaboration.ts";
 import { InMemoryAichestraStore } from "./repository.ts";
 import type {
   ConflictRepositories,
@@ -859,11 +879,13 @@ export class PostgresRepositoryFactory implements RepositoryFactory {
   private readonly store: PostgresAichestraStore;
   private readonly usageLedger: UsageLedger;
   private readonly improvementRepository: ImprovementRepository;
+  private readonly durableCollaborationRepositories: DurableCollaborationRepositories;
 
   constructor(input: { client: DatabaseClient; improvementRepository?: ImprovementRepository }) {
     this.store = new PostgresAichestraStore(input.client);
     this.usageLedger = new MockUsageLedger(this.store);
     this.improvementRepository = input.improvementRepository ?? new InMemoryImprovementRepository();
+    this.durableCollaborationRepositories = createPostgresDurableCollaborationRepositories(input.client);
   }
 
   createDataStore(): InMemoryAichestraStore {
@@ -890,6 +912,10 @@ export class PostgresRepositoryFactory implements RepositoryFactory {
     return this.store;
   }
 
+  createDurableCollaborationRepositories(): DurableCollaborationRepositories {
+    return this.durableCollaborationRepositories;
+  }
+
   createRegistryRepositories(): RegistryServiceInput {
     return {
       skillRepository: this.store,
@@ -908,6 +934,210 @@ export class PostgresRepositoryFactory implements RepositoryFactory {
 
   createImprovementRepositories(): ImprovementRepository {
     return this.improvementRepository;
+  }
+}
+
+export function createPostgresDurableCollaborationRepositories(
+  client: DatabaseClient
+): DurableCollaborationRepositories {
+  const repositories = {} as Record<DurableCollaborationRepositoryGroup, DurableCollaborationGroupRepository>;
+  for (const group of DURABLE_COLLABORATION_REPOSITORY_GROUPS) {
+    repositories[group] = new PostgresDurableCollaborationGroupRepository(client, group);
+  }
+  return createDurableCollaborationRepositorySet("postgres", repositories);
+}
+
+class PostgresDurableCollaborationGroupRepository implements DurableCollaborationGroupRepository {
+  readonly group: DurableCollaborationRepositoryGroup;
+  private readonly client: DatabaseClient;
+
+  constructor(client: DatabaseClient, group: DurableCollaborationRepositoryGroup) {
+    this.client = client;
+    this.group = group;
+  }
+
+  create(input: CreateDurableCollaborationRecordInput): DurableCollaborationRecord {
+    this.assertRecordKind(input.recordKind);
+    const now = input.createdAt ?? new Date();
+    const record: DurableCollaborationRecord = {
+      ...input,
+      group: this.group,
+      metadata: sanitizeDurableCollaborationMetadata(input.metadata),
+      createdAt: now,
+      updatedAt: input.updatedAt ?? now
+    };
+    this.client.execute(
+      `INSERT INTO ${this.tableFor(record.recordKind)} (${durableRecordColumns().join(", ")})
+       VALUES (${durableRecordValues(record).join(", ")})`
+    );
+    return cloneDurableRecord(record);
+  }
+
+  getById(id: string): DurableCollaborationRecord | undefined {
+    for (const recordKind of DURABLE_COLLABORATION_RECORD_KINDS_BY_GROUP[this.group]) {
+      const rows = this.client.query(`${durableRecordSelect(this.group, recordKind)} WHERE id = ${sqlValue(id)} LIMIT 1`);
+      if (rows[0]) {
+        return mapDurableRecord(rows[0]);
+      }
+    }
+    return undefined;
+  }
+
+  list(): DurableCollaborationRecord[] {
+    return DURABLE_COLLABORATION_RECORD_KINDS_BY_GROUP[this.group].flatMap((recordKind) =>
+      this.client.query(durableRecordSelect(this.group, recordKind)).map(mapDurableRecord)
+    );
+  }
+
+  updateStatus(id: string, input: UpdateDurableCollaborationStatusInput): DurableCollaborationRecord {
+    const existing = this.requireRecord(id);
+    const updated: DurableCollaborationRecord = {
+      ...existing,
+      status: input.status ?? existing.status,
+      decision: input.decision ?? existing.decision,
+      severity: input.severity ?? existing.severity,
+      metadata: {
+        ...existing.metadata,
+        ...sanitizeDurableCollaborationMetadata(input.metadata)
+      },
+      updatedAt: input.updatedAt ?? new Date()
+    };
+    this.client.execute(
+      `UPDATE ${this.tableFor(existing.recordKind)}
+       SET status = ${sqlValue(updated.status)},
+           decision = ${sqlValue(updated.decision)},
+           severity = ${sqlValue(updated.severity)},
+           metadata_json = ${sqlValue(updated.metadata)},
+           updated_at = ${sqlValue(updated.updatedAt)}
+       WHERE id = ${sqlValue(id)}`
+    );
+    return cloneDurableRecord(updated);
+  }
+
+  updateMetadata(id: string, metadata: DurableCollaborationMetadata): DurableCollaborationRecord {
+    const existing = this.requireRecord(id);
+    const updated: DurableCollaborationRecord = {
+      ...existing,
+      metadata: {
+        ...existing.metadata,
+        ...sanitizeDurableCollaborationMetadata(metadata)
+      },
+      updatedAt: new Date()
+    };
+    this.client.execute(
+      `UPDATE ${this.tableFor(existing.recordKind)}
+       SET metadata_json = ${sqlValue(updated.metadata)}, updated_at = ${sqlValue(updated.updatedAt)}
+       WHERE id = ${sqlValue(id)}`
+    );
+    return cloneDurableRecord(updated);
+  }
+
+  appendEvent(input: CreateDurableCollaborationEventInput): DurableCollaborationEvent {
+    this.assertRecordKind(input.recordKind);
+    this.requireRecord(input.recordId);
+    const event: DurableCollaborationEvent = {
+      ...input,
+      group: this.group,
+      metadata: sanitizeDurableCollaborationMetadata(input.metadata),
+      createdAt: input.createdAt ?? new Date()
+    };
+    this.client.execute(
+      `INSERT INTO durable_collaboration_events (
+          id,
+          group_name,
+          record_kind,
+          record_table,
+          record_id,
+          event_type,
+          request_id,
+          correlation_id,
+          actor_id,
+          service_account_id,
+          metadata_json,
+          created_at
+        )
+       VALUES (
+          ${sqlValue(event.id)},
+          ${sqlValue(event.group)},
+          ${sqlValue(event.recordKind)},
+          ${sqlValue(this.tableFor(event.recordKind))},
+          ${sqlValue(event.recordId)},
+          ${sqlValue(event.eventType)},
+          ${sqlValue(event.requestId)},
+          ${sqlValue(event.correlationId)},
+          ${sqlValue(event.actorId)},
+          ${sqlValue(event.serviceAccountId)},
+          ${sqlValue(event.metadata)},
+          ${sqlValue(event.createdAt)}
+        )`
+    );
+    return cloneDurableEvent(event);
+  }
+
+  listEvents(recordId?: string): DurableCollaborationEvent[] {
+    const where = [`group_name = ${sqlValue(this.group)}`];
+    if (recordId) where.push(`record_id = ${sqlValue(recordId)}`);
+    return this.client
+      .query(`${durableEventSelect()} WHERE ${where.join(" AND ")} ORDER BY created_at, id`)
+      .map(mapDurableEvent);
+  }
+
+  summarize(): DurableCollaborationRepositorySummary {
+    const recordKinds = [...DURABLE_COLLABORATION_RECORD_KINDS_BY_GROUP[this.group]];
+    const recordCount = recordKinds.reduce((total, recordKind) => total + this.safeCount(this.tableFor(recordKind)), 0);
+    const eventCount = this.safeEventCount();
+    return {
+      group: this.group,
+      label: DURABLE_COLLABORATION_GROUP_LABELS[this.group],
+      providerKind: "postgres",
+      implemented: true,
+      recordKinds,
+      tableNames: recordKinds.map((recordKind) => this.tableFor(recordKind)),
+      recordCount,
+      eventCount,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      databaseUrlExposed: false
+    };
+  }
+
+  private tableFor(recordKind: DurableCollaborationRecordKind): string {
+    return DURABLE_COLLABORATION_RECORD_TABLES[recordKind];
+  }
+
+  private assertRecordKind(recordKind: DurableCollaborationRecordKind): void {
+    const expectedGroup = getDurableCollaborationRecordGroup(recordKind);
+    if (expectedGroup !== this.group) {
+      throw new Error(`Record kind ${recordKind} belongs to ${expectedGroup}, not ${this.group}.`);
+    }
+  }
+
+  private requireRecord(id: string): DurableCollaborationRecord {
+    const existing = this.getById(id);
+    if (!existing) {
+      throw new Error(`Durable collaboration record not found: ${id}`);
+    }
+    return existing;
+  }
+
+  private safeCount(tableName: string): number {
+    try {
+      const row = this.client.query<{ count: string }>(`SELECT COUNT(*) AS count FROM ${tableName}`)[0];
+      return row ? Number(row.count) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private safeEventCount(): number {
+    try {
+      const row = this.client.query<{ count: string }>(
+        `SELECT COUNT(*) AS count FROM durable_collaboration_events WHERE group_name = ${sqlValue(this.group)}`
+      )[0];
+      return row ? Number(row.count) : 0;
+    } catch {
+      return 0;
+    }
   }
 }
 
@@ -960,6 +1190,152 @@ function sqlValue(value: unknown): string {
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   if (Array.isArray(value) || typeof value === "object") return `${sqlLiteral(JSON.stringify(value))}::jsonb`;
   return sqlLiteral(String(value));
+}
+
+function durableRecordColumns(): string[] {
+  return [
+    "id",
+    "repo_id",
+    "task_id",
+    "task_run_id",
+    "agent_run_id",
+    "branch_name",
+    "branch_lease_id",
+    "workspace_lease_id",
+    "status",
+    "decision",
+    "severity",
+    "request_id",
+    "correlation_id",
+    "actor_id",
+    "service_account_id",
+    "metadata_json",
+    "created_at",
+    "updated_at"
+  ];
+}
+
+function durableRecordValues(record: DurableCollaborationRecord): string[] {
+  return [
+    sqlValue(record.id),
+    sqlValue(record.repoId),
+    sqlValue(record.taskId),
+    sqlValue(record.taskRunId),
+    sqlValue(record.agentRunId),
+    sqlValue(record.branchName),
+    sqlValue(record.branchLeaseId),
+    sqlValue(record.workspaceLeaseId),
+    sqlValue(record.status),
+    sqlValue(record.decision),
+    sqlValue(record.severity),
+    sqlValue(record.requestId),
+    sqlValue(record.correlationId),
+    sqlValue(record.actorId),
+    sqlValue(record.serviceAccountId),
+    sqlValue(record.metadata),
+    sqlValue(record.createdAt),
+    sqlValue(record.updatedAt)
+  ];
+}
+
+function durableRecordSelect(
+  group: DurableCollaborationRepositoryGroup,
+  recordKind: DurableCollaborationRecordKind
+): string {
+  return `SELECT id,
+    ${sqlValue(group)} AS "group",
+    ${sqlValue(recordKind)} AS "recordKind",
+    repo_id AS "repoId",
+    task_id AS "taskId",
+    task_run_id AS "taskRunId",
+    agent_run_id AS "agentRunId",
+    branch_name AS "branchName",
+    branch_lease_id AS "branchLeaseId",
+    workspace_lease_id AS "workspaceLeaseId",
+    status,
+    decision,
+    severity,
+    request_id AS "requestId",
+    correlation_id AS "correlationId",
+    actor_id AS "actorId",
+    service_account_id AS "serviceAccountId",
+    metadata_json AS metadata,
+    created_at AS "createdAt",
+    updated_at AS "updatedAt"
+    FROM ${DURABLE_COLLABORATION_RECORD_TABLES[recordKind]}`;
+}
+
+function durableEventSelect(): string {
+  return `SELECT id,
+    group_name AS "group",
+    record_kind AS "recordKind",
+    record_id AS "recordId",
+    event_type AS "eventType",
+    request_id AS "requestId",
+    correlation_id AS "correlationId",
+    actor_id AS "actorId",
+    service_account_id AS "serviceAccountId",
+    metadata_json AS metadata,
+    created_at AS "createdAt"
+    FROM durable_collaboration_events`;
+}
+
+function mapDurableRecord(row: Row): DurableCollaborationRecord {
+  return {
+    id: asString(row, "id"),
+    group: asString(row, "group") as DurableCollaborationRepositoryGroup,
+    recordKind: asString(row, "recordKind") as DurableCollaborationRecordKind,
+    repoId: asOptionalString(row, "repoId"),
+    taskId: asOptionalString(row, "taskId"),
+    taskRunId: asOptionalString(row, "taskRunId"),
+    agentRunId: asOptionalString(row, "agentRunId"),
+    branchName: asOptionalString(row, "branchName"),
+    branchLeaseId: asOptionalString(row, "branchLeaseId"),
+    workspaceLeaseId: asOptionalString(row, "workspaceLeaseId"),
+    status: asOptionalString(row, "status"),
+    decision: asOptionalString(row, "decision"),
+    severity: asOptionalString(row, "severity"),
+    requestId: asOptionalString(row, "requestId"),
+    correlationId: asOptionalString(row, "correlationId"),
+    actorId: asOptionalString(row, "actorId"),
+    serviceAccountId: asOptionalString(row, "serviceAccountId"),
+    metadata: sanitizeDurableCollaborationMetadata(asRecord(row, "metadata")),
+    createdAt: asDate(row, "createdAt"),
+    updatedAt: asDate(row, "updatedAt")
+  };
+}
+
+function mapDurableEvent(row: Row): DurableCollaborationEvent {
+  return {
+    id: asString(row, "id"),
+    group: asString(row, "group") as DurableCollaborationRepositoryGroup,
+    recordKind: asString(row, "recordKind") as DurableCollaborationRecordKind,
+    recordId: asString(row, "recordId"),
+    eventType: asString(row, "eventType"),
+    requestId: asOptionalString(row, "requestId"),
+    correlationId: asOptionalString(row, "correlationId"),
+    actorId: asOptionalString(row, "actorId"),
+    serviceAccountId: asOptionalString(row, "serviceAccountId"),
+    metadata: sanitizeDurableCollaborationMetadata(asRecord(row, "metadata")),
+    createdAt: asDate(row, "createdAt")
+  };
+}
+
+function cloneDurableRecord(record: DurableCollaborationRecord): DurableCollaborationRecord {
+  return {
+    ...record,
+    metadata: sanitizeDurableCollaborationMetadata(record.metadata),
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt)
+  };
+}
+
+function cloneDurableEvent(event: DurableCollaborationEvent): DurableCollaborationEvent {
+  return {
+    ...event,
+    metadata: sanitizeDurableCollaborationMetadata(event.metadata),
+    createdAt: new Date(event.createdAt)
+  };
 }
 
 function sanitizeDatabaseError(error: unknown): string {

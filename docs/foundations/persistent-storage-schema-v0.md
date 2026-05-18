@@ -57,6 +57,53 @@ Purpose: durable LLM/runtime usage and cost attribution.
 - Retention: billing and audit retention
 - Migration notes: never drop task/run attribution
 
+## Durable Collaboration Store Tables
+
+Durable Collaboration Stores v1 extends the Postgres schema with safe metadata-only tables for collaborative agent/Git coordination records. These tables are optional at runtime because default storage remains in-memory unless the existing Postgres provider is explicitly selected.
+
+Tables:
+
+- `branch_orchestration_requests`
+- `branch_orchestration_decisions`
+- `branch_ownership_records`
+- `agent_sessions`
+- `agent_run_coordination_groups`
+- `agent_session_overlaps`
+- `agent_workspace_leases`
+- `agent_workspace_lifecycle_events`
+- `agent_workspace_cleanup_decisions`
+- `agent_worktree_allocation_requests`
+- `agent_worktree_allocation_results`
+- `file_leases`
+- `edit_intents`
+- `edit_overlap_assessments`
+- `merge_queue_policies`
+- `merge_readiness_decisions`
+- `merge_queue_holds`
+- `conflict_resolution_requests`
+- `conflict_summaries`
+- `conflict_resolution_plans`
+- `conflict_resolution_recommendations`
+- `pr_ownership_records`
+- `pr_handoff_requests`
+- `pr_handoff_decisions`
+- `orphan_lease_records`
+- `cleanup_recommendations`
+- `cleanup_decisions`
+- `recovery_actions`
+- `durable_collaboration_events`
+
+Common record columns:
+
+- Primary key: `id`
+- Scope/linkage: `repo_id`, `task_id`, `task_run_id`, `agent_run_id`, `branch_name`, `branch_lease_id`, `workspace_lease_id`
+- State: `status`, `decision`, `severity`
+- Attribution: `request_id`, `correlation_id`, `actor_id`, `service_account_id`
+- Metadata: `metadata_json jsonb`
+- Timestamps: `created_at`, `updated_at`
+
+Migration notes: never add raw payload, credential value, endpoint/auth value, database URL, env value, token, cookie, session id, API key, webhook secret, or credential-cache columns. Metadata must be sanitized before persistence and before return.
+
 ## Auth/RBAC Tables
 
 These tables are schema skeletons for Production Auth/RBAC Planning v0. Runtime repositories remain in-memory in v0, and no production SSO, OIDC, SAML, SCIM, session, password, or API-key issuance path is implemented.

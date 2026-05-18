@@ -10,6 +10,10 @@ import type {
 import { InMemoryImprovementRepository } from "@aichestra/improvement";
 import type { ImprovementRepository } from "@aichestra/improvement";
 import type { RegistryServiceInput } from "@aichestra/registry";
+import {
+  createInMemoryDurableCollaborationRepositories,
+  type DurableCollaborationRepositories
+} from "./durable-collaboration.ts";
 import { InMemoryAichestraStore, createSeededStore } from "./repository.ts";
 import { MockUsageLedger } from "./usage-ledger.ts";
 import type { UsageLedger } from "./usage-ledger.ts";
@@ -79,6 +83,7 @@ export type RepositoryFactory = {
   createUsageLedgerRepository(): UsageLedgerRepository;
   createUsageLedger(): UsageLedger;
   createConflictRepositories(): ConflictRepositories;
+  createDurableCollaborationRepositories(): DurableCollaborationRepositories;
   createRegistryRepositories(): RegistryServiceInput;
   createImprovementRepositories(): ImprovementRepository;
 };
@@ -100,11 +105,13 @@ export type InMemoryStorageProviderInput = {
 export class InMemoryRepositoryFactory implements RepositoryFactory {
   private readonly store: InMemoryAichestraStore;
   private readonly improvementRepository: ImprovementRepository;
+  private readonly durableCollaborationRepositories: DurableCollaborationRepositories;
   private readonly repoRoot?: string;
 
   constructor(input: InMemoryStorageProviderInput = {}) {
     this.store = input.store ?? createSeededStore();
     this.improvementRepository = input.improvementRepository ?? new InMemoryImprovementRepository();
+    this.durableCollaborationRepositories = createInMemoryDurableCollaborationRepositories("in_memory");
     this.repoRoot = input.repoRoot;
   }
 
@@ -130,6 +137,10 @@ export class InMemoryRepositoryFactory implements RepositoryFactory {
 
   createConflictRepositories(): ConflictRepositories {
     return this.store;
+  }
+
+  createDurableCollaborationRepositories(): DurableCollaborationRepositories {
+    return this.durableCollaborationRepositories;
   }
 
   createRegistryRepositories(): RegistryServiceInput {
@@ -208,6 +219,10 @@ export class PersistentRepositoryFactoryPlaceholder implements RepositoryFactory
   }
 
   createConflictRepositories(): ConflictRepositories {
+    return this.notImplemented();
+  }
+
+  createDurableCollaborationRepositories(): DurableCollaborationRepositories {
     return this.notImplemented();
   }
 

@@ -37,6 +37,11 @@ import type {
   VaultIntegrationTestProfile,
   VaultIntegrationTestReadinessSummary,
   VaultIntegrationTestSafetyCheck,
+  VaultLiveIntegrationReadiness,
+  VaultLiveIntegrationRunbook,
+  VaultLiveIntegrationSummary,
+  VaultLiveValidationCheck,
+  VaultLiveValidationRunRecord,
   MergeQueueIntegrationTestCase,
   MergeQueueIntegrationTestProfile,
   MergeQueueIntegrationTestReadinessSummary,
@@ -268,6 +273,26 @@ export function vaultIntegrationTestSafetyCheckToDto(check: VaultIntegrationTest
 }
 
 export function vaultIntegrationTestReadinessSummaryToDto(summary: VaultIntegrationTestReadinessSummary) {
+  return sanitize(summary);
+}
+
+export function vaultLiveIntegrationReadinessToDto(readiness: VaultLiveIntegrationReadiness) {
+  return sanitize(readiness);
+}
+
+export function vaultLiveValidationCheckToDto(check: VaultLiveValidationCheck) {
+  return sanitize(check);
+}
+
+export function vaultLiveValidationRunRecordToDto(record: VaultLiveValidationRunRecord) {
+  return sanitize(record);
+}
+
+export function vaultLiveIntegrationRunbookToDto(runbook: VaultLiveIntegrationRunbook) {
+  return sanitize(runbook);
+}
+
+export function vaultLiveIntegrationSummaryToDto(summary: VaultLiveIntegrationSummary) {
   return sanitize(summary);
 }
 

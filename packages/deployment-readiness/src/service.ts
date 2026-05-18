@@ -144,6 +144,12 @@ import type {
   VaultIntegrationTestReadinessSummary,
   VaultIntegrationTestSafetyCategory,
   VaultIntegrationTestSafetyCheck,
+  VaultLiveIntegrationReadiness,
+  VaultLiveIntegrationReadinessStatus,
+  VaultLiveIntegrationRunbook,
+  VaultLiveIntegrationSummary,
+  VaultLiveValidationCheck,
+  VaultLiveValidationRunRecord,
   MergeQueueIntegrationTestCase,
   MergeQueueIntegrationTestProfile,
   MergeQueueIntegrationTestProfileStatus,
@@ -497,7 +503,19 @@ function testSecretPathAllowedByPrefix(pathValue: string, prefix: string): boole
 }
 
 function looksLikeTestOnlyVaultPath(pathValue: string): boolean {
-  return /(^|[/_-])(test|tests|integration|sandbox|nonprod|non-production|ci)([/_-]|$)/i.test(pathValue);
+  return /(^|[/_-])(test|tests|dev|development|integration|sandbox|nonprod|non-production|ci)([/_-]|$)/i.test(pathValue);
+}
+
+function looksLikeProductionVaultPath(pathValue: string): boolean {
+  return /(^|[/_-])(prod|production|customer|tenant|live|real|payment|billing|private|root)([/_-]|$)/i.test(pathValue);
+}
+
+function looksLikeTestOnlyVaultKey(keyValue: string): boolean {
+  return /(^|[_-])(test|tests|dummy|mock|sample|sandbox|nonprod|ci)([_-]|$)/i.test(keyValue);
+}
+
+function looksLikeSensitiveVaultKey(keyValue: string): boolean {
+  return /(^|[_-])(api[_-]?key|token|password|passwd|secret|private[_-]?key|credential|webhook[_-]?secret)([_-]|$)/i.test(keyValue);
 }
 
 function profileFromEnv(value: string | undefined): DeploymentProfileName {
@@ -3942,9 +3960,12 @@ export class DeploymentReadinessService {
         };
       }
       if (check.category === "path_allowlist") {
+        const unsafeAllowlist = summary.unsafeGateWarnings.includes("test_secret_path_not_allowlisted") ||
+          summary.unsafeGateWarnings.includes("path_allowlist_prefix_not_test_only") ||
+          summary.unsafeGateWarnings.includes("production_like_path_allowlist_configured");
         return {
           ...check,
-          status: summary.pathAllowlistConfigured && summary.testSecretPathAllowlisted ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
+          status: unsafeAllowlist ? "fail" as const : summary.pathAllowlistConfigured && summary.testSecretPathAllowlisted ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
           metadata: {
             ...check.metadata,
             pathAllowlistConfigured: summary.pathAllowlistConfigured,
@@ -3957,7 +3978,8 @@ export class DeploymentReadinessService {
       if (check.category === "test_secret_path") {
         const unsafePath = summary.unsafeGateWarnings.includes("test_secret_path_not_allowlisted") ||
           summary.unsafeGateWarnings.includes("test_secret_path_not_test_only") ||
-          summary.unsafeGateWarnings.includes("production_like_test_path_configured");
+          summary.unsafeGateWarnings.includes("production_like_test_path_configured") ||
+          summary.unsafeGateWarnings.includes("test_secret_key_not_test_marker");
         return {
           ...check,
           status: unsafePath ? "fail" as const : summary.testSecretPathConfigured && summary.testSecretKeyConfigured ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
@@ -4104,6 +4126,326 @@ export class DeploymentReadinessService {
         productionSecretBackendReady: false
       }
     };
+  }
+
+  getVaultLiveIntegrationReadiness(): VaultLiveIntegrationReadiness {
+    const summary = this.getVaultIntegrationTestReadinessSummary();
+    const unsafe = new Set(summary.unsafeGateWarnings);
+    const testPathLooksSafe = summary.testSecretPathConfigured &&
+      summary.testSecretPathAllowlisted &&
+      summary.testSecretPathLooksTestOnly &&
+      !unsafe.has("production_like_test_path_configured") &&
+      !unsafe.has("production_like_path_allowlist_configured") &&
+      !unsafe.has("path_allowlist_prefix_not_test_only") &&
+      !unsafe.has("test_secret_key_not_test_marker");
+    const status: VaultLiveIntegrationReadinessStatus = summary.unsafeGateCount > 0
+      ? "blocked_unsafe"
+      : summary.liveTestsEnabled && summary.missingGateCount === 0
+        ? "ready_for_manual_live_test"
+        : summary.liveTestsEnabled
+          ? "ready_if_configured"
+          : "skipped";
+
+    return clone({
+      id: "vault_live_integration_readiness_v1",
+      status,
+      requiredGateCount: summary.requiredGateCount,
+      configuredGateCount: summary.configuredGateCount,
+      missingGates: summary.missingRequiredEnvVars,
+      unsafeGates: summary.unsafeGateWarnings,
+      testPathAllowlisted: summary.testSecretPathAllowlisted,
+      testPathLooksSafe,
+      writeOperationsAllowed: false,
+      deleteOperationsAllowed: false,
+      rotationAllowed: false,
+      broadListAllowed: false,
+      metadata: {
+        docs: "docs/foundations/vault-secret-backend/live-integration-enablement-v1.md",
+        planDocs: "docs/foundations/vault-secret-backend/live-integration-enablement-v1-plan.md",
+        profileDocs: "docs/roadmaps/vault-integration-test-profile/v1.md",
+        liveTestsEnabled: summary.liveTestsEnabled,
+        canRunLiveValidation: status === "ready_for_manual_live_test",
+        vaultBackendSelected: summary.vaultBackendSelected,
+        vaultProviderEnabled: summary.vaultProviderEnabled,
+        vaultAddressConfigured: summary.vaultAddressConfigured,
+        vaultTokenConfigured: summary.vaultTokenConfigured,
+        vaultKvMountConfigured: summary.vaultKvMountConfigured,
+        testSecretPathConfigured: summary.testSecretPathConfigured,
+        testSecretKeyConfigured: summary.testSecretKeyConfigured,
+        pathAllowlistPrefixCount: summary.pathAllowlistPrefixCount,
+        vaultAddressReturned: false,
+        vaultTokenReturned: false,
+        rawPathReturned: false,
+        rawKeyReturned: false,
+        secretValueReturned: false,
+        envValuesReturned: false,
+        productionVaultRolloutImplemented: false
+      }
+    });
+  }
+
+  listVaultLiveValidationChecks(): VaultLiveValidationCheck[] {
+    const summary = this.getVaultIntegrationTestReadinessSummary();
+    const readiness = this.getVaultLiveIntegrationReadiness();
+    const unsafe = new Set(summary.unsafeGateWarnings);
+    const inactiveStatus = summary.liveTestsEnabled ? "warning" as const : "skipped" as const;
+    const gateStatus = (configured: boolean): "pass" | "warning" | "fail" | "skipped" => configured ? "pass" : inactiveStatus;
+    const failIfUnsafe = (warningIds: string[], fallback: "pass" | "warning" | "fail" | "skipped"): "pass" | "warning" | "fail" | "skipped" =>
+      warningIds.some((warning) => unsafe.has(warning)) ? "fail" : fallback;
+
+    const checks: VaultLiveValidationCheck[] = [
+      {
+        id: "vault_live_env_gates",
+        checkKind: "env_gates",
+        status: readiness.status === "blocked_unsafe" ? "fail" : summary.missingGateCount === 0 ? "pass" : inactiveStatus,
+        severity: "critical",
+        remediation: "Configure every required Vault live validation gate only in a reviewed non-production environment.",
+        metadata: {
+          requiredGateCount: summary.requiredGateCount,
+          configuredGateCount: summary.configuredGateCount,
+          missingGateCount: summary.missingGateCount,
+          unsafeGateCount: summary.unsafeGateCount,
+          envValuesReturned: false
+        }
+      },
+      {
+        id: "vault_live_provider_selected",
+        checkKind: "provider_selected",
+        status: gateStatus(summary.vaultBackendSelected),
+        severity: "high",
+        remediation: "Set AICHESTRA_SECRET_BACKEND_PROVIDER=vault for live validation only.",
+        metadata: { vaultBackendSelected: summary.vaultBackendSelected, providerValueReturned: false }
+      },
+      {
+        id: "vault_live_enable_flag",
+        checkKind: "enable_flag",
+        status: gateStatus(summary.vaultProviderEnabled),
+        severity: "high",
+        remediation: "Set AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER=true only for the reviewed live validation run.",
+        metadata: { vaultProviderEnabled: summary.vaultProviderEnabled }
+      },
+      {
+        id: "vault_live_addr_configured",
+        checkKind: "vault_addr_configured",
+        status: gateStatus(summary.vaultAddressConfigured),
+        severity: "critical",
+        remediation: "Configure AICHESTRA_VAULT_ADDR; readiness surfaces must expose only configured true/false.",
+        metadata: { vaultAddressConfigured: summary.vaultAddressConfigured, vaultAddressReturned: false }
+      },
+      {
+        id: "vault_live_token_configured",
+        checkKind: "token_configured",
+        status: gateStatus(summary.vaultTokenConfigured),
+        severity: "critical",
+        remediation: "Configure AICHESTRA_VAULT_TOKEN for the test-only run and keep it out of logs, API, health, dashboard, and audit.",
+        metadata: { vaultTokenConfigured: summary.vaultTokenConfigured, vaultTokenReturned: false }
+      },
+      {
+        id: "vault_live_mount_configured",
+        checkKind: "mount_configured",
+        status: gateStatus(summary.vaultKvMountConfigured),
+        severity: "high",
+        remediation: "Configure AICHESTRA_VAULT_KV_MOUNT for the test KV v2 mount.",
+        metadata: { vaultKvMountConfigured: summary.vaultKvMountConfigured, mountValueReturned: false }
+      },
+      {
+        id: "vault_live_path_allowlist",
+        checkKind: "path_allowlist",
+        status: failIfUnsafe(
+          ["test_secret_path_not_allowlisted", "path_allowlist_prefix_not_test_only", "production_like_path_allowlist_configured"],
+          summary.pathAllowlistConfigured && summary.testSecretPathAllowlisted ? "pass" : inactiveStatus
+        ),
+        severity: "critical",
+        remediation: "Set AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES to a narrow test-only prefix that contains the configured test path.",
+        metadata: {
+          pathAllowlistConfigured: summary.pathAllowlistConfigured,
+          pathAllowlistPrefixCount: summary.pathAllowlistPrefixCount,
+          testPathAllowlisted: summary.testSecretPathAllowlisted,
+          pathValuesReturned: false
+        }
+      },
+      {
+        id: "vault_live_test_path_safe",
+        checkKind: "test_path_safe",
+        status: failIfUnsafe(
+          ["test_secret_path_not_test_only", "production_like_test_path_configured", "test_secret_key_not_test_marker"],
+          readiness.testPathLooksSafe ? "pass" : inactiveStatus
+        ),
+        severity: "critical",
+        remediation: "Use an allowlisted non-production path and a test-marked key; avoid production-looking path and key names.",
+        metadata: {
+          testSecretPathConfigured: summary.testSecretPathConfigured,
+          testSecretKeyConfigured: summary.testSecretKeyConfigured,
+          testPathAllowlisted: readiness.testPathAllowlisted,
+          testPathLooksSafe: readiness.testPathLooksSafe,
+          rawPathReturned: false,
+          rawKeyReturned: false
+        }
+      },
+      {
+        id: "vault_live_no_write",
+        checkKind: "no_write",
+        status: unsafe.has("vault_write_enabled") ? "fail" : "pass",
+        severity: "critical",
+        remediation: "Remove any Vault write enablement flag; this profile is read-only.",
+        metadata: { writeOperationsAllowed: false, writeAttempted: false }
+      },
+      {
+        id: "vault_live_no_delete",
+        checkKind: "no_delete",
+        status: unsafe.has("vault_delete_enabled") ? "fail" : "pass",
+        severity: "critical",
+        remediation: "Remove any Vault delete enablement flag; this profile never deletes secrets.",
+        metadata: { deleteOperationsAllowed: false, deleteAttempted: false }
+      },
+      {
+        id: "vault_live_no_rotate",
+        checkKind: "no_rotate",
+        status: unsafe.has("vault_rotate_enabled") ? "fail" : "pass",
+        severity: "critical",
+        remediation: "Remove any Vault rotation enablement flag; rotation remains a future task.",
+        metadata: { rotationAllowed: false }
+      },
+      {
+        id: "vault_live_no_broad_list",
+        checkKind: "no_broad_list",
+        status: unsafe.has("vault_broad_list_enabled") ? "fail" : "pass",
+        severity: "critical",
+        remediation: "Remove any broad-list enablement flag; live validation reads only one configured KV v2 key.",
+        metadata: { broadListAllowed: false, broadListAttempted: false }
+      },
+      {
+        id: "vault_live_no_secret_exposure",
+        checkKind: "no_secret_exposure",
+        status: "pass",
+        severity: "critical",
+        remediation: "Keep DTO, health, dashboard, audit, and test assertions limited to booleans/counts/status metadata.",
+        metadata: {
+          noSecretsExposed: true,
+          envValuesExposed: false,
+          vaultTokenExposed: false,
+          vaultAddressExposed: false,
+          vaultPathExposed: false,
+          vaultKeyExposed: false,
+          secretValueExposed: false
+        }
+      }
+    ];
+
+    return clone(checks);
+  }
+
+  canRunVaultLiveValidation(): boolean {
+    return this.getVaultLiveIntegrationReadiness().status === "ready_for_manual_live_test";
+  }
+
+  getVaultLiveValidationRunRecord(): VaultLiveValidationRunRecord {
+    const readiness = this.getVaultLiveIntegrationReadiness();
+    const status = readiness.status === "blocked_unsafe"
+      ? "blocked"
+      : readiness.status === "ready_for_manual_live_test"
+        ? "ready"
+        : "skipped";
+    return clone({
+      id: "vault_live_validation_run_record_v1",
+      status,
+      secretValueExposed: false,
+      writeAttempted: false,
+      deleteAttempted: false,
+      broadListAttempted: false,
+      metadata: {
+        liveValidationExecutedByDefault: false,
+        liveVaultCallAttempted: false,
+        readyForManualLiveTest: status === "ready",
+        blockedUnsafe: status === "blocked",
+        skippedByDefault: status === "skipped",
+        rotateAttempted: false,
+        envValuesReturned: false,
+        tokenReturned: false,
+        productionVaultRolloutImplemented: false
+      }
+    });
+  }
+
+  getVaultLiveIntegrationRunbook(): VaultLiveIntegrationRunbook {
+    const profile = this.getVaultIntegrationTestProfile();
+    return clone({
+      id: "vault_live_integration_runbook_v1",
+      title: "Vault Live Integration Enablement v1 safe runbook",
+      status: "metadata_only",
+      requiredEnvVars: profile.requiredEnvVars,
+      optionalEnvVars: ["AICHESTRA_VAULT_NAMESPACE", "AICHESTRA_VAULT_REQUEST_TIMEOUT_MS"],
+      preparationSteps: [
+        "Use a non-production Vault instance and a KV v2 mount dedicated to integration validation.",
+        "Create one small test-only secret out of band under an allowlisted path that includes a test/dev/sandbox marker.",
+        "Use a test-marked key name and do not use production credential names or production secret values.",
+        "Configure only the required gates for the manual validation session; do not commit env files.",
+        "Confirm /readiness/secrets/vault/live-readiness reports ready_for_manual_live_test before running the live skeleton."
+      ],
+      validationSteps: [
+        "Run default pnpm lint, pnpm typecheck, pnpm test, and pnpm build first; these must not call Vault.",
+        "After explicit operator approval and all gates are configured, run the targeted Vault backend live skeleton such as pnpm test tests/vault-secret-backend-v1.test.ts.",
+        "Inspect only status, metadata, and audit redaction assertions; do not print token, path, key, env, or secret values.",
+        "Clear live validation env gates after the run and keep production Vault rollout false."
+      ],
+      forbiddenOperations: [
+        "vault_write",
+        "vault_delete",
+        "vault_rotate",
+        "vault_broad_list",
+        "secret_value_output",
+        "env_value_output",
+        "credential_cache_read",
+        "production_vault_rollout"
+      ],
+      expectedSkipBehavior: "Default runtime/tests skip live validation unless every required gate is configured and unsafe gates are empty.",
+      troubleshooting: [
+        "If status is skipped, configure only the missing gate names shown by readiness output.",
+        "If status is blocked_unsafe, remove unsafe gate settings before any live validation.",
+        "If the path is not allowlisted, narrow AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES to the test-only prefix containing the test path.",
+        "If the path is production-like, replace it with a path containing test, dev, integration, sandbox, nonprod, or ci and no production markers.",
+        "If no-secret checks fail, stop and inspect redaction before retrying; do not run the live skeleton."
+      ],
+      metadata: {
+        docs: "docs/foundations/vault-secret-backend/live-integration-enablement-v1.md",
+        valuesReturned: false,
+        liveVaultCallInRunbook: false,
+        productionVaultRolloutImplemented: false
+      }
+    });
+  }
+
+  getVaultLiveIntegrationSummary(): VaultLiveIntegrationSummary {
+    const readiness = this.getVaultLiveIntegrationReadiness();
+    return clone({
+      id: "vault_live_integration_summary_v1",
+      status: "v1_implemented",
+      readinessStatus: readiness.status,
+      canRunLiveValidation: this.canRunVaultLiveValidation(),
+      requiredGateCount: readiness.requiredGateCount,
+      configuredGateCount: readiness.configuredGateCount,
+      missingGateCount: readiness.missingGates.length,
+      unsafeGateCount: readiness.unsafeGates.length,
+      testPathAllowlisted: readiness.testPathAllowlisted,
+      testPathLooksSafe: readiness.testPathLooksSafe,
+      productionVaultRolloutImplemented: false,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      vaultTokenExposed: false,
+      vaultAddressExposed: false,
+      vaultPathExposed: false,
+      vaultKeyExposed: false,
+      writeOperationsAllowed: false,
+      deleteOperationsAllowed: false,
+      rotationAllowed: false,
+      broadListAllowed: false,
+      metadata: {
+        docs: "docs/foundations/vault-secret-backend/live-integration-enablement-v1.md",
+        liveTestsEnabledByDefault: false,
+        defaultRuntimeCallsVault: false,
+        liveValidationExecutedByDefault: false
+      }
+    });
   }
 
   getMergeQueueIntegrationTestProfile(): MergeQueueIntegrationTestProfile {
@@ -4527,6 +4869,9 @@ export class DeploymentReadinessService {
       enforcementMode: "shadow_only",
       enforcementChanged: false,
       staticPolicyEngineAuthoritative: true,
+      shadowEvaluatorSkeletonImplemented: true,
+      shadowEvaluatorEnabled: false,
+      mockComparisonSupported: true,
       shadowEvaluatorImplemented: false,
       candidateRuntimeImplemented: false,
       candidateRuntimeExecuted: false,
@@ -4554,7 +4899,7 @@ export class DeploymentReadinessService {
       readinessFailCount: failCount,
       reportCount: this.policyShadowEvaluationReports.length,
       goldenCaseSource: "Policy Runtime PoC Golden Test Harness v1",
-      recommendedNextTask: "Policy Runtime Shadow Evaluator Skeleton v1",
+      recommendedNextTask: "Policy Runtime Shadow Evaluator Implementation Planning v1, or Signed JSON/YAML Bundle Schema v1",
       currentRolloutStage: "docs_planning_golden_harness_only",
       candidateRuntimeInterfaceImplemented: false,
       staticPolicyEngineUnchanged: true,
@@ -4564,6 +4909,7 @@ export class DeploymentReadinessService {
         docs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1.md",
         planDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluation-v1-plan.md",
         candidateRuntimeInterfaceDocs: "docs/roadmaps/policy-bundle-runtime-poc/candidate-runtime-interface-v1.md",
+        evaluatorSkeletonDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluator-skeleton-v1.md",
         mismatchTaxonomyDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-mismatch-taxonomy-v1.md",
         reportingDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-reporting-v1.md",
         rolloutRollbackDocs: "docs/roadmaps/policy-bundle-runtime-poc/shadow-rollout-rollback-v1.md",
@@ -4573,6 +4919,9 @@ export class DeploymentReadinessService {
         noDynamicPolicyExecution: true,
         noExternalPolicyServiceCalls: true,
         noSecretsOrEnvValues: true,
+        shadowEvaluatorSkeletonImplemented: true,
+        shadowEvaluatorEnabled: false,
+        mockComparisonSupported: true,
         staticPolicyEngineSourceOfTruth: true,
         shadowEvaluatorImplemented: false,
         candidateRuntimeImplemented: false,
@@ -5329,9 +5678,18 @@ export class DeploymentReadinessService {
   private vaultIntegrationUnsafeGateWarnings(): string[] {
     const warnings: string[] = [];
     const testSecretPath = this.env.AICHESTRA_TEST_VAULT_SECRET_PATH?.trim();
+    const testSecretKey = this.env.AICHESTRA_TEST_VAULT_SECRET_KEY?.trim();
     const pathPrefixes = csvValues(this.env.AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES);
     if (stringConfigured(this.env.AICHESTRA_VAULT_AUTH_METHOD) && this.env.AICHESTRA_VAULT_AUTH_METHOD !== "token") {
       warnings.push("vault_auth_method_not_token");
+    }
+    for (const prefix of pathPrefixes) {
+      if (!looksLikeTestOnlyVaultPath(prefix)) {
+        warnings.push("path_allowlist_prefix_not_test_only");
+      }
+      if (looksLikeProductionVaultPath(prefix)) {
+        warnings.push("production_like_path_allowlist_configured");
+      }
     }
     if (testSecretPath) {
       if (!pathPrefixes.some((prefix) => testSecretPathAllowedByPrefix(testSecretPath, prefix))) {
@@ -5340,9 +5698,12 @@ export class DeploymentReadinessService {
       if (!looksLikeTestOnlyVaultPath(testSecretPath)) {
         warnings.push("test_secret_path_not_test_only");
       }
-      if (/(^|[/_-])(prod|production)([/_-]|$)/i.test(testSecretPath)) {
+      if (looksLikeProductionVaultPath(testSecretPath)) {
         warnings.push("production_like_test_path_configured");
       }
+    }
+    if (testSecretKey && looksLikeSensitiveVaultKey(testSecretKey) && !looksLikeTestOnlyVaultKey(testSecretKey)) {
+      warnings.push("test_secret_key_not_test_marker");
     }
     if (flag(this.env.AICHESTRA_VAULT_ALLOW_WRITE) || flag(this.env.AICHESTRA_ALLOW_VAULT_WRITE)) warnings.push("vault_write_enabled");
     if (flag(this.env.AICHESTRA_VAULT_ALLOW_DELETE) || flag(this.env.AICHESTRA_ALLOW_VAULT_DELETE)) warnings.push("vault_delete_enabled");
@@ -5410,6 +5771,34 @@ export class DeploymentReadinessService {
       warnings.push("test_base_branch_overlaps_source_branches");
     }
     return [...new Set(warnings)];
+  }
+}
+
+export class VaultLiveIntegrationReadinessService {
+  private readonly deploymentReadiness: DeploymentReadinessService;
+
+  constructor(deploymentReadiness: DeploymentReadinessService) {
+    this.deploymentReadiness = deploymentReadiness;
+  }
+
+  getReadiness(): VaultLiveIntegrationReadiness {
+    return this.deploymentReadiness.getVaultLiveIntegrationReadiness();
+  }
+
+  listChecks(): VaultLiveValidationCheck[] {
+    return this.deploymentReadiness.listVaultLiveValidationChecks();
+  }
+
+  canRunLiveValidation(): boolean {
+    return this.deploymentReadiness.canRunVaultLiveValidation();
+  }
+
+  getRunbook(): VaultLiveIntegrationRunbook {
+    return this.deploymentReadiness.getVaultLiveIntegrationRunbook();
+  }
+
+  getSummary(): VaultLiveIntegrationSummary {
+    return this.deploymentReadiness.getVaultLiveIntegrationSummary();
   }
 }
 

@@ -6,6 +6,8 @@ Runtime policy engine: `StaticPolicyEngine`
 
 Golden Test Harness v1 is the source-of-truth compatibility baseline for future policy runtime work. It uses `StaticPolicyEngine` decisions as canonical expected behavior and does not execute a candidate runtime.
 
+Update: Policy Runtime Shadow Evaluator Skeleton v1 can consume the golden case metadata to build a deterministic mock comparison report. This report maps expected static decisions into a mock candidate result shape for tests only; it does not change golden expected decisions and does not execute a candidate runtime.
+
 ## Current Behavior
 
 - Golden cases are deterministic and local.
@@ -19,7 +21,7 @@ Golden Test Harness v1 is the source-of-truth compatibility baseline for future 
 Future shadow evaluation should feed each golden case through:
 
 1. `StaticPolicyEngine` as source of truth.
-2. A disabled candidate runtime only after a future runtime skeleton exists.
+2. The disabled/default shadow evaluator or deterministic mock evaluator skeleton.
 3. A comparison layer that records, but never enforces, mismatches.
 
 Golden cases must include the static decision, reason, matched rule ids, required obligations, redaction expectations, and audit metadata expectations. Candidate output must be normalized to that shape before comparison.
@@ -38,3 +40,7 @@ Golden cases must include the static decision, reason, matched rule ids, require
 - OPA, Cedar, signed bundle runtime, or external policy service calls.
 - Runtime enforcement change.
 - Production policy activation.
+
+## Skeleton Report
+
+Policy Runtime Shadow Evaluator Skeleton v1 exposes a read-only fixture report with golden case count, domains covered, mock comparison support, disabled evaluator status, and `enforcementChanged: false`. The report is static/local metadata and never makes `MockPolicyShadowEvaluator` a production runtime.

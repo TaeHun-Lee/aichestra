@@ -302,6 +302,10 @@ export type PolicyShadowEvaluationReadModel = {
   mismatchTaxonomy: DashboardJsonObject[];
   readinessChecks: DashboardJsonObject[];
   reports: DashboardJsonObject[];
+  evaluatorStatus: DashboardJsonObject;
+  evaluatorSummary: DashboardJsonObject;
+  evaluatorMismatchTypes: DashboardJsonObject[];
+  evaluatorMockReport: DashboardJsonObject;
   criticalMismatchExamples: DashboardJsonObject[];
   rollout: DashboardJsonObject;
   noExecutionStatus: DashboardJsonObject;
@@ -501,6 +505,16 @@ export type DatabaseOperationsReadModel = {
   noSecretStatus: DashboardJsonObject;
 };
 
+export type DurableCollaborationStoresReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  inventory: DashboardJsonObject[];
+  repositories: DashboardJsonObject[];
+  schema: DashboardJsonObject;
+  safety: DashboardJsonObject;
+  noSecretStatus: DashboardJsonObject;
+};
+
 export type SecretBackendMigrationReadModel = {
   scopeMetadata?: ScopedReadModelMetadata;
   summary: DashboardJsonObject;
@@ -693,6 +707,11 @@ export type VaultIntegrationTestReadModel = {
   gatedLiveTestCases: DashboardJsonObject[];
   mockTestCases: DashboardJsonObject[];
   safetyChecks: DashboardJsonObject[];
+  liveReadiness?: DashboardJsonObject;
+  liveChecks?: DashboardJsonObject[];
+  liveRunbook?: DashboardJsonObject;
+  liveRunRecord?: DashboardJsonObject;
+  liveSummary?: DashboardJsonObject;
   blockers: DashboardJsonObject[];
   warnings: DashboardJsonObject[];
   gateStatus: DashboardJsonObject;
@@ -796,6 +815,11 @@ export type ObservabilityReadModel = {
   traceSummary: DashboardJsonObject;
   sourceCoverage: DashboardJsonObject[];
   productionReadinessBlockers: DashboardJsonObject[];
+  exporterConfigs: DashboardJsonObject[];
+  futureBackends: DashboardJsonObject[];
+  exportSafetyChecks: DashboardJsonObject[];
+  exportReadinessSummary: DashboardJsonObject;
+  exportNoSecretStatus: DashboardJsonObject;
   auditScopeSummary: DashboardJsonObject;
   auditScopeDecision: DashboardJsonObject;
   auditScopeRedactionPlans: DashboardJsonObject[];
@@ -846,6 +870,7 @@ export type DashboardReadModels = {
   dashboardScopeFilter: DashboardScopeFilterReadModel;
   readiness: DeploymentReadinessReadModel;
   database: DatabaseOperationsReadModel;
+  collaborationStores: DurableCollaborationStoresReadModel;
   secretBackend: SecretBackendMigrationReadModel;
   secretBackendDecision: SecretBackendDecisionReadModel;
   vaultSecretBackend: VaultSecretBackendReadModel;
@@ -892,6 +917,7 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/scope-filter",
   "/dashboard/readiness",
   "/dashboard/database",
+  "/dashboard/collaboration-stores",
   "/dashboard/secret-backend",
   "/dashboard/secret-backend-decision",
   "/dashboard/vault-secret-backend",

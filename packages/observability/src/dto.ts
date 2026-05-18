@@ -12,6 +12,10 @@ import type {
   MetricSnapshot,
   ObservabilityConfig,
   ObservabilityDashboardReadModel,
+  ObservabilityExportEnvelope,
+  ObservabilityExporterConfig,
+  ObservabilityExportReadinessSummary,
+  ObservabilityExportSafetyCheck,
   TraceSpan
 } from "./types.ts";
 
@@ -76,6 +80,22 @@ export function traceSpanToDto(span: TraceSpan) {
 
 export function observabilityConfigToDto(config: ObservabilityConfig) {
   return toJson(config);
+}
+
+export function observabilityExporterConfigToDto(config: ObservabilityExporterConfig) {
+  return toJson(config);
+}
+
+export function observabilityExportEnvelopeToDto(envelope: ObservabilityExportEnvelope) {
+  return toJson(envelope);
+}
+
+export function observabilityExportSafetyCheckToDto(check: ObservabilityExportSafetyCheck) {
+  return toJson(check);
+}
+
+export function observabilityExportReadinessSummaryToDto(summary: ObservabilityExportReadinessSummary) {
+  return toJson(summary);
 }
 
 export function observabilityDashboardReadModelToDto(model: ObservabilityDashboardReadModel) {

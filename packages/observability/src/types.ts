@@ -245,6 +245,102 @@ export type ObservabilityConfig = {
   metadata: Record<string, unknown>;
 };
 
+export type ObservabilityExporterKind =
+  | "disabled"
+  | "mock"
+  | "opentelemetry_future"
+  | "datadog_future"
+  | "grafana_cloud_future"
+  | "cloudwatch_future"
+  | "opensearch_future"
+  | "splunk_future"
+  | "siem_future"
+  | "s3_future"
+  | "custom_future";
+
+export type ObservabilityExporterStatus = "disabled" | "active_mock" | "not_configured" | "future";
+
+export type ObservabilityExporterConfig = {
+  id: string;
+  exporterKind: ObservabilityExporterKind;
+  status: ObservabilityExporterStatus;
+  exportLogsEnabled: false;
+  exportMetricsEnabled: false;
+  exportTracesEnabled: false;
+  exportAuditEnabled: false;
+  externalCallsEnabled: false;
+  endpointConfigured: boolean;
+  authConfigured: boolean;
+  tenantScopeRequired: boolean;
+  redactionRequired: boolean;
+  metadata: Record<string, unknown>;
+};
+
+export type ObservabilityExportEnvelopeKind = "audit" | "metric" | "trace" | "readiness" | "policy_shadow_future";
+
+export type ObservabilityExportEnvelope = {
+  id: string;
+  envelopeKind: ObservabilityExportEnvelopeKind;
+  source: string;
+  tenantId?: string;
+  teamId?: string;
+  projectId?: string;
+  resourceScope?: Record<string, unknown>;
+  redactionClass: AuditRedactionClassName;
+  retentionClass: AuditRetentionClassName;
+  payloadSummary: string;
+  rawPayloadIncluded: false;
+  secretFieldsRedacted: true;
+  metadata: Record<string, unknown>;
+};
+
+export type ObservabilityExportSafetyCheckKind =
+  | "exporter_disabled_by_default"
+  | "no_raw_payload"
+  | "no_secret_fields"
+  | "no_env_values"
+  | "redaction_applied"
+  | "tenant_scope_present"
+  | "retention_class_present"
+  | "endpoint_not_exposed"
+  | "auth_not_exposed";
+
+export type ObservabilityExportSafetyCheckStatus = "pass" | "warning" | "fail" | "skipped";
+
+export type ObservabilityExportSafetySeverity = "info" | "low" | "medium" | "high" | "critical";
+
+export type ObservabilityExportSafetyCheck = {
+  id: string;
+  checkKind: ObservabilityExportSafetyCheckKind;
+  status: ObservabilityExportSafetyCheckStatus;
+  severity: ObservabilityExportSafetySeverity;
+  remediation: string;
+  metadata: Record<string, unknown>;
+};
+
+export type ObservabilityExportReadinessSummary = {
+  exporterEnabled: false;
+  externalCallsEnabled: false;
+  configuredExporterCount: number;
+  futureExporterCount: number;
+  safetyCheckCount: number;
+  failedSafetyCheckCount: number;
+  rawPayloadExportAllowed: false;
+  secretExportAllowed: false;
+  metadata: Record<string, unknown>;
+};
+
+export type ObservabilityExportNoSecretStatus = {
+  exporterEnabled: false;
+  externalCallsEnabled: false;
+  rawPayloadExportAllowed: false;
+  secretExportAllowed: false;
+  envValuesExposed: false;
+  endpointValuesExposed: false;
+  authValuesExposed: false;
+  noSecretsExposed: true;
+};
+
 export type ObservabilityDashboardReadModel = {
   config: ObservabilityConfig;
   auditSummary: AuditSummary;
@@ -260,6 +356,11 @@ export type ObservabilityDashboardReadModel = {
   traceSummary: Record<string, unknown>;
   sourceCoverage: AuditSourceCoverage[];
   productionReadinessBlockers: Record<string, unknown>[];
+  exporterConfigs: ObservabilityExporterConfig[];
+  futureBackends: ObservabilityExporterConfig[];
+  exportSafetyChecks: ObservabilityExportSafetyCheck[];
+  exportReadinessSummary: ObservabilityExportReadinessSummary;
+  exportNoSecretStatus: ObservabilityExportNoSecretStatus;
   noSecretStatus: {
     noSecretsExposed: true;
     rawPayloadsStored: false;

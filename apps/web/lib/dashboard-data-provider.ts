@@ -19,6 +19,7 @@ import {
   type DashboardTenantScopePlanningReadModel,
   type DatabaseOperationsReadModel,
   type DeploymentReadinessReadModel,
+  type DurableCollaborationStoresReadModel,
   type EnterpriseProviderReadModel,
   type GitHubAppHardeningReadModel,
   type GitHubAppIntegrationTestReadModel,
@@ -54,6 +55,7 @@ import {
 } from "@aichestra/shared";
 import { createDashboardReadinessTenantScopePlanningService, createDashboardScopeFilteringService } from "@aichestra/deployment-readiness";
 import { createTenantScopeEnforcementService } from "@aichestra/auth";
+import { createDisabledPolicyShadowEvaluator, policyShadowEvaluatorMismatchTypes, runPolicyShadowGoldenMockReport } from "@aichestra/policy";
 
 export type DashboardDataProvider = {
   getReadModels(): Promise<DashboardReadModels>;
@@ -239,6 +241,9 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       databaseOperationsCriticalBlockers: numeric(sections.database.summary.criticalBlockerCount),
       databaseMigrationFiles: sections.database.migrations.length,
       databaseIndexReviewItems: sections.database.indexReview.length,
+      durableCollaborationRepositoryGroups: sections.collaborationStores.repositories.length,
+      durableCollaborationRequiredRecords: numeric(sections.collaborationStores.summary.requiredDurableRecordCount),
+      durableCollaborationPostgresTables: numeric(sections.collaborationStores.schema.tableCount),
       secretBackendReadinessBlockers: sections.secretBackend.blockers.length,
       secretBackendOptions: sections.secretBackend.backendOptions.length,
       secretRotationPlans: sections.secretBackend.rotationPlans.length,
@@ -269,6 +274,8 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       normalizedAuditEvents: numeric(sections.observability.auditSummary.totalEvents),
       auditSourcesCovered: sections.observability.sourceCoverage.filter((source) => source.normalized === "yes").length,
       observabilityTraceSpans: sections.observability.traceSpans.length,
+      observabilityExportFutureBackends: sections.observability.futureBackends.length,
+      observabilityExportFailedSafetyChecks: numeric(sections.observability.exportReadinessSummary.failedSafetyCheckCount),
       auditEvents: numeric(sections.audit.summary.totalEvents)
     }),
     sections: {
@@ -296,6 +303,7 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       tenantScopeEnforcement: { status: "available", count: sections.tenantScopeEnforcement.modes.length, notes: ["Tenant Scope Enforcement v1 is partial/representative metadata; tenant filtering and production enforcement remain false."] },
       readiness: { status: "available", count: sections.readiness.productionBlockers.length, notes: ["Production deployment readiness is planning-only and currently blocked."] },
       database: { status: "available", count: sections.database.blockers.length, notes: ["Persistent DB Production Operations v1 is read-only planning; no production DB connection or destructive job is run."] },
+      collaborationStores: { status: "available", count: sections.collaborationStores.repositories.length, notes: ["Durable Collaboration Stores v1 exposes repository and schema metadata; default runtime remains in-memory and optional Postgres is gated."] },
       secretBackend: { status: "available", count: sections.secretBackend.blockers.length, notes: ["Secret Backend Migration v0 is planning/readiness-only; no real backend is contacted and env values are hidden."] },
       secretBackendDecision: { status: "available", count: sections.secretBackendDecision.risks.length, notes: ["Production Secret Backend Option Decision v0 selects Vault for v1 planning only; no backend is contacted and no secret values are read."] },
       vaultSecretBackend: { status: "available", count: sections.vaultSecretBackend.checks.length, notes: ["Vault Secret Backend v1 is gated and non-default; dashboard data is metadata-only and does not read Vault."] },
@@ -306,7 +314,7 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       stagingReleaseCandidate: { status: "available", count: sections.stagingReleaseCandidate.blockers.length, notes: ["Staging Release Candidate Checklist v0 is read-only; it does not create releases, tags, GitHub releases, deployments, or run integration tests."] },
       stagingExecution: { status: "available", count: sections.stagingExecution.blockers.length, notes: ["Staging Deployment Execution Plan v0 is planning-only; it does not deploy, create releases or tags, call providers, or run integration tests."] },
       cicd: { status: "available", count: sections.cicd.blockers.length, notes: ["Staging CI/CD Pipeline Planning v0 is read-only; no active workflow, deployment, or default remote integration test is enabled."] },
-      observability: { status: "available", count: numeric(sections.observability.auditSummary.totalEvents), notes: ["Observability v0 is in-memory/read-only and has no external exporter."] },
+      observability: { status: "available", count: numeric(sections.observability.auditSummary.totalEvents), notes: ["Observability v0 is in-memory/read-only. External Observability Export v1 is skeleton-only; external calls, raw-payload export, and secret export remain disabled."] },
       audit: { status: "available", count: numeric(sections.audit.summary.totalEvents), notes: [] }
     },
     safety: {
@@ -1172,6 +1180,18 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     })
   };
 
+  const policyShadowEvaluatorStatus = createDisabledPolicyShadowEvaluator().getStatus();
+  const policyShadowEvaluatorMockReport = runPolicyShadowGoldenMockReport();
+  const policyShadowEvaluatorPreview = policyShadowEvaluatorMockReport.results.slice(0, 5).map((result) => ({
+    id: result.id,
+    status: result.status,
+    sourceOfTruthRuntime: result.sourceOfTruthRuntime,
+    candidateRuntimeKind: result.candidateRuntimeKind,
+    enforcementChanged: result.enforcementChanged,
+    mismatchCount: result.mismatches.length,
+    comparison: result.comparison
+  }));
+
   const policyShadow: PolicyShadowEvaluationReadModel = {
     summary: sanitizeDashboardObject({
       status: "v1_implemented",
@@ -1181,6 +1201,9 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       enforcementMode: "shadow_only",
       enforcementChanged: false,
       staticPolicyEngineAuthoritative: true,
+      shadowEvaluatorSkeletonImplemented: true,
+      shadowEvaluatorEnabled: false,
+      mockComparisonSupported: true,
       shadowEvaluatorImplemented: false,
       candidateRuntimeImplemented: false,
       candidateRuntimeExecuted: false,
@@ -1197,9 +1220,9 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       comparisonRuleCount: 6,
       mismatchTaxonomyCount: 10,
       criticalMismatchKindCount: 3,
-      readinessCheckCount: 10,
+      readinessCheckCount: 11,
       goldenCaseSource: "Policy Runtime PoC Golden Test Harness v1",
-      recommendedNextTask: "Policy Runtime Shadow Evaluator Skeleton v1"
+      recommendedNextTask: "Policy Runtime Shadow Evaluator Implementation Planning v1, or Signed JSON/YAML Bundle Schema v1"
     }),
     plan: sanitizeDashboardObject({
       id: "policy_shadow_evaluation_v1_plan",
@@ -1232,6 +1255,15 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     reports: sanitizeDashboardArray([
       { id: "policy_shadow_report_planning_only_v1", domain: "deployment_readiness", caseCount: 0, mismatchCount: 0, enforcementChanged: false }
     ]),
+    evaluatorStatus: sanitizeDashboardObject(policyShadowEvaluatorStatus),
+    evaluatorSummary: sanitizeDashboardObject(policyShadowEvaluatorMockReport.summary),
+    evaluatorMismatchTypes: sanitizeDashboardArray(policyShadowEvaluatorMismatchTypes),
+    evaluatorMockReport: sanitizeDashboardObject({
+      fixtureReport: policyShadowEvaluatorMockReport.fixtureReport,
+      summary: policyShadowEvaluatorMockReport.summary,
+      previewCount: policyShadowEvaluatorPreview.length,
+      resultPreview: policyShadowEvaluatorPreview
+    }),
     criticalMismatchExamples: sanitizeDashboardArray([
       { mismatchKind: "static_deny_candidate_allow", example: "static denies secret.read but candidate allows" },
       { mismatchKind: "static_block_candidate_allow", example: "static blocks governance apply but candidate allows" },
@@ -1248,6 +1280,9 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       enforcementMode: "shadow_only",
       enforcementChanged: false,
       staticPolicyEngineAuthoritative: true,
+      shadowEvaluatorSkeletonImplemented: true,
+      shadowEvaluatorEnabled: false,
+      mockComparisonSupported: true,
       shadowEvaluatorImplemented: false,
       candidateRuntimeImplemented: false,
       candidateRuntimeExecuted: false,
@@ -1875,6 +1910,81 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       productionDbConnectionAttempted: false,
       destructiveOperationsEnabled: false,
       retentionDeletionJobsEnabled: false
+    })
+  };
+
+  const collaborationStores: DurableCollaborationStoresReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      providerKind: "in_memory",
+      defaultRuntime: "in_memory",
+      durableCollaborationStoreConfigured: false,
+      productionReady: false,
+      repositoryGroupCount: 9,
+      implementedRepositoryGroupCount: 9,
+      requiredDurableRecordCount: 28,
+      recommendedDurableRecordCount: 4,
+      ephemeralRecordCount: 3,
+      postgresTableCount: 28,
+      migrationCoverage: "v1_schema_skeleton",
+      optionalPostgresSupported: true,
+      optionalPostgresTestsConfigured: false,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      databaseUrlExposed: false,
+      remoteGitOperationsExecuted: false,
+      workspaceMutationExecuted: false,
+      externalCallsExecuted: false
+    }),
+    inventory: sanitizeDashboardArray([
+      { modelName: "BranchOwnershipRecord", classification: "required_durable", group: "branch_orchestration", repositoryNeeded: true, postgresTableNeeded: true, migrationStatus: "implemented_skeleton" },
+      { modelName: "AgentWorkspaceLease", classification: "required_durable", group: "agent_workspace", repositoryNeeded: true, postgresTableNeeded: true, migrationStatus: "implemented_skeleton" },
+      { modelName: "AgentSession", classification: "required_durable", group: "agent_session_coordination", repositoryNeeded: true, postgresTableNeeded: true, migrationStatus: "implemented_skeleton" },
+      { modelName: "EditIntent", classification: "required_durable", group: "edit_intent", repositoryNeeded: true, postgresTableNeeded: true, migrationStatus: "implemented_skeleton" },
+      { modelName: "MergeReadinessDecision", classification: "required_durable", group: "merge_queue_policy", repositoryNeeded: true, postgresTableNeeded: true, migrationStatus: "implemented_skeleton" },
+      { modelName: "ConflictResolutionPlan", classification: "required_durable", group: "conflict_resolution", repositoryNeeded: true, postgresTableNeeded: true, migrationStatus: "implemented_skeleton" }
+    ]),
+    repositories: sanitizeDashboardArray([
+      { group: "branch_orchestration", label: "Branch Orchestration", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 },
+      { group: "agent_session_coordination", label: "Agent Session Coordination", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 },
+      { group: "agent_workspace", label: "Agent Workspace Lifecycle", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 },
+      { group: "agent_worktree_allocation", label: "Agent Worktree Allocation", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 },
+      { group: "edit_intent", label: "File Lease / Edit Intent Graph", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 },
+      { group: "merge_queue_policy", label: "Merge Queue Policy", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 },
+      { group: "conflict_resolution", label: "Conflict Resolution Assistant", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 },
+      { group: "pr_ownership", label: "PR Ownership / Handoff", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 },
+      { group: "cleanup_recovery", label: "Branch Cleanup / Orphan Recovery", providerKind: "in_memory", implemented: true, recordCount: 0, eventCount: 0 }
+    ]),
+    schema: sanitizeDashboardObject({
+      status: "implemented_skeleton",
+      tableCount: 28,
+      eventTableName: "durable_collaboration_events",
+      safeColumnsOnly: true,
+      credentialColumnsPresent: false,
+      envValueColumnsPresent: false,
+      databaseUrlColumnsPresent: false,
+      rawPayloadColumnsPresent: false
+    }),
+    safety: sanitizeDashboardObject({
+      defaultRuntime: "in_memory",
+      durableCollaborationStoreConfigured: false,
+      productionReady: false,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      databaseUrlExposed: false,
+      remoteGitOperationsExecuted: false,
+      workspaceMutationExecuted: false,
+      externalCallsExecuted: false,
+      rawPayloadStorageAllowed: false,
+      credentialStorageAllowed: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      databaseUrlExposed: false,
+      databaseUrlValueReturned: false,
+      credentialStorageAllowed: false,
+      rawPayloadStorageAllowed: false
     })
   };
 
@@ -3306,6 +3416,47 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       externalIdentityProviderCalled: false
     })
   };
+  const observabilityFutureBackends = [
+    "opentelemetry_future",
+    "datadog_future",
+    "grafana_cloud_future",
+    "cloudwatch_future",
+    "opensearch_future",
+    "splunk_future",
+    "siem_future",
+    "s3_future",
+    "custom_future"
+  ].map((exporterKind) => ({
+    id: `observability_exporter_${exporterKind}`,
+    exporterKind,
+    status: "future",
+    exportLogsEnabled: false,
+    exportMetricsEnabled: false,
+    exportTracesEnabled: false,
+    exportAuditEnabled: false,
+    externalCallsEnabled: false,
+    endpointConfigured: false,
+    authConfigured: false,
+    tenantScopeRequired: true,
+    redactionRequired: true,
+    metadata: {
+      futureBackend: true,
+      productionReady: false,
+      endpointValueExposed: false,
+      authValueExposed: false
+    }
+  }));
+  const observabilityExportSafetyChecks = sanitizeDashboardArray([
+    { id: "observability_export_check_exporter_disabled_by_default", checkKind: "exporter_disabled_by_default", status: "pass", severity: "critical" },
+    { id: "observability_export_check_no_raw_payload", checkKind: "no_raw_payload", status: "pass", severity: "critical" },
+    { id: "observability_export_check_no_secret_fields", checkKind: "no_secret_fields", status: "pass", severity: "critical" },
+    { id: "observability_export_check_no_env_values", checkKind: "no_env_values", status: "pass", severity: "critical" },
+    { id: "observability_export_check_redaction_applied", checkKind: "redaction_applied", status: "pass", severity: "high" },
+    { id: "observability_export_check_tenant_scope_present", checkKind: "tenant_scope_present", status: "pass", severity: "medium" },
+    { id: "observability_export_check_retention_class_present", checkKind: "retention_class_present", status: "pass", severity: "high" },
+    { id: "observability_export_check_endpoint_not_exposed", checkKind: "endpoint_not_exposed", status: "pass", severity: "high" },
+    { id: "observability_export_check_auth_not_exposed", checkKind: "auth_not_exposed", status: "pass", severity: "high" }
+  ]);
   const observability: ObservabilityReadModel = {
     config: sanitizeDashboardObject({
       status: "v0_implemented",
@@ -3381,6 +3532,68 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       { moduleName: "Deployment Readiness", normalized: "partial", eventCount: readiness.checks.length }
     ]),
     productionReadinessBlockers: readiness.checks.filter((check) => check.category === "observability" || check.category === "audit"),
+    exporterConfigs: sanitizeDashboardArray([
+      {
+        id: "observability_exporter_disabled",
+        exporterKind: "disabled",
+        status: "disabled",
+        exportLogsEnabled: false,
+        exportMetricsEnabled: false,
+        exportTracesEnabled: false,
+        exportAuditEnabled: false,
+        externalCallsEnabled: false,
+        endpointConfigured: false,
+        authConfigured: false,
+        tenantScopeRequired: true,
+        redactionRequired: true,
+        metadata: { defaultRuntime: true, productionReady: false, endpointValueExposed: false, authValueExposed: false }
+      },
+      {
+        id: "observability_exporter_mock",
+        exporterKind: "mock",
+        status: "not_configured",
+        exportLogsEnabled: false,
+        exportMetricsEnabled: false,
+        exportTracesEnabled: false,
+        exportAuditEnabled: false,
+        externalCallsEnabled: false,
+        endpointConfigured: false,
+        authConfigured: false,
+        tenantScopeRequired: true,
+        redactionRequired: true,
+        metadata: { testsOnly: true, productionReady: false, endpointValueExposed: false, authValueExposed: false }
+      },
+      ...observabilityFutureBackends
+    ]),
+    futureBackends: sanitizeDashboardArray(observabilityFutureBackends),
+    exportSafetyChecks: observabilityExportSafetyChecks,
+    exportReadinessSummary: sanitizeDashboardObject({
+      exporterEnabled: false,
+      externalCallsEnabled: false,
+      configuredExporterCount: 0,
+      futureExporterCount: observabilityFutureBackends.length,
+      safetyCheckCount: observabilityExportSafetyChecks.length,
+      failedSafetyCheckCount: 0,
+      rawPayloadExportAllowed: false,
+      secretExportAllowed: false,
+      metadata: {
+        status: "v1_implemented_skeleton",
+        productionObservabilityExportImplemented: false,
+        noExternalCalls: true,
+        noRawPayloadExport: true,
+        noSecretsOrEnvValues: true
+      }
+    }),
+    exportNoSecretStatus: sanitizeDashboardObject({
+      exporterEnabled: false,
+      externalCallsEnabled: false,
+      rawPayloadExportAllowed: false,
+      secretExportAllowed: false,
+      envValuesExposed: false,
+      endpointValuesExposed: false,
+      authValuesExposed: false,
+      noSecretsExposed: true
+    }),
     auditScopeSummary: sanitizeDashboardObject({
       status: "v1_implemented_partial",
       defaultDetailLevel: "summary",
@@ -3497,6 +3710,7 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     dashboardScopeFilter,
     readiness,
     database,
+    collaborationStores,
     secretBackend,
     secretBackendDecision,
     vaultSecretBackend,
@@ -3551,6 +3765,7 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     dashboardScopeFilter: withScopeMetadata(dashboardScopeFilter, scopeMetadataFor("tenant_scope_enforcement")),
     readiness: withScopeMetadata(readiness, scopeMetadataFor("production_readiness")),
     database: withScopeMetadata(database, scopeMetadataFor("database")),
+    collaborationStores: withScopeMetadata(collaborationStores, scopeMetadataFor("collaboration_stores")),
     secretBackend: withScopeMetadata(secretBackend, scopeMetadataFor("secret_backend")),
     secretBackendDecision: withScopeMetadata(secretBackendDecision, scopeMetadataFor("secret_backend_decision")),
     vaultSecretBackend: withScopeMetadata(vaultSecretBackend, scopeMetadataFor("vault_secret_backend")),
@@ -3630,6 +3845,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         dashboardScopeFilterResponse,
         readinessResponse,
         databaseResponse,
+        collaborationStoresResponse,
         secretBackendResponse,
         secretBackendDecisionResponse,
         vaultSecretBackendResponse,
@@ -3670,6 +3886,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         dashboardScopeFilter: objectValue((dashboardScopeFilterResponse as Record<string, unknown>).dashboardScopeFilter) as unknown as DashboardScopeFilterReadModel,
         readiness: objectValue((readinessResponse as Record<string, unknown>).readiness) as unknown as DeploymentReadinessReadModel,
         database: objectValue((databaseResponse as Record<string, unknown>).database) as unknown as DatabaseOperationsReadModel,
+        collaborationStores: objectValue((collaborationStoresResponse as Record<string, unknown>).collaborationStores) as unknown as DurableCollaborationStoresReadModel,
         secretBackend: objectValue((secretBackendResponse as Record<string, unknown>).secretBackend) as unknown as SecretBackendMigrationReadModel,
         secretBackendDecision: objectValue((secretBackendDecisionResponse as Record<string, unknown>).secretBackendDecision) as unknown as SecretBackendDecisionReadModel,
         vaultSecretBackend: objectValue((vaultSecretBackendResponse as Record<string, unknown>).vaultSecretBackend) as unknown as VaultSecretBackendReadModel,

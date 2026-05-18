@@ -4,6 +4,7 @@ import {
   defaultAuditRetentionPolicies,
   defaultMetricDefinitions
 } from "./catalog.ts";
+import { createExternalObservabilityExportReadinessService } from "./exporter.ts";
 import { containsUnsafeAuditMaterial, sanitizeAuditMetadata, redactAuditString } from "./sanitizer.ts";
 import type {
   AuditCategory,
@@ -744,6 +745,7 @@ export class ObservabilityService {
     const recent = this.listAuditEvents({ limit: 10 }).events;
     const spans = this.listTraceSpans({ limit: 10 });
     const sources = this.listAuditSources();
+    const externalExport = createExternalObservabilityExportReadinessService();
     const readinessBlockers = [
       ...sourceItems(this.sourceProvider(), {
         ...sourceDefinitions.find((source) => source.id === "source_deployment_readiness")!,
@@ -771,6 +773,11 @@ export class ObservabilityService {
       }),
       sourceCoverage: sources,
       productionReadinessBlockers: readinessBlockers,
+      exporterConfigs: externalExport.getExporterConfigs(),
+      futureBackends: externalExport.listFutureBackends(),
+      exportSafetyChecks: externalExport.getSafetyChecks(),
+      exportReadinessSummary: externalExport.getSummary(),
+      exportNoSecretStatus: externalExport.getNoSecretStatus(),
       noSecretStatus: {
         noSecretsExposed: true,
         rawPayloadsStored: false,

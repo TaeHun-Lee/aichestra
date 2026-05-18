@@ -8,3 +8,4 @@ export * from "./dto.ts";
 export * from "./resource-scope.ts";
 export * from "./golden-cases.ts";
 export * from "./golden-harness.ts";
+export * from "./shadow-evaluator.ts";

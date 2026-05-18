@@ -67,7 +67,10 @@
 63. Registry Signed Package / Artifact Trust v1 - implemented
 64. Eval Suite Execution Harness v1 - implemented
 65. Audit Query Scope Enforcement v1 - implemented partial
-66. Phase 5 enterprise planning
+66. Vault Live Integration Enablement v1 - implemented
+67. Policy Runtime Shadow Evaluator Skeleton v1 - implemented
+68. Durable Collaboration Stores v1 - implemented
+69. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -739,7 +742,7 @@ Goals:
 - Define static-vs-candidate comparison rules, mismatch severity taxonomy, audit/reporting metadata, dashboard/readiness behavior, and rollout/rollback stages.
 - Preserve runtime safety: no candidate runtime execution, no OPA/Rego or Cedar runtime, no signed bundle verification runtime, no dynamic policy execution, no remote bundle loading, no external policy service calls, no production Auth/RBAC, no credential issuance, and no secret/env exposure.
 
-Recommended next step: Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1 is implemented. Continue with Policy Runtime Shadow Evaluator Implementation Planning v1, or Signed JSON/YAML Bundle Schema v1.
 
 ## 46. Production Auth Provider Skeleton v1
 
@@ -753,7 +756,7 @@ Goals:
 - Add safe RequestContext/AuthContext/PolicySubject metadata for provider kind/status without trusting real tokens.
 - Preserve runtime safety: no real OIDC/SAML/SCIM/SSO/login/logout/session handling, no JWT or token validation, no cookie parsing as auth, no API-key/session/JWT/service-account credential issuance, no SCIM sync, no external IdP calls, no credential-cache reads, no env value exposure, and no production-auth enabled claim.
 
-Recommended next step: Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1 is implemented. Continue with Policy Runtime Shadow Evaluator Implementation Planning v1, or Signed JSON/YAML Bundle Schema v1.
 
 ## 47. Policy Bundle Runtime PoC Planning v0
 
@@ -768,7 +771,7 @@ Goals:
 - Define shadow evaluation, mismatch severity, golden decision cases, rollout/rollback, safety constraints, and success/failure criteria.
 - Keep runtime safe: no OPA/Rego, Cedar, signed JSON/YAML evaluator, custom policy service, shadow evaluator, dynamic policy execution, remote policy loading, hot reload, external calls, production Auth/RBAC, tenant enforcement, secrets, or env values.
 
-Recommended next step: Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1 is implemented. Continue with Policy Runtime Shadow Evaluator Implementation Planning v1, or Signed JSON/YAML Bundle Schema v1.
 
 ## 48. Policy Runtime PoC Golden Test Harness v1
 
@@ -782,7 +785,7 @@ Goals:
 - Preserve deny-by-default behavior and record deterministic pass/fail counts for future runtime comparisons.
 - Keep runtime safe: no OPA/Rego, Cedar, signed JSON/YAML evaluator, signed bundle verification, custom policy service, shadow evaluator, dynamic policy execution, remote bundle loading, hot reload, external calls, production Auth/RBAC, tenant enforcement, secrets, or env values.
 
-Recommended next step: Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1 is implemented. Continue with Policy Runtime Shadow Evaluator Implementation Planning v1, or Signed JSON/YAML Bundle Schema v1.
 
 ## OIDC provider integration status
 
@@ -1036,7 +1039,7 @@ Goals:
 - Expose read-only `/dashboard/scope-filter`, dashboard panel "Dashboard Scope Filtering", and filter summary metadata.
 - Preserve runtime safety: no production Auth/RBAC, no real tenant provisioning, no row-level security, no production tenant isolation, no real OIDC/SAML/SCIM/session/JWT/API key, no external identity provider calls, no remote Git operations, no real LLM/MCP calls, no secret/env exposure.
 
-Recommended next step: Readiness Endpoint Scope Filtering v1 (apply the same filter context to `/readiness/*` endpoints), Audit Query Scope Enforcement v2, or External Observability Export v1 planning.
+Recommended next step: Readiness Endpoint Scope Filtering v1 (apply the same filter context to `/readiness/*` endpoints), Audit Query Scope Enforcement v2, or External Observability Export Integration-Test Profile v1.
 
 ## 61e. Audit Query Scope Enforcement v1
 
@@ -1051,7 +1054,7 @@ Goals:
 - Attach scope decision summaries to audit/observability API and dashboard read models.
 - Preserve runtime safety: no production Auth/RBAC, tenant provisioning, row-level security, production audit storage backend, external SIEM/export, external providers or IdPs, session/JWT/API-key issuance, raw payload access, or secret/env exposure.
 
-Recommended next step: External Observability Export v1, Tenant Scope Enforcement v2, or Audit Query Scope Enforcement v2 with durable query filters after production auth and tenant grants exist.
+Recommended next step: External Observability Export Integration-Test Profile v1, Tenant Scope Enforcement v2, or Audit Query Scope Enforcement v2 with durable query filters after production auth and tenant grants exist.
 
 ## 62. Registry Tenant Scope Enforcement v1
 
@@ -1098,7 +1101,66 @@ Goals:
 
 Recommended next step: Canary Execution Harness v1, or Eval Suite Live Integration-Test Profile v1.
 
-## 65. Phase 5 Enterprise Planning
+## 65. External Observability Export v1
+
+Implemented with `docs/features/external-observability-export/v1-plan.md`, `docs/features/external-observability-export/v1.md`, `packages/observability/src/exporter.ts`, `/observability/export/*`, `/dashboard/observability` export metadata, `/health.observabilityExport`, and deterministic tests.
+
+Goals:
+
+- Define exporter provider options for disabled, mock, and future observability backends.
+- Define a safe export envelope schema for audit, metric, trace, readiness, and future policy-shadow metadata.
+- Add safety checks for disabled defaults, no raw payload, no secret fields, no env values, redaction, tenant scope, retention class, endpoint hiding, and auth hiding.
+- Implement `DisabledObservabilityExporter` and test-only `MockObservabilityExporter`; future exporters stay not configured.
+- Expose read-only/check-only API and dashboard metadata.
+- Preserve runtime safety: no external exporter, no OpenTelemetry runtime, no Datadog/Grafana Cloud/CloudWatch/OpenSearch/Splunk/SIEM/S3/GCS/Azure Monitor/Honeycomb/Prometheus Pushgateway calls, no raw payload export, no secret/env exposure, and no endpoint/auth value exposure.
+
+Recommended next step: External Observability Export Integration-Test Profile v1, or Alerting v1.
+
+## 66. Vault Live Integration Enablement v1
+
+Implemented with `docs/foundations/vault-secret-backend/live-integration-enablement-v1-plan.md`, `docs/foundations/vault-secret-backend/live-integration-enablement-v1.md`, `packages/deployment-readiness` live readiness/check/runbook/summary models, read-only `/readiness/secrets/vault/live-*` endpoints, dashboard Vault Integration panel updates, health metadata, and deterministic tests.
+
+Goals:
+
+- Keep Vault disabled by default and keep default runtime/tests from calling Vault.
+- Add a clearer manual live validation checklist for one test-only KV v2 path.
+- Harden required gates, path allowlist checks, production-looking path detection, test key marker checks, and no-write/no-delete/no-rotate/no-broad-list policy.
+- Expose only booleans, counts, status, gate names, and sanitized metadata.
+- Keep production Vault rollout, secret writes/deletes/rotation/migration, broad listing, AppRole/Kubernetes auth production flow, BYOK, credential issuance, and external provider calls out of scope.
+
+Recommended next step: Vault Production Rollout Planning v1, or Env Fallback Production Block v1.
+
+## 67. Policy Runtime Shadow Evaluator Skeleton v1
+
+Implemented with `docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluator-skeleton-v1-plan.md`, `docs/roadmaps/policy-bundle-runtime-poc/shadow-evaluator-skeleton-v1.md`, disabled/mock evaluator models in `packages/policy/src/shadow-evaluator.ts`, read-only `/readiness/policy-shadow/evaluator/*` API endpoints, dashboard metadata, golden fixture mock reports, and deterministic tests.
+
+Goals:
+
+- Define the `PolicyShadowEvaluator` interface without replacing `StaticPolicyEngine`.
+- Keep `DisabledPolicyShadowEvaluator` as the default and expose disabled status/readiness metadata.
+- Provide deterministic `MockPolicyShadowEvaluator` behavior for fixture and unit tests only.
+- Compare static decisions to a future candidate result shape across effect, reason, rule id, obligations, redaction, and audit metadata.
+- Record mismatch metadata with `record_only` or `block_rollout_future`; never enforce shadow results.
+- Keep runtime safe: no OPA/Rego, Cedar, signed bundle verification runtime, candidate runtime execution, dynamic policy execution, remote loading, external policy service calls, production Auth/RBAC, sessions, credentials, secrets, or env values.
+
+Recommended next step: Policy Runtime Shadow Evaluator Implementation Planning v1, or Signed JSON/YAML Bundle Schema v1.
+
+## 68. Durable Collaboration Stores v1
+
+Implemented with `docs/features/durable-collaboration-stores/v1-plan.md`, `docs/features/durable-collaboration-stores/v1.md`, `docs/reference/durable-collaboration-store-inventory.md`, `packages/db/src/durable-collaboration.ts`, optional Postgres repository wiring, migration table skeletons, `/readiness/collaboration-stores/*`, `/dashboard/collaboration-stores`, `/health.durableCollaborationStores`, and deterministic tests.
+
+Goals:
+
+- Inventory durable collaboration records across branch orchestration, agent sessions, workspace lifecycle, worktree allocation, edit intent, merge queue policy, conflict assistant, PR ownership, and cleanup/recovery.
+- Add provider-neutral repository contracts and in-memory default implementations.
+- Add optional Postgres repository/schema support behind existing storage gates.
+- Expose safe readiness, API, health, and dashboard metadata.
+- Keep default runtime in-memory and mock-first.
+- Preserve no remote Git, no workspace mutation, no provider/LLM/vendor calls, no DB URL exposure, no raw payload storage, and no secret/env exposure.
+
+Recommended next step: Clean Approved Worktree Verification, or Actual Staging Deployment Execution when the approved scope is clean and explicitly authorized.
+
+## 69. Phase 5 Enterprise Planning
 
 Goals:
 
