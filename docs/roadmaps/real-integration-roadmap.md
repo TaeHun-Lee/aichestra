@@ -56,7 +56,18 @@
 52. Cross-session File Lease / Edit Intent Graph v1 - implemented
 53. Multi-user / Multi-session Branch Orchestrator v2 - implemented
 54. Merge Queue Policy v2 - implemented
-55. Phase 5 enterprise planning
+55. Conflict Resolution Assistant v1 - implemented
+56. Merge Queue Live Integration-Test Profile v1 - implemented
+57. Agent Worktree Allocation v1 - implemented
+58. PR Ownership / Handoff Model v1 - implemented
+59. Branch Cleanup / Orphan Lease Recovery v1 - implemented
+60. Real Merge Execution Policy v1 - implemented
+61. Skill / Harness Compatibility Matrix v1 - implemented
+62. Registry Tenant Scope Enforcement v1 - implemented partial
+63. Registry Signed Package / Artifact Trust v1 - implemented
+64. Eval Suite Execution Harness v1 - implemented
+65. Audit Query Scope Enforcement v1 - implemented partial
+66. Phase 5 enterprise planning
 
 ## 1. Persistent DB Implementation v1
 
@@ -611,7 +622,7 @@ Goals:
 - Preserve deny-by-default Policy-as-code behavior and existing SecretRef/Git/LLM/MCP/Runner safety gates.
 - Keep runtime safe: no OIDC, SAML, SCIM, SSO, login/logout/session handling, JWTs, API keys, service-account credentials, external IdP calls, credential-cache reads, secret/env exposure, or production-auth ready claim.
 
-Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Tenant Scope Enforcement v1, Dashboard Scope Filtering v1, Audit Query Scope Enforcement v1, and Production Auth Provider Skeleton v1 are implemented as safe partial/readiness surfaces. Continue with Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or production-auth follow-up hardening.
 
 ## 38. API AuthContext Middleware Skeleton v1
 
@@ -626,7 +637,7 @@ Goals:
 - Preserve deny-by-default Policy-as-code behavior and existing SecretRef/Git/LLM/MCP/Runner/Dashboard/Observability safety gates.
 - Keep runtime safe: no OIDC, SAML, SCIM, SSO, login/logout/session handling, JWTs, API keys, service-account credentials, external IdP calls, Authorization-header auth, cookie auth, credential-cache reads, secret/env exposure, or production-auth ready claim.
 
-Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Tenant Scope Enforcement v1, Dashboard Scope Filtering v1, Audit Query Scope Enforcement v1, and Production Auth Provider Skeleton v1 are implemented as safe partial/readiness surfaces. Continue with Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or production-auth follow-up hardening.
 
 ## 39. Service Account Actor Boundary v1
 
@@ -641,7 +652,7 @@ Goals:
 - Preserve deny-by-default policy behavior, no-secret/no-env behavior, and mock-first runtime defaults.
 - Keep runtime safe: no service-account credentials, JWTs, API keys, sessions, credential rotation, external IdP/provider calls, credential-cache reads, or production-auth ready claim.
 
-Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Tenant Scope Enforcement v1, Dashboard Scope Filtering v1, Audit Query Scope Enforcement v1, and Production Auth Provider Skeleton v1 are implemented as safe partial/readiness surfaces. Continue with Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or production-auth follow-up hardening.
 
 ## 40. Registry/Governance RequestContext Migration v1
 
@@ -656,7 +667,7 @@ Goals:
 - Keep auto-improvement draft/proposal/governance-only; apply remains blocked and active registry entries are not mutated by draft changes.
 - Keep runtime safe: no production auth, real service-account credentials, real eval/canary execution, artifact registry integration, external provider calls, secret/env exposure, or production-governance ready claim.
 
-Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Tenant Scope Enforcement v1, Dashboard Scope Filtering v1, Audit Query Scope Enforcement v1, and Production Auth Provider Skeleton v1 are implemented as safe partial/readiness surfaces. Continue with Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or production-auth follow-up hardening.
 
 ## 41. Tenant/Repo/Provider Scope Model v1
 
@@ -671,7 +682,7 @@ Goals:
 - Preserve deny-by-default policy behavior and all provider/secret/runner/registry/governance gates.
 - Keep runtime safe: no production tenant provisioning, tenant isolation enforcement, row-level security, production dashboard filtering, real Auth/RBAC, provider calls, credential issuance, secret/env exposure, or production tenancy claim.
 
-Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Tenant Scope Enforcement v1, Dashboard Scope Filtering v1, Audit Query Scope Enforcement v1, and Production Auth Provider Skeleton v1 are implemented as safe partial/readiness surfaces. Continue with Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or production-auth follow-up hardening.
 
 ## 42. Dashboard/Readiness Tenant Scope Planning v1
 
@@ -685,7 +696,7 @@ Goals:
 - Expose read-only planning metadata for future implementation.
 - Preserve mock-first runtime, no-secret/no-env behavior, and production tenant enforcement false status.
 
-Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Tenant Scope Enforcement v1, Dashboard Scope Filtering v1, Audit Query Scope Enforcement v1, and Production Auth Provider Skeleton v1 are implemented as safe partial/readiness surfaces. Continue with Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or production-auth follow-up hardening.
 
 ## 43. Dashboard/Readiness Tenant Scope Implementation v1
 
@@ -699,7 +710,7 @@ Goals:
 - Render missing-scope warnings, role visibility hints, redaction labels, tenant filtering false, production enforcement false, and no-secret/no-env status.
 - Preserve current behavior without hiding panels, filtering data, enforcing tenant isolation, implementing production Auth/RBAC, calling providers, or exposing secrets/env values.
 
-Recommended next step: Tenant Scope Enforcement v1 is implemented as partial representative metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Tenant Scope Enforcement v1, Dashboard Scope Filtering v1, Audit Query Scope Enforcement v1, and Production Auth Provider Skeleton v1 are implemented as safe partial/readiness surfaces. Continue with Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or production-auth follow-up hardening.
 
 ## 44. Tenant Scope Enforcement v1
 
@@ -714,7 +725,7 @@ Goals:
 - Keep `StaticPolicyEngine` authoritative; policy deny remains authoritative and scope allow cannot override policy deny.
 - Keep runtime safe: no production tenant provisioning, production Auth/RBAC, row-level security, DB tenant partitioning, external IdP/provider calls, remote Git, real LLM/MCP calls, credential-cache reads, or secret/env exposure.
 
-Recommended next step: Policy Runtime Shadow Evaluation Planning v1 is implemented as planning/readiness metadata. Continue with OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Dashboard Scope Filtering v1 and Audit Query Scope Enforcement v1 are implemented as representative metadata/redaction surfaces. Continue with Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Production Auth/RBAC hardening. Production tenant isolation remains false.
 
 ## 45. Policy Runtime Shadow Evaluation Planning v1
 
@@ -728,7 +739,7 @@ Goals:
 - Define static-vs-candidate comparison rules, mismatch severity taxonomy, audit/reporting metadata, dashboard/readiness behavior, and rollout/rollback stages.
 - Preserve runtime safety: no candidate runtime execution, no OPA/Rego or Cedar runtime, no signed bundle verification runtime, no dynamic policy execution, no remote bundle loading, no external policy service calls, no production Auth/RBAC, no credential issuance, and no secret/env exposure.
 
-Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1, or OIDC Provider Skeleton Hardening v1.
+Recommended next step: Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## 46. Production Auth Provider Skeleton v1
 
@@ -742,7 +753,7 @@ Goals:
 - Add safe RequestContext/AuthContext/PolicySubject metadata for provider kind/status without trusting real tokens.
 - Preserve runtime safety: no real OIDC/SAML/SCIM/SSO/login/logout/session handling, no JWT or token validation, no cookie parsing as auth, no API-key/session/JWT/service-account credential issuance, no SCIM sync, no external IdP calls, no credential-cache reads, no env value exposure, and no production-auth enabled claim.
 
-Recommended next step: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next step: Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## 47. Policy Bundle Runtime PoC Planning v0
 
@@ -757,7 +768,7 @@ Goals:
 - Define shadow evaluation, mismatch severity, golden decision cases, rollout/rollback, safety constraints, and success/failure criteria.
 - Keep runtime safe: no OPA/Rego, Cedar, signed JSON/YAML evaluator, custom policy service, shadow evaluator, dynamic policy execution, remote policy loading, hot reload, external calls, production Auth/RBAC, tenant enforcement, secrets, or env values.
 
-Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1, or Tenant Scope Enforcement v1.
+Recommended next step: Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## 48. Policy Runtime PoC Golden Test Harness v1
 
@@ -771,7 +782,7 @@ Goals:
 - Preserve deny-by-default behavior and record deterministic pass/fail counts for future runtime comparisons.
 - Keep runtime safe: no OPA/Rego, Cedar, signed JSON/YAML evaluator, signed bundle verification, custom policy service, shadow evaluator, dynamic policy execution, remote bundle loading, hot reload, external calls, production Auth/RBAC, tenant enforcement, secrets, or env values.
 
-Recommended next step: Policy Runtime Shadow Evaluator Skeleton v1, or Tenant Scope Enforcement v1.
+Recommended next step: Readiness Endpoint Scope Filtering v1, Audit Query Scope Enforcement v2, or Policy Runtime Shadow Evaluator Skeleton v1.
 
 ## OIDC provider integration status
 
@@ -806,7 +817,7 @@ Goals:
 - Surface active workspace leases, isolation state, branch lease linkage, lifecycle status, cleanup decisions, and explicit no-destructive-cleanup status in API/dashboard read models.
 - Preserve runtime safety: no remote Git, no vendor CLI execution, no LLM provider call, no credential-cache read, no secret/env exposure, no production deployment, and no weakening of Git, Runner, Local Agent, Auth/RBAC, Policy, SecretRef, Tenant Scope, Dashboard, Observability, or Safety gates.
 
-Recommended next step: Conflict Resolution Assistant v1, Merge Queue Live Integration-Test Profile v1, or Agent Worktree Allocation v1.
+Recommended next step: Agent Worktree Allocation v1 has since been completed. Continue with Agent Worktree Live Integration-Test Profile v1, Conflict Resolution Assistant LLM Proposal Profile v1, or Merge Queue Live Dry-run Execution v1.
 
 ## 51. Multi-session Agent Run Coordination v1
 
@@ -822,7 +833,7 @@ Goals:
 - Surface session coordination, overlap warnings, branch/workspace assignment, merge readiness counts, and no-destructive-action status in API/dashboard read models.
 - Preserve runtime safety: no agent execution, no remote Git, no branch/worktree creation, no branch switching, no vendor CLI execution, no LLM provider call, no credential-cache read, no secret/env exposure, and no weakening of Auth/RBAC, Policy, Git, LLM, Runner, Local Agent, Registry, Governance, Dashboard, Observability, Tenant Scope, or Secrets/Sandbox gates.
 
-Recommended next step: Conflict Resolution Assistant v1, Merge Queue Live Integration-Test Profile v1, or Agent Worktree Allocation v1.
+Recommended next step: Agent Worktree Allocation v1 has since been completed. Continue with Agent Worktree Live Integration-Test Profile v1, Conflict Resolution Assistant LLM Proposal Profile v1, or Merge Queue Live Dry-run Execution v1.
 
 ## 52. Cross-session File Lease / Edit Intent Graph v1
 
@@ -838,7 +849,7 @@ Goals:
 - Surface active edit intents, file leases, graph counts, overlap assessments, recommendations, and no-file-lock/no-source-mutation status in API/dashboard/readiness metadata.
 - Preserve runtime safety: no OS-level file locks, no source file mutation, no remote Git, no branch/worktree creation, no branch switching, no vendor CLI execution, no LLM provider call, no credential-cache read, no secret/env exposure, and no weakening of Auth/RBAC, Policy, Git, LLM, Runner, Local Agent, Registry, Governance, Dashboard, Observability, Tenant Scope, or Secrets/Sandbox gates.
 
-Recommended next step: Conflict Resolution Assistant v1, or Merge Queue Live Integration-Test Profile v1.
+Recommended next step: Agent Worktree Allocation v1 has since been completed. Continue with Agent Worktree Live Integration-Test Profile v1, Conflict Resolution Assistant LLM Proposal Profile v1, or Merge Queue Live Dry-run Execution v1.
 
 ## 53. Multi-user / Multi-session Branch Orchestrator v2
 
@@ -856,7 +867,7 @@ Goals:
 - Surface branch requests, decisions, ownership, drift, naming policy, collision blockers, same-workspace blockers, audit events, and no-destructive-Git status in API/dashboard read models.
 - Preserve runtime safety: no real Git branch creation, no checkout/switch, no fetch/push/merge/rebase/force-push/delete, no worktree mutation, no agent execution, no provider calls, no credential-cache reads, no secret/env exposure, and no weakening of existing Git, Runner, Auth/RBAC, Policy, SecretRef, Tenant Scope, Dashboard, Observability, Registry, Governance, Staging, CI/CD, or Secrets/Sandbox gates.
 
-Recommended next step: Conflict Resolution Assistant v1, or Merge Queue Live Integration-Test Profile v1.
+Recommended next step: Agent Worktree Allocation v1 has since been completed. Continue with Agent Worktree Live Integration-Test Profile v1, Conflict Resolution Assistant LLM Proposal Profile v1, or Merge Queue Live Dry-run Execution v1.
 
 ## 54. Merge Queue Policy v2
 
@@ -872,16 +883,229 @@ Goals:
 - Expose policy status, decisions, holds, priority order, blocking reasons, warnings, and explicit merge-execution-disabled state in API/dashboard read models.
 - Preserve runtime safety: no merge execution, no auto-merge, no remote Git, no fetch/push/rebase/force-push/delete, no remote PR updates, no provider calls, no LLM calls, no vendor CLI execution, no workspace mutation, no secret/env exposure, and no weakening of Git, Auth/RBAC, Policy, Tenant Scope, Branch Lease, Workspace Lifecycle, Multi-session Coordination, Dashboard, Observability, or Safety gates.
 
-Recommended next step: Conflict Resolution Assistant v1, or Merge Queue Live Integration-Test Profile v1.
+Recommended next step: Conflict Resolution Assistant LLM Proposal Profile v1, or Merge Queue Live Dry-run Execution v1. Merge Queue Live Integration-Test Profile v1 is implemented at item 56.
 
-## 55. Phase 5 Enterprise Planning
+## 55. Conflict Resolution Assistant v1
+
+Implemented with `docs/features/conflict-resolution-assistant/v1-plan.md`, `docs/features/conflict-resolution-assistant/v1.md`, `packages/core/src/conflicts/conflict-resolution-assistant.ts`, safe `/git/conflicts/assistant/*` API endpoints, `/dashboard/conflicts` read models, `/health` metadata, and deterministic tests.
+
+Goals:
+
+- Define `ConflictResolutionRequest`, `ConflictSummary`, `ConflictResolutionPlan`, and `ConflictResolutionRecommendation` models.
+- Consume dry-run merge simulation, conflict risk, merge queue, branch lease, workspace lease, and edit overlap metadata where available.
+- Classify same-file edit, same-directory refactor, future rename/delete, generated-file, dependency-lockfile, and unknown conflict kinds.
+- Generate review-only resolution plans with suggested validation, suggested tests, risks, and recommendations.
+- Link merge queue holds to conflict plans as metadata without releasing holds.
+- Preserve runtime safety: no source mutation, no patch apply, no real merge/rebase/fetch/push/checkout/switch/force-push/delete, no remote provider call, no real LLM call by default, no vendor CLI, no credential cache read, no secret/env exposure, and `applyAllowed: false`.
+
+Recommended next step: Conflict Resolution Assistant LLM Proposal Profile v1, or Merge Queue Live Dry-run Execution v1.
+
+## 56. Merge Queue Live Integration-Test Profile v1
+
+Implemented with `docs/features/merge-queue-live-integration-test-profile/v1-plan.md`, `docs/features/merge-queue-live-integration-test-profile/v1.md`, `MergeQueueIntegrationTestProfile`/`MergeQueueIntegrationTestCase`/`MergeQueueIntegrationSafetyCheck` models in `@aichestra/deployment-readiness`, `/readiness/merge-queue-integration/*` API endpoints, `/dashboard/merge-queue-integration` read model and panel, `mergeQueueIntegrationTests` `/health` metadata, the skipped-by-default `tests/merge-queue-live-integration-test-profile-v1.test.ts` skeleton, and deterministic tests.
+
+Goals:
+
+- Define a controlled, skipped-by-default profile for validating Merge Queue Policy v2 readiness against non-production Git fixtures.
+- Require explicit env gates: merge queue integration tests enabled, remote Git enabled, GitHub provider, allowed repos, allowed branch prefix `aichestra/test/`, remote merge/rebase/force-push/branch-delete disabled, dry-run-only enabled, test repo allowlisted, test base branch configured, and test source branches under the required prefix.
+- Mark `AICHESTRA_ALLOW_REMOTE_MERGE=true`, `AICHESTRA_ALLOW_REMOTE_REBASE=true`, `AICHESTRA_ALLOW_REMOTE_FORCE_PUSH=true`, `AICHESTRA_ALLOW_REMOTE_BRANCH_DELETE=true`, `AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY=false`, branch prefix mismatch, repo allowlist mismatch, and source branches outside the prefix as unsafe gates.
+- Limit live operations to merge queue policy evaluation against test metadata, the existing local/mock dry-run merge simulation, branch lease metadata check, conflict risk metadata check, policy decision metadata check, and cleanup metadata check.
+- Keep cleanup manual mark-only with branch deletion forbidden, including for cleanup.
+- Expose read-only readiness, API, dashboard, and health surfaces and never return env values, repo URLs, or branch names from env.
+- Preserve runtime safety: no real merge execution, no auto-merge, no remote merge/rebase/force-push/branch-delete API call, no fetch/push/checkout/switch in default tests, no vendor CLI, no LLM call, no workspace mutation, no secret/env exposure, and no weakening of Git, Merge Queue, Branch Lease, Workspace Lifecycle, Auth/RBAC, Policy, Tenant Scope, Dashboard, Observability, or Safety gates.
+
+Recommended next step: Agent Worktree Live Integration-Test Profile v1, Conflict Resolution Assistant LLM Proposal Profile v1, or Merge Queue Live Dry-run Execution v1.
+
+## 57. Agent Worktree Allocation v1
+
+Implemented with `docs/features/agent-worktree-allocation/v1-plan.md`, `docs/features/agent-worktree-allocation/v1.md`, `packages/runner/src/worktree-allocation.ts`, safe `/agents/worktrees/*` API endpoints, `/readiness/agent-worktrees/*` readiness metadata, `/dashboard/agents` panel updates, `/health` metadata, and deterministic tests.
+
+Goals:
+
+- Define `AgentWorktreeAllocationRequest`, `AgentWorktreeAllocationResult`, and `AgentWorktreeSafetyCheck` models.
+- Validate workspace root allowlists, requested paths, branch lease metadata, branch name safety, and shared worktree path collisions.
+- Support dry-run allocation without filesystem mutation.
+- Support fixture-only allocation metadata and optional Agent Workspace Lifecycle v2 lease linkage.
+- Keep `git_worktree_future` blocked as future work.
+- Expose allocation requests, results, safety checks, enabled false status, fixture-only status, allowlist count, branch/workspace lease linkage, no-real-Git-worktree status, and no-destructive-cleanup status in API/dashboard/readiness/health surfaces.
+- Preserve runtime safety: no real `git worktree add/remove`, checkout/switch/reset/clean/fetch/push/merge/rebase, force-push, branch deletion, provider calls, LLM calls, vendor CLI execution, destructive cleanup, source mutation, credential-cache reads, secret/env exposure, full local path exposure, or weakening of Git, Workspace Lifecycle, Branch Orchestrator, Multi-session Coordination, Runner, Local Agent, Auth/RBAC, Policy, Tenant Scope, Dashboard, Observability, or Safety gates.
+
+Recommended next step: Agent Worktree Live Integration-Test Profile v1, or Conflict Resolution Assistant LLM Proposal Profile v1.
+
+## 58. PR Ownership / Handoff Model v1
+
+Implemented with `docs/features/pr-ownership-handoff/v1-plan.md`, `docs/features/pr-ownership-handoff/v1.md`, `packages/core/src/conflicts/pr-ownership-handoff.ts`, policy-as-code PR ownership/handoff actions, safe `/git/pr-ownership*` and `/git/pr-handoffs*` API endpoints, `/readiness/pr-ownership/summary`, `/dashboard/git` panel updates, `/health` metadata, and deterministic tests.
+
+Goals:
+
+- Define `PrOwnershipRecord`, `PrHandoffRequest`, `PrHandoffDecision`, and `PrOwnershipAuditEvent` models.
+- Link local ownership metadata to BranchLease, WorkspaceLease, MergeQueueEntry, PR read model, task/task run/agent run, and Conflict Resolution Assistant plan ids where available.
+- Support human-to-human, agent-to-human, service-to-human, team handoff, and future human-to-agent metadata while keeping human-to-agent acceptance blocked in v1.
+- Preserve RequestContext/AuthContext/PolicySubject attribution and audit/correlation metadata.
+- Expose merge queue owner readiness and conflict-plan owner/reviewer links without automatically holding/releasing queue entries.
+- Preserve runtime safety: no GitHub API call, no remote reviewer assignment, no remote PR update, no push/merge/close/delete, no auto-merge, no LLM/provider/vendor call, no workspace mutation, no credential cache read, and no secret/env exposure.
+
+Recommended next step: PR Ownership Live Integration-Test Profile v1, or Branch Cleanup Live Integration-Test Profile v1. Branch Cleanup / Orphan Lease Recovery v1 is now implemented; see item 59 below.
+
+## 59. Branch Cleanup / Orphan Lease Recovery v1
+
+Implemented with `docs/features/branch-cleanup-orphan-lease-recovery/v1-plan.md`, `docs/features/branch-cleanup-orphan-lease-recovery/v1.md`, `packages/git-adapter/src/branch-cleanup.ts`, `cleanup.*` / `branch.delete_future` / `worktree.remove_future` / `pr.close_future` policy actions, safe `/git/cleanup/*` API endpoints, `/dashboard/git-cleanup` read model and panel, `branchCleanup` `/health` metadata, and deterministic tests.
+
+Goals:
+
+- Define `OrphanLeaseRecord`, `CleanupRecommendation`, `CleanupDecision`, and `RecoveryAction` models with deterministic detection rules across Branch Lease, Workspace Lifecycle, Worktree Allocation, Branch Orchestrator, Multi-session Coordination, Merge Queue, and future PR Ownership Handoff snapshots.
+- Distinguish safe metadata-only cleanup (`release_metadata_lease`, `mark_cleanup_pending`, `mark_abandoned`, `require_manual_review`) from destructive cleanup (`delete_branch_future`, `remove_worktree_future`, `close_pr_future`, `archive_record_future`) that remains future-only.
+- Allow `cleanup.scan`, `cleanup.recommend`, `cleanup.decide`, and `cleanup.metadata_execute` under mock-first metadata-only context; deny `cleanup.destructive_execute_future`, `branch.delete_future`, `worktree.remove_future`, and `pr.close_future` by default.
+- Expose read-only `/git/cleanup/*` APIs, dashboard panel, and health metadata.
+- Preserve runtime safety: no real branch deletion, no real worktree removal, no real PR closure, no filesystem deletion, no remote Git, no LLM/vendor call, no secret/env exposure, no destructive cleanup execution by default.
+
+Recommended next step: Branch Cleanup Live Integration-Test Profile v1, PR Ownership Live Integration-Test Profile v1, or Real Merge Execution Approval Profile v1.
+
+## 60. Real Merge Execution Policy v1
+
+Implemented with `docs/features/real-merge-execution-policy/v1-plan.md`, `docs/features/real-merge-execution-policy/v1.md`, `packages/core/src/conflicts/real-merge-execution-policy.ts`, `merge_execution.*` policy actions, safe `/git/merge-execution/*` API endpoints, `/readiness/merge-execution/summary`, `/dashboard/conflicts` panel updates, `/health` metadata, and deterministic tests.
+
+Goals:
+
+- Define disabled `RealMergeExecutionPolicy`, `RealMergeExecutionRequest`, `RealMergeExecutionDecision`, `RealMergePrecondition`, `RealMergeForbiddenOperation`, and post-execution evidence template models.
+- Evaluate branch lease, workspace/worktree, merge queue, dry-run, conflict risk, edit overlap, conflict resolution plan, PR ownership, approval, validation, tenant scope, policy, observability, and rollback evidence as metadata-only preconditions.
+- Keep `mergeExecutionEnabled`, `autoMergeEnabled`, `remotePushEnabled`, `mergeExecutionPerformed`, `autoMergePerformed`, and `remotePushPerformed` false in v1.
+- Expose read-only API/dashboard/readiness/health surfaces and forbidden operation status.
+- Preserve runtime safety: no real merge, no auto-merge, no remote push/fetch/rebase/force-push/branch deletion, no remote PR update, no GitHub API call, no workspace mutation, no LLM/provider/vendor call, no credential-cache read, and no secret/env exposure.
+
+Recommended next step: Real Merge Execution Approval Profile v1, or Merge Queue Live Dry-run Execution v1.
+
+## 61. Skill / Harness Compatibility Matrix v1
+
+Implemented with `docs/features/registry-compatibility-matrix/v1-plan.md`, `docs/features/registry-compatibility-matrix/v1.md`, `packages/registry/src/compatibility.ts`, new `registry.compatibility.*` policy actions, safe `/registry/compatibility/*` API endpoints, `/readiness/registry/compatibility/summary`, `/dashboard/registry-compatibility` panel, `/health.registryCompatibility` metadata, and deterministic tests.
+
+Goals:
+
+- Define `RegistryCompatibilityContext`, `SkillCompatibilityProfile`, `HarnessCompatibilityProfile`, `InstructionCompatibilityProfile`, `RegistryCompatibilityRule`, `RegistryCompatibilityDecision`, and `RegistryCompatibilitySummary` models.
+- Evaluate compatibility across task kind, language, framework, provider/model capability, runner capability, MCP tool/risk, security policy, tenant/repo/provider scope, and existing registry resolver gates.
+- Produce deterministic advisory decisions (`compatible | compatible_with_warnings | incompatible | blocked_by_policy | blocked_by_registry_gate | future_unknown`) without bypassing registry resolver gates.
+- Allow `registry.compatibility.read` and `registry.compatibility.evaluate` under mock metadata-only context; deny `registry.compatibility.matrix.update_future` and `registry.compatibility.override_future` by default.
+- Expose read-only `/registry/compatibility/*`, `/readiness/registry/compatibility/summary`, `/dashboard/registry-compatibility`, and `/health.registryCompatibility` surfaces.
+- Preserve runtime safety: no registry mutation, no auto-apply, no eval/canary execution, no external provider/MCP/LLM/vendor CLI call, no remote Git operation, no secret/env exposure, and no weakening of lifecycle/approval/eval/checksum/semver/policy gates.
+
+Recommended next step: Eval Suite Live Integration-Test Profile v1, or Registry Scope Enforcement v2.
+
+## 61b. Skill / Harness Drift Detection v1
+
+Implemented with `docs/features/skill-harness-drift-detection/v1-plan.md`, `docs/features/skill-harness-drift-detection/v1.md`, `packages/registry/src/drift-detection.ts`, new `registry.drift.*` policy actions, safe `/registry/drift/*` API endpoints, `/readiness/registry/drift/summary`, `/dashboard/registry-drift` panel, `/health.registryDrift` metadata, and deterministic tests.
+
+Goals:
+
+- Define `RegistryDriftSignal`, `RegistryDriftBaseline`, `RegistryDriftAssessment`, `RegistryDriftRecommendation`, and `RegistryDriftSummary` models.
+- Compute deterministic mock drift scores (weighted signal kind × severity multiplier, clamped 0–100) and classify into `no_drift | watch | degraded | critical | insufficient_data` assessment statuses across `info | low | medium | high | critical` severities.
+- Link drift to Skill, Harness, Instruction, RegistryPackage, and Compatibility Profile targets, producing advisory recommendations (`monitor | create_improvement_candidate | require_eval | require_canary | review_instruction | review_harness | review_provider_compatibility | deprecate_future | rollback_review`) and governance follow-ups.
+- Optionally feed Auto-Improvement candidate proposal readiness as draft-only metadata; never apply or mutate registry entries.
+- Allow `registry.drift.read`, `registry.drift.assess`, and `registry.drift.recommend` under mock metadata-only context; deny `registry.drift.create_candidate_future` and `registry.drift.auto_apply_future` by default.
+- Expose read-only `/registry/drift/*`, `/readiness/registry/drift/summary`, `/dashboard/registry-drift`, and `/health.registryDrift` surfaces.
+- Preserve runtime safety: no real LLM call, no real eval suite execution, no real canary execution, no active registry mutation, no auto-apply, no external provider/MCP/LLM/vendor CLI call, no remote Git operation, no credential-cache read, and no secret/env exposure.
+
+Recommended next step: Auto-Improvement Proposal Pipeline v1 (draft-only candidate flow consuming Drift Detection assessments), or Drift Detection v2 (real telemetry ingestion behind explicit gates).
+
+## 61c. Canary Execution Harness + Apply Workflow v1
+
+Implemented with `docs/features/canary-execution-apply-workflow/v1-plan.md`, `docs/features/canary-execution-apply-workflow/v1.md`, `packages/registry/src/canary-apply.ts` (`CanaryExecutionService`, `ApplyWorkflowService`), new `registry.canary.*` / `registry.apply_workflow.create` / `registry.apply_gate.evaluate` / `registry.apply.metadata_record` / `registry.apply.execute_future` / `registry.apply.auto_apply_future` policy actions and default rules, safe `/registry/canary/*` and `/registry/apply-workflows/*` API endpoints, `/readiness/registry/canary/summary` and `/readiness/registry/apply-workflows/summary`, `/dashboard/registry-canary-apply` panel, `/health.registryCanaryApply` metadata, and deterministic tests.
+
+Goals:
+
+- Define `RegistryCanaryPlan`, `RegistryCanaryRun`, `RegistryCanaryResult`, `RegistryCanaryVerdict`, `RegistryApplyWorkflow`, `RegistryApplyGateDecision`, `RegistryRollbackPlan`, `RegistryCanaryApplySummary` models.
+- Execute deterministic mock canary runs only; produce verdicts and apply-gate impacts.
+- Compose apply workflows that require eval + canary + manual approval + rollback plan before reaching `ready_for_manual_apply_future`; record metadata-only apply decisions without mutating active registry entries.
+- Connect canary verdicts to apply gate readiness via `applyGateImpact ∈ {no_change | improves_readiness | blocks_apply | future_manual_review}`.
+- Allow `registry.canary.plan`, `registry.canary.run_mock`, `registry.apply_workflow.create`, `registry.apply_gate.evaluate`, and `registry.apply.metadata_record` in mock metadata-only context; deny `registry.canary.run_external_future`, `registry.apply.execute_future`, and `registry.apply.auto_apply_future` by default.
+- Expose read-only `/registry/canary/*`, `/registry/apply-workflows/*`, `/readiness/registry/canary/summary`, `/readiness/registry/apply-workflows/summary`, `/dashboard/registry-canary-apply`, and `/health.registryCanaryApply` surfaces.
+- Preserve runtime safety: no real LLM call, no real external canary, no real eval execution, no active registry mutation through auto-improvement, no auto-apply, no provider/MCP/LLM/vendor CLI call, no remote Git operation, no credential-cache read, and no secret/env exposure.
+
+Recommended next step: Eval/Canary Live Integration-Test Profile v1 (gated profile that lets operators dry-run real eval suites and real canary runs in non-production with explicit safety/scope checks, while keeping auto-apply denied), or Auto-improvement Apply Governance v2 (human-in-the-loop manual apply review pipeline that consumes Apply Workflow v1 metadata-only decisions and adds full apply governance without enabling auto-apply).
+
+## 61d. Dashboard Scope Filtering v1
+
+Implemented with `docs/features/dashboard-scope-filtering/v1-plan.md`, `docs/features/dashboard-scope-filtering/v1.md`, `packages/deployment-readiness/src/dashboard-scope-filtering.ts` (`DashboardScopeFilteringService`, `parseDashboardFilterHeaders`, `SAFE_DEMO_HEADER_NAMES`), shared `DashboardScopeFilterReadModel`, safe `/dashboard/scope-filter` endpoint, demo-only header parsing in `apps/api/src/main.ts`, representative `filterPanelBody` redaction on `security`/`vaultSecretBackend`/`observability`/`audit`/`githubApp`/`githubAppIntegration`/`llmIntegration`/`mcp`/`staging*` panels, Dashboard Scope Filtering HTML panel in `apps/web/src/render.ts`, demo data provider entry, and deterministic tests in `tests/dashboard-scope-filtering-v1.test.ts`.
+
+Goals:
+
+- Define `DashboardScopeFilterContext`, `DashboardPanelFilterDecision`, and `DashboardScopeFilterSummary` models.
+- Evaluate each `DashboardPanelScopeSummary` against a mock-only role/scope context and produce `visible | redacted | hidden | warning_only | not_applicable` decisions.
+- Apply representative redaction to selected sensitive panels via `filterPanelBody`; keep core overview/tasks visible.
+- Preserve default mock-admin fallback so existing demo flows render unchanged.
+- Parse safe-only demo headers (`x-aichestra-demo-role/tenant-id/team-id/project-id/resource-scope`); ignore Authorization, cookie, session, JWT, and API-key headers.
+- Expose read-only `/dashboard/scope-filter`, dashboard panel "Dashboard Scope Filtering", and filter summary metadata.
+- Preserve runtime safety: no production Auth/RBAC, no real tenant provisioning, no row-level security, no production tenant isolation, no real OIDC/SAML/SCIM/session/JWT/API key, no external identity provider calls, no remote Git operations, no real LLM/MCP calls, no secret/env exposure.
+
+Recommended next step: Readiness Endpoint Scope Filtering v1 (apply the same filter context to `/readiness/*` endpoints), Audit Query Scope Enforcement v2, or External Observability Export v1 planning.
+
+## 61e. Audit Query Scope Enforcement v1
+
+Implemented with `docs/features/audit-query-scope-enforcement/v1-plan.md`, `docs/features/audit-query-scope-enforcement/v1.md`, `packages/observability/src/audit-query-scope.ts`, `/observability/audit/query-scope/check`, `/readiness/audit-scope/summary`, `/readiness/audit-scope/redaction-plans`, audit-event scope summaries, `/dashboard/observability` metadata, `/health.auditQueryScope`, and deterministic tests.
+
+Goals:
+
+- Define `AuditQueryScopeRequest`, `AuditQueryScopeDecision`, and `AuditQueryRedactionPlan` models.
+- Enforce representative role behavior for viewer, developer, audit_reader, security_admin, platform_admin, and service-account contexts.
+- Keep summary access available where safe while redacting or denying detail when scope is missing or mismatched.
+- Keep `raw_payload_forbidden` denied in all v1 paths.
+- Attach scope decision summaries to audit/observability API and dashboard read models.
+- Preserve runtime safety: no production Auth/RBAC, tenant provisioning, row-level security, production audit storage backend, external SIEM/export, external providers or IdPs, session/JWT/API-key issuance, raw payload access, or secret/env exposure.
+
+Recommended next step: External Observability Export v1, Tenant Scope Enforcement v2, or Audit Query Scope Enforcement v2 with durable query filters after production auth and tenant grants exist.
+
+## 62. Registry Tenant Scope Enforcement v1
+
+Implemented with `docs/features/registry-tenant-scope-enforcement/v1-plan.md`, `docs/features/registry-tenant-scope-enforcement/v1.md`, `packages/registry/src/scope-enforcement.ts`, registry resolver scope metadata, registry scope policy actions, `/registry/scope/*`, `/readiness/registry/scope/summary`, dashboard Registry Tenant Scope rows, `/health.registryTenantScope`, and deterministic tests.
+
+Goals:
+
+- Define `RegistryScopeDecision` and `RegistryScopeEnforcementSummary` models for skills, harnesses, instructions, packages, eval results, approval queues, history, and audit surfaces.
+- Attach scope decisions and summaries to resolver results without changing resolver selection.
+- Preserve lifecycle, approval, eval, checksum, semver, policy, and governance gates.
+- Add representative mutation scope checks while keeping policy deny authoritative.
+- Expose metadata/readiness API, dashboard, and health visibility.
+- Preserve runtime safety: no production tenant provisioning, no row-level security, no production Auth/RBAC, no external IdP/provider/LLM/MCP/Git/Vault calls, no active registry mutation through auto-improvement, and no secret/env exposure.
+
+Recommended next step: Eval Suite Live Integration-Test Profile v1, or Registry Scope Enforcement v2.
+
+## 63. Registry Signed Package / Artifact Trust v1
+
+Implemented with `docs/features/registry-artifact-trust/v1-plan.md`, `docs/features/registry-artifact-trust/v1.md`, `packages/registry/src/artifact-trust.ts`, new `registry.artifact_trust.*` / `registry.artifact_signature.*` / `registry.artifact.*_future` policy actions, safe `/registry/artifact-trust/*` API endpoints, `/readiness/registry/artifact-trust/summary`, dashboard Registry Artifact Trust rows, `/health.registryArtifactTrust`, and deterministic tests.
+
+Goals:
+
+- Define artifact digest, mock signature, provenance, trust policy, trust decision, and trust summary models.
+- Attach trust metadata to registry package import/export and resolver results without changing resolver selection.
+- Preserve lifecycle, approval, eval, checksum, semver, policy, governance, tenant scope, and resolver gates.
+- Add representative blockers for digest mismatch and invalid/revoked mock signatures while default unsigned/missing provenance remains warning metadata.
+- Expose metadata/readiness API, dashboard, and health visibility.
+- Preserve runtime safety: no real signing, no real verification, no signing key generation/storage, no Sigstore/Cosign/GPG/KMS/Vault transit/cloud signing, no external artifact registry calls, no artifact upload/download, no active registry mutation through auto-improvement, and no secret/env exposure.
+
+Recommended next step: Registry Signed Bundle Verification Planning v1, or Eval Suite Live Integration-Test Profile v1.
+
+## 64. Eval Suite Execution Harness v1
+
+Implemented with `docs/features/eval-suite-execution-harness/v1-plan.md`, `docs/features/eval-suite-execution-harness/v1.md`, `packages/registry/src/eval-suite-execution.ts`, new `registry.eval_suite.*` and `governance.eval.*` policy actions, safe `/registry/eval-suites`, `/registry/eval-runs`, `/readiness/registry/evals/summary` API endpoints, dashboard Registry Eval Suite rows, `/health.registryEvalSuites`, and deterministic tests.
+
+Goals:
+
+- Define eval suite, eval case, eval run, case result, and verdict models for registry candidates and draft registry changes.
+- Execute deterministic mock/local metadata checks only.
+- Attach eval result metadata to registry targets and proposal eval requirements without enabling active registry mutation through auto-improvement.
+- Feed proposal readiness metadata while keeping canary and apply gates blocked unless their existing evidence/policy allows future progress.
+- Preserve registry lifecycle, approval, eval, checksum, semver, compatibility, artifact trust, tenant scope, policy, governance, and apply gates.
+- Preserve runtime safety: no real external eval suites, no real LLM/MCP/provider/vendor CLI calls, no canary execution, no auto-apply, no active registry mutation through auto-improvement, no remote Git operations, and no secret/env exposure.
+
+Recommended next step: Canary Execution Harness v1, or Eval Suite Live Integration-Test Profile v1.
+
+## 65. Phase 5 Enterprise Planning
 
 Goals:
 
 - SSO and SCIM.
 - Audit export.
 - Data residency.
-- Signed artifacts.
+- Real signed artifact verification.
 - Real artifact registry.
 - Production RBAC.
 - Deployment and operational controls.

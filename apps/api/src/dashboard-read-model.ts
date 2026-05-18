@@ -9,10 +9,10 @@ import {
   scopeSummary
 } from "@aichestra/auth";
 import type { AuthorizationService } from "@aichestra/auth";
-import type { MergeQueuePolicyService } from "@aichestra/core";
+import type { ConflictResolutionAssistantService, MergeQueuePolicyService, PrOwnershipService, RealMergeExecutionPolicyService } from "@aichestra/core";
 import type { TenantScopeEnforcementService } from "@aichestra/auth";
 import type { InMemoryAichestraStore } from "@aichestra/db";
-import type { DashboardReadinessTenantScopePlanningService, DeploymentReadinessService } from "@aichestra/deployment-readiness";
+import type { DashboardReadinessTenantScopePlanningService, DashboardScopeFilterContext, DashboardScopeFilteringService, DeploymentReadinessService } from "@aichestra/deployment-readiness";
 import {
   baseBranchDriftStatusToDto,
   branchNamingPolicyToDto,
@@ -22,14 +22,33 @@ import {
   branchOrchestratorSummaryToDto,
   branchOwnershipRecordToDto
 } from "@aichestra/git-adapter";
-import type { BranchOrchestratorService, GitHubAppRuntimeService, GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
+import type { BranchCleanupRecoveryService, BranchOrchestratorService, GitHubAppRuntimeService, GitHubWebhookRuntimeConfig, GitIntegrationService, GitProviderRuntimeConfig, GitWebhookReceiverService } from "@aichestra/git-adapter";
 import type { ImprovementServices } from "@aichestra/improvement";
 import { providerCatalogEntryToDto } from "@aichestra/llm-gateway";
 import type { LLMGatewayService, LocalAgentProtocolService, ProviderAbstractionService } from "@aichestra/llm-gateway";
 import type { MCPGateway } from "@aichestra/mcp-gateway";
-import type { ObservabilityService } from "@aichestra/observability";
+import type { AuditQueryScopeEnforcementService, ObservabilityService } from "@aichestra/observability";
 import { runPolicyRuntimeGoldenHarness, type PolicyService } from "@aichestra/policy";
-import type { RegistryService } from "@aichestra/registry";
+import type { ApplyWorkflowService, CanaryExecutionService, EvalSuiteExecutionService, RegistryArtifactTrustService, RegistryCanaryApplySummary, RegistryCompatibilityService, RegistryDriftDetectionService, RegistryService, RegistryTenantScopeEnforcementService } from "@aichestra/registry";
+import {
+  registryEvalAttachmentToDto,
+  registryEvalCaseResultToDto,
+  registryEvalCaseToDto,
+  registryEvalRunToDto,
+  registryEvalSuiteToDto,
+  registryEvalSummaryToDto,
+  registryEvalVerdictToDto,
+  registryArtifactInputFromPackageManifest,
+  registryArtifactTrustDecisionToDto,
+  registryArtifactTrustPolicyToDto,
+  registryArtifactTrustSummaryToDto,
+  registryResourceInputFromHarness,
+  registryResourceInputFromInstruction,
+  registryResourceInputFromPackageManifest,
+  registryResourceInputFromSkill,
+  registryScopeDecisionToDto,
+  registryScopeEnforcementSummaryToDto
+} from "@aichestra/registry";
 import {
   agentConcurrencyPolicyToDto,
   editIntentGraphToDto,
@@ -40,6 +59,10 @@ import {
   agentRunCoordinationAuditEventToDto,
   agentRunCoordinationGroupToDto,
   agentRunCoordinationSummaryToDto,
+  agentWorktreeAllocationRequestToDto,
+  agentWorktreeAllocationResultToDto,
+  agentWorktreeAllocationSummaryToDto,
+  agentWorktreeSafetyCheckToDto,
   agentSessionOverlapToDto,
   agentSessionToDto,
   agentWorkspaceCleanupDecisionToDto,
@@ -47,7 +70,7 @@ import {
   agentWorkspaceLifecycleEventToDto,
   agentWorkspaceToDto
 } from "@aichestra/runner";
-import type { AgentRunCoordinationService, AgentRunnerService, EditIntentGraphService } from "@aichestra/runner";
+import type { AgentRunCoordinationService, AgentRunnerService, AgentWorktreeAllocationService, EditIntentGraphService } from "@aichestra/runner";
 import type { SecurityControlService } from "@aichestra/security";
 import {
   sanitizeDashboardArray,
@@ -94,6 +117,12 @@ import {
   type StagingReleaseCandidateReadModel,
   type TaskRunSummaryReadModel,
   type VaultIntegrationTestReadModel,
+  type MergeQueueIntegrationTestReadModel,
+  type BranchCleanupReadModel,
+  type RegistryCompatibilityReadModel,
+  type RegistryDriftReadModel,
+  type RegistryCanaryApplyReadModel,
+  type DashboardScopeFilterReadModel,
   type VaultSecretBackendReadModel
 } from "@aichestra/shared";
 
@@ -108,9 +137,22 @@ export type DashboardReadModelContext = {
   llmGatewayService: LLMGatewayService;
   agentRunnerService: AgentRunnerService;
   agentRunCoordinationService: AgentRunCoordinationService;
+  agentWorktreeAllocationService: AgentWorktreeAllocationService;
   mergeQueuePolicyService: MergeQueuePolicyService;
+  conflictResolutionAssistantService: ConflictResolutionAssistantService;
+  realMergeExecutionPolicyService: RealMergeExecutionPolicyService;
+  branchCleanupRecoveryService: BranchCleanupRecoveryService;
+  prOwnershipService: PrOwnershipService;
   editIntentGraphService: EditIntentGraphService;
   registryService: RegistryService;
+  registryCompatibilityService: RegistryCompatibilityService;
+  registryArtifactTrustService: RegistryArtifactTrustService;
+  evalSuiteExecutionService: EvalSuiteExecutionService;
+  registryDriftDetectionService: RegistryDriftDetectionService;
+  canaryExecutionService: CanaryExecutionService;
+  applyWorkflowService: ApplyWorkflowService;
+  registryCanaryApplyGetSummary: () => RegistryCanaryApplySummary;
+  registryTenantScopeEnforcementService: RegistryTenantScopeEnforcementService;
   improvementServices: ImprovementServices;
   policyService: PolicyService;
   authorizationService: AuthorizationService;
@@ -120,8 +162,11 @@ export type DashboardReadModelContext = {
   mcpGatewayService: MCPGateway;
   deploymentReadinessService: DeploymentReadinessService;
   tenantScopePlanningService: DashboardReadinessTenantScopePlanningService;
+  dashboardScopeFilteringService: DashboardScopeFilteringService;
+  dashboardScopeFilterContext?: DashboardScopeFilterContext;
   tenantScopeEnforcementService: TenantScopeEnforcementService;
   observabilityService: ObservabilityService;
+  auditQueryScopeEnforcementService: AuditQueryScopeEnforcementService;
 };
 
 function last<T>(items: T[]): T | undefined {
@@ -259,6 +304,9 @@ function buildConflicts(context: DashboardReadModelContext): ConflictManagerRead
       approvalStatus: "missing"
     }
   });
+  const conflictAssistantSummary = context.conflictResolutionAssistantService.getSummary();
+  const conflictResolutionPlans = context.conflictResolutionAssistantService.listPlans();
+  const realMergeExecutionSummary = context.realMergeExecutionPolicyService.getSummary();
 
   return {
     branchLeases: sanitizeDashboardArray(branchLeases),
@@ -268,6 +316,18 @@ function buildConflicts(context: DashboardReadModelContext): ConflictManagerRead
     mergeQueuePolicy: sanitizeDashboardObject(mergeQueuePolicy.policy),
     mergeReadinessDecisions: sanitizeDashboardArray(mergeQueuePolicy.decisions),
     mergeQueueHolds: sanitizeDashboardArray(mergeQueuePolicy.holds),
+    conflictResolutionRequests: sanitizeDashboardArray(context.conflictResolutionAssistantService.listRequests()),
+    conflictSummaries: sanitizeDashboardArray(context.conflictResolutionAssistantService.listSummaries()),
+    conflictResolutionPlans: sanitizeDashboardArray(conflictResolutionPlans),
+    conflictResolutionRecommendations: sanitizeDashboardArray(context.conflictResolutionAssistantService.listRecommendations()),
+    conflictAssistantSummary: sanitizeDashboardObject(conflictAssistantSummary),
+    realMergeExecutionPolicy: sanitizeDashboardObject(context.realMergeExecutionPolicyService.getPolicy()),
+    realMergeExecutionRequests: sanitizeDashboardArray(context.realMergeExecutionPolicyService.listRequests()),
+    realMergeExecutionDecisions: sanitizeDashboardArray(context.realMergeExecutionPolicyService.listDecisions()),
+    realMergePreconditions: sanitizeDashboardArray(context.realMergeExecutionPolicyService.listPreconditions()),
+    realMergeForbiddenOperations: sanitizeDashboardArray(context.realMergeExecutionPolicyService.listForbiddenOperations()),
+    realMergePostExecutionEvidenceTemplate: sanitizeDashboardObject(context.realMergeExecutionPolicyService.getPostExecutionEvidenceTemplate()),
+    realMergeExecutionSummary: sanitizeDashboardObject(realMergeExecutionSummary),
     summary: sanitizeDashboardObject({
       activeLeases: branchLeases.filter((lease) => lease.status === "active").length,
       conflictRisks: conflictRisks.length,
@@ -277,7 +337,25 @@ function buildConflicts(context: DashboardReadModelContext): ConflictManagerRead
       mergeQueuePolicyReady: mergeQueuePolicy.summary.ready,
       mergeQueuePolicyHolds: mergeQueuePolicy.summary.hold + mergeQueuePolicy.summary.needsHumanReview + mergeQueuePolicy.summary.blocked,
       mergeExecutionEnabled: mergeQueuePolicy.summary.mergeExecutionEnabled,
-      autoMergeEnabled: mergeQueuePolicy.summary.autoMergeEnabled
+      autoMergeEnabled: mergeQueuePolicy.summary.autoMergeEnabled,
+      conflictAssistantStatus: conflictAssistantSummary.status,
+      conflictAssistantRequests: conflictAssistantSummary.requests,
+      conflictAssistantPlans: conflictAssistantSummary.plans,
+      conflictAssistantRecommendations: conflictAssistantSummary.recommendations,
+      conflictAssistantApplyAllowed: conflictAssistantSummary.applyAllowed,
+      conflictAssistantRealLlmUsed: conflictAssistantSummary.realLlmUsed,
+      realMergeExecutionStatus: realMergeExecutionSummary.status,
+      realMergePolicyStatus: realMergeExecutionSummary.policyStatus,
+      realMergeRequests: realMergeExecutionSummary.requests,
+      realMergeDecisions: realMergeExecutionSummary.decisions,
+      realMergeReadyForManualFuture: realMergeExecutionSummary.readyForManualFuture,
+      realMergeBlocked: realMergeExecutionSummary.blocked,
+      realMergePreconditions: realMergeExecutionSummary.preconditions,
+      realMergeForbiddenOperations: realMergeExecutionSummary.forbiddenOperations,
+      realMergeExecutionEnabled: realMergeExecutionSummary.mergeExecutionEnabled,
+      realMergeAutoMergeEnabled: realMergeExecutionSummary.autoMergeEnabled,
+      realMergeRemotePushEnabled: realMergeExecutionSummary.remotePushEnabled,
+      realMergeExecutionPerformed: realMergeExecutionSummary.mergeExecutionPerformed
     })
   };
 }
@@ -294,6 +372,9 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
   const branchSyncStates = context.gitWebhookReceiverService.listBranchSyncStates();
   const lastChangedFilesAudit = webhookAuditEvents.find((event) => event.eventType.startsWith("github_changed_files_refresh_"));
   const branchOrchestratorSummary = context.branchOrchestratorService.getSummary();
+  const prOwnershipSummary = context.prOwnershipService.getSummary();
+  const prMergeQueueOwnershipReadiness = context.prOwnershipService.listMergeQueueOwnershipReadiness();
+  const prOwnershipByQueueEntry = new Map(prMergeQueueOwnershipReadiness.map((readiness) => [readiness.mergeQueueEntryId, readiness]));
   const changedFiles = branchRecords.flatMap((lease) =>
     lease.files.map((file) => ({
       path: file,
@@ -345,6 +426,9 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       pullRequestId: entry.pullRequestId,
       recommendation: entry.recommendation,
       policyDecision: decisionsByEntry.get(entry.id)?.decision ?? "not_evaluated",
+      ownershipStatus: prOwnershipByQueueEntry.get(entry.id)?.status ?? "missing_owner",
+      ownershipRecordId: prOwnershipByQueueEntry.get(entry.id)?.ownershipRecordId,
+      ownerActorId: prOwnershipByQueueEntry.get(entry.id)?.ownerActorId,
       mergeExecutionEnabled: false
     }))),
     branchOrchestrationRequests: sanitizeDashboardArray(context.branchOrchestratorService.listOrchestrationRequests().map(branchOrchestrationRequestToDto)),
@@ -354,6 +438,12 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
     branchNamingPolicies: sanitizeDashboardArray(context.branchOrchestratorService.listNamingPolicies().map(branchNamingPolicyToDto)),
     branchOrchestratorAuditEvents: sanitizeDashboardArray(context.branchOrchestratorService.listAuditEvents().map(branchOrchestratorAuditEventToDto)),
     branchOrchestratorSummary: sanitizeDashboardObject(branchOrchestratorSummaryToDto(branchOrchestratorSummary)),
+    prOwnershipRecords: sanitizeDashboardArray(context.prOwnershipService.listOwnership()),
+    prHandoffRequests: sanitizeDashboardArray(context.prOwnershipService.listHandoffs()),
+    prHandoffDecisions: sanitizeDashboardArray(context.prOwnershipService.listDecisions()),
+    prOwnershipAuditEvents: sanitizeDashboardArray(context.prOwnershipService.listAuditEvents()),
+    prOwnershipSummary: sanitizeDashboardObject(prOwnershipSummary),
+    prMergeQueueOwnershipReadiness: sanitizeDashboardArray(prMergeQueueOwnershipReadiness),
     auditEvents: sanitizeDashboardArray(auditEvents),
     remoteAuditEvents: sanitizeDashboardArray(auditEvents.filter(remoteGitAuditEvent)),
     blockedExamples: sanitizeDashboardArray([
@@ -406,6 +496,11 @@ function buildGit(context: DashboardReadModelContext): GitIntegrationReadModel {
       branchOrchestratorStatus: branchOrchestratorSummary.status,
       branchOrchestratorRemoteGitOperation: branchOrchestratorSummary.remoteGitOperation,
       branchOrchestratorNoDestructiveGit: branchOrchestratorSummary.noDestructiveGit,
+      prOwnershipStatus: prOwnershipSummary.status,
+      remotePrUpdateEnabled: false,
+      remoteReviewerAssignmentEnabled: false,
+      prOwnershipGithubApiCalls: false,
+      prOwnershipAutoMergeEnabled: false,
       tokenExposed: false,
       webhookSecretExposed: false
     })
@@ -769,6 +864,279 @@ function buildVaultIntegration(context: DashboardReadModelContext): VaultIntegra
   };
 }
 
+function buildMergeQueueIntegration(context: DashboardReadModelContext): MergeQueueIntegrationTestReadModel {
+  const readiness = context.deploymentReadinessService;
+  const summary = readiness.getMergeQueueIntegrationTestReadinessSummary();
+  const safetyChecks = readiness.listMergeQueueIntegrationSafetyChecks();
+  const testCases = readiness.listMergeQueueIntegrationTestCases();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    profile: sanitizeDashboardObject(readiness.getMergeQueueIntegrationTestProfile()),
+    testCases: sanitizeDashboardArray(testCases),
+    gatedLiveTestCases: sanitizeDashboardArray(testCases.filter((testCase) => testCase.requiresLiveGit)),
+    mockTestCases: sanitizeDashboardArray(testCases.filter((testCase) => !testCase.requiresLiveGit)),
+    safetyChecks: sanitizeDashboardArray(safetyChecks),
+    blockers: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "fail")),
+    warnings: sanitizeDashboardArray(safetyChecks.filter((check) => check.status === "warning")),
+    gateStatus: sanitizeDashboardObject({
+      configuredGateCount: summary.configuredGateCount,
+      missingGateCount: summary.missingGateCount,
+      unsafeGateCount: summary.unsafeGateCount,
+      gitProviderAllowed: summary.gitProviderAllowed,
+      remoteGitEnabled: summary.remoteGitEnabled,
+      githubIntegrationProfileEnabled: summary.githubIntegrationProfileEnabled,
+      allowedRepoCount: summary.allowedRepoCount,
+      requiredBranchPrefix: summary.requiredBranchPrefix,
+      branchPrefixConfigured: summary.branchPrefixConfigured,
+      branchPrefixMatchesRequired: summary.branchPrefixMatchesRequired,
+      testRepoConfigured: summary.testRepoConfigured,
+      testRepoAllowlisted: summary.testRepoAllowlisted,
+      testBaseBranchConfigured: summary.testBaseBranchConfigured,
+      testSourceBranchCount: summary.testSourceBranchCount,
+      testSourceBranchesMatchPrefix: summary.testSourceBranchesMatchPrefix,
+      baseBranchDistinctFromSources: summary.baseBranchDistinctFromSources,
+      envValuesReturned: false,
+      repoUrlsReturned: false,
+      branchNamesReturned: false
+    }),
+    operationPolicy: sanitizeDashboardObject({
+      dryRunOnly: summary.dryRunOnly,
+      autoMergeForbidden: summary.autoMergeForbidden,
+      remoteMergeForbidden: summary.remoteMergeForbidden,
+      remoteRebaseForbidden: summary.remoteRebaseForbidden,
+      remoteForcePushForbidden: summary.remoteForcePushForbidden,
+      remoteBranchDeleteForbidden: summary.remoteBranchDeleteForbidden,
+      realMergeExecuted: summary.realMergeExecuted,
+      remoteGitCallsInDefaultTests: summary.remoteGitCallsInDefaultTests
+    }),
+    cleanupPolicy: sanitizeDashboardObject({
+      status: summary.cleanupPolicy,
+      branchDeletionAllowed: summary.branchDeletionAllowed,
+      manualMarkOnly: true,
+      remoteCleanupCallsEnabledByDefault: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed,
+      repoUrlsExposed: summary.repoUrlsExposed,
+      branchNamesExposed: summary.branchNamesExposed,
+      remoteGitCallsInDefaultTests: summary.remoteGitCallsInDefaultTests,
+      realMergeExecuted: summary.realMergeExecuted,
+      noAutoMerge: summary.noAutoMerge,
+      noForcePush: summary.noForcePush,
+      noBranchDelete: summary.noBranchDelete
+    })
+  };
+}
+
+function buildBranchCleanup(context: DashboardReadModelContext): BranchCleanupReadModel {
+  const cleanupService = context.branchCleanupRecoveryService;
+  const summary = cleanupService.getSummary();
+  const orphans = cleanupService.listOrphanRecords();
+  const recommendations = cleanupService.listRecommendations();
+  const recoveryActions = cleanupService.listRecoveryActions();
+  const decisions = cleanupService.listDecisions();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    orphanRecords: sanitizeDashboardArray(orphans),
+    criticalOrphanRecords: sanitizeDashboardArray(orphans.filter((orphan) => orphan.severity === "critical")),
+    highSeverityOrphanRecords: sanitizeDashboardArray(orphans.filter((orphan) => orphan.severity === "high")),
+    recommendations: sanitizeDashboardArray(recommendations),
+    destructiveFutureRecommendations: sanitizeDashboardArray(recommendations.filter((recommendation) => recommendation.destructive === "true_future")),
+    metadataOnlyRecommendations: sanitizeDashboardArray(recommendations.filter((recommendation) => recommendation.destructive === "false")),
+    decisions: sanitizeDashboardArray(decisions),
+    recoveryActions: sanitizeDashboardArray(recoveryActions),
+    policyStatus: sanitizeDashboardObject({
+      cleanupScanAllowed: true,
+      cleanupMetadataExecuteAllowed: true,
+      destructiveCleanupAllowed: false,
+      branchDeletionAllowed: false,
+      worktreeRemovalAllowed: false,
+      prClosureAllowed: false
+    }),
+    noDestructiveStatus: sanitizeDashboardObject({
+      destructiveCleanupEnabled: summary.destructiveCleanupEnabled,
+      realBranchDeleted: summary.realBranchDeleted,
+      realWorktreeRemoved: summary.realWorktreeRemoved,
+      realPullRequestClosed: summary.realPullRequestClosed,
+      remoteGitCallsExecuted: summary.remoteGitCallsExecuted,
+      filesystemDeletionsExecuted: summary.filesystemDeletionsExecuted,
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed
+    })
+  };
+}
+
+function buildRegistryCompatibility(context: DashboardReadModelContext): RegistryCompatibilityReadModel {
+  const compatibilityService = context.registryCompatibilityService;
+  const compatibilityContext = compatibilityService.buildContext({});
+  const decisions = compatibilityService.evaluateCandidates(compatibilityContext);
+  const summary = compatibilityService.summarizeDecisions(decisions);
+  const compatibleCandidates = decisions.filter((decision) => decision.decision === "compatible");
+  const warningCandidates = decisions.filter((decision) => decision.decision === "compatible_with_warnings");
+  const incompatibleCandidates = decisions.filter((decision) => decision.decision === "incompatible");
+  const blockedByPolicyCandidates = decisions.filter((decision) => decision.decision === "blocked_by_policy");
+  const blockedByRegistryGateCandidates = decisions.filter((decision) => decision.decision === "blocked_by_registry_gate");
+  const futureUnknownCandidates = decisions.filter((decision) => decision.decision === "future_unknown");
+  return {
+    summary: sanitizeDashboardObject(summary),
+    rules: sanitizeDashboardArray(compatibilityService.listRules()),
+    skillProfiles: sanitizeDashboardArray(compatibilityService.listSkillProfiles()),
+    harnessProfiles: sanitizeDashboardArray(compatibilityService.listHarnessProfiles()),
+    instructionProfiles: sanitizeDashboardArray(compatibilityService.listInstructionProfiles()),
+    candidateDecisions: sanitizeDashboardArray(decisions),
+    compatibleCandidates: sanitizeDashboardArray(compatibleCandidates),
+    warningCandidates: sanitizeDashboardArray(warningCandidates),
+    incompatibleCandidates: sanitizeDashboardArray(incompatibleCandidates),
+    blockedByPolicyCandidates: sanitizeDashboardArray(blockedByPolicyCandidates),
+    blockedByRegistryGateCandidates: sanitizeDashboardArray(blockedByRegistryGateCandidates),
+    futureUnknownCandidates: sanitizeDashboardArray(futureUnknownCandidates),
+    resolverGateRelationship: sanitizeDashboardObject({
+      resolverGatesPreserved: true,
+      lifecycleGate: "preserved",
+      approvalGate: "preserved",
+      evalGate: "preserved",
+      checksumGate: "preserved",
+      semverGate: "preserved",
+      compatibilityCanBypassResolver: false
+    }),
+    scopeRelationship: sanitizeDashboardObject({
+      productionTenantEnforcement: false,
+      scopeMismatchSeverity: "warning",
+      tenantScopeEnforcementImplemented: "partial",
+      autoApplyEnabled: false
+    }),
+    noAutoApplyStatus: sanitizeDashboardObject({
+      autoApplyEnabled: false,
+      registryMutationsExecuted: false,
+      externalCallsExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    })
+  };
+}
+
+function buildRegistryDrift(context: DashboardReadModelContext): RegistryDriftReadModel {
+  const drift = context.registryDriftDetectionService;
+  drift.assessAll();
+  const summary = drift.getSummary();
+  const assessments = drift.listAssessments();
+  const signals = drift.listSignals();
+  const baselines = drift.listBaselines();
+  const recommendations = drift.listRecommendations();
+  const governanceFollowUps = assessments
+    .flatMap((assessment) => assessment.governanceFollowUps.map((followUp) => ({
+      assessmentId: assessment.id,
+      targetKind: assessment.targetKind,
+      targetId: assessment.targetId,
+      severity: assessment.severity,
+      status: assessment.status,
+      followUp
+    })));
+  return {
+    summary: sanitizeDashboardObject(summary),
+    signals: sanitizeDashboardArray(signals),
+    baselines: sanitizeDashboardArray(baselines),
+    assessments: sanitizeDashboardArray(assessments),
+    recommendations: sanitizeDashboardArray(recommendations),
+    criticalAssessments: sanitizeDashboardArray(assessments.filter((assessment) => assessment.status === "critical")),
+    degradedAssessments: sanitizeDashboardArray(assessments.filter((assessment) => assessment.status === "degraded")),
+    watchAssessments: sanitizeDashboardArray(assessments.filter((assessment) => assessment.status === "watch")),
+    insufficientDataAssessments: sanitizeDashboardArray(assessments.filter((assessment) => assessment.status === "insufficient_data")),
+    governanceFollowUps: sanitizeDashboardArray(governanceFollowUps),
+    noAutoApplyStatus: sanitizeDashboardObject({
+      applyAllowed: summary.applyAllowed,
+      registryMutationExecuted: summary.registryMutationExecuted,
+      evalExecuted: summary.evalExecuted,
+      canaryExecuted: summary.canaryExecuted,
+      autoImprovementApplied: summary.autoImprovementApplied,
+      externalCallExecuted: summary.externalCallExecuted,
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed
+    })
+  };
+}
+
+function buildRegistryCanaryApply(context: DashboardReadModelContext): RegistryCanaryApplyReadModel {
+  const canary = context.canaryExecutionService;
+  const apply = context.applyWorkflowService;
+  const summary = context.registryCanaryApplyGetSummary();
+  const canaryPlans = canary.listCanaryPlans();
+  const canaryRuns = canary.listCanaryRuns();
+  const canaryResults = canary.listCanaryResults();
+  const canaryVerdicts = canary.listCanaryVerdicts();
+  const workflows = apply.listWorkflows();
+  const decisions = apply.listGateDecisions();
+  const rollbackPlans = apply.listRollbackPlans();
+  return {
+    summary: sanitizeDashboardObject(summary),
+    canaryPlans: sanitizeDashboardArray(canaryPlans),
+    canaryRuns: sanitizeDashboardArray(canaryRuns),
+    canaryResults: sanitizeDashboardArray(canaryResults),
+    canaryVerdicts: sanitizeDashboardArray(canaryVerdicts),
+    applyWorkflows: sanitizeDashboardArray(workflows),
+    applyGateDecisions: sanitizeDashboardArray(decisions),
+    rollbackPlans: sanitizeDashboardArray(rollbackPlans),
+    blockedApplyDecisions: sanitizeDashboardArray(decisions.filter((decision) => decision.decision.startsWith("blocked_"))),
+    metadataOnlyApplyDecisions: sanitizeDashboardArray(decisions.filter((decision) => decision.decision === "metadata_only_recorded")),
+    noAutoApplyStatus: sanitizeDashboardObject({
+      autoApplyEnabled: summary.autoApplyEnabled,
+      activeRegistryMutationAllowed: summary.activeRegistryMutationAllowed,
+      applyPerformed: summary.applyPerformed,
+      activeRegistryMutated: summary.activeRegistryMutated,
+      externalCanaryExecuted: summary.externalCanaryExecuted,
+      realEvalExecuted: summary.realEvalExecuted,
+      realProviderCallExecuted: summary.realProviderCallExecuted,
+      noSecretsExposed: summary.noSecretsExposed,
+      envValuesExposed: summary.envValuesExposed
+    })
+  };
+}
+
+function buildDashboardScopeFilter(context: DashboardReadModelContext): { readModel: DashboardScopeFilterReadModel; decisionsByPanel: Map<string, ReturnType<DashboardScopeFilteringService["evaluatePanel"]>> } {
+  const filterService = context.dashboardScopeFilteringService;
+  const filterContext = context.dashboardScopeFilterContext ?? filterService.buildFilterContext();
+  const panelSummaries = context.tenantScopePlanningService.listDashboardPanelScopeSummaries();
+  const decisions = filterService.evaluatePanels(panelSummaries, filterContext);
+  const summary = filterService.summarizeDecisions(decisions, filterContext);
+  const decisionsByPanel = new Map(decisions.map((decision) => [decision.panelId, decision]));
+  const visible = decisions.filter((decision) => decision.decision === "visible");
+  const redacted = decisions.filter((decision) => decision.decision === "redacted");
+  const hidden = decisions.filter((decision) => decision.decision === "hidden");
+  const warning = decisions.filter((decision) => decision.decision === "warning_only");
+  const readModel: DashboardScopeFilterReadModel = {
+    summary: sanitizeDashboardObject(summary),
+    decisions: sanitizeDashboardArray(decisions),
+    visiblePanels: sanitizeDashboardArray(visible.map((decision) => ({ panelId: decision.panelId, panelName: decision.panelName, decision: decision.decision }))),
+    redactedPanels: sanitizeDashboardArray(redacted.map((decision) => ({ panelId: decision.panelId, panelName: decision.panelName, redactedFields: decision.redactedFields }))),
+    hiddenPanels: sanitizeDashboardArray(hidden.map((decision) => ({ panelId: decision.panelId, panelName: decision.panelName, requiredRoles: decision.requiredRoles, requiredScopes: decision.requiredScopes }))),
+    warningPanels: sanitizeDashboardArray(warning.map((decision) => ({ panelId: decision.panelId, panelName: decision.panelName, reason: decision.reason }))),
+    context: sanitizeDashboardObject({
+      actorId: filterContext.actorId,
+      principalId: filterContext.principalId,
+      roles: filterContext.roles,
+      tenantIds: filterContext.tenantIds,
+      teamIds: filterContext.teamIds,
+      projectIds: filterContext.projectIds,
+      resourceScopes: filterContext.resourceScopes,
+      source: filterContext.source,
+      authMode: filterContext.authMode,
+      productionAuthImplemented: false,
+      productionTenantEnforcement: false,
+      externalIdentityProviderCalled: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      productionFiltering: false,
+      productionAuthImplemented: false,
+      productionTenantEnforcement: false,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      externalIdentityProviderCalled: false
+    })
+  };
+  return { readModel, decisionsByPanel };
+}
+
 function buildStaging(context: DashboardReadModelContext): StagingDeploymentReadModel {
   const readiness = context.deploymentReadinessService;
   const summary = readiness.getStagingDeploymentSummary();
@@ -981,26 +1349,144 @@ function buildRegistry(context: DashboardReadModelContext): RegistryReadModel {
   const evalResults = targets.flatMap((target) => context.registryService.listEvalResultsForTarget(target.kind, target.id));
   const proposals = context.improvementServices.proposals.listProposals();
   const draftChanges = context.improvementServices.draftRegistryChanges.listDraftChanges();
+  const approvalQueue = context.registryService.listApprovalQueue();
+  const packageManifests = context.registryService.listPackageManifests();
+  const registryScopeInputs = [
+    ...skills.map(registryResourceInputFromSkill),
+    ...harnesses.map(registryResourceInputFromHarness),
+    ...instructions.map(registryResourceInputFromInstruction),
+    ...packageManifests.map(registryResourceInputFromPackageManifest)
+  ];
+  const registryScopeDecisions = context.registryTenantScopeEnforcementService.evaluateRegistryResources(registryScopeInputs, {
+    source: "dashboard",
+    actorId: "dashboard_registry_scope_reader",
+    roles: ["viewer"],
+    metadata: { dashboardReadModel: true }
+  });
+  const approvalQueueScopeDecisions = approvalQueue.map((item) => context.registryTenantScopeEnforcementService.evaluateApprovalQueueItem(item, {
+    source: "dashboard",
+    actorId: "dashboard_registry_scope_reader",
+    roles: ["viewer"],
+    metadata: { dashboardReadModel: true }
+  }));
+  const artifactTrustDecisions = packageManifests.map((manifest) => context.registryArtifactTrustService.evaluateArtifactTrust(
+    registryArtifactInputFromPackageManifest(manifest),
+    {
+      source: "dashboard",
+      actorId: "dashboard_registry_artifact_trust_reader",
+      roles: ["viewer"],
+      metadata: {
+        dashboardReadModel: true,
+        metadataOnly: true,
+        resolverGatesPreserved: true,
+        realSigningImplemented: false,
+        realVerificationImplemented: false,
+        externalRegistryCalls: false
+      }
+    }
+  ));
+  const artifactTrustSummary = context.registryArtifactTrustService.summarizeDecisions(artifactTrustDecisions);
+  const evalService = context.evalSuiteExecutionService;
+  const evalSuites = evalService.listSuites();
+  const evalCases = evalSuites.flatMap((suite) => evalService.listCases(suite.id));
+  const evalRuns = evalService.listEvalRuns();
+  const evalCaseResults = evalRuns.flatMap((run) => evalService.listCaseResults(run.id));
+  const evalVerdicts = evalRuns.flatMap((run) => {
+    const verdict = evalService.getEvalVerdict(run.id);
+    return verdict ? [verdict] : [];
+  });
+  const evalAttachments = evalService.listAttachments();
+  const evalSummary = evalService.getEvalSummary();
 
   return {
     summary: sanitizeDashboardObject({
       activeSkills: skills.filter((entry) => entry.status === "active").length,
       activeHarnesses: harnesses.filter((entry) => entry.status === "active").length,
       activeInstructions: instructions.filter((entry) => entry.status === "active").length,
-      approvalQueueItems: context.registryService.listApprovalQueue().length,
-      packageManifests: context.registryService.listPackageManifests().length,
+      approvalQueueItems: approvalQueue.length,
+      packageManifests: packageManifests.length,
       improvementProposals: proposals.length,
       draftRegistryChanges: draftChanges.length,
-      autoApplyEnabled: context.improvementServices.safetyPolicies.listPolicies().some((policy) => policy.allowAutoApply)
+      autoApplyEnabled: context.improvementServices.safetyPolicies.listPolicies().some((policy) => policy.allowAutoApply),
+      registryScopeWarnings: registryScopeDecisions.filter((decision) => decision.decision.endsWith("_warning")).length,
+      registryScopeDenied: registryScopeDecisions.filter((decision) => decision.decision.endsWith("_denied")).length,
+      registryArtifactTrustWarnings: artifactTrustSummary.warnings,
+      registryArtifactTrustBlocked: artifactTrustSummary.blocked,
+      registryEvalSuites: evalSuites.length,
+      registryEvalRuns: evalRuns.length,
+      registryEvalFailedRuns: evalSummary.failedRuns,
+      registryEvalWarningRuns: evalSummary.warningRuns,
+      realArtifactSigningImplemented: artifactTrustSummary.realSigningImplemented,
+      realArtifactVerificationImplemented: artifactTrustSummary.realVerificationImplemented,
+      productionRegistryTenantIsolation: false
     }),
     skills: sanitizeDashboardArray(skills),
     harnesses: sanitizeDashboardArray(harnesses),
     instructions: sanitizeDashboardArray(instructions),
-    approvalQueue: sanitizeDashboardArray(context.registryService.listApprovalQueue()),
-    packages: sanitizeDashboardArray(context.registryService.listPackageManifests()),
+    approvalQueue: sanitizeDashboardArray(approvalQueue),
+    packages: sanitizeDashboardArray(packageManifests),
     auditLogs: sanitizeDashboardArray(context.registryService.listAuditLogs()),
     revisions: sanitizeDashboardArray(revisions),
     evalResults: sanitizeDashboardArray(evalResults),
+    scopeSummary: sanitizeDashboardObject(registryScopeEnforcementSummaryToDto(context.registryTenantScopeEnforcementService.summarizeDecisions(registryScopeDecisions))),
+    scopeDecisions: sanitizeDashboardArray(registryScopeDecisions.map(registryScopeDecisionToDto)),
+    approvalQueueScopeSummary: sanitizeDashboardObject(registryScopeEnforcementSummaryToDto(context.registryTenantScopeEnforcementService.summarizeDecisions(approvalQueueScopeDecisions))),
+    artifactTrustSummary: sanitizeDashboardObject(registryArtifactTrustSummaryToDto(artifactTrustSummary)),
+    artifactTrustDecisions: sanitizeDashboardArray(artifactTrustDecisions.map(registryArtifactTrustDecisionToDto)),
+    artifactTrustPolicies: sanitizeDashboardArray(context.registryArtifactTrustService.listTrustPolicies().map(registryArtifactTrustPolicyToDto)),
+    evalSuiteSummary: sanitizeDashboardObject(registryEvalSummaryToDto(evalSummary)),
+    evalSuites: sanitizeDashboardArray(evalSuites.map(registryEvalSuiteToDto)),
+    evalCases: sanitizeDashboardArray(evalCases.map(registryEvalCaseToDto)),
+    evalRuns: sanitizeDashboardArray(evalRuns.map(registryEvalRunToDto)),
+    evalCaseResults: sanitizeDashboardArray(evalCaseResults.map(registryEvalCaseResultToDto)),
+    evalVerdicts: sanitizeDashboardArray(evalVerdicts.map(registryEvalVerdictToDto)),
+    evalAttachments: sanitizeDashboardArray(evalAttachments.map(registryEvalAttachmentToDto)),
+    evalSuiteStatus: sanitizeDashboardObject({
+      status: evalSummary.status,
+      executionMode: evalSummary.executionMode,
+      mockExecutionOnly: true,
+      externalEvalImplemented: evalSummary.externalEvalImplemented,
+      realProviderCalls: evalSummary.realProviderCalls,
+      llmCallsExecuted: evalSummary.llmCallsExecuted,
+      mcpCallsExecuted: evalSummary.mcpCallsExecuted,
+      vendorCliExecuted: evalSummary.vendorCliExecuted,
+      canaryExecuted: evalSummary.canaryExecuted,
+      autoApplyEnabled: evalSummary.autoApplyEnabled,
+      activeRegistryMutationExecuted: evalSummary.activeRegistryMutationExecuted,
+      resolverGatesPreserved: true,
+      applyGateStillRequired: true,
+      noSecretsExposed: evalSummary.noSecretsExposed,
+      envValuesExposed: evalSummary.envValuesExposed
+    }),
+    artifactTrustStatus: sanitizeDashboardObject({
+      digestStatusVisible: true,
+      signatureStatusVisible: true,
+      provenanceStatusVisible: true,
+      unsignedWarnings: artifactTrustSummary.unsigned,
+      missingProvenanceWarnings: artifactTrustSummary.missingProvenance,
+      digestMismatchBlockers: artifactTrustDecisions.filter((decision) => decision.decision === "blocked_digest_mismatch").length,
+      futureRealVerificationDisabled: true,
+      signingKeysGenerated: false,
+      noExternalRegistryCalls: true,
+      resolverGatesPreserved: true,
+      lifecycleApprovalEvalChecksumGatesPreserved: true,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    resolverScopeStatus: sanitizeDashboardObject({
+      scopeMetadataAttached: true,
+      resolverGatesPreserved: true,
+      pendingApprovalStillExcluded: true,
+      checksumMismatchStillBlocked: true,
+      productionEnforcement: false
+    }),
+    mutationScopeStatus: sanitizeDashboardObject({
+      mutationScopeCheckEnabled: true,
+      policyDenyStillWins: true,
+      lifecycleApprovalEvalChecksumGatesPreserved: true,
+      activeRegistryMutationThroughAutoImprovement: false,
+      productionEnforcement: false
+    }),
     governance: sanitizeDashboardObject({
       failureSignals: context.improvementServices.signals.listSignals(),
       failureClusters: context.improvementServices.clustering.listClusters(),
@@ -1076,6 +1562,7 @@ function buildAgents(context: DashboardReadModelContext): AgentRunnerReadModel {
   const coordinationSummary = context.agentRunCoordinationService.getSummary();
   const editIntentSummary = context.editIntentGraphService.getOverlapSummary();
   const editIntentGraph = context.editIntentGraphService.listGraph();
+  const worktreeAllocationSummary = context.agentWorktreeAllocationService.getSummary();
   return {
     config: sanitizeDashboardObject(context.agentRunnerService.getConfig()),
     runners: sanitizeDashboardArray(context.agentRunnerService.listRunners()),
@@ -1100,6 +1587,10 @@ function buildAgents(context: DashboardReadModelContext): AgentRunnerReadModel {
       fullWorkspacePathsExposed: false,
       noSecretsExposed: true
     }),
+    worktreeAllocationRequests: sanitizeDashboardArray(context.agentWorktreeAllocationService.listRequests().map(agentWorktreeAllocationRequestToDto)),
+    worktreeAllocationResults: sanitizeDashboardArray(context.agentWorktreeAllocationService.listAllocations().map(agentWorktreeAllocationResultToDto)),
+    worktreeSafetyChecks: sanitizeDashboardArray(context.agentWorktreeAllocationService.listSafetyChecks().map(agentWorktreeSafetyCheckToDto)),
+    worktreeAllocationSummary: sanitizeDashboardObject(agentWorktreeAllocationSummaryToDto(worktreeAllocationSummary)),
     coordinationSessions: sanitizeDashboardArray(context.agentRunCoordinationService.listSessions().map(agentSessionToDto)),
     coordinationGroups: sanitizeDashboardArray(context.agentRunCoordinationService.listCoordinationGroups().map(agentRunCoordinationGroupToDto)),
     sessionOverlaps: sanitizeDashboardArray(context.agentRunCoordinationService.listSessionOverlaps().map(agentSessionOverlapToDto)),
@@ -1131,6 +1622,10 @@ function buildAgents(context: DashboardReadModelContext): AgentRunnerReadModel {
       {
         operation: "runner.git_worktree_execution",
         reason: "git_worktree_allocation_modeled_but_not_enabled"
+      },
+      {
+        operation: "runner.git_worktree_add_remove",
+        reason: "agent_worktree_allocation_v1_never_runs_real_git_worktree"
       },
       {
         operation: "runner.workspace_cleanup_delete",
@@ -1734,6 +2229,13 @@ function buildReadiness(context: DashboardReadModelContext): DeploymentReadiness
 
 function buildObservability(context: DashboardReadModelContext): ObservabilityReadModel {
   const observability = context.observabilityService.buildDashboardObservabilityReadModel();
+  const auditScopeDecision = context.auditQueryScopeEnforcementService.evaluateAuditQuery({
+    roles: ["viewer"],
+    requestedDetailLevel: "detail",
+    metadata: { source: "dashboard:observability" }
+  });
+  const auditScopeSummary = context.auditQueryScopeEnforcementService.getSummary();
+  const auditScopeDecisionSummary = context.auditQueryScopeEnforcementService.summarizeAuditQueryDecision(auditScopeDecision);
   return {
     config: sanitizeDashboardObject(observability.config),
     auditSummary: sanitizeDashboardObject(observability.auditSummary),
@@ -1749,6 +2251,19 @@ function buildObservability(context: DashboardReadModelContext): ObservabilityRe
     traceSummary: sanitizeDashboardObject(observability.traceSummary),
     sourceCoverage: sanitizeDashboardArray(observability.sourceCoverage),
     productionReadinessBlockers: sanitizeDashboardArray(observability.productionReadinessBlockers),
+    auditScopeSummary: sanitizeDashboardObject(auditScopeSummary),
+    auditScopeDecision: sanitizeDashboardObject(auditScopeDecisionSummary),
+    auditScopeRedactionPlans: sanitizeDashboardArray(context.auditQueryScopeEnforcementService.listRedactionPlans()),
+    auditScopeStatus: sanitizeDashboardObject({
+      status: auditScopeSummary.status,
+      allowedDetailLevel: auditScopeDecisionSummary.allowedDetailLevel,
+      redactedDetailCount: auditScopeDecisionSummary.redactedFieldCount,
+      missingScopeWarnings: auditScopeDecisionSummary.missingScopes,
+      rawPayloadForbidden: auditScopeSummary.rawPayloadAllowed === false,
+      productionStorageEnforcement: auditScopeSummary.productionStorageEnforcement,
+      noSecretsExposed: auditScopeSummary.noSecretsExposed,
+      envValuesExposed: auditScopeSummary.envValuesExposed
+    }),
     noSecretStatus: sanitizeDashboardObject(observability.noSecretStatus)
   };
 }
@@ -1762,6 +2277,12 @@ function auditGroup(source: string, events: unknown[]): DashboardJsonObject {
 }
 
 function buildAudit(context: DashboardReadModelContext): AuditSummaryReadModel {
+  const auditScopeDecision = context.auditQueryScopeEnforcementService.evaluateAuditQuery({
+    roles: ["viewer"],
+    requestedDetailLevel: "detail",
+    metadata: { source: "dashboard:audit" }
+  });
+  const auditScopeSummary = context.auditQueryScopeEnforcementService.getSummary();
   const groups = [
     auditGroup("core", context.store.listAuditLogs()),
     auditGroup("registry", context.registryService.listAuditLogs()),
@@ -1782,6 +2303,8 @@ function buildAudit(context: DashboardReadModelContext): AuditSummaryReadModel {
   return {
     auditGroups: groups,
     recentEvents: sanitizeDashboardArray(recentEvents),
+    auditScopeSummary: sanitizeDashboardObject(auditScopeSummary),
+    auditScopeDecision: sanitizeDashboardObject(context.auditQueryScopeEnforcementService.summarizeAuditQueryDecision(auditScopeDecision)),
     summary: sanitizeDashboardObject({
       groupCount: groups.length,
       totalEvents: groups.reduce((total, group) => total + (typeof group.count === "number" ? group.count : 0), 0),
@@ -1801,6 +2324,11 @@ function buildOverview(
   llm: LLMGatewayReadModel,
   llmIntegration: LLMIntegrationTestReadModel,
   vaultIntegration: VaultIntegrationTestReadModel,
+  mergeQueueIntegration: MergeQueueIntegrationTestReadModel,
+  branchCleanup: BranchCleanupReadModel,
+  registryCompatibility: RegistryCompatibilityReadModel,
+  registryDrift: RegistryDriftReadModel,
+  registryCanaryApply: RegistryCanaryApplyReadModel,
   agents: AgentRunnerReadModel,
   policy: PolicyReadModel,
   policyBundles: PolicyBundleReadinessReadModel,
@@ -1853,6 +2381,8 @@ function buildOverview(
       branchOrchestratorOwnershipRecords: git.branchOwnershipRecords.length,
       branchOrchestratorBlockedCollisions: git.branchOrchestratorSummary.blockedCollisions ?? 0,
       branchOrchestratorSameWorkspaceBlockers: git.branchOrchestratorSummary.sameWorkspaceBlockers ?? 0,
+      conflictAssistantRequests: conflicts.conflictResolutionRequests.length,
+      conflictAssistantPlans: conflicts.conflictResolutionPlans.length,
       githubAppReadinessBlockers: githubApp.blockers.length,
       githubAppPermissions: githubApp.permissionMatrix.length,
       githubWebhookAllowlistedEvents: githubApp.webhookEventAllowlist.length,
@@ -1867,6 +2397,39 @@ function buildOverview(
       vaultIntegrationMissingGates: vaultIntegration.summary.missingGateCount ?? 0,
       vaultIntegrationUnsafeGates: vaultIntegration.summary.unsafeGateCount ?? 0,
       vaultIntegrationTestCases: vaultIntegration.testCases.length,
+      mergeQueueIntegrationMissingGates: mergeQueueIntegration.summary.missingGateCount ?? 0,
+      mergeQueueIntegrationUnsafeGates: mergeQueueIntegration.summary.unsafeGateCount ?? 0,
+      mergeQueueIntegrationTestCases: mergeQueueIntegration.testCases.length,
+      branchCleanupOrphans: branchCleanup.orphanRecords.length,
+      branchCleanupRecommendations: branchCleanup.recommendations.length,
+      branchCleanupDestructiveFutureRecommendations: branchCleanup.destructiveFutureRecommendations.length,
+      registryCompatibilityRules: registryCompatibility.rules.length,
+      registryCompatibilityCandidates: registryCompatibility.candidateDecisions.length,
+      registryDriftAssessments: registryDrift.assessments.length,
+      registryDriftCriticalAssessments: registryDrift.criticalAssessments.length,
+      registryDriftDegradedAssessments: registryDrift.degradedAssessments.length,
+      registryDriftWatchAssessments: registryDrift.watchAssessments.length,
+      registryDriftRecommendations: registryDrift.recommendations.length,
+      registryCanaryPlans: registryCanaryApply.canaryPlans.length,
+      registryCanaryRuns: registryCanaryApply.canaryRuns.length,
+      registryCanaryVerdicts: registryCanaryApply.canaryVerdicts.length,
+      registryApplyWorkflows: registryCanaryApply.applyWorkflows.length,
+      registryApplyGateDecisions: registryCanaryApply.applyGateDecisions.length,
+      registryApplyReadyForManualFuture: typeof registryCanaryApply.summary.readyForManualApplyCount === "number"
+        ? registryCanaryApply.summary.readyForManualApplyCount
+        : 0,
+      registryApplyBlocked: typeof registryCanaryApply.summary.blockedApplyDecisionCount === "number"
+        ? registryCanaryApply.summary.blockedApplyDecisionCount
+        : 0,
+      registryApplyMetadataOnlyDecisions: typeof registryCanaryApply.summary.metadataOnlyApplyDecisionCount === "number"
+        ? registryCanaryApply.summary.metadataOnlyApplyDecisionCount
+        : 0,
+      registryEvalSuites: registry.evalSuites.length,
+      registryEvalRuns: registry.evalRuns.length,
+      registryEvalFailedRuns: registry.evalVerdicts.filter((verdict) => verdict.overallVerdict === "failed").length,
+      registryCompatibilityCompatibleCandidates: registryCompatibility.compatibleCandidates.length,
+      registryCompatibilityIncompatibleCandidates: registryCompatibility.incompatibleCandidates.length,
+      registryCompatibilityBlockedByRegistryGateCandidates: registryCompatibility.blockedByRegistryGateCandidates.length,
       agentRuns: agents.runs.length,
       policyRules: policy.rules.length,
       policyBundleReadinessBlockers: policyBundles.blockers.length,
@@ -1948,6 +2511,12 @@ function buildOverview(
       llm: { status: "available", count: llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
       llmIntegration: { status: "available", count: llmIntegration.testCases.length, notes: ["LLM Gateway integration-test profile v1 is skipped by default and never exposes API keys, env values, or raw provider responses."] },
       vaultIntegration: { status: "available", count: vaultIntegration.testCases.length, notes: ["Vault integration-test profile v1 is skipped by default and never exposes Vault tokens, env values, secret paths, or secret values."] },
+      mergeQueueIntegration: { status: "available", count: mergeQueueIntegration.testCases.length, notes: ["Merge Queue live integration-test profile v1 is skipped by default; no real merge, remote rebase, force-push, or branch deletion is enabled and no env values, repo URLs, or branch names are exposed."] },
+      branchCleanup: { status: "available", count: branchCleanup.orphanRecords.length, notes: ["Branch Cleanup / Orphan Lease Recovery v1 is metadata-only; destructive cleanup remains future and no real branch deletion, worktree removal, PR closure, filesystem deletion, or remote Git operation is enabled."] },
+      registryCompatibility: { status: "available", count: registryCompatibility.candidateDecisions.length, notes: ["Skill/Harness Compatibility Matrix v1 is advisory metadata only; resolver gates remain authoritative and registry mutation, auto-apply, eval/canary execution, and provider/MCP calls are not enabled."] },
+      registryDrift: { status: "available", count: registryDrift.assessments.length, notes: ["Skill/Harness Drift Detection v1 is advisory metadata only; no real eval or canary executes, registry entries are not mutated, and auto-apply is denied by default."] },
+      registryCanaryApply: { status: "available", count: registryCanaryApply.applyWorkflows.length, notes: ["Canary Execution Harness + Apply Workflow v1 runs deterministic mock canaries only; apply execution remains future-only, auto-apply is denied by default, and active registry entries are never mutated."] },
+      registryEvalSuites: { status: "available", count: registry.evalSuites.length, notes: ["Eval Suite Execution Harness v1 executes deterministic mock/local cases only; external eval, LLM/MCP/vendor calls, canary execution, and auto-apply remain disabled."] },
       agents: { status: "available", count: agents.runs.length, notes: ["Runner command execution remains gated."] },
       policy: { status: "available", count: policy.rules.length, notes: [] },
       policyBundles: { status: "available", count: policyBundles.blockers.length, notes: ["Policy Bundle / OPA-Cedar v0 is planning-only; StaticPolicyEngine remains the runtime and no external policy engine is enabled."] },
@@ -1999,7 +2568,11 @@ function buildOverview(
   };
 }
 
-export function buildDashboardReadModels(context: DashboardReadModelContext, source: DashboardReadModelSource = "api"): DashboardReadModels {
+export function buildDashboardReadModels(context: DashboardReadModelContext, source: DashboardReadModelSource = "api", filterContext?: DashboardScopeFilterContext): DashboardReadModels {
+  const effectiveContext: DashboardReadModelContext = filterContext
+    ? { ...context, dashboardScopeFilterContext: filterContext }
+    : context;
+  context = effectiveContext;
   const tasks = buildTasks(context);
   const git = buildGit(context);
   const githubApp = buildGitHubApp(context);
@@ -2009,6 +2582,11 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const llm = buildLlm(context);
   const llmIntegration = buildLlmIntegration(context);
   const vaultIntegration = buildVaultIntegration(context);
+  const mergeQueueIntegration = buildMergeQueueIntegration(context);
+  const branchCleanup = buildBranchCleanup(context);
+  const registryCompatibility = buildRegistryCompatibility(context);
+  const registryDrift = buildRegistryDrift(context);
+  const registryCanaryApply = buildRegistryCanaryApply(context);
   const agents = buildAgents(context);
   const policy = buildPolicy(context);
   const policyBundles = buildPolicyBundles(context);
@@ -2036,19 +2614,32 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
   const cicd = buildCicd(context);
   const observability = buildObservability(context);
   const audit = buildAudit(context);
-  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, agents, policy, policyBundles, policyShadow, policyRuntimePoc, auth, authProduction, authProviders, providers, security, localAgents, mcp, scopes, tenantScopePlanning, tenantScopeEnforcement, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
+  const { readModel: dashboardScopeFilter, decisionsByPanel: filterDecisionsByPanel } = buildDashboardScopeFilter(context);
+  const filterService = context.dashboardScopeFilteringService;
+  const applyFilter = <T extends Record<string, unknown>>(panel: T, panelId: string): T => {
+    const decision = filterDecisionsByPanel.get(panelId);
+    if (!decision) return panel;
+    const filtered = filterService.filterPanelBody(panel, decision);
+    return filtered as T;
+  };
+  const overview = buildOverview(source, tasks, git, githubApp, githubAppIntegration, conflicts, registry, llm, llmIntegration, vaultIntegration, mergeQueueIntegration, branchCleanup, registryCompatibility, registryDrift, registryCanaryApply, agents, policy, policyBundles, policyShadow, policyRuntimePoc, auth, authProduction, authProviders, providers, security, localAgents, mcp, scopes, tenantScopePlanning, tenantScopeEnforcement, readiness, database, secretBackend, secretBackendDecision, vaultSecretBackend, staging, stagingDryRun, stagingReleaseCandidate, stagingExecution, cicd, observability, audit);
 
   return {
     overview: withScopeMetadata(overview, dashboardScopeMetadata(context, "overview")),
     tasks: withScopeMetadata(tasks, dashboardScopeMetadata(context, "tasks")),
     git: withScopeMetadata(git, dashboardScopeMetadata(context, "git")),
-    githubApp: withScopeMetadata(githubApp, dashboardScopeMetadata(context, "github_app")),
-    githubAppIntegration: withScopeMetadata(githubAppIntegration, dashboardScopeMetadata(context, "github_app_integration")),
+    githubApp: applyFilter(withScopeMetadata(githubApp, dashboardScopeMetadata(context, "github_app")), "github_app"),
+    githubAppIntegration: applyFilter(withScopeMetadata(githubAppIntegration, dashboardScopeMetadata(context, "github_app_integration")), "github_app_integration"),
     conflicts: withScopeMetadata(conflicts, dashboardScopeMetadata(context, "conflict_risks")),
     registry: withScopeMetadata(registry, dashboardScopeMetadata(context, "registry")),
     llm: withScopeMetadata(llm, dashboardScopeMetadata(context, "llm_gateway")),
-    llmIntegration: withScopeMetadata(llmIntegration, dashboardScopeMetadata(context, "llm_integration")),
+    llmIntegration: applyFilter(withScopeMetadata(llmIntegration, dashboardScopeMetadata(context, "llm_integration")), "llm_integration"),
     vaultIntegration: withScopeMetadata(vaultIntegration, dashboardScopeMetadata(context, "vault_integration")),
+    mergeQueueIntegration: withScopeMetadata(mergeQueueIntegration, dashboardScopeMetadata(context, "merge_queue_integration")),
+    branchCleanup: withScopeMetadata(branchCleanup, dashboardScopeMetadata(context, "branch_cleanup")),
+    registryCompatibility: withScopeMetadata(registryCompatibility, dashboardScopeMetadata(context, "registry_compatibility")),
+    registryDrift: withScopeMetadata(registryDrift, dashboardScopeMetadata(context, "registry_drift")),
+    registryCanaryApply: withScopeMetadata(registryCanaryApply, dashboardScopeMetadata(context, "registry_canary_apply")),
     agents: withScopeMetadata(agents, dashboardScopeMetadata(context, "local_agent_runner")),
     policy: withScopeMetadata(policy, dashboardScopeMetadata(context, "policy")),
     policyBundles: withScopeMetadata(policyBundles, dashboardScopeMetadata(context, "policy_bundles")),
@@ -2057,9 +2648,9 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     authProduction: withScopeMetadata(authProduction, dashboardScopeMetadata(context, "auth_production")),
     authProviders: withScopeMetadata(authProviders, dashboardScopeMetadata(context, "auth_provider_skeleton")),
     providers: withScopeMetadata(providers, dashboardScopeMetadata(context, "providers")),
-    security: withScopeMetadata(security, dashboardScopeMetadata(context, "security")),
+    security: applyFilter(withScopeMetadata(security, dashboardScopeMetadata(context, "security")), "security"),
     localAgents: withScopeMetadata(localAgents, dashboardScopeMetadata(context, "local_agent_protocol")),
-    mcp: withScopeMetadata(mcp, dashboardScopeMetadata(context, "mcp_gateway")),
+    mcp: applyFilter(withScopeMetadata(mcp, dashboardScopeMetadata(context, "mcp_gateway")), "mcp_gateway"),
     scopes: withScopeMetadata(scopes, dashboardScopeMetadata(context, "scope_model")),
     tenantScopePlanning,
     tenantScopeEnforcement,
@@ -2067,14 +2658,15 @@ export function buildDashboardReadModels(context: DashboardReadModelContext, sou
     database: withScopeMetadata(database, dashboardScopeMetadata(context, "database")),
     secretBackend: withScopeMetadata(secretBackend, dashboardScopeMetadata(context, "secret_backend")),
     secretBackendDecision: withScopeMetadata(secretBackendDecision, dashboardScopeMetadata(context, "secret_backend_decision")),
-    vaultSecretBackend: withScopeMetadata(vaultSecretBackend, dashboardScopeMetadata(context, "vault_secret_backend")),
-    staging: withScopeMetadata(staging, dashboardScopeMetadata(context, "staging")),
-    stagingDryRun: withScopeMetadata(stagingDryRun, dashboardScopeMetadata(context, "staging_dry_run")),
-    stagingReleaseCandidate: withScopeMetadata(stagingReleaseCandidate, dashboardScopeMetadata(context, "staging_rc")),
-    stagingExecution: withScopeMetadata(stagingExecution, dashboardScopeMetadata(context, "staging_execution")),
+    vaultSecretBackend: applyFilter(withScopeMetadata(vaultSecretBackend, dashboardScopeMetadata(context, "vault_secret_backend")), "vault_secret_backend"),
+    staging: applyFilter(withScopeMetadata(staging, dashboardScopeMetadata(context, "staging")), "staging"),
+    stagingDryRun: applyFilter(withScopeMetadata(stagingDryRun, dashboardScopeMetadata(context, "staging_dry_run")), "staging_dry_run"),
+    stagingReleaseCandidate: applyFilter(withScopeMetadata(stagingReleaseCandidate, dashboardScopeMetadata(context, "staging_rc")), "staging_rc"),
+    stagingExecution: applyFilter(withScopeMetadata(stagingExecution, dashboardScopeMetadata(context, "staging_execution")), "staging_execution"),
     cicd: withScopeMetadata(cicd, dashboardScopeMetadata(context, "ci_cd")),
-    observability: withScopeMetadata(observability, dashboardScopeMetadata(context, "observability")),
-    audit: withScopeMetadata(audit, dashboardScopeMetadata(context, "audit")),
-    policyRuntimePoc: withScopeMetadata(policyRuntimePoc, dashboardScopeMetadata(context, "policy_runtime_poc"))
+    observability: applyFilter(withScopeMetadata(observability, dashboardScopeMetadata(context, "observability")), "observability"),
+    audit: applyFilter(withScopeMetadata(audit, dashboardScopeMetadata(context, "audit")), "audit"),
+    policyRuntimePoc: withScopeMetadata(policyRuntimePoc, dashboardScopeMetadata(context, "policy_runtime_poc")),
+    dashboardScopeFilter: withScopeMetadata(dashboardScopeFilter, dashboardScopeMetadata(context, "tenant_scope_enforcement"))
   };
 }

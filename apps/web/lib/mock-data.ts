@@ -1,5 +1,7 @@
+import os from "node:os";
+import path from "node:path";
 import { createSeededStore } from "@aichestra/db";
-import { MergeQueuePolicyService } from "@aichestra/core";
+import { ConflictResolutionAssistantService, MergeQueuePolicyService, PrOwnershipService, RealMergeExecutionPolicyService } from "@aichestra/core";
 import { BranchOrchestratorService, GitHubGitProvider, GitIntegrationService, MockGitProvider } from "@aichestra/git-adapter";
 import { LocalAgentProtocolService, OpenAICompatibleLLMProvider, ProviderAbstractionService, createDefaultLlmGatewayService, seedLlmModels } from "@aichestra/llm-gateway";
 import { PolicyService, createPolicyContext, createPolicyResource, createPolicySubject } from "@aichestra/policy";
@@ -7,6 +9,7 @@ import { PolicyBackedRegistryMutationAuthorizer, createRegistryService } from "@
 import {
   AgentRunCoordinationService,
   AgentRunnerService,
+  AgentWorktreeAllocationService,
   EditIntentGraphService,
   MockAgentRunner,
   editIntentGraphToDto,
@@ -19,6 +22,10 @@ import {
   agentWorkspaceLeaseToDto,
   agentWorkspaceLifecycleEventToDto,
   agentWorkspaceToDto,
+  agentWorktreeAllocationRequestToDto,
+  agentWorktreeAllocationResultToDto,
+  agentWorktreeAllocationSummaryToDto,
+  agentWorktreeSafetyCheckToDto,
   createAgentRunnerConfigFromEnv
 } from "@aichestra/runner";
 import { SecurityControlService } from "@aichestra/security";
@@ -185,6 +192,39 @@ export async function getDashboardData() {
     }, {
       actorId: task.requesterUserId,
       metadata: { source: "dashboard" }
+    });
+  }
+  const worktreeRoot = path.join(os.tmpdir(), "aichestra-dashboard-worktrees");
+  const worktreeBranchLease = latestTaskRun
+    ? store.listBranchLeases("repo_demo_backend", "active").find((lease) => lease.taskRunId === latestTaskRun.id)
+    : undefined;
+  const agentWorktreeAllocationService = new AgentWorktreeAllocationService({
+    allowedWorkspaceRoots: [worktreeRoot],
+    branchLeaseLookup: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+    workspaceLeaseLookup: (workspaceLeaseId) => agentRunnerService.getWorkspaceLease(workspaceLeaseId)
+  });
+  if (agentRunnerRun && worktreeBranchLease) {
+    agentWorktreeAllocationService.dryRunAllocate({
+      repoId: worktreeBranchLease.repoId,
+      baseBranch: worktreeBranchLease.baseBranch,
+      branchName: worktreeBranchLease.branchName,
+      branchLeaseId: worktreeBranchLease.id,
+      workspaceLeaseId: agentRunnerRun.workspaceLeaseId,
+      requestedPath: path.join(worktreeRoot, "dashboard-agent-worktree"),
+      workspaceRoot: worktreeRoot,
+      agentRunId: agentRunnerRun.id,
+      taskId: task.id,
+      userId: task.requesterUserId,
+      metadata: {
+        source: "dashboard_demo",
+        fixtureOnly: true,
+        secretPreview: "OPENAI_API_KEY=redacted-by-service"
+      }
+    }, {
+      actorId: task.requesterUserId,
+      requestId: "dashboard-demo-worktree",
+      correlationId: "dashboard-demo",
+      source: "dashboard"
     });
   }
   const agentRunCoordinationService = new AgentRunCoordinationService({
@@ -634,6 +674,258 @@ export async function getDashboardData() {
     approvalStatus: "approved",
     metadata: { source: "dashboard", releaseBlocker: true }
   });
+  const conflictResolutionAssistantService = new ConflictResolutionAssistantService({
+    dataSource: {
+      getMergeSimulation: (mergeSimulationId) => store.listMergeSimulations().find((simulation) => simulation.id === mergeSimulationId),
+      latestMergeSimulationForLease: (branchLeaseId) => store.latestMergeSimulationForLease(branchLeaseId),
+      getMergeQueueEntry: (mergeQueueEntryId) => store.getMergeQueueEntry(mergeQueueEntryId),
+      getConflictRisk: (conflictRiskId) => store.computeRepoConflictRisks("repo_demo_backend").find((risk) => risk.id === conflictRiskId),
+      highestConflictRiskForLease: (branchLeaseId) => store.highestConflictRiskForLease(branchLeaseId),
+      getBranchLease: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+      getEditOverlap: (editOverlapId) => {
+        const overlap = editIntentGraphService.listOverlapAssessments().find((candidate) => candidate.id === editOverlapId);
+        return overlap ? {
+          id: overlap.id,
+          repoId: overlap.repoId,
+          sessionIds: overlap.sessionIds,
+          overlapKind: overlap.overlapKind,
+          files: overlap.files,
+          directories: overlap.directories,
+          severity: overlap.severity,
+          recommendation: overlap.recommendation,
+          reason: overlap.reason,
+          metadata: overlap.metadata
+        } : undefined;
+      },
+      listEditOverlapsForRequest: (request) => editIntentGraphService.listOverlapAssessments({ repoId: request.repoId }).map((overlap) => ({
+        id: overlap.id,
+        repoId: overlap.repoId,
+        sessionIds: overlap.sessionIds,
+        overlapKind: overlap.overlapKind,
+        files: overlap.files,
+        directories: overlap.directories,
+        severity: overlap.severity,
+        recommendation: overlap.recommendation,
+        reason: overlap.reason,
+        metadata: overlap.metadata
+      }))
+    }
+  });
+  const dashboardMergeQueueEntry = store.listMergeQueueEntries("repo_demo_backend")[0];
+  const dashboardConflictRequest = dashboardMergeQueueEntry
+    ? conflictResolutionAssistantService.createRequest({
+      repoId: dashboardMergeQueueEntry.repoId,
+      baseBranch: "main",
+      sourceBranch: dashboardMergeQueueEntry.branchName,
+      targetBranch: "main",
+      mergeQueueEntryId: dashboardMergeQueueEntry.id,
+      branchLeaseIds: [dashboardMergeQueueEntry.branchLeaseId],
+      files: ["src/auth/session.ts", "tests/auth/session.test.ts"],
+      metadata: { source: "dashboard", demoSecret: "OPENAI_API_KEY=sk-dashboard-secret" }
+    }, {
+      actorId: "mock-dashboard",
+      serviceAccountId: "dashboard_read_model",
+      source: "dashboard"
+    })
+    : undefined;
+  if (dashboardConflictRequest) {
+    conflictResolutionAssistantService.summarizeConflict(dashboardConflictRequest.id, { actorId: "mock-dashboard", source: "dashboard" });
+  }
+  const dashboardConflictPlan = dashboardConflictRequest
+    ? conflictResolutionAssistantService.generateResolutionPlan(dashboardConflictRequest.id, { actorId: "mock-dashboard", source: "dashboard" })
+    : undefined;
+  const prOwnershipService = new PrOwnershipService({
+    dataSource: {
+      getBranchLease: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+      getMergeQueueEntry: (mergeQueueEntryId) => store.getMergeQueueEntry(mergeQueueEntryId),
+      listMergeQueueEntries: (repoId) => store.listMergeQueueEntries(repoId),
+      getPullRequest: (pullRequestId) => store.listPullRequests().find((pullRequest) => pullRequest.id === pullRequestId),
+      getPullRequestSyncState: (repoId, pullRequestNumber) => store.getGitPullRequestSyncState(repoId, pullRequestNumber)
+    },
+    policyEvaluator: (input) => {
+      const decision = policyService.evaluate({
+        subject: createPolicySubject({
+          actorId: input.context.actorId ?? "mock-dashboard",
+          principalId: input.context.principalId,
+          actorKind: input.context.serviceAccountId ? "service_account" : "system",
+          roles: ["system", "reviewer", "developer"],
+          teams: input.context.teams,
+          serviceAccountId: input.context.serviceAccountId,
+          requestId: input.context.requestId,
+          correlationId: input.context.correlationId,
+          source: "dashboard_pr_ownership"
+        }),
+        action: input.action,
+        resource: createPolicyResource({
+          resourceKind: "pull_request",
+          resourceId: input.ownership?.pullRequestId ?? input.handoff?.pullRequestId ?? input.ownership?.id,
+          metadata: input.metadata
+        }),
+        context: createPolicyContext({
+          taskId: input.ownership?.taskId,
+          taskRunId: input.ownership?.taskRunId,
+          repoId: input.ownership?.repoId ?? input.handoff?.repoId,
+          branchName: input.ownership?.branchName ?? input.handoff?.branchName,
+          environment: {
+            metadataOnly: true,
+            remotePrUpdate: false,
+            remoteReviewerAssignment: false,
+            githubApiCalls: false,
+            autoMergeEnabled: false,
+            branchDeletionEnabled: false,
+            workspaceMutation: false,
+            secretsExposed: false,
+            envValuesExposed: false,
+            futureAgentHandoff: input.metadata.handoffKind === "human_to_agent_future"
+          },
+          metadata: { ...input.metadata, source: "dashboard" }
+        })
+      });
+      return {
+        allowed: decision.allowed,
+        decision: decision.decision,
+        reason: decision.reason,
+        policyDecisionId: decision.id,
+        matchedRuleIds: decision.matchedRuleIds
+      };
+    }
+  });
+  const dashboardPrOwnership = dashboardMergeQueueEntry
+    ? prOwnershipService.createOwnership({
+      repoId: dashboardMergeQueueEntry.repoId,
+      pullRequestId: dashboardMergeQueueEntry.pullRequestId,
+      pullRequestNumber: 1,
+      branchName: dashboardMergeQueueEntry.branchName,
+      branchLeaseId: dashboardMergeQueueEntry.branchLeaseId,
+      workspaceLeaseId: agentRunnerRun?.workspaceLeaseId,
+      mergeQueueEntryId: dashboardMergeQueueEntry.id,
+      conflictResolutionPlanId: dashboardConflictPlan?.id,
+      taskId: dashboardMergeQueueEntry.taskId,
+      taskRunId: dashboardMergeQueueEntry.taskRunId,
+      agentRunId: agentRunnerRun?.id,
+      ownerActorId: agentRunnerRun?.id ?? "agent_dashboard_codex",
+      ownerKind: "agent",
+      reviewerActorIds: ["user_demo_reviewer"],
+      metadata: {
+        source: "dashboard",
+        noRemotePrUpdate: true,
+        secretPreview: "GITHUB_TOKEN=redacted-by-service"
+      }
+    }, {
+      actorId: "mock-dashboard",
+      serviceAccountId: "dashboard_read_model",
+      source: "dashboard"
+    })
+    : undefined;
+  if (dashboardPrOwnership) {
+    prOwnershipService.addReviewer({
+      ownershipRecordId: dashboardPrOwnership.id,
+      reviewerActorId: "user_demo_reviewer",
+      metadata: { source: "dashboard", remoteReviewerAssignment: false }
+    }, { actorId: "mock-dashboard", source: "dashboard" });
+    const handoff = prOwnershipService.requestHandoff({
+      ownershipRecordId: dashboardPrOwnership.id,
+      fromActorId: dashboardPrOwnership.ownerActorId,
+      toActorId: "user_demo_reviewer",
+      handoffKind: "agent_to_human",
+      reason: "dashboard_fixture_agent_to_human_review"
+    }, { actorId: "mock-dashboard", source: "dashboard" });
+    prOwnershipService.decideHandoff(handoff.id, {
+      decision: "accept",
+      decidedByActorId: "user_demo_reviewer",
+      reason: "dashboard_fixture_handoff_accepted"
+    }, { actorId: "user_demo_reviewer", source: "dashboard" });
+  }
+  const realMergeExecutionPolicyService = new RealMergeExecutionPolicyService({
+    dataSource: {
+      getBranchLease: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+      getMergeQueueEntry: (mergeQueueEntryId) => store.getMergeQueueEntry(mergeQueueEntryId),
+      latestMergeSimulationForLease: (branchLeaseId) => store.latestMergeSimulationForLease(branchLeaseId),
+      getMergeSimulation: (mergeSimulationId) => store.listMergeSimulations().find((simulation) => simulation.id === mergeSimulationId),
+      highestConflictRiskForLease: (branchLeaseId) => store.highestConflictRiskForLease(branchLeaseId),
+      getWorkspaceLease: (workspaceLeaseId) => {
+        const workspace = agentRunnerService.getWorkspaceLease(workspaceLeaseId);
+        return workspace ? {
+          id: workspace.id,
+          repoId: workspace.repoId,
+          branchLeaseId: workspace.branchLeaseId,
+          taskRunId: workspace.taskRunId,
+          branchName: workspace.branchName,
+          status: workspace.status,
+          isolationStatus: workspace.isolationStatus,
+          workspaceKind: workspace.workspaceKind,
+          metadata: { workspacePathRedacted: true, metadataOnly: true }
+        } : undefined;
+      },
+      listEditOverlapsForRequest: (request) => editIntentGraphService.listOverlapAssessments({ repoId: request.repoId }).map((overlap) => ({
+        id: overlap.id,
+        repoId: overlap.repoId,
+        overlapKind: overlap.overlapKind,
+        files: overlap.files,
+        severity: overlap.severity,
+        recommendation: overlap.recommendation,
+        metadata: { source: "dashboard_fixture" }
+      })),
+      getConflictResolutionPlan: (planId) => {
+        const plan = conflictResolutionAssistantService.getPlan(planId);
+        return plan ? {
+          id: plan.id,
+          status: plan.status,
+          applyAllowed: plan.applyAllowed,
+          metadata: plan.metadata
+        } : undefined;
+      },
+      getPrOwnershipReadiness: (request) => {
+        if (request.mergeQueueEntryId) {
+          const readiness = prOwnershipService.getMergeQueueOwnershipReadiness(request.mergeQueueEntryId);
+          return {
+            status: readiness.status,
+            ownershipRecordId: readiness.ownershipRecordId,
+            ownerActorId: readiness.ownerActorId,
+            metadata: { mergeQueueEntryId: readiness.mergeQueueEntryId }
+          };
+        }
+        return undefined;
+      },
+      getMergeQueueReadiness: (mergeQueueEntryId) => {
+        const decision = mergeQueuePolicyPreview.decisions.find((candidate) => candidate.queueEntryId === mergeQueueEntryId);
+        return decision ? {
+          decision: decision.decision,
+          blockingReasons: decision.blockingReasons,
+          warnings: decision.warnings,
+          metadata: { source: "dashboard_fixture" }
+        } : undefined;
+      }
+    }
+  });
+  const dashboardRealMergeDecision = dashboardMergeQueueEntry
+    ? realMergeExecutionPolicyService.evaluateRequest({
+      repoId: dashboardMergeQueueEntry.repoId,
+      baseBranch: "main",
+      sourceBranch: dashboardMergeQueueEntry.branchName,
+      mergeQueueEntryId: dashboardMergeQueueEntry.id,
+      branchLeaseId: dashboardMergeQueueEntry.branchLeaseId,
+      workspaceLeaseId: agentRunnerRun?.workspaceLeaseId,
+      prOwnershipId: dashboardPrOwnership?.id,
+      conflictResolutionPlanId: dashboardConflictPlan?.id,
+      validationStatus: "passed",
+      approvalStatus: "approved",
+      rollbackPlanStatus: "passed",
+      tenantScopeStatus: "match",
+      metadata: {
+        source: "dashboard",
+        files: ["src/auth/session.ts", "tests/auth/session.test.ts"],
+        mergeExecutionEnabled: false,
+        autoMergeEnabled: false
+      }
+    }, {
+      requestId: "dashboard-real-merge-request",
+      correlationId: "dashboard-real-merge-correlation",
+      actorId: "mock-dashboard",
+      serviceAccountId: "dashboard_read_model",
+      source: "dashboard"
+    })
+    : undefined;
   const improvement = createImprovementDemoData();
 
   return {
@@ -655,6 +947,18 @@ export async function getDashboardData() {
     mergeQueuePolicy: mergeQueuePolicyPreview.policy,
     mergeReadinessDecisions: mergeQueuePolicyPreview.decisions,
     mergeQueueHolds: mergeQueuePolicyPreview.holds,
+    conflictResolutionRequests: conflictResolutionAssistantService.listRequests(),
+    conflictSummaries: conflictResolutionAssistantService.listSummaries(),
+    conflictResolutionPlans: conflictResolutionAssistantService.listPlans(),
+    conflictResolutionRecommendations: dashboardConflictPlan ? conflictResolutionAssistantService.listRecommendations(dashboardConflictPlan.id) : [],
+    conflictAssistantSummary: conflictResolutionAssistantService.getSummary(),
+    realMergeExecutionPolicy: realMergeExecutionPolicyService.getPolicy(),
+    realMergeExecutionRequests: realMergeExecutionPolicyService.listRequests(),
+    realMergeExecutionDecisions: dashboardRealMergeDecision ? realMergeExecutionPolicyService.listDecisions() : [],
+    realMergePreconditions: dashboardRealMergeDecision ? realMergeExecutionPolicyService.listPreconditions(dashboardRealMergeDecision.requestId) : [],
+    realMergeForbiddenOperations: realMergeExecutionPolicyService.listForbiddenOperations(),
+    realMergePostExecutionEvidenceTemplate: realMergeExecutionPolicyService.getPostExecutionEvidenceTemplate(),
+    realMergeExecutionSummary: realMergeExecutionPolicyService.getSummary(),
     skills: store.listSkills(),
     harnesses: store.listHarnesses(),
     instructions: store.listInstructions(),
@@ -678,6 +982,9 @@ export async function getDashboardData() {
       pullRequestId: entry.pullRequestId,
       recommendation: entry.recommendation,
       policyDecision: mergeQueuePolicyPreview.decisions.find((decision) => decision.queueEntryId === entry.id)?.decision ?? "not_evaluated",
+      ownershipStatus: prOwnershipService.getMergeQueueOwnershipReadiness(entry).status,
+      ownerActorId: prOwnershipService.getMergeQueueOwnershipReadiness(entry).ownerActorId,
+      ownershipRecordId: prOwnershipService.getMergeQueueOwnershipReadiness(entry).ownershipRecordId,
       mergeExecutionEnabled: false
     })),
     branchOrchestrationRequests: branchOrchestratorService.listOrchestrationRequests(),
@@ -687,6 +994,12 @@ export async function getDashboardData() {
     branchNamingPolicies: branchOrchestratorService.listNamingPolicies(),
     branchOrchestratorAuditEvents: branchOrchestratorService.listAuditEvents(),
     branchOrchestratorSummary: branchOrchestratorService.getSummary(),
+    prOwnershipRecords: prOwnershipService.listOwnership(),
+    prHandoffRequests: prOwnershipService.listHandoffs(),
+    prHandoffDecisions: prOwnershipService.listDecisions(),
+    prOwnershipAuditEvents: prOwnershipService.listAuditEvents(),
+    prOwnershipSummary: prOwnershipService.getSummary(),
+    prMergeQueueOwnershipReadiness: prOwnershipService.listMergeQueueOwnershipReadiness("repo_demo_backend"),
     gitAuditEvents: gitService.listGitAuditEvents(),
     gitRemoteAuditEvents: gitService.listGitAuditEvents().filter((event) => event.action.includes("github_") || event.action.includes("remote_git")),
     remoteBlockedOperation,
@@ -712,6 +1025,10 @@ export async function getDashboardData() {
     agentWorkspaceLeases: agentRunnerService.listWorkspaceLeases().map(agentWorkspaceLeaseToDto),
     agentWorkspaceLifecycleEvents: agentRunnerService.listWorkspaceLifecycleEvents().map(agentWorkspaceLifecycleEventToDto),
     agentWorkspaceCleanupDecisions: agentRunnerService.listWorkspaceCleanupDecisions().map(agentWorkspaceCleanupDecisionToDto),
+    agentWorktreeAllocationRequests: agentWorktreeAllocationService.listRequests().map(agentWorktreeAllocationRequestToDto),
+    agentWorktreeAllocationResults: agentWorktreeAllocationService.listAllocations().map(agentWorktreeAllocationResultToDto),
+    agentWorktreeSafetyChecks: agentWorktreeAllocationService.listSafetyChecks().map(agentWorktreeSafetyCheckToDto),
+    agentWorktreeAllocationSummary: agentWorktreeAllocationSummaryToDto(agentWorktreeAllocationService.getSummary()),
     agentCoordinationSessions: agentRunCoordinationService.listSessions(),
     agentCoordinationGroups: agentRunCoordinationService.listCoordinationGroups(),
     agentSessionOverlaps: agentRunCoordinationService.listSessionOverlaps(),

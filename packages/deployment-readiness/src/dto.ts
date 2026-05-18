@@ -37,6 +37,10 @@ import type {
   VaultIntegrationTestProfile,
   VaultIntegrationTestReadinessSummary,
   VaultIntegrationTestSafetyCheck,
+  MergeQueueIntegrationTestCase,
+  MergeQueueIntegrationTestProfile,
+  MergeQueueIntegrationTestReadinessSummary,
+  MergeQueueIntegrationSafetyCheck,
   GitHubAppInstallation,
   GitHubAppPermissionMatrixEntry,
   GitHubAppProductionRisk,
@@ -264,6 +268,22 @@ export function vaultIntegrationTestSafetyCheckToDto(check: VaultIntegrationTest
 }
 
 export function vaultIntegrationTestReadinessSummaryToDto(summary: VaultIntegrationTestReadinessSummary) {
+  return sanitize(summary);
+}
+
+export function mergeQueueIntegrationTestProfileToDto(profile: MergeQueueIntegrationTestProfile) {
+  return sanitize(profile);
+}
+
+export function mergeQueueIntegrationTestCaseToDto(testCase: MergeQueueIntegrationTestCase) {
+  return sanitize(testCase);
+}
+
+export function mergeQueueIntegrationSafetyCheckToDto(check: MergeQueueIntegrationSafetyCheck) {
+  return sanitize(check);
+}
+
+export function mergeQueueIntegrationTestReadinessSummaryToDto(summary: MergeQueueIntegrationTestReadinessSummary) {
   return sanitize(summary);
 }
 

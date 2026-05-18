@@ -97,6 +97,18 @@ export type TenantScopeEnforcementReadModel = {
   noSecretStatus: DashboardJsonObject;
 };
 
+export type DashboardScopeFilterReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  decisions: DashboardJsonObject[];
+  visiblePanels: DashboardJsonObject[];
+  redactedPanels: DashboardJsonObject[];
+  hiddenPanels: DashboardJsonObject[];
+  warningPanels: DashboardJsonObject[];
+  context: DashboardJsonObject;
+  noSecretStatus: DashboardJsonObject;
+};
+
 export type DashboardOverviewReadModel = {
   scopeMetadata?: ScopedReadModelMetadata;
   generatedAt: string;
@@ -139,6 +151,12 @@ export type GitIntegrationReadModel = {
   branchNamingPolicies: DashboardJsonObject[];
   branchOrchestratorAuditEvents: DashboardJsonObject[];
   branchOrchestratorSummary: DashboardJsonObject;
+  prOwnershipRecords: DashboardJsonObject[];
+  prHandoffRequests: DashboardJsonObject[];
+  prHandoffDecisions: DashboardJsonObject[];
+  prOwnershipAuditEvents: DashboardJsonObject[];
+  prOwnershipSummary: DashboardJsonObject;
+  prMergeQueueOwnershipReadiness: DashboardJsonObject[];
   auditEvents: DashboardJsonObject[];
   remoteAuditEvents: DashboardJsonObject[];
   blockedExamples: DashboardJsonObject[];
@@ -154,6 +172,18 @@ export type ConflictManagerReadModel = {
   mergeQueuePolicy: DashboardJsonObject;
   mergeReadinessDecisions: DashboardJsonObject[];
   mergeQueueHolds: DashboardJsonObject[];
+  conflictResolutionRequests: DashboardJsonObject[];
+  conflictSummaries: DashboardJsonObject[];
+  conflictResolutionPlans: DashboardJsonObject[];
+  conflictResolutionRecommendations: DashboardJsonObject[];
+  conflictAssistantSummary: DashboardJsonObject;
+  realMergeExecutionPolicy: DashboardJsonObject;
+  realMergeExecutionRequests: DashboardJsonObject[];
+  realMergeExecutionDecisions: DashboardJsonObject[];
+  realMergePreconditions: DashboardJsonObject[];
+  realMergeForbiddenOperations: DashboardJsonObject[];
+  realMergePostExecutionEvidenceTemplate: DashboardJsonObject;
+  realMergeExecutionSummary: DashboardJsonObject;
   summary: DashboardJsonObject;
 };
 
@@ -168,6 +198,23 @@ export type RegistryReadModel = {
   auditLogs: DashboardJsonObject[];
   revisions: DashboardJsonObject[];
   evalResults: DashboardJsonObject[];
+  scopeSummary: DashboardJsonObject;
+  scopeDecisions: DashboardJsonObject[];
+  approvalQueueScopeSummary: DashboardJsonObject;
+  artifactTrustSummary: DashboardJsonObject;
+  artifactTrustDecisions: DashboardJsonObject[];
+  artifactTrustPolicies: DashboardJsonObject[];
+  artifactTrustStatus: DashboardJsonObject;
+  evalSuiteSummary: DashboardJsonObject;
+  evalSuites: DashboardJsonObject[];
+  evalCases: DashboardJsonObject[];
+  evalRuns: DashboardJsonObject[];
+  evalCaseResults: DashboardJsonObject[];
+  evalVerdicts: DashboardJsonObject[];
+  evalAttachments: DashboardJsonObject[];
+  evalSuiteStatus: DashboardJsonObject;
+  resolverScopeStatus: DashboardJsonObject;
+  mutationScopeStatus: DashboardJsonObject;
   governance: DashboardJsonObject;
 };
 
@@ -203,6 +250,10 @@ export type AgentRunnerReadModel = {
   workspaceEvents: DashboardJsonObject[];
   cleanupDecisions: DashboardJsonObject[];
   workspaceLifecycle: DashboardJsonObject;
+  worktreeAllocationRequests: DashboardJsonObject[];
+  worktreeAllocationResults: DashboardJsonObject[];
+  worktreeSafetyChecks: DashboardJsonObject[];
+  worktreeAllocationSummary: DashboardJsonObject;
   coordinationSessions: DashboardJsonObject[];
   coordinationGroups: DashboardJsonObject[];
   sessionOverlaps: DashboardJsonObject[];
@@ -649,6 +700,86 @@ export type VaultIntegrationTestReadModel = {
   noSecretStatus: DashboardJsonObject;
 };
 
+export type MergeQueueIntegrationTestReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  profile: DashboardJsonObject;
+  testCases: DashboardJsonObject[];
+  gatedLiveTestCases: DashboardJsonObject[];
+  mockTestCases: DashboardJsonObject[];
+  safetyChecks: DashboardJsonObject[];
+  blockers: DashboardJsonObject[];
+  warnings: DashboardJsonObject[];
+  gateStatus: DashboardJsonObject;
+  operationPolicy: DashboardJsonObject;
+  cleanupPolicy: DashboardJsonObject;
+  noSecretStatus: DashboardJsonObject;
+};
+
+export type RegistryCompatibilityReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  rules: DashboardJsonObject[];
+  skillProfiles: DashboardJsonObject[];
+  harnessProfiles: DashboardJsonObject[];
+  instructionProfiles: DashboardJsonObject[];
+  candidateDecisions: DashboardJsonObject[];
+  compatibleCandidates: DashboardJsonObject[];
+  warningCandidates: DashboardJsonObject[];
+  incompatibleCandidates: DashboardJsonObject[];
+  blockedByPolicyCandidates: DashboardJsonObject[];
+  blockedByRegistryGateCandidates: DashboardJsonObject[];
+  futureUnknownCandidates: DashboardJsonObject[];
+  resolverGateRelationship: DashboardJsonObject;
+  scopeRelationship: DashboardJsonObject;
+  noAutoApplyStatus: DashboardJsonObject;
+};
+
+export type RegistryDriftReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  signals: DashboardJsonObject[];
+  baselines: DashboardJsonObject[];
+  assessments: DashboardJsonObject[];
+  recommendations: DashboardJsonObject[];
+  criticalAssessments: DashboardJsonObject[];
+  degradedAssessments: DashboardJsonObject[];
+  watchAssessments: DashboardJsonObject[];
+  insufficientDataAssessments: DashboardJsonObject[];
+  governanceFollowUps: DashboardJsonObject[];
+  noAutoApplyStatus: DashboardJsonObject;
+};
+
+export type RegistryCanaryApplyReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  canaryPlans: DashboardJsonObject[];
+  canaryRuns: DashboardJsonObject[];
+  canaryResults: DashboardJsonObject[];
+  canaryVerdicts: DashboardJsonObject[];
+  applyWorkflows: DashboardJsonObject[];
+  applyGateDecisions: DashboardJsonObject[];
+  rollbackPlans: DashboardJsonObject[];
+  blockedApplyDecisions: DashboardJsonObject[];
+  metadataOnlyApplyDecisions: DashboardJsonObject[];
+  noAutoApplyStatus: DashboardJsonObject;
+};
+
+export type BranchCleanupReadModel = {
+  scopeMetadata?: ScopedReadModelMetadata;
+  summary: DashboardJsonObject;
+  orphanRecords: DashboardJsonObject[];
+  criticalOrphanRecords: DashboardJsonObject[];
+  highSeverityOrphanRecords: DashboardJsonObject[];
+  recommendations: DashboardJsonObject[];
+  destructiveFutureRecommendations: DashboardJsonObject[];
+  metadataOnlyRecommendations: DashboardJsonObject[];
+  decisions: DashboardJsonObject[];
+  recoveryActions: DashboardJsonObject[];
+  policyStatus: DashboardJsonObject;
+  noDestructiveStatus: DashboardJsonObject;
+};
+
 export type ObservabilityReadModel = {
   scopeMetadata?: ScopedReadModelMetadata;
   config: DashboardJsonObject;
@@ -665,6 +796,10 @@ export type ObservabilityReadModel = {
   traceSummary: DashboardJsonObject;
   sourceCoverage: DashboardJsonObject[];
   productionReadinessBlockers: DashboardJsonObject[];
+  auditScopeSummary: DashboardJsonObject;
+  auditScopeDecision: DashboardJsonObject;
+  auditScopeRedactionPlans: DashboardJsonObject[];
+  auditScopeStatus: DashboardJsonObject;
   noSecretStatus: DashboardJsonObject;
 };
 
@@ -672,6 +807,8 @@ export type AuditSummaryReadModel = {
   scopeMetadata?: ScopedReadModelMetadata;
   auditGroups: DashboardJsonObject[];
   recentEvents: DashboardJsonObject[];
+  auditScopeSummary: DashboardJsonObject;
+  auditScopeDecision: DashboardJsonObject;
   summary: DashboardJsonObject;
 };
 
@@ -686,6 +823,11 @@ export type DashboardReadModels = {
   llm: LLMGatewayReadModel;
   llmIntegration: LLMIntegrationTestReadModel;
   vaultIntegration: VaultIntegrationTestReadModel;
+  mergeQueueIntegration: MergeQueueIntegrationTestReadModel;
+  branchCleanup: BranchCleanupReadModel;
+  registryCompatibility: RegistryCompatibilityReadModel;
+  registryDrift: RegistryDriftReadModel;
+  registryCanaryApply: RegistryCanaryApplyReadModel;
   agents: AgentRunnerReadModel;
   policy: PolicyReadModel;
   policyBundles: PolicyBundleReadinessReadModel;
@@ -701,6 +843,7 @@ export type DashboardReadModels = {
   scopes: ScopeReadinessReadModel;
   tenantScopePlanning: DashboardTenantScopePlanningReadModel;
   tenantScopeEnforcement: TenantScopeEnforcementReadModel;
+  dashboardScopeFilter: DashboardScopeFilterReadModel;
   readiness: DeploymentReadinessReadModel;
   database: DatabaseOperationsReadModel;
   secretBackend: SecretBackendMigrationReadModel;
@@ -726,6 +869,11 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/llm",
   "/dashboard/llm-integration",
   "/dashboard/vault-integration",
+  "/dashboard/merge-queue-integration",
+  "/dashboard/git-cleanup",
+  "/dashboard/registry-compatibility",
+  "/dashboard/registry-drift",
+  "/dashboard/registry-canary-apply",
   "/dashboard/agents",
   "/dashboard/policy",
   "/dashboard/policy-bundles",
@@ -741,6 +889,7 @@ export const dashboardReadModelEndpoints = [
   "/dashboard/scopes",
   "/dashboard/tenant-scope",
   "/dashboard/tenant-enforcement",
+  "/dashboard/scope-filter",
   "/dashboard/readiness",
   "/dashboard/database",
   "/dashboard/secret-backend",

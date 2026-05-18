@@ -1,6 +1,6 @@
 # Tenant Scope Enforcement v1 Plan
 
-Status: ready for implementation.
+Status: implemented as `v1_implemented_partial`.
 
 Tenant Scope Enforcement v1 is a limited mock-safe enforcement scaffold. It introduces reusable scope comparison decisions and representative dashboard/readiness metadata, but it does not implement production tenant isolation.
 
@@ -112,3 +112,7 @@ These summaries should include enforcement mode, scope decision summary, missing
 ## Validation Plan
 
 Run deterministic tests for decision models, service helpers, policy-deny preservation, representative dashboard/readiness metadata, no-secret/no-env exposure, and regressions. Then run `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `git diff --check`.
+
+## Implementation Result
+
+Tenant Scope Enforcement v1 is implemented as partial representative metadata in `packages/auth/src/tenant-scope-enforcement.ts`, API/readiness/dashboard surfaces, docs, inventory, and deterministic tests. It does not implement production tenant isolation, dashboard/readiness filtering, audit query filtering, production Auth/RBAC, row-level security, or real tenant provisioning.

@@ -2,8 +2,8 @@ import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { AichestraError, MergeQueuePolicyService, NotFoundError, isTaskStatus } from "@aichestra/core";
-import type { BranchLeaseStatus, MergeQueueHoldKind, MergeQueueHoldSeverity, MergeQueuePolicyAction, MergeQueuePolicyContext, MergeSimulationMode, MergeSimulationStatus, RegistryVersionRef, Task } from "@aichestra/core";
+import { AichestraError, ConflictResolutionAssistantService, MergeQueuePolicyService, NotFoundError, PrOwnershipService, RealMergeExecutionPolicyService, isTaskStatus } from "@aichestra/core";
+import type { BranchLeaseStatus, ConflictResolutionRequestContext, MergeQueueHoldKind, MergeQueueHoldSeverity, MergeQueuePolicyAction, MergeQueuePolicyContext, MergeSimulationMode, MergeSimulationStatus, PrHandoffDecisionValue, PrHandoffKind, PrHandoffStatus, PrOwnerKind, PrOwnershipContext, PrOwnershipStatus, RealMergeEvidenceStatus, RealMergeExecutionContext, RegistryVersionRef, Task } from "@aichestra/core";
 import type { TaskStatus } from "@aichestra/core";
 import {
   InMemoryAichestraStore,
@@ -32,6 +32,8 @@ import {
   cicdRiskToDto,
   captureLocalStagingSignoffScope,
   createDashboardReadinessTenantScopePlanningService,
+  createDashboardScopeFilteringService,
+  parseDashboardFilterHeaders,
   createDeploymentReadinessService,
   dashboardPanelScopeSummaryToDto,
   databaseAuditGrowthPlanToDto,
@@ -73,6 +75,10 @@ import {
   vaultIntegrationTestProfileToDto,
   vaultIntegrationTestReadinessSummaryToDto,
   vaultIntegrationTestSafetyCheckToDto,
+  mergeQueueIntegrationTestCaseToDto,
+  mergeQueueIntegrationTestProfileToDto,
+  mergeQueueIntegrationTestReadinessSummaryToDto,
+  mergeQueueIntegrationSafetyCheckToDto,
   policyBundleMigrationPhaseToDto,
   policyBundlePlanToDto,
   policyBundleReadinessCheckToDto,
@@ -147,7 +153,7 @@ import {
   tenantScopeRoleVisibilityToDto,
   scopedReadModelMetadataToDto
 } from "@aichestra/deployment-readiness";
-import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DashboardReadinessTenantScopePlanningService, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, PolicyBundleReadinessCategory, PolicyRuntimePocReadinessCategory, PolicyShadowReadinessCategory, SecretBackendReadinessCategory, StagingDeploymentDryRunCheckCategory, StagingDeploymentGateCategory, StagingHumanSignoffEvidence, StagingHumanSignoffStatus, StagingReadinessCategory, StagingReleaseCandidateGateCategory, StagingReleaseCandidateSignoffRole, StagingSignoffScopeReview, StagingSignoffScopeSnapshot, VaultIntegrationTestSafetyCategory } from "@aichestra/deployment-readiness";
+import type { AuthRbacReadinessCategory, CICDJobCategory, CICDPipelineProfileName, CICDReadinessCategory, DashboardReadinessTenantScopePlanningService, DeploymentReadinessService, GitHubAppIntegrationTestSafetyCategory, LLMIntegrationTestSafetyCategory, MergeQueueIntegrationSafetyCategory, PolicyBundleReadinessCategory, PolicyRuntimePocReadinessCategory, PolicyShadowReadinessCategory, SecretBackendReadinessCategory, StagingDeploymentDryRunCheckCategory, StagingDeploymentGateCategory, StagingHumanSignoffEvidence, StagingHumanSignoffStatus, StagingReadinessCategory, StagingReleaseCandidateGateCategory, StagingReleaseCandidateSignoffRole, StagingSignoffScopeReview, StagingSignoffScopeSnapshot, VaultIntegrationTestSafetyCategory } from "@aichestra/deployment-readiness";
 import {
   AuthorizationService,
   InMemoryAuthRepository,
@@ -181,10 +187,12 @@ import {
 } from "@aichestra/auth";
 import type { AuthorizationResource, RequestSource, ResourceScope, TenantScopeEnforcementService } from "@aichestra/auth";
 import {
+  BranchCleanupRecoveryService,
   BranchOrchestratorService,
   GitIntegrationService,
   GitHubAppRuntimeService,
   GitWebhookReceiverService,
+  InMemoryBranchCleanupRecoveryRepository,
   InMemoryBranchOrchestratorRepository,
   LocalGitDryRunMergeSimulator,
   MockMergeSimulator,
@@ -199,7 +207,7 @@ import {
   createGitHubWebhookRuntimeFromEnv,
   createGitProviderFromEnv
 } from "@aichestra/git-adapter";
-import type { BaseBranchDriftStatusValue, BranchOrchestrationDecisionValue, BranchOwnershipStatus, BranchPurpose, GitHubAppRuntimeConfig, GitHubWebhookRuntimeConfig, GitProviderRuntimeConfig } from "@aichestra/git-adapter";
+import type { BaseBranchDriftStatusValue, BranchCleanupDecisionInput, BranchOrchestrationDecisionValue, BranchOwnershipStatus, BranchPurpose, CleanupDecisionValue, GitHubAppRuntimeConfig, GitHubWebhookRuntimeConfig, GitProviderRuntimeConfig, OrphanLeaseKind, OrphanSeverity } from "@aichestra/git-adapter";
 import {
   budgetDecisionToDto,
   credentialReferenceResultToDto,
@@ -262,13 +270,14 @@ import {
   auditRetentionPolicyToDto,
   auditSourceCoverageToDto,
   auditSummaryToDto,
+  createAuditQueryScopeEnforcementService,
   createObservabilityService,
   metricDefinitionToDto,
   metricSnapshotToDto,
   observabilityConfigToDto,
   traceSpanToDto
 } from "@aichestra/observability";
-import type { AuditCategory, AuditOutcome, AuditSeverity, ObservabilityService } from "@aichestra/observability";
+import type { AuditCategory, AuditQueryRequestedDetailLevel, AuditOutcome, AuditSeverity, ObservabilityService, AuditQueryScopeEnforcementService } from "@aichestra/observability";
 import {
   AgentRunnerService,
   AgentRunCoordinationService,
@@ -295,14 +304,24 @@ import {
   agentWorkspaceLeaseToDto,
   agentWorkspaceLifecycleEventToDto,
   AgentWorkspaceLifecycleService,
+  AgentWorktreeAllocationService,
   commandExecutionResultToDto,
   createInMemoryAgentRunnerRepositories,
   createAgentRunnerConfigFromEnv,
   createAgentRunnerFromConfig,
+  createAgentWorktreeAllocationServiceFromEnv,
+  agentWorktreeAllocationRequestToDto,
+  agentWorktreeAllocationResultToDto,
+  agentWorktreeAllocationSummaryToDto,
+  agentWorktreeSafetyCheckToDto,
   instructionAssemblyToDto,
   LocalAgentWorkspaceManager
 } from "@aichestra/runner";
 import type {
+  AgentWorktreeAllocationDecision,
+  AgentWorktreeAllocationMode,
+  AgentWorktreeSafetyCheckKind,
+  AgentWorktreeSafetyStatus,
   AgentRunnerRuntimeConfig,
   EditIntentConfidence,
   EditIntentKind,
@@ -361,7 +380,27 @@ import {
 import type { PolicyActorKind } from "@aichestra/policy";
 import {
   PolicyBackedRegistryMutationAuthorizer,
+  RegistryCompatibilityService,
+  RegistryArtifactTrustService,
+  RegistryDriftDetectionService,
+  CanaryExecutionService,
+  ApplyWorkflowService,
+  EvalSuiteExecutionService,
   createRegistryService,
+  createRegistryCompatibilityService,
+  createRegistryArtifactTrustService,
+  createRegistryDriftDetectionService,
+  createCanaryAndApplyServices,
+  createEvalSuiteExecutionService,
+  createRegistryTenantScopeEnforcementService,
+  registryEvalAttachmentToDto,
+  registryEvalCaseResultToDto,
+  registryEvalCaseToDto,
+  registryEvalRunToDto,
+  registryEvalSuiteToDto,
+  registryEvalSummaryToDto,
+  registryEvalTargetFromRegistryPackage,
+  registryEvalVerdictToDto,
   harnessToDto,
   instructionToDto,
   isApprovalStatus,
@@ -372,15 +411,27 @@ import {
   isRegistryStatus,
   registryAuditLogToDto,
   registryApprovalQueueItemToDto,
+  registryArtifactInputFromPackageManifest,
+  registryArtifactProvenanceToDto,
+  registryArtifactSignatureToDto,
+  registryArtifactTrustDecisionToDto,
+  registryArtifactTrustPolicyToDto,
+  registryArtifactTrustSummaryToDto,
   registryEvalResultToDto,
   registryImportResultToDto,
   registryPackageManifestToDto,
   registryResolutionToDto,
   registryRevisionToDto,
   registryRollbackResultToDto,
+  registryResourceInputFromHarness,
+  registryResourceInputFromInstruction,
+  registryResourceInputFromPackageManifest,
+  registryResourceInputFromSkill,
+  registryScopeDecisionToDto,
+  registryScopeEnforcementSummaryToDto,
   skillToDto
 } from "@aichestra/registry";
-import type { RegistryService } from "@aichestra/registry";
+import type { RegistryArtifactKind, RegistryArtifactTrustDecisionValue, RegistryArtifactTrustEvaluationInput, RegistryArtifactTrustContext, RegistryCompatibilityContextInput, RegistryCompatibilityServiceContext, RegistryEvalRunStatus, RegistryEvalServiceContext, RegistryEvalTargetKind, RegistryEvalTargetSnapshot, RegistryScopeEvaluationInput, RegistryScopeResourceKind, RegistryScopeServiceContext, RegistryService, RegistryTenantScopeEnforcementService } from "@aichestra/registry";
 import {
   SecurityControlService,
   credentialResolutionResultToDto,
@@ -416,10 +467,23 @@ type RouteContext = {
   llmGatewayService: LLMGatewayService;
   agentRunnerService: AgentRunnerService;
   agentRunCoordinationService: AgentRunCoordinationService;
+  agentWorktreeAllocationService: AgentWorktreeAllocationService;
   mergeQueuePolicyService: MergeQueuePolicyService;
+  conflictResolutionAssistantService: ConflictResolutionAssistantService;
+  prOwnershipService: PrOwnershipService;
+  realMergeExecutionPolicyService: RealMergeExecutionPolicyService;
+  branchCleanupRecoveryService: BranchCleanupRecoveryService;
   editIntentGraphService: EditIntentGraphService;
   agentRunnerConfig: AgentRunnerRuntimeConfig;
   registryService: RegistryService;
+  registryCompatibilityService: RegistryCompatibilityService;
+  registryArtifactTrustService: RegistryArtifactTrustService;
+  evalSuiteExecutionService: EvalSuiteExecutionService;
+  registryDriftDetectionService: RegistryDriftDetectionService;
+  canaryExecutionService: CanaryExecutionService;
+  applyWorkflowService: ApplyWorkflowService;
+  registryCanaryApplyGetSummary: () => import("@aichestra/registry").RegistryCanaryApplySummary;
+  registryTenantScopeEnforcementService: RegistryTenantScopeEnforcementService;
   improvementServices: ImprovementServices;
   policyService: PolicyService;
   authorizationService: AuthorizationService;
@@ -431,8 +495,10 @@ type RouteContext = {
   mcpGatewayService: MCPGateway;
   deploymentReadinessService: DeploymentReadinessService;
   tenantScopePlanningService: DashboardReadinessTenantScopePlanningService;
+  dashboardScopeFilteringService: import("@aichestra/deployment-readiness").DashboardScopeFilteringService;
   tenantScopeEnforcementService: TenantScopeEnforcementService;
   observabilityService: ObservabilityService;
+  auditQueryScopeEnforcementService: AuditQueryScopeEnforcementService;
 };
 
 type JsonValue = Record<string, unknown> | unknown[];
@@ -581,6 +647,258 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function registryScopeContextFromRequest(
+  requestContext: ReturnType<ApiRequestContextMiddleware["requireApiContext"]>
+): RegistryScopeServiceContext {
+  return {
+    requestContext,
+    authContext: requestContext.authContext,
+    actorId: requestContext.authContext.actor.id,
+    principalId: requestContext.authContext.principal.id,
+    serviceAccountId: stringValue(requestContext.authContext.metadata.serviceAccountId),
+    requestId: requestContext.requestId,
+    correlationId: requestContext.correlationId,
+    source: requestContext.source,
+    roles: requestContext.authContext.roles.map((role) => role.name),
+    tenantId: requestContext.tenantId,
+    teamId: requestContext.teamId,
+    projectId: requestContext.projectId,
+    resourceScopes: requestContext.resourceScopes,
+    metadata: requestContext.metadata
+  };
+}
+
+function registryScopeInputsFromRegistry(registryService: RegistryService): RegistryScopeEvaluationInput[] {
+  return [
+    ...registryService.listSkills().map(registryResourceInputFromSkill),
+    ...registryService.listHarnesses().map(registryResourceInputFromHarness),
+    ...registryService.listInstructions().map(registryResourceInputFromInstruction),
+    ...registryService.listPackageManifests().map(registryResourceInputFromPackageManifest)
+  ];
+}
+
+function registryArtifactTrustContextFromRequest(
+  requestContext: ReturnType<ApiRequestContextMiddleware["requireApiContext"]>
+): RegistryArtifactTrustContext {
+  return {
+    requestContext,
+    authContext: requestContext.authContext,
+    actorId: requestContext.authContext.actor.id,
+    principalId: requestContext.authContext.principal.id,
+    serviceAccountId: stringValue(requestContext.authContext.metadata.serviceAccountId),
+    requestId: requestContext.requestId,
+    correlationId: requestContext.correlationId,
+    source: requestContext.source,
+    roles: requestContext.authContext.roles.map((role) => role.name),
+    resourceScopes: requestContext.resourceScopes,
+    metadata: {
+      ...(requestContext.metadata ?? {}),
+      metadataOnly: true,
+      resolverGatesPreserved: true,
+      realSigningImplemented: false,
+      realVerificationImplemented: false,
+      externalRegistryCalls: false
+    }
+  };
+}
+
+function registryArtifactTrustInputsFromRegistry(registryService: RegistryService): RegistryArtifactTrustEvaluationInput[] {
+  return registryService.listPackageManifests().map(registryArtifactInputFromPackageManifest);
+}
+
+function registryArtifactTrustInputFromBody(body: Record<string, unknown>): RegistryArtifactTrustEvaluationInput | undefined {
+  const artifactId = stringValue(body.artifactId) ?? stringValue(body.packageId);
+  if (!artifactId) return undefined;
+  const artifactKind = isRegistryArtifactKind(body.artifactKind) ? body.artifactKind : undefined;
+  const metadata = recordValue(body.metadata);
+  return {
+    artifactId,
+    packageId: stringValue(body.packageId),
+    artifactKind,
+    checksum: stringValue(body.checksum),
+    digest: isRecordValue(body.digest) ? body.digest as RegistryArtifactTrustEvaluationInput["digest"] : undefined,
+    signature: isRecordValue(body.signature) ? body.signature as RegistryArtifactTrustEvaluationInput["signature"] : undefined,
+    provenance: isRecordValue(body.provenance) ? body.provenance as RegistryArtifactTrustEvaluationInput["provenance"] : undefined,
+    sensitive: body.sensitive === true,
+    metadata
+  };
+}
+
+function registryEvalContextFromRequest(
+  requestContext: ReturnType<ApiRequestContextMiddleware["requireApiContext"]>
+): RegistryEvalServiceContext {
+  return {
+    requestContext,
+    authContext: requestContext.authContext,
+    actorId: requestContext.authContext.actor.id,
+    principalId: requestContext.authContext.principal.id,
+    serviceAccountId: stringValue(requestContext.authContext.metadata.serviceAccountId),
+    requestId: requestContext.requestId,
+    correlationId: requestContext.correlationId,
+    source: requestContext.source,
+    roles: requestContext.authContext.roles.map((role) => role.name),
+    resourceScopes: requestContext.resourceScopes,
+    metadata: {
+      ...(requestContext.metadata ?? {}),
+      metadataOnly: true,
+      mockExecutionOnly: true,
+      externalEvalImplemented: false,
+      realProviderCalls: false,
+      llmCallsExecuted: false,
+      mcpCallsExecuted: false,
+      vendorCliExecuted: false,
+      canaryExecuted: false,
+      autoApplyEnabled: false,
+      activeRegistryMutationExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }
+  };
+}
+
+function registryEvalTargetFromServices(
+  registryService: RegistryService,
+  improvementServices: ImprovementServices,
+  targetKind: RegistryEvalTargetKind,
+  targetId: string
+): RegistryEvalTargetSnapshot | undefined {
+  if (targetKind === "skill") {
+    const target = registryService.getSkill(targetId);
+    return target ? {
+      targetKind,
+      targetId: target.id,
+      targetName: target.name,
+      targetVersion: target.version,
+      status: target.status,
+      approvalStatus: target.approvalStatus,
+      evalStatus: target.evalStatus,
+      metadata: {
+        owner: target.owner,
+        compatibleAgents: target.compatibleAgents,
+        requiredHarnesses: target.requiredHarnesses,
+        dependencyCount: target.dependencies?.length ?? 0
+      }
+    } : undefined;
+  }
+  if (targetKind === "harness") {
+    const target = registryService.getHarness(targetId);
+    return target ? {
+      targetKind,
+      targetId: target.id,
+      targetName: target.name,
+      targetVersion: target.version,
+      status: target.status,
+      approvalStatus: target.approvalStatus,
+      evalStatus: target.evalStatus,
+      metadata: {
+        owner: target.owner,
+        runtimeType: target.runtimeType,
+        dependencyCount: target.dependencies?.length ?? 0
+      }
+    } : undefined;
+  }
+  if (targetKind === "instruction") {
+    const target = registryService.getInstruction(targetId);
+    return target ? {
+      targetKind,
+      targetId: target.id,
+      targetName: target.name,
+      targetVersion: target.version,
+      status: target.status,
+      approvalStatus: target.approvalStatus,
+      evalStatus: target.evalStatus,
+      checksumStatus: target.checksumStatus,
+      metadata: {
+        type: target.type,
+        scope: target.scope,
+        precedence: target.precedence,
+        checksumAlgorithm: target.checksumAlgorithm,
+        dependencyCount: target.dependencies?.length ?? 0
+      }
+    } : undefined;
+  }
+  if (targetKind === "registry_package") {
+    const manifest = registryService.getPackageManifest(targetId);
+    return manifest ? registryEvalTargetFromRegistryPackage(manifest) : undefined;
+  }
+  if (targetKind === "draft_registry_change") {
+    const change = improvementServices.draftRegistryChanges.getDraftChange(targetId);
+    return change ? {
+      targetKind,
+      targetId: change.id,
+      targetName: change.targetName,
+      targetVersion: change.targetVersion,
+      status: change.status,
+      draftRegistryChange: change,
+      proposal: improvementServices.proposals.listProposals().find((proposal) => proposal.id === change.proposalId),
+      metadata: {
+        proposalId: change.proposalId,
+        targetKind: change.targetKind,
+        targetId: change.targetId,
+        changeType: change.changeType,
+        draftOnly: true,
+        activeRegistryMutation: false
+      }
+    } : undefined;
+  }
+  return undefined;
+}
+
+function isRegistryEvalTargetKind(value: unknown): value is RegistryEvalTargetKind {
+  return value === "skill" ||
+    value === "harness" ||
+    value === "instruction" ||
+    value === "registry_package" ||
+    value === "draft_registry_change";
+}
+
+function isRegistryEvalRunStatus(value: unknown): value is RegistryEvalRunStatus {
+  return value === "requested" ||
+    value === "running_mock" ||
+    value === "passed" ||
+    value === "failed" ||
+    value === "warning" ||
+    value === "skipped" ||
+    value === "blocked_policy" ||
+    value === "blocked_missing_target" ||
+    value === "future_external";
+}
+
+function isRegistryScopeResourceKind(value: unknown): value is RegistryScopeResourceKind {
+  return value === "skill" ||
+    value === "harness" ||
+    value === "instruction" ||
+    value === "package" ||
+    value === "eval_result" ||
+    value === "approval_queue" ||
+    value === "history" ||
+    value === "audit";
+}
+
+function isRegistryArtifactKind(value: unknown): value is RegistryArtifactKind {
+  return value === "skill_package" ||
+    value === "harness_package" ||
+    value === "instruction_artifact" ||
+    value === "registry_bundle" ||
+    value === "policy_bundle_future" ||
+    value === "unknown";
+}
+
+function isRegistryArtifactTrustDecision(value: unknown): value is RegistryArtifactTrustDecisionValue {
+  return value === "trusted" ||
+    value === "trusted_with_warnings" ||
+    value === "untrusted" ||
+    value === "blocked_unsigned" ||
+    value === "blocked_digest_mismatch" ||
+    value === "blocked_invalid_signature" ||
+    value === "blocked_missing_provenance" ||
+    value === "future_verification_required";
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const observabilityAuditCategories = new Set<AuditCategory>([
   "auth",
   "policy",
@@ -621,6 +939,11 @@ function parseAuditOutcome(url: URL): AuditOutcome | undefined {
 function parseAuditSeverity(url: URL): AuditSeverity | undefined {
   const value = url.searchParams.get("severity") ?? undefined;
   return value && observabilityAuditSeverities.has(value as AuditSeverity) ? value as AuditSeverity : undefined;
+}
+
+function parseAuditQueryDetailLevel(value: string | null | undefined): AuditQueryRequestedDetailLevel | undefined {
+  if (value === "summary" || value === "metadata" || value === "detail" || value === "raw_payload_forbidden") return value;
+  return undefined;
 }
 
 function parseDateQuery(url: URL, name: string): Date | undefined {
@@ -683,6 +1006,213 @@ function mergeQueuePolicyContextFromInput(
       source: metadata.source ?? "api",
       authMode: requestContext.authContext.authMode,
       principalId: requestContext.authContext.principal.id
+    }
+  };
+}
+
+function conflictResolutionAssistantContextFromInput(
+  requestContext: ReturnType<ApiRequestContextMiddleware["requireApiContext"]>,
+  body: Record<string, unknown> = {}
+): ConflictResolutionRequestContext {
+  const metadata = recordValue(body.metadata);
+  return {
+    requestId: requestContext.requestId,
+    correlationId: requestContext.correlationId,
+    actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
+    principalId: requestContext.authContext.principal.id,
+    serviceAccountId: stringValue(body.serviceAccountId) ?? stringValue((requestContext.authContext.actor as { serviceAccountId?: unknown }).serviceAccountId),
+    source: stringValue(body.source) ?? stringValue(metadata.source) ?? "api_conflict_resolution_assistant",
+    metadata: {
+      ...metadata,
+      authMode: requestContext.authContext.authMode,
+      metadataOnly: true,
+      noSourceMutation: true,
+      noRealMerge: true,
+      noExternalLlmCall: true
+    }
+  };
+}
+
+function prOwnershipContextFromInput(
+  requestContext: ReturnType<ApiRequestContextMiddleware["requireApiContext"]>,
+  body: Record<string, unknown> = {}
+): PrOwnershipContext {
+  const metadata = recordValue(body.metadata);
+  const serviceAccountId = stringValue(body.serviceAccountId) ?? stringValue(requestContext.authContext.metadata.serviceAccountId);
+  return {
+    requestId: requestContext.requestId,
+    correlationId: requestContext.correlationId,
+    actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
+    principalId: requestContext.authContext.principal.id,
+    serviceAccountId,
+    source: stringValue(body.source) ?? stringValue(metadata.source) ?? "api_pr_ownership_handoff",
+    actorKind: stringValue(body.actorKind) ?? requestContext.authContext.actor.actorKind,
+    roles: requestContext.authContext.roles.map((role) => role.name),
+    teams: requestContext.authContext.teams?.map((team) => team.id),
+    metadata: {
+      ...metadata,
+      authMode: requestContext.authContext.authMode,
+      metadataOnly: true,
+      remotePrUpdate: false,
+      remoteReviewerAssignment: false,
+      noGitHubApiCall: true,
+      noAutoMerge: true,
+      noBranchDeletion: true
+    }
+  };
+}
+
+function realMergeExecutionContextFromInput(
+  requestContext: ReturnType<ApiRequestContextMiddleware["requireApiContext"]>,
+  body: Record<string, unknown> = {}
+): RealMergeExecutionContext {
+  const metadata = recordValue(body.metadata);
+  const serviceAccountId = stringValue(body.serviceAccountId) ?? stringValue(requestContext.authContext.metadata.serviceAccountId);
+  return {
+    requestId: requestContext.requestId,
+    correlationId: requestContext.correlationId,
+    actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
+    principalId: requestContext.authContext.principal.id,
+    serviceAccountId,
+    source: stringValue(body.source) ?? stringValue(metadata.source) ?? "api_real_merge_execution_policy",
+    roles: requestContext.authContext.roles.map((role) => role.name),
+    teams: requestContext.authContext.teams?.map((team) => team.id),
+    validationStatus: realMergeEvidenceStatus(body.validationStatus ?? metadata.validationStatus),
+    approvalStatus: realMergeEvidenceStatus(body.approvalStatus ?? metadata.approvalStatus),
+    rollbackPlanStatus: realMergeEvidenceStatus(body.rollbackPlanStatus ?? metadata.rollbackPlanStatus),
+    tenantScopeStatus: realMergeTenantScopeStatus(body.tenantScopeStatus ?? metadata.tenantScopeStatus),
+    metadata: {
+      ...metadata,
+      authMode: requestContext.authContext.authMode,
+      metadataOnly: true,
+      mergeExecutionEnabled: false,
+      autoMergeEnabled: false,
+      remotePushEnabled: false,
+      noRealMerge: true,
+      noAutoMerge: true,
+      noRemoteGit: true,
+      noBranchDeletion: true,
+      noWorkspaceMutation: true,
+      noGitHubApiCall: true
+    }
+  };
+}
+
+function realMergeEvidenceStatus(value: unknown): RealMergeEvidenceStatus | undefined {
+  return value === "passed" ||
+    value === "approved" ||
+    value === "not_required" ||
+    value === "pending" ||
+    value === "failed" ||
+    value === "rejected" ||
+    value === "missing"
+    ? value
+    : undefined;
+}
+
+function realMergeTenantScopeStatus(value: unknown): RealMergeExecutionContext["tenantScopeStatus"] {
+  return value === "match" ||
+    value === "mismatch" ||
+    value === "unknown" ||
+    value === "not_applicable"
+    ? value
+    : undefined;
+}
+
+function isPrOwnerKind(value: unknown): value is PrOwnerKind {
+  return value === "human" || value === "agent" || value === "service_account" || value === "team" || value === "unknown";
+}
+
+function isPrOwnershipStatus(value: unknown): value is PrOwnershipStatus {
+  return value === "active" ||
+    value === "review_requested" ||
+    value === "handoff_requested" ||
+    value === "handed_off" ||
+    value === "blocked" ||
+    value === "abandoned" ||
+    value === "merged" ||
+    value === "closed_future";
+}
+
+function isPrHandoffKind(value: unknown): value is PrHandoffKind {
+  return value === "human_to_human" ||
+    value === "agent_to_human" ||
+    value === "human_to_agent_future" ||
+    value === "service_to_human" ||
+    value === "team_handoff";
+}
+
+function isPrHandoffStatus(value: unknown): value is PrHandoffStatus {
+  return value === "requested" ||
+    value === "accepted" ||
+    value === "rejected" ||
+    value === "expired" ||
+    value === "cancelled" ||
+    value === "blocked_policy" ||
+    value === "blocked_missing_context";
+}
+
+function isPrHandoffDecisionValue(value: unknown): value is PrHandoffDecisionValue {
+  return value === "accept" ||
+    value === "reject" ||
+    value === "hold" ||
+    value === "request_more_info" ||
+    value === "expired" ||
+    value === "blocked";
+}
+
+function isAgentWorktreeAllocationMode(value: unknown): value is AgentWorktreeAllocationMode {
+  return value === "fixture_only" || value === "dry_run" || value === "git_worktree_future";
+}
+
+function isAgentWorktreeAllocationDecision(value: unknown): value is AgentWorktreeAllocationDecision {
+  return value === "allocated_fixture" ||
+    value === "dry_run_valid" ||
+    value === "blocked_root_not_allowed" ||
+    value === "blocked_path_collision" ||
+    value === "blocked_branch_missing" ||
+    value === "blocked_policy" ||
+    value === "future_git_worktree_required";
+}
+
+function isAgentWorktreeSafetyStatus(value: unknown): value is AgentWorktreeSafetyStatus {
+  return value === "pass" || value === "warning" || value === "fail" || value === "not_applicable";
+}
+
+function isAgentWorktreeSafetyCheckKind(value: unknown): value is AgentWorktreeSafetyCheckKind {
+  return value === "workspace_root_allowed" ||
+    value === "path_within_root" ||
+    value === "path_not_shared" ||
+    value === "branch_lease_present" ||
+    value === "branch_name_safe" ||
+    value === "no_remote_git" ||
+    value === "cleanup_safe" ||
+    value === "fixture_only";
+}
+
+function agentWorktreeAllocationStatusCode(decision: AgentWorktreeAllocationDecision): number {
+  return decision === "allocated_fixture" || decision === "dry_run_valid" ? 201 : 409;
+}
+
+function agentWorktreeAllocationContextFromInput(
+  requestContext: ReturnType<ApiRequestContextMiddleware["requireApiContext"]>,
+  body: Record<string, unknown> = {}
+) {
+  const metadata = recordValue(body.metadata);
+  return {
+    actorId: stringValue(body.actorId) ?? requestContext.authContext.actor.id,
+    principalId: requestContext.authContext.principal.id,
+    serviceAccountId: stringValue(body.serviceAccountId) ?? stringValue((requestContext.authContext.actor as { serviceAccountId?: unknown }).serviceAccountId),
+    requestId: requestContext.requestId,
+    correlationId: requestContext.correlationId,
+    source: stringValue(body.source) ?? stringValue(metadata.source) ?? "api_agent_worktree_allocation",
+    metadata: {
+      ...metadata,
+      authMode: requestContext.authContext.authMode,
+      metadataOnly: true,
+      noRealGitWorktree: true,
+      noRemoteGit: true,
+      noDestructiveCleanup: true
     }
   };
 }
@@ -1433,9 +1963,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const githubAppIntegration = context.deploymentReadinessService.getGitHubAppIntegrationTestReadinessSummary();
       const llmIntegration = context.deploymentReadinessService.getLLMIntegrationTestReadinessSummary();
       const vaultIntegration = context.deploymentReadinessService.getVaultIntegrationTestReadinessSummary();
+      const mergeQueueIntegration = context.deploymentReadinessService.getMergeQueueIntegrationTestReadinessSummary();
       const tenantScopePlanning = context.tenantScopePlanningService.getSummary();
       const tenantScopeEnforcement = context.tenantScopeEnforcementService.getSummary();
       const secretRefs = context.securityService.listSecretRefs();
+      const conflictAssistant = context.conflictResolutionAssistantService.getSummary();
+      const prOwnership = context.prOwnershipService.getSummary();
+      const realMergeExecution = context.realMergeExecutionPolicyService.getSummary();
+      const worktreeAllocation = context.agentWorktreeAllocationService.getSummary();
+      const auditQueryScope = context.auditQueryScopeEnforcementService.getSummary();
       sendJson(response, storage.healthy ? 200 : 503, {
         status: storage.healthy ? "ok" : "degraded",
         service: "aichestra-api",
@@ -1555,6 +2091,84 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           githubWebhookSecretSource: context.gitWebhookConfig.webhookSecretSource,
           githubWebhookSecretStatus: context.gitWebhookConfig.webhookSecretStatus
         },
+        conflictResolutionAssistant: {
+          status: conflictAssistant.status,
+          requests: conflictAssistant.requests,
+          summaries: conflictAssistant.summaries,
+          plans: conflictAssistant.plans,
+          recommendations: conflictAssistant.recommendations,
+          applyAllowed: conflictAssistant.applyAllowed,
+          realLlmUsed: conflictAssistant.realLlmUsed,
+          sourceMutation: conflictAssistant.sourceMutation,
+          mergeExecution: conflictAssistant.mergeExecution,
+          patchApplication: conflictAssistant.patchApplication,
+          externalProviderCalls: conflictAssistant.externalProviderCalls,
+          secretsExposed: conflictAssistant.secretsExposed,
+          envValuesExposed: conflictAssistant.envValuesExposed
+        },
+        prOwnershipHandoff: {
+          status: prOwnership.status,
+          ownershipRecords: prOwnership.ownershipRecords,
+          activeOwnershipRecords: prOwnership.activeOwnershipRecords,
+          handoffRequests: prOwnership.handoffRequests,
+          pendingHandoffs: prOwnership.pendingHandoffs,
+          acceptedHandoffs: prOwnership.acceptedHandoffs,
+          rejectedHandoffs: prOwnership.rejectedHandoffs,
+          expiredHandoffs: prOwnership.expiredHandoffs,
+          blockedHandoffs: prOwnership.blockedHandoffs,
+          reviewerAssignments: prOwnership.reviewerAssignments,
+          mergeQueueEntriesMissingOwner: prOwnership.mergeQueueEntriesMissingOwner,
+          remotePrUpdateEnabled: prOwnership.remotePrUpdateEnabled,
+          remoteReviewerAssignmentEnabled: prOwnership.remoteReviewerAssignmentEnabled,
+          githubApiCalls: prOwnership.githubApiCalls,
+          autoMergeEnabled: prOwnership.autoMergeEnabled,
+          branchDeletionEnabled: prOwnership.branchDeletionEnabled,
+          workspaceMutation: prOwnership.workspaceMutation,
+          secretsExposed: prOwnership.secretsExposed,
+          envValuesExposed: prOwnership.envValuesExposed
+        },
+        realMergeExecutionPolicy: {
+          status: realMergeExecution.status,
+          policyStatus: realMergeExecution.policyStatus,
+          requests: realMergeExecution.requests,
+          decisions: realMergeExecution.decisions,
+          readyForManualFuture: realMergeExecution.readyForManualFuture,
+          blocked: realMergeExecution.blocked,
+          preconditions: realMergeExecution.preconditions,
+          forbiddenOperations: realMergeExecution.forbiddenOperations,
+          mergeExecutionEnabled: realMergeExecution.mergeExecutionEnabled,
+          autoMergeEnabled: realMergeExecution.autoMergeEnabled,
+          remotePushEnabled: realMergeExecution.remotePushEnabled,
+          mergeExecutionPerformed: realMergeExecution.mergeExecutionPerformed,
+          autoMergePerformed: realMergeExecution.autoMergePerformed,
+          remotePushPerformed: realMergeExecution.remotePushPerformed,
+          branchDeletionPerformed: realMergeExecution.branchDeletionPerformed,
+          workspaceMutationPerformed: realMergeExecution.workspaceMutationPerformed,
+          githubApiCalls: realMergeExecution.githubApiCalls,
+          realLlmCalls: realMergeExecution.realLlmCalls,
+          secretsExposed: realMergeExecution.secretsExposed,
+          envValuesExposed: realMergeExecution.envValuesExposed
+        },
+        agentWorktreeAllocation: {
+          status: worktreeAllocation.status,
+          allocationEnabled: worktreeAllocation.allocationEnabled,
+          fixtureOnly: worktreeAllocation.fixtureOnly,
+          productionWorktreeAllocation: worktreeAllocation.productionWorktreeAllocation,
+          integrationTestsEnabled: worktreeAllocation.integrationTestsEnabled,
+          workspaceRootAllowlistConfigured: worktreeAllocation.workspaceRootAllowlistConfigured,
+          workspaceRootAllowlistCount: worktreeAllocation.workspaceRootAllowlistCount,
+          requests: worktreeAllocation.requests,
+          allocations: worktreeAllocation.allocations,
+          safetyChecks: worktreeAllocation.safetyChecks,
+          blockedAllocations: worktreeAllocation.blockedAllocations,
+          realGitWorktreeExecuted: worktreeAllocation.realGitWorktreeExecuted,
+          remoteGitOperation: worktreeAllocation.remoteGitOperation,
+          destructiveCleanupExecuted: worktreeAllocation.destructiveCleanupExecuted,
+          sourceMutation: worktreeAllocation.sourceMutation,
+          secretsExposed: worktreeAllocation.secretsExposed,
+          envValuesExposed: worktreeAllocation.envValuesExposed,
+          fullLocalPathsExposed: worktreeAllocation.fullLocalPathsExposed
+        },
         llm: {
           providerKind: context.llmGatewayService.getConfig().providerKind,
           routingMode: context.llmGatewayService.getConfig().routingMode,
@@ -1585,6 +2199,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           maxRuntimeMs: context.agentRunnerService.getConfig().maxRuntimeMs,
           workspaceLifecycleStatus: "v2_implemented",
           activeWorkspaceLeaseCount: context.agentRunnerService.listWorkspaceLeases().filter((lease) => lease.status === "active").length,
+          worktreeAllocationStatus: worktreeAllocation.status,
+          worktreeAllocationEnabled: worktreeAllocation.allocationEnabled,
+          worktreeAllocationCount: worktreeAllocation.allocations,
           editIntentGraphStatus: "v1_implemented",
           activeEditIntentCount: context.editIntentGraphService.getOverlapSummary().activeIntents,
           activeFileLeaseCount: context.editIntentGraphService.getOverlapSummary().activeFileLeases,
@@ -1884,6 +2501,192 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           vaultSecretValueExposed: vaultIntegration.vaultSecretValueExposed,
           vaultCallsInDefaultTests: vaultIntegration.vaultCallsInDefaultTests
         },
+        mergeQueueIntegrationTests: {
+          status: mergeQueueIntegration.status,
+          planningOnly: mergeQueueIntegration.planningOnly,
+          productionReady: mergeQueueIntegration.productionReady,
+          profileStatus: mergeQueueIntegration.profileStatus,
+          enabled: mergeQueueIntegration.liveTestsEnabled,
+          canRunLiveTests: mergeQueueIntegration.canRunLiveTests,
+          defaultLiveTestsSkipped: mergeQueueIntegration.defaultLiveTestsSkipped,
+          requiredGatesConfiguredCount: mergeQueueIntegration.configuredGateCount,
+          missingGatesCount: mergeQueueIntegration.missingGateCount,
+          unsafeGatesCount: mergeQueueIntegration.unsafeGateCount,
+          gitProviderAllowed: mergeQueueIntegration.gitProviderAllowed,
+          remoteGitEnabled: mergeQueueIntegration.remoteGitEnabled,
+          githubIntegrationProfileEnabled: mergeQueueIntegration.githubIntegrationProfileEnabled,
+          allowedRepoCount: mergeQueueIntegration.allowedRepoCount,
+          branchPrefixConfigured: mergeQueueIntegration.branchPrefixConfigured,
+          branchPrefixMatchesRequired: mergeQueueIntegration.branchPrefixMatchesRequired,
+          testRepoConfigured: mergeQueueIntegration.testRepoConfigured,
+          testRepoAllowlisted: mergeQueueIntegration.testRepoAllowlisted,
+          testBaseBranchConfigured: mergeQueueIntegration.testBaseBranchConfigured,
+          testSourceBranchCount: mergeQueueIntegration.testSourceBranchCount,
+          testSourceBranchesMatchPrefix: mergeQueueIntegration.testSourceBranchesMatchPrefix,
+          dryRunOnly: mergeQueueIntegration.dryRunOnly,
+          remoteMergeForbidden: mergeQueueIntegration.remoteMergeForbidden,
+          remoteRebaseForbidden: mergeQueueIntegration.remoteRebaseForbidden,
+          remoteForcePushForbidden: mergeQueueIntegration.remoteForcePushForbidden,
+          remoteBranchDeleteForbidden: mergeQueueIntegration.remoteBranchDeleteForbidden,
+          noAutoMerge: mergeQueueIntegration.noAutoMerge,
+          noForcePush: mergeQueueIntegration.noForcePush,
+          noBranchDelete: mergeQueueIntegration.noBranchDelete,
+          noSecretsExposed: mergeQueueIntegration.noSecretsExposed,
+          envValuesExposed: mergeQueueIntegration.envValuesExposed,
+          repoUrlsExposed: mergeQueueIntegration.repoUrlsExposed,
+          branchNamesExposed: mergeQueueIntegration.branchNamesExposed,
+          remoteGitCallsInDefaultTests: mergeQueueIntegration.remoteGitCallsInDefaultTests,
+          realMergeExecuted: mergeQueueIntegration.realMergeExecuted
+        },
+        registryDrift: (() => {
+          const summary = context.registryDriftDetectionService.getSummary();
+          return {
+            status: summary.status,
+            planningOnly: summary.planningOnly,
+            signalCount: summary.signalCount,
+            baselineCount: summary.baselineCount,
+            assessmentCount: summary.assessmentCount,
+            recommendationCount: summary.recommendationCount,
+            criticalSignalCount: summary.criticalSignalCount,
+            highSignalCount: summary.highSignalCount,
+            applyAllowed: summary.applyAllowed,
+            registryMutationExecuted: summary.registryMutationExecuted,
+            evalExecuted: summary.evalExecuted,
+            canaryExecuted: summary.canaryExecuted,
+            autoImprovementApplied: summary.autoImprovementApplied,
+            externalCallExecuted: summary.externalCallExecuted,
+            noSecretsExposed: summary.noSecretsExposed,
+            envValuesExposed: summary.envValuesExposed
+          };
+        })(),
+        registryCanaryApply: (() => {
+          const summary = context.registryCanaryApplyGetSummary();
+          return {
+            status: summary.status,
+            planningOnly: summary.planningOnly,
+            canaryPlanCount: summary.canaryPlanCount,
+            canaryRunCount: summary.canaryRunCount,
+            canaryResultCount: summary.canaryResultCount,
+            canaryVerdictCount: summary.canaryVerdictCount,
+            applyWorkflowCount: summary.applyWorkflowCount,
+            applyGateDecisionCount: summary.applyGateDecisionCount,
+            rollbackPlanCount: summary.rollbackPlanCount,
+            passedCanaryRunCount: summary.passedCanaryRunCount,
+            failedCanaryRunCount: summary.failedCanaryRunCount,
+            warningCanaryRunCount: summary.warningCanaryRunCount,
+            blockedCanaryRunCount: summary.blockedCanaryRunCount,
+            skippedCanaryRunCount: summary.skippedCanaryRunCount,
+            readyForManualApplyCount: summary.readyForManualApplyCount,
+            blockedApplyDecisionCount: summary.blockedApplyDecisionCount,
+            metadataOnlyApplyDecisionCount: summary.metadataOnlyApplyDecisionCount,
+            autoApplyEnabled: summary.autoApplyEnabled,
+            activeRegistryMutationAllowed: summary.activeRegistryMutationAllowed,
+            applyPerformed: summary.applyPerformed,
+            activeRegistryMutated: summary.activeRegistryMutated,
+            externalCanaryExecuted: summary.externalCanaryExecuted,
+            realEvalExecuted: summary.realEvalExecuted,
+            realProviderCallExecuted: summary.realProviderCallExecuted,
+            noSecretsExposed: summary.noSecretsExposed,
+            envValuesExposed: summary.envValuesExposed
+          };
+        })(),
+        registryCompatibility: (() => {
+          const summary = context.registryCompatibilityService.getSummary();
+          return {
+            status: summary.status,
+            planningOnly: summary.planningOnly,
+            ruleCount: summary.ruleCount,
+            skillProfileCount: summary.skillProfileCount,
+            harnessProfileCount: summary.harnessProfileCount,
+            instructionProfileCount: summary.instructionProfileCount,
+            resolverGatesPreserved: summary.resolverGatesPreserved,
+            autoApplyEnabled: summary.autoApplyEnabled,
+            registryMutationsExecuted: summary.registryMutationsExecuted,
+            externalCallsExecuted: summary.externalCallsExecuted,
+            noSecretsExposed: summary.noSecretsExposed,
+            envValuesExposed: summary.envValuesExposed
+          };
+        })(),
+        registryArtifactTrust: (() => {
+          const summary = context.registryArtifactTrustService.getTrustSummary();
+          return {
+            status: "v1_implemented",
+            totalArtifacts: summary.totalArtifacts,
+            trusted: summary.trusted,
+            warnings: summary.warnings,
+            blocked: summary.blocked,
+            unsigned: summary.unsigned,
+            missingProvenance: summary.missingProvenance,
+            realSigningImplemented: summary.realSigningImplemented,
+            realVerificationImplemented: summary.realVerificationImplemented,
+            externalRegistryCalls: summary.externalRegistryCalls,
+            noSigningKeysGenerated: true,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          };
+        })(),
+        registryEvalSuites: (() => {
+          const summary = context.evalSuiteExecutionService.getEvalSummary();
+          return {
+            status: summary.status,
+            executionMode: summary.executionMode,
+            suiteCount: summary.suiteCount,
+            caseCount: summary.caseCount,
+            runCount: summary.runCount,
+            resultCount: summary.resultCount,
+            passedRuns: summary.passedRuns,
+            failedRuns: summary.failedRuns,
+            warningRuns: summary.warningRuns,
+            skippedRuns: summary.skippedRuns,
+            blockedRuns: summary.blockedRuns,
+            externalEvalImplemented: summary.externalEvalImplemented,
+            realProviderCalls: summary.realProviderCalls,
+            llmCallsExecuted: summary.llmCallsExecuted,
+            mcpCallsExecuted: summary.mcpCallsExecuted,
+            vendorCliExecuted: summary.vendorCliExecuted,
+            canaryExecuted: summary.canaryExecuted,
+            autoApplyEnabled: summary.autoApplyEnabled,
+            activeRegistryMutationExecuted: summary.activeRegistryMutationExecuted,
+            noSecretsExposed: summary.noSecretsExposed,
+            envValuesExposed: summary.envValuesExposed
+          };
+        })(),
+        registryTenantScope: (() => {
+          const summary = context.registryTenantScopeEnforcementService.getSummary();
+          return {
+            status: "v1_implemented_partial",
+            totalResources: summary.totalResources,
+            inScope: summary.inScope,
+            warnings: summary.warnings,
+            denied: summary.denied,
+            missingScope: summary.missingScope,
+            enforcementMode: summary.enforcementMode,
+            productionEnforcement: summary.productionEnforcement,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          };
+        })(),
+        branchCleanup: (() => {
+          const cleanupSummary = context.branchCleanupRecoveryService.getSummary();
+          return {
+            status: cleanupSummary.status,
+            scans: cleanupSummary.scans,
+            orphanRecords: cleanupSummary.orphanRecords,
+            recommendations: cleanupSummary.recommendations,
+            decisions: cleanupSummary.decisions,
+            recoveryActions: cleanupSummary.recoveryActions,
+            destructiveFutureRecommendations: cleanupSummary.destructiveFutureRecommendations,
+            metadataOnlyRecommendations: cleanupSummary.metadataOnlyRecommendations,
+            destructiveCleanupEnabled: cleanupSummary.destructiveCleanupEnabled,
+            realBranchDeleted: cleanupSummary.realBranchDeleted,
+            realWorktreeRemoved: cleanupSummary.realWorktreeRemoved,
+            realPullRequestClosed: cleanupSummary.realPullRequestClosed,
+            remoteGitCallsExecuted: cleanupSummary.remoteGitCallsExecuted,
+            filesystemDeletionsExecuted: cleanupSummary.filesystemDeletionsExecuted,
+            noSecretsExposed: cleanupSummary.noSecretsExposed,
+            envValuesExposed: cleanupSummary.envValuesExposed
+          };
+        })(),
         auth: {
           providerKind: context.authorizationService.getConfig().providerKind,
           authMode: context.authorizationService.getConfig().authMode,
@@ -2076,6 +2879,15 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           secretsExposed: false,
           tokensExposed: false
         },
+        auditQueryScope: {
+          status: auditQueryScope.status,
+          rawPayloadAllowed: auditQueryScope.rawPayloadAllowed,
+          productionStorageEnforcement: auditQueryScope.productionStorageEnforcement,
+          externalExportEnabled: auditQueryScope.externalExportEnabled,
+          redactionPlanCount: auditQueryScope.redactionPlanCount,
+          noSecretsExposed: auditQueryScope.noSecretsExposed,
+          envValuesExposed: auditQueryScope.envValuesExposed
+        },
         security: {
           secretManagerKind: context.securityService.getConfig().secretManagerKind,
           credentialManagerKind: context.securityService.getConfig().credentialManagerKind,
@@ -2093,6 +2905,277 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           productionSandboxRuntime: false
         }
       });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "audit-scope") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Audit scope readiness endpoints are read-only." });
+        return;
+      }
+      const auditScope = context.auditQueryScopeEnforcementService;
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, readinessScopedPayload(context, "audit_scope_summary", {
+          summary: auditScope.getSummary(),
+          noSecretStatus: {
+            noSecretsExposed: true,
+            envValuesExposed: false,
+            rawPayloadAllowed: false,
+            productionStorageEnforcement: false,
+            externalExportEnabled: false
+          }
+        }) as JsonValue);
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "redaction-plans") {
+        sendJson(response, 200, readinessScopedPayload(context, "audit_scope_redaction_plans", {
+          redactionPlans: auditScope.listRedactionPlans(),
+          summary: auditScope.getSummary()
+        }) as JsonValue);
+        return;
+      }
+      sendJson(response, 404, { error: "audit_scope_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "agent-worktrees") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Agent worktree allocation readiness endpoints are read-only metadata." });
+        return;
+      }
+      const worktreeService = context.agentWorktreeAllocationService;
+      if (segments[2] === "summary" || segments.length === 2) {
+        sendJson(response, 200, readinessScopedPayload(context, "agent_worktrees", {
+          summary: agentWorktreeAllocationSummaryToDto(worktreeService.getSummary())
+        }));
+        return;
+      }
+      if (segments[2] === "safety-checks") {
+        sendJson(response, 200, readinessScopedPayload(context, "agent_worktrees", {
+          safetyChecks: worktreeService.listSafetyChecks({
+            status: isAgentWorktreeSafetyStatus(url.searchParams.get("status")) ? url.searchParams.get("status") as AgentWorktreeSafetyStatus : undefined,
+            checkKind: isAgentWorktreeSafetyCheckKind(url.searchParams.get("checkKind")) ? url.searchParams.get("checkKind") as AgentWorktreeSafetyCheckKind : undefined
+          }).map(agentWorktreeSafetyCheckToDto)
+        }));
+        return;
+      }
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "registry" && segments[2] === "compatibility" && segments[3] === "summary") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Registry compatibility readiness endpoint is read-only metadata." });
+        return;
+      }
+      sendJson(response, 200, readinessScopedPayload(context, "registry_compatibility", {
+        summary: context.registryCompatibilityService.getSummary(),
+        ruleCount: context.registryCompatibilityService.listRules().length,
+        skillProfileCount: context.registryCompatibilityService.listSkillProfiles().length,
+        harnessProfileCount: context.registryCompatibilityService.listHarnessProfiles().length,
+        instructionProfileCount: context.registryCompatibilityService.listInstructionProfiles().length,
+        resolverGatesPreserved: true,
+        autoApplyEnabled: false,
+        registryMutationsExecuted: false,
+        externalCallsExecuted: false,
+        noSecretsExposed: true
+      }));
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "registry" && segments[2] === "artifact-trust" && segments[3] === "summary") {
+      const readinessRequestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Registry artifact trust readiness endpoint is read-only metadata." });
+        return;
+      }
+      const trustContext = registryArtifactTrustContextFromRequest(readinessRequestContext);
+      const decisions = registryArtifactTrustInputsFromRegistry(context.registryService)
+        .map((input) => context.registryArtifactTrustService.evaluateArtifactTrust(input, trustContext));
+      sendJson(response, 200, readinessScopedPayload(context, "registry_artifact_trust", {
+        summary: registryArtifactTrustSummaryToDto(context.registryArtifactTrustService.summarizeDecisions(decisions)),
+        policies: context.registryArtifactTrustService.listTrustPolicies().map(registryArtifactTrustPolicyToDto),
+        decisions: decisions.map(registryArtifactTrustDecisionToDto),
+        resolverGatesPreserved: true,
+        lifecycleApprovalEvalChecksumGatesPreserved: true,
+        realSigningImplemented: false,
+        realVerificationImplemented: false,
+        signingKeysGenerated: false,
+        externalRegistryCalls: false,
+        noSecretsExposed: true,
+        envValuesExposed: false
+      }));
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "registry" && segments[2] === "evals" && segments[3] === "summary") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Registry eval suite readiness endpoint is read-only metadata." });
+        return;
+      }
+      const evalService = context.evalSuiteExecutionService;
+      const suites = evalService.listSuites();
+      const runs = evalService.listEvalRuns();
+      sendJson(response, 200, readinessScopedPayload(context, "registry_evals", {
+        summary: registryEvalSummaryToDto(evalService.getEvalSummary()),
+        suites: suites.map(registryEvalSuiteToDto),
+        caseCount: suites.reduce((count, suite) => count + evalService.listCases(suite.id).length, 0),
+        runCount: runs.length,
+        verdicts: runs.flatMap((run) => {
+          const verdict = evalService.getEvalVerdict(run.id);
+          return verdict ? [registryEvalVerdictToDto(verdict)] : [];
+        }),
+        externalEvalImplemented: false,
+        realProviderCalls: false,
+        llmCallsExecuted: false,
+        mcpCallsExecuted: false,
+        vendorCliExecuted: false,
+        canaryExecuted: false,
+        autoApplyEnabled: false,
+        activeRegistryMutationExecuted: false,
+        noSecretsExposed: true,
+        envValuesExposed: false
+      }));
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "registry" && segments[2] === "drift" && segments[3] === "summary") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Registry drift readiness endpoint is read-only metadata." });
+        return;
+      }
+      const driftSummary = context.registryDriftDetectionService.getSummary();
+      sendJson(response, 200, readinessScopedPayload(context, "registry_drift", {
+        summary: driftSummary,
+        signalCount: driftSummary.signalCount,
+        baselineCount: driftSummary.baselineCount,
+        assessmentCount: driftSummary.assessmentCount,
+        recommendationCount: driftSummary.recommendationCount,
+        applyAllowed: driftSummary.applyAllowed,
+        evalExecuted: driftSummary.evalExecuted,
+        canaryExecuted: driftSummary.canaryExecuted,
+        autoImprovementApplied: driftSummary.autoImprovementApplied,
+        registryMutationExecuted: driftSummary.registryMutationExecuted,
+        externalCallExecuted: driftSummary.externalCallExecuted,
+        noSecretsExposed: driftSummary.noSecretsExposed
+      }));
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "registry" && segments[2] === "canary" && segments[3] === "summary") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Registry canary readiness endpoint is read-only metadata." });
+        return;
+      }
+      const summary = context.registryCanaryApplyGetSummary();
+      sendJson(response, 200, readinessScopedPayload(context, "registry_canary", {
+        summary,
+        canaryPlanCount: summary.canaryPlanCount,
+        canaryRunCount: summary.canaryRunCount,
+        canaryVerdictCount: summary.canaryVerdictCount,
+        externalCanaryExecuted: summary.externalCanaryExecuted,
+        autoApplyEnabled: summary.autoApplyEnabled,
+        activeRegistryMutationAllowed: summary.activeRegistryMutationAllowed,
+        applyPerformed: summary.applyPerformed,
+        activeRegistryMutated: summary.activeRegistryMutated,
+        realProviderCallExecuted: summary.realProviderCallExecuted,
+        noSecretsExposed: summary.noSecretsExposed,
+        envValuesExposed: summary.envValuesExposed
+      }));
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "registry" && segments[2] === "apply-workflows" && segments[3] === "summary") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Registry apply workflows readiness endpoint is read-only metadata." });
+        return;
+      }
+      const summary = context.registryCanaryApplyGetSummary();
+      sendJson(response, 200, readinessScopedPayload(context, "registry_apply_workflow", {
+        summary,
+        applyWorkflowCount: summary.applyWorkflowCount,
+        applyGateDecisionCount: summary.applyGateDecisionCount,
+        readyForManualApplyCount: summary.readyForManualApplyCount,
+        blockedApplyDecisionCount: summary.blockedApplyDecisionCount,
+        metadataOnlyApplyDecisionCount: summary.metadataOnlyApplyDecisionCount,
+        rollbackPlanCount: summary.rollbackPlanCount,
+        autoApplyEnabled: summary.autoApplyEnabled,
+        activeRegistryMutationAllowed: summary.activeRegistryMutationAllowed,
+        applyPerformed: summary.applyPerformed,
+        activeRegistryMutated: summary.activeRegistryMutated,
+        noSecretsExposed: summary.noSecretsExposed,
+        envValuesExposed: summary.envValuesExposed
+      }));
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "registry" && segments[2] === "scope" && segments[3] === "summary") {
+      const readinessRequestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Registry scope readiness endpoint is read-only metadata." });
+        return;
+      }
+      const serviceContext = registryScopeContextFromRequest(readinessRequestContext);
+      const decisions = context.registryTenantScopeEnforcementService.evaluateRegistryResources(
+        registryScopeInputsFromRegistry(context.registryService),
+        serviceContext
+      );
+      const approvalQueueDecisions = context.registryService.listApprovalQueue({ requestContext: readinessRequestContext })
+        .map((item) => context.registryTenantScopeEnforcementService.evaluateApprovalQueueItem(item, serviceContext));
+      sendJson(response, 200, readinessScopedPayload(context, "registry_scope", {
+        summary: registryScopeEnforcementSummaryToDto(context.registryTenantScopeEnforcementService.summarizeDecisions([...decisions, ...approvalQueueDecisions])),
+        decisions: decisions.map(registryScopeDecisionToDto),
+        approvalQueueScopeSummary: registryScopeEnforcementSummaryToDto(context.registryTenantScopeEnforcementService.summarizeDecisions(approvalQueueDecisions)),
+        resolverGatesPreserved: true,
+        productionEnforcement: false,
+        rowLevelSecurityImplemented: false,
+        productionAuthImplemented: false,
+        externalCallsExecuted: false,
+        noSecretsExposed: true,
+        envValuesExposed: false
+      }));
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "pr-ownership") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "PR ownership readiness endpoints are read-only metadata." });
+        return;
+      }
+      const repoId = url.searchParams.get("repoId") ?? undefined;
+      sendJson(response, 200, readinessScopedPayload(context, "pr_ownership", {
+        summary: context.prOwnershipService.getSummary(repoId),
+        mergeQueueOwnershipReadiness: context.prOwnershipService.listMergeQueueOwnershipReadiness(repoId),
+        remotePrUpdateEnabled: false,
+        remoteReviewerAssignmentEnabled: false,
+        githubApiCalls: false,
+        autoMergeEnabled: false
+      }));
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "merge-execution") {
+      context.apiRequestContextMiddleware.requireApiContext(request);
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Real merge execution policy readiness endpoints are read-only metadata." });
+        return;
+      }
+      const repoId = url.searchParams.get("repoId") ?? undefined;
+      sendJson(response, 200, readinessScopedPayload(context, "real_merge_execution", {
+        summary: context.realMergeExecutionPolicyService.getSummary(repoId),
+        policy: context.realMergeExecutionPolicyService.getPolicy(),
+        forbiddenOperations: context.realMergeExecutionPolicyService.listForbiddenOperations(),
+        postExecutionEvidenceTemplate: context.realMergeExecutionPolicyService.getPostExecutionEvidenceTemplate(),
+        mergeExecutionEnabled: false,
+        autoMergeEnabled: false,
+        remotePushEnabled: false
+      }));
       return;
     }
 
@@ -2698,6 +3781,37 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       return;
     }
 
+    if (segments[0] === "readiness" && segments[1] === "merge-queue-integration") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Merge queue integration-test readiness endpoints are read-only planning models." });
+        return;
+      }
+      const readiness = context.deploymentReadinessService;
+      if (segments.length === 3 && segments[2] === "profile") {
+        sendJson(response, 200, { profile: mergeQueueIntegrationTestProfileToDto(readiness.getMergeQueueIntegrationTestProfile()) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "test-cases") {
+        sendJson(response, 200, { testCases: readiness.listMergeQueueIntegrationTestCases().map(mergeQueueIntegrationTestCaseToDto) });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "safety-checks") {
+        const category = url.searchParams.get("category") ?? undefined;
+        const categories = ["env_gates", "repo_allowlist", "branch_prefix", "no_auto_merge", "no_force_push", "no_branch_delete", "dry_run_only", "cleanup", "audit"];
+        sendJson(response, 200, {
+          safetyChecks: readiness.listMergeQueueIntegrationSafetyChecks(category && categories.includes(category) ? { category: category as MergeQueueIntegrationSafetyCategory } : {})
+            .map(mergeQueueIntegrationSafetyCheckToDto)
+        });
+        return;
+      }
+      if (segments.length === 3 && segments[2] === "summary") {
+        sendJson(response, 200, readinessScopedPayload(context, "merge_queue_integration", { summary: mergeQueueIntegrationTestReadinessSummaryToDto(readiness.getMergeQueueIntegrationTestReadinessSummary()) }));
+        return;
+      }
+      sendJson(response, 404, { error: "merge_queue_integration_readiness_route_not_found" });
+      return;
+    }
+
     if (segments[0] === "readiness" && segments[1] === "policy-bundles") {
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Policy bundle readiness endpoints are read-only planning models." });
@@ -3054,7 +4168,39 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
     }
 
     if (segments[0] === "observability") {
-      context.apiRequestContextMiddleware.requireApiContext(request);
+      const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+      const auditScope = context.auditQueryScopeEnforcementService;
+      if (segments.length === 4 && segments[1] === "audit" && segments[2] === "query-scope" && segments[3] === "check") {
+        if (method !== "POST") {
+          sendJson(response, 405, { error: "method_not_allowed", message: "Audit query scope checks use POST and do not mutate audit storage." });
+          return;
+        }
+        const body = recordValue(await readJson(request));
+        const decision = auditScope.evaluateAuditQuery({
+          id: stringValue(body.id),
+          actorId: stringValue(body.actorId),
+          principalId: stringValue(body.principalId),
+          roles: stringArrayValue(body.roles),
+          tenantIds: stringArrayValue(body.tenantIds),
+          teamIds: stringArrayValue(body.teamIds),
+          projectIds: stringArrayValue(body.projectIds),
+          repoIds: stringArrayValue(body.repoIds),
+          providerIds: stringArrayValue(body.providerIds),
+          resourceKinds: stringArrayValue(body.resourceKinds),
+          auditSources: stringArrayValue(body.auditSources),
+          requestedDetailLevel: parseAuditQueryDetailLevel(stringValue(body.requestedDetailLevel)) ?? "summary",
+          metadata: {
+            ...recordValue(body.metadata),
+            source: "observability:audit_query_scope_check"
+          }
+        }, requestContext);
+        sendJson(response, 200, {
+          decision,
+          summary: auditScope.summarizeAuditQueryDecision(decision),
+          redactionPlans: auditScope.listRedactionPlans()
+        } as JsonValue);
+        return;
+      }
       if (method !== "GET") {
         sendJson(response, 405, { error: "method_not_allowed", message: "Observability endpoints are read-only." });
         return;
@@ -3069,7 +4215,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (segments[1] === "audit") {
         if (segments.length === 3 && segments[2] === "events") {
-          sendJson(response, 200, auditQueryResultToDto(observability.listAuditEvents({
+          const decision = auditScope.evaluateAuditQuery({
+            requestedDetailLevel: parseAuditQueryDetailLevel(url.searchParams.get("detailLevel")) ?? "metadata",
+            resourceKinds: csvQueryValues(url, "resourceKind", "resourceKinds"),
+            auditSources: csvQueryValues(url, "auditSource", "auditSources", "source", "sources"),
+            metadata: {
+              source: "observability:audit_events",
+              auditQueryScope: url.searchParams.get("auditQueryScope") === "present" ? "present" : undefined
+            }
+          }, requestContext);
+          const result = auditQueryResultToDto(observability.listAuditEvents({
             categories: parseAuditCategories(url),
             eventTypes: csvQueryValues(url, "eventType", "eventTypes"),
             actorId: url.searchParams.get("actorId") ?? undefined,
@@ -3081,7 +4236,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             since: parseDateQuery(url, "since"),
             until: parseDateQuery(url, "until"),
             limit: parsePositiveIntegerQuery(url, "limit")
-          })) as JsonValue);
+          }));
+          sendJson(response, 200, auditScope.redactAuditResult(result, decision) as JsonValue);
           return;
         }
         if (segments.length === 3 && segments[2] === "summary") {
@@ -3131,8 +4287,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 405, { error: "method_not_allowed", message: "Dashboard read models are read-only." });
         return;
       }
-      const dashboard = buildDashboardReadModels(context, "api");
+      const filterHeaderInput = parseDashboardFilterHeaders(request.headers as Record<string, string | string[] | undefined>);
+      const filterContext = Object.keys(filterHeaderInput).length > 0
+        ? context.dashboardScopeFilteringService.buildFilterContext({
+          ...filterHeaderInput,
+          source: "api",
+          authMode: "demo_request_header"
+        })
+        : undefined;
+      const dashboard = buildDashboardReadModels(context, "api", filterContext);
       const section = segments[1] ?? "overview";
+      if (section === "scope-filter") {
+        sendJson(response, 200, { dashboardScopeFilter: dashboard.dashboardScopeFilter });
+        return;
+      }
       if (section === "overview" && segments.length <= 2) {
         sendJson(response, 200, { overview: dashboard.overview });
         return;
@@ -3229,6 +4397,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, 200, { tenantScopeEnforcement: dashboard.tenantScopeEnforcement });
         return;
       }
+      if (section === "scope-filter") {
+        sendJson(response, 200, { dashboardScopeFilter: dashboard.dashboardScopeFilter });
+        return;
+      }
       if (section === "readiness") {
         sendJson(response, 200, { readiness: dashboard.readiness });
         return;
@@ -3251,6 +4423,26 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
       if (section === "vault-integration") {
         sendJson(response, 200, { vaultIntegration: dashboard.vaultIntegration });
+        return;
+      }
+      if (section === "merge-queue-integration") {
+        sendJson(response, 200, { mergeQueueIntegration: dashboard.mergeQueueIntegration });
+        return;
+      }
+      if (section === "git-cleanup") {
+        sendJson(response, 200, { branchCleanup: dashboard.branchCleanup });
+        return;
+      }
+      if (section === "registry-compatibility") {
+        sendJson(response, 200, { registryCompatibility: dashboard.registryCompatibility });
+        return;
+      }
+      if (section === "registry-drift") {
+        sendJson(response, 200, { registryDrift: dashboard.registryDrift });
+        return;
+      }
+      if (section === "registry-canary-apply") {
+        sendJson(response, 200, { registryCanaryApply: dashboard.registryCanaryApply });
         return;
       }
       if (section === "staging") {
@@ -5046,6 +6238,85 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
 
+      if (segments[1] === "worktrees") {
+        const worktreeService = context.agentWorktreeAllocationService;
+        if (method === "GET" && segments[2] === "allocations") {
+          sendJson(response, 200, {
+            requests: worktreeService.listRequests({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              branchLeaseId: url.searchParams.get("branchLeaseId") ?? undefined,
+              workspaceLeaseId: url.searchParams.get("workspaceLeaseId") ?? undefined,
+              allocationMode: isAgentWorktreeAllocationMode(url.searchParams.get("allocationMode")) ? url.searchParams.get("allocationMode") as AgentWorktreeAllocationMode : undefined
+            }).map(agentWorktreeAllocationRequestToDto),
+            allocations: worktreeService.listAllocations({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              branchLeaseId: url.searchParams.get("branchLeaseId") ?? undefined,
+              workspaceLeaseId: url.searchParams.get("workspaceLeaseId") ?? undefined,
+              allocationMode: isAgentWorktreeAllocationMode(url.searchParams.get("allocationMode")) ? url.searchParams.get("allocationMode") as AgentWorktreeAllocationMode : undefined,
+              decision: isAgentWorktreeAllocationDecision(url.searchParams.get("decision")) ? url.searchParams.get("decision") as AgentWorktreeAllocationDecision : undefined
+            }).map(agentWorktreeAllocationResultToDto)
+          });
+          return;
+        }
+        if (method === "GET" && segments[2] === "safety-checks") {
+          sendJson(response, 200, {
+            safetyChecks: worktreeService.listSafetyChecks({
+              requestId: url.searchParams.get("requestId") ?? undefined,
+              resultId: url.searchParams.get("resultId") ?? undefined,
+              status: isAgentWorktreeSafetyStatus(url.searchParams.get("status")) ? url.searchParams.get("status") as AgentWorktreeSafetyStatus : undefined,
+              checkKind: isAgentWorktreeSafetyCheckKind(url.searchParams.get("checkKind")) ? url.searchParams.get("checkKind") as AgentWorktreeSafetyCheckKind : undefined
+            }).map(agentWorktreeSafetyCheckToDto)
+          });
+          return;
+        }
+        if (method === "GET" && segments[2] === "summary") {
+          sendJson(response, 200, { summary: agentWorktreeAllocationSummaryToDto(worktreeService.getSummary()) });
+          return;
+        }
+        if (method === "POST" && (segments[2] === "dry-run" || segments[2] === "fixture-allocate")) {
+          const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
+          const body = await readJson(request) as Record<string, unknown>;
+          const repoId = stringValue(body.repoId);
+          const branchName = stringValue(body.branchName);
+          const requestedPath = stringValue(body.requestedPath);
+          const workspaceRoot = stringValue(body.workspaceRoot);
+          const agentRunId = stringValue(body.agentRunId);
+          const branchLeaseId = stringValue(body.branchLeaseId);
+          if (!repoId || !branchName || !requestedPath || !workspaceRoot || !agentRunId || !branchLeaseId) {
+            sendJson(response, 400, {
+              error: "invalid_agent_worktree_allocation_request",
+              message: "repoId, branchName, branchLeaseId, requestedPath, workspaceRoot, and agentRunId are required."
+            });
+            return;
+          }
+          const input = {
+            id: stringValue(body.id),
+            repoId,
+            baseRepoPath: stringValue(body.baseRepoPath),
+            baseBranch: stringValue(body.baseBranch) ?? "main",
+            branchName,
+            branchLeaseId,
+            workspaceLeaseId: stringValue(body.workspaceLeaseId),
+            requestedPath,
+            workspaceRoot,
+            agentRunId,
+            taskId: stringValue(body.taskId),
+            userId: stringValue(body.userId) ?? requestContext.authContext.principal.id,
+            allocationMode: segments[2] === "fixture-allocate" ? "fixture_only" as const : "dry_run" as const,
+            metadata: recordValue(body.metadata)
+          };
+          const allocationContext = agentWorktreeAllocationContextFromInput(requestContext, body);
+          const result = segments[2] === "fixture-allocate"
+            ? await worktreeService.allocateFixtureWorktree(input, allocationContext)
+            : worktreeService.dryRunAllocate(input, allocationContext);
+          sendJson(response, agentWorktreeAllocationStatusCode(result.decision), {
+            allocation: agentWorktreeAllocationResultToDto(result),
+            summary: agentWorktreeAllocationSummaryToDto(worktreeService.getSummary())
+          });
+          return;
+        }
+      }
+
       if (segments[1] === "workspaces") {
         if (method === "GET" && segments.length === 2) {
           sendJson(response, 200, {
@@ -5680,8 +6951,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           return;
         }
         const targetKind = targetKindParam;
+        const auditScopeDecision = context.registryTenantScopeEnforcementService.evaluateRegistryAuditQuery({
+          resourceId: targetKind && targetId ? `${targetKind}:${targetId}:audit` : "registry_audit_query"
+        }, registryScopeContextFromRequest(apiRequestContext));
         sendJson(response, 200, {
-          auditLogs: registryService.listAuditLogs({ targetKind, targetId, requestContext: apiRequestContext }).map(registryAuditLogToDto)
+          auditLogs: registryService.listAuditLogs({ targetKind, targetId, requestContext: apiRequestContext }).map(registryAuditLogToDto),
+          scopeDecision: registryScopeDecisionToDto(auditScopeDecision)
         });
         return;
       }
@@ -5697,33 +6972,814 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           sendJson(response, 400, { error: "invalid_approval_status", message: "approvalStatus must be not_required, pending, approved, or rejected." });
           return;
         }
+        const approvalQueue = registryService.listApprovalQueue({
+          targetKind: targetKindParam,
+          approvalStatus: approvalStatusParam,
+          owner: url.searchParams.get("owner") ?? undefined,
+          includeArchived: url.searchParams.get("includeArchived") === "true",
+          requestContext: apiRequestContext
+        });
+        const approvalScopeDecisions = approvalQueue.map((item) => context.registryTenantScopeEnforcementService.evaluateApprovalQueueItem(item, registryScopeContextFromRequest(apiRequestContext)));
         sendJson(response, 200, {
-          approvalQueue: registryService.listApprovalQueue({
+          approvalQueue: approvalQueue.map(registryApprovalQueueItemToDto),
+          scopeSummary: registryScopeEnforcementSummaryToDto(context.registryTenantScopeEnforcementService.summarizeDecisions(approvalScopeDecisions))
+        });
+        return;
+      }
+
+      if (segments[1] === "eval-suites") {
+        const evalService = context.evalSuiteExecutionService;
+        if (method === "GET" && segments.length === 2) {
+          const suites = evalService.listSuites();
+          sendJson(response, 200, {
+            suites: suites.map(registryEvalSuiteToDto),
+            summary: registryEvalSummaryToDto(evalService.getEvalSummary()),
+            externalEvalImplemented: false,
+            realProviderCalls: false,
+            llmCallsExecuted: false,
+            mcpCallsExecuted: false,
+            vendorCliExecuted: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "cases") {
+          const suiteId = segments[2];
+          if (!evalService.listSuites().some((suite) => suite.id === suiteId)) {
+            sendJson(response, 404, { error: "eval_suite_not_found", message: `Registry eval suite not found: ${suiteId}` });
+            return;
+          }
+          sendJson(response, 200, {
+            cases: evalService.listCases(suiteId).map(registryEvalCaseToDto),
+            mockExecutionOnly: true,
+            noExternalCalls: true
+          });
+          return;
+        }
+        sendJson(response, method === "GET" ? 404 : 405, {
+          error: method === "GET" ? "registry_eval_suite_route_not_found" : "method_not_allowed",
+          message: "Registry eval suite endpoints are metadata/readiness only."
+        });
+        return;
+      }
+
+      if (segments[1] === "eval-runs") {
+        const evalService = context.evalSuiteExecutionService;
+        const evalContext = registryEvalContextFromRequest(apiRequestContext);
+        if (method === "GET" && segments.length === 2) {
+          const targetKindParam = url.searchParams.get("targetKind") ?? undefined;
+          const statusParam = url.searchParams.get("status") ?? undefined;
+          if (targetKindParam !== undefined && !isRegistryEvalTargetKind(targetKindParam)) {
+            sendJson(response, 400, { error: "invalid_eval_target_kind", message: "targetKind is not supported for registry eval runs." });
+            return;
+          }
+          if (statusParam !== undefined && !isRegistryEvalRunStatus(statusParam)) {
+            sendJson(response, 400, { error: "invalid_eval_run_status", message: "status is not supported for registry eval runs." });
+            return;
+          }
+          const runs = evalService.listEvalRuns({
+            suiteId: url.searchParams.get("suiteId") ?? undefined,
             targetKind: targetKindParam,
-            approvalStatus: approvalStatusParam,
-            owner: url.searchParams.get("owner") ?? undefined,
-            includeArchived: url.searchParams.get("includeArchived") === "true",
-            requestContext: apiRequestContext
-          }).map(registryApprovalQueueItemToDto)
+            targetId: url.searchParams.get("targetId") ?? undefined,
+            proposalId: url.searchParams.get("proposalId") ?? undefined,
+            status: statusParam
+          });
+          sendJson(response, 200, {
+            evalRuns: runs.map(registryEvalRunToDto),
+            summary: registryEvalSummaryToDto(evalService.getEvalSummary()),
+            mockExecutionOnly: true,
+            externalEvalImplemented: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          const body = recordValue(await readJson(request));
+          const suiteId = stringValue(body.suiteId);
+          const targetKind = stringValue(body.targetKind);
+          const targetId = stringValue(body.targetId);
+          if (!suiteId || !isRegistryEvalTargetKind(targetKind) || !targetId) {
+            sendJson(response, 400, { error: "invalid_eval_run_request", message: "suiteId, targetKind, and targetId are required." });
+            return;
+          }
+          try {
+            const run = evalService.requestEvalRun({
+              suiteId,
+              targetKind,
+              targetId,
+              draftRegistryChangeId: stringValue(body.draftRegistryChangeId),
+              proposalId: stringValue(body.proposalId),
+              metadata: recordValue(body.metadata)
+            }, evalContext);
+            const verdict = evalService.getEvalVerdict(run.id);
+            sendJson(response, 201, {
+              evalRun: registryEvalRunToDto(run),
+              verdict: verdict ? registryEvalVerdictToDto(verdict) : undefined,
+              mockExecutionOnly: true,
+              externalEvalImplemented: false,
+              noSecretsExposed: true,
+              envValuesExposed: false
+            });
+          } catch (error) {
+            sendJson(response, 400, { error: "invalid_eval_run_request", message: error instanceof Error ? error.message : "Invalid registry eval run request" });
+          }
+          return;
+        }
+        if (method === "GET" && segments.length === 3) {
+          const run = evalService.getEvalRun(segments[2]);
+          if (!run) {
+            sendJson(response, 404, { error: "eval_run_not_found", message: `Registry eval run not found: ${segments[2]}` });
+            return;
+          }
+          const verdict = evalService.getEvalVerdict(run.id);
+          sendJson(response, 200, {
+            evalRun: registryEvalRunToDto(run),
+            verdict: verdict ? registryEvalVerdictToDto(verdict) : undefined
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "execute-mock") {
+          if (!evalService.getEvalRun(segments[2])) {
+            sendJson(response, 404, { error: "eval_run_not_found", message: `Registry eval run not found: ${segments[2]}` });
+            return;
+          }
+          const run = evalService.executeMockEvalRun(segments[2], evalContext);
+          const verdict = evalService.getEvalVerdict(run.id);
+          sendJson(response, 200, {
+            evalRun: registryEvalRunToDto(run),
+            results: evalService.listCaseResults(run.id).map(registryEvalCaseResultToDto),
+            verdict: verdict ? registryEvalVerdictToDto(verdict) : undefined,
+            mockExecutionOnly: true,
+            externalEvalImplemented: false,
+            realProviderCalls: false,
+            llmCallsExecuted: false,
+            mcpCallsExecuted: false,
+            vendorCliExecuted: false,
+            canaryExecuted: false,
+            autoApplyEnabled: false,
+            activeRegistryMutationExecuted: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "results") {
+          if (!evalService.getEvalRun(segments[2])) {
+            sendJson(response, 404, { error: "eval_run_not_found", message: `Registry eval run not found: ${segments[2]}` });
+            return;
+          }
+          sendJson(response, 200, { results: evalService.listCaseResults(segments[2]).map(registryEvalCaseResultToDto) });
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "verdict") {
+          if (!evalService.getEvalRun(segments[2])) {
+            sendJson(response, 404, { error: "eval_run_not_found", message: `Registry eval run not found: ${segments[2]}` });
+            return;
+          }
+          const verdict = evalService.getEvalVerdict(segments[2]);
+          sendJson(response, 200, { verdict: verdict ? registryEvalVerdictToDto(verdict) : undefined });
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "attach") {
+          if (!evalService.getEvalRun(segments[2])) {
+            sendJson(response, 404, { error: "eval_run_not_found", message: `Registry eval run not found: ${segments[2]}` });
+            return;
+          }
+          const body = recordValue(await readJson(request));
+          try {
+            const attachment = evalService.attachEvalResultToRegistryTarget({
+              runId: segments[2],
+              updateRegistryEvalStatus: body.updateRegistryEvalStatus === true,
+              attachToProposal: body.attachToProposal === true,
+              evalRequirementId: stringValue(body.evalRequirementId),
+              metadata: recordValue(body.metadata)
+            }, evalContext);
+            sendJson(response, 201, {
+              attachment: registryEvalAttachmentToDto(attachment),
+              mockExecutionOnly: true,
+              registryContentMutated: false,
+              activeRegistryMutationExecuted: false,
+              canaryExecuted: false,
+              autoApplyEnabled: false,
+              noSecretsExposed: true,
+              envValuesExposed: false
+            });
+          } catch (error) {
+            sendJson(response, 400, { error: "eval_result_attach_failed", message: error instanceof Error ? error.message : "Could not attach eval result metadata" });
+          }
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "registry_eval_run_route_not_found" : "method_not_allowed",
+          message: "Registry eval run endpoints only execute deterministic mock/local eval metadata and never call external providers."
+        });
+        return;
+      }
+
+      if (segments[1] === "scope") {
+        const scopeService = context.registryTenantScopeEnforcementService;
+        const serviceContext = registryScopeContextFromRequest(apiRequestContext);
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          const decisions = scopeService.evaluateRegistryResources(registryScopeInputsFromRegistry(registryService), serviceContext);
+          const approvalQueueDecisions = registryService.listApprovalQueue({ requestContext: apiRequestContext })
+            .map((item) => scopeService.evaluateApprovalQueueItem(item, serviceContext));
+          sendJson(response, 200, {
+            summary: registryScopeEnforcementSummaryToDto(scopeService.summarizeDecisions([...decisions, ...approvalQueueDecisions])),
+            productionEnforcement: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "decisions") {
+          const kind = url.searchParams.get("registryResourceKind") ?? undefined;
+          if (kind !== undefined && !isRegistryScopeResourceKind(kind)) {
+            sendJson(response, 400, { error: "invalid_registry_scope_kind", message: "registryResourceKind is not supported." });
+            return;
+          }
+          sendJson(response, 200, {
+            decisions: scopeService.listDecisions({ registryResourceKind: kind }).map(registryScopeDecisionToDto),
+            summary: registryScopeEnforcementSummaryToDto(scopeService.getSummary())
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "evaluate") {
+          const body = recordValue(await readJson(request));
+          const registryResourceKind = stringValue(body.registryResourceKind);
+          const resourceId = stringValue(body.resourceId);
+          if (!isRegistryScopeResourceKind(registryResourceKind) || !resourceId) {
+            sendJson(response, 400, { error: "invalid_registry_scope_request", message: "registryResourceKind and resourceId are required." });
+            return;
+          }
+          const decision = scopeService.evaluateRegistryResource({
+            registryResourceKind,
+            resourceId,
+            tenantId: stringValue(body.tenantId),
+            teamId: stringValue(body.teamId),
+            projectId: stringValue(body.projectId),
+            repoId: stringValue(body.repoId),
+            providerId: stringValue(body.providerId),
+            enforcementMode: body.enforcementMode === "metadata_only" || body.enforcementMode === "warning" || body.enforcementMode === "deny_sensitive" || body.enforcementMode === "future_production"
+              ? body.enforcementMode
+              : undefined,
+            sensitive: body.sensitive === true,
+            metadata: recordValue(body.metadata)
+          }, serviceContext);
+          sendJson(response, 201, {
+            decision: registryScopeDecisionToDto(decision),
+            productionEnforcement: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "registry_scope_route_not_found" : "method_not_allowed",
+          message: "Registry scope endpoints are metadata/readiness only and do not mutate registry entries."
+        });
+        return;
+      }
+
+      if (segments[1] === "artifact-trust") {
+        const trustService = context.registryArtifactTrustService;
+        const trustContext = registryArtifactTrustContextFromRequest(apiRequestContext);
+        if (method === "GET" && segments.length === 3 && segments[2] === "policies") {
+          sendJson(response, 200, {
+            policies: trustService.listTrustPolicies().map(registryArtifactTrustPolicyToDto),
+            realSigningImplemented: false,
+            realVerificationImplemented: false,
+            externalRegistryCalls: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "decisions") {
+          const decisionFilter = url.searchParams.get("decision") ?? undefined;
+          if (decisionFilter !== undefined && !isRegistryArtifactTrustDecision(decisionFilter)) {
+            sendJson(response, 400, { error: "invalid_artifact_trust_decision", message: "decision is not supported." });
+            return;
+          }
+          const decisions = trustService.listTrustDecisions({
+            artifactId: url.searchParams.get("artifactId") ?? undefined,
+            decision: decisionFilter
+          });
+          sendJson(response, 200, {
+            decisions: decisions.map(registryArtifactTrustDecisionToDto),
+            summary: registryArtifactTrustSummaryToDto(trustService.summarizeDecisions(decisions)),
+            realSigningImplemented: false,
+            realVerificationImplemented: false,
+            externalRegistryCalls: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          const decisions = registryArtifactTrustInputsFromRegistry(registryService)
+            .map((input) => trustService.evaluateArtifactTrust(input, trustContext));
+          sendJson(response, 200, {
+            summary: registryArtifactTrustSummaryToDto(trustService.summarizeDecisions(decisions)),
+            policyCount: trustService.listTrustPolicies().length,
+            resolverGatesPreserved: true,
+            lifecycleApprovalEvalChecksumGatesPreserved: true,
+            realSigningImplemented: false,
+            realVerificationImplemented: false,
+            signingKeysGenerated: false,
+            externalRegistryCalls: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "evaluate") {
+          const body = recordValue(await readJson(request));
+          const packageId = stringValue(body.packageId);
+          const manifest = packageId ? registryService.getPackageManifest(packageId) : undefined;
+          if (packageId && !manifest) notFound("registry package", packageId);
+          const decision = manifest
+            ? trustService.evaluatePackageTrust(manifest, trustContext)
+            : (() => {
+                const input = registryArtifactTrustInputFromBody(body);
+                if (!input) return undefined;
+                return trustService.evaluateArtifactTrust(input, trustContext);
+              })();
+          if (!decision) {
+            sendJson(response, 400, { error: "invalid_artifact_trust_request", message: "artifactId or packageId is required." });
+            return;
+          }
+          sendJson(response, 201, {
+            decision: registryArtifactTrustDecisionToDto(decision),
+            summary: registryArtifactTrustSummaryToDto(trustService.getTrustSummary()),
+            realSigningImplemented: false,
+            realVerificationImplemented: false,
+            externalRegistryCalls: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "mock-signature") {
+          const body = recordValue(await readJson(request));
+          const artifactId = stringValue(body.artifactId);
+          if (!artifactId) {
+            sendJson(response, 400, { error: "invalid_mock_signature_request", message: "artifactId is required." });
+            return;
+          }
+          const expiresAtRaw = stringValue(body.expiresAt);
+          const expiresAt = expiresAtRaw && Number.isFinite(new Date(expiresAtRaw).getTime())
+            ? new Date(expiresAtRaw)
+            : undefined;
+          const signature = trustService.createMockSignatureMetadata({
+            artifactId,
+            signatureStatus: body.signatureStatus === "invalid" || body.signatureStatus === "revoked" || body.signatureStatus === "unsigned" || body.signatureStatus === "mock_signed"
+              ? body.signatureStatus
+              : undefined,
+            signerId: stringValue(body.signerId),
+            signingAuthority: stringValue(body.signingAuthority),
+            keyRefId: stringValue(body.keyRefId),
+            expiresAt,
+            metadata: recordValue(body.metadata)
+          }, trustContext);
+          sendJson(response, 201, {
+            signature: registryArtifactSignatureToDto(signature),
+            realSigningPerformed: false,
+            realSignatureVerificationPerformed: false,
+            signingKeyGenerated: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "provenance") {
+          const body = recordValue(await readJson(request));
+          const artifactId = stringValue(body.artifactId);
+          if (!artifactId) {
+            sendJson(response, 400, { error: "invalid_artifact_provenance_request", message: "artifactId is required." });
+            return;
+          }
+          const provenance = trustService.attachProvenanceMetadata({
+            artifactId,
+            sourceRepoId: stringValue(body.sourceRepoId),
+            sourceCommitSha: stringValue(body.sourceCommitSha),
+            sourceBranch: stringValue(body.sourceBranch),
+            buildRunId: stringValue(body.buildRunId),
+            taskRunId: stringValue(body.taskRunId),
+            agentRunId: stringValue(body.agentRunId),
+            buildSystem: body.buildSystem === "local_fixture" || body.buildSystem === "ci_future" || body.buildSystem === "external_future"
+              ? body.buildSystem
+              : "mock",
+            provenanceStatus: body.provenanceStatus === "present_mock" || body.provenanceStatus === "missing" || body.provenanceStatus === "incomplete" || body.provenanceStatus === "untrusted" || body.provenanceStatus === "trusted_future"
+              ? body.provenanceStatus
+              : undefined,
+            metadata: recordValue(body.metadata)
+          }, trustContext);
+          sendJson(response, 201, {
+            provenance: registryArtifactProvenanceToDto(provenance),
+            externalRegistryCalls: false,
+            externalBuildSystemCalled: false,
+            noSecretsExposed: true,
+            envValuesExposed: false
+          });
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "registry_artifact_trust_route_not_found" : "method_not_allowed",
+          message: "Registry artifact trust endpoints are metadata-only and never perform real signing, verification, or external registry calls."
+        });
+        return;
+      }
+
+      if (segments[1] === "compatibility") {
+        const compatibilityService = context.registryCompatibilityService;
+        const serviceContext: RegistryCompatibilityServiceContext = {
+          actorId: apiRequestContext.authContext.actor.id,
+          principalId: apiRequestContext.authContext.principal.id,
+          serviceAccountId: typeof apiRequestContext.authContext.metadata.serviceAccountId === "string"
+            ? (apiRequestContext.authContext.metadata.serviceAccountId as string)
+            : undefined,
+          requestId: apiRequestContext.requestId,
+          correlationId: apiRequestContext.correlationId,
+          source: "api"
+        };
+        if (method === "GET" && segments.length === 3 && segments[2] === "rules") {
+          sendJson(response, 200, { rules: compatibilityService.listRules() });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          sendJson(response, 200, { summary: compatibilityService.getSummary(serviceContext) });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "candidates") {
+          const taskKind = url.searchParams.get("taskKind") ?? undefined;
+          const context0 = compatibilityService.buildContext({
+            taskKind,
+            repoId: url.searchParams.get("repoId") ?? undefined,
+            providerKind: url.searchParams.get("providerKind") ?? undefined,
+            modelId: url.searchParams.get("modelId") ?? undefined,
+            modelCapabilities: url.searchParams.get("modelCapabilities")?.split(",").map((value) => value.trim()).filter(Boolean) ?? undefined,
+            runnerKind: url.searchParams.get("runnerKind") ?? undefined,
+            tenantId: url.searchParams.get("tenantId") ?? undefined
+          }, serviceContext);
+          const decisions = compatibilityService.evaluateCandidates(context0, serviceContext);
+          sendJson(response, 200, {
+            context: context0,
+            decisions,
+            summary: compatibilityService.summarizeDecisions(decisions, serviceContext)
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "evaluate") {
+          const body = recordValue(await readJson(request));
+          const contextInput = recordValue(body.context) as RegistryCompatibilityContextInput;
+          const compatibilityContext = compatibilityService.buildContext(contextInput, serviceContext);
+          const candidateKind = stringValue(body.candidateKind);
+          const candidateId = stringValue(body.candidateId);
+          if (!candidateKind || !candidateId) {
+            sendJson(response, 400, { error: "invalid_compatibility_request", message: "candidateKind and candidateId are required." });
+            return;
+          }
+          let decision;
+          if (candidateKind === "skill") decision = compatibilityService.evaluateSkill(candidateId, compatibilityContext, serviceContext);
+          else if (candidateKind === "harness") decision = compatibilityService.evaluateHarness(candidateId, compatibilityContext, serviceContext);
+          else if (candidateKind === "instruction") decision = compatibilityService.evaluateInstruction(candidateId, compatibilityContext, serviceContext);
+          else if (candidateKind === "package" || candidateKind === "bundle") decision = compatibilityService.evaluatePackage(candidateId, compatibilityContext, serviceContext);
+          else {
+            sendJson(response, 400, { error: "invalid_candidate_kind", message: "candidateKind must be skill, harness, instruction, package, or bundle." });
+            return;
+          }
+          sendJson(response, 201, { context: compatibilityContext, decision });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "evaluate-many") {
+          const body = recordValue(await readJson(request));
+          const contextInput = recordValue(body.context) as RegistryCompatibilityContextInput;
+          const compatibilityContext = compatibilityService.buildContext(contextInput, serviceContext);
+          const decisions = compatibilityService.evaluateCandidates(compatibilityContext, serviceContext);
+          sendJson(response, 201, {
+            context: compatibilityContext,
+            decisions,
+            summary: compatibilityService.summarizeDecisions(decisions, serviceContext)
+          });
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "registry_compatibility_route_not_found" : "method_not_allowed",
+          message: "Registry compatibility endpoints are advisory metadata only and never mutate registry entries."
+        });
+        return;
+      }
+
+      if (segments[1] === "drift") {
+        const driftService = context.registryDriftDetectionService;
+        const driftServiceContext = {
+          actorId: apiRequestContext.authContext.actor.id,
+          principalId: apiRequestContext.authContext.principal.id,
+          serviceAccountId: typeof apiRequestContext.authContext.metadata.serviceAccountId === "string"
+            ? (apiRequestContext.authContext.metadata.serviceAccountId as string)
+            : undefined,
+          requestId: apiRequestContext.requestId,
+          correlationId: apiRequestContext.correlationId,
+          source: "api"
+        };
+        const driftTargetKindParam = url.searchParams.get("targetKind") ?? undefined;
+        const driftTargetIdParam = url.searchParams.get("targetId") ?? undefined;
+        const driftSeverityParam = url.searchParams.get("severity") ?? undefined;
+        const allowedDriftKinds = ["skill", "harness", "instruction", "registry_package", "compatibility_profile"] as const;
+        const allowedDriftSeverities = ["info", "low", "medium", "high", "critical"] as const;
+        const driftTargetKind = driftTargetKindParam && (allowedDriftKinds as readonly string[]).includes(driftTargetKindParam)
+          ? (driftTargetKindParam as (typeof allowedDriftKinds)[number])
+          : undefined;
+        const driftSeverity = driftSeverityParam && (allowedDriftSeverities as readonly string[]).includes(driftSeverityParam)
+          ? (driftSeverityParam as (typeof allowedDriftSeverities)[number])
+          : undefined;
+        const driftQuery = {
+          targetKind: driftTargetKind,
+          targetId: driftTargetIdParam,
+          severity: driftSeverity
+        };
+        if (method === "GET" && segments.length === 3 && segments[2] === "signals") {
+          sendJson(response, 200, { signals: driftService.collectSignals(driftQuery, driftServiceContext) });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "baselines") {
+          sendJson(response, 200, { baselines: driftService.listBaselines(driftQuery) });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "assessments") {
+          sendJson(response, 200, { assessments: driftService.listAssessments(driftQuery) });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "recommendations") {
+          sendJson(response, 200, { recommendations: driftService.listRecommendations(driftQuery) });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          sendJson(response, 200, { summary: driftService.getSummary() });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "assess") {
+          const body = recordValue(await readJson(request));
+          const targetKindBody = stringValue(body.targetKind);
+          const targetIdBody = stringValue(body.targetId);
+          if (!targetKindBody || !targetIdBody || !(allowedDriftKinds as readonly string[]).includes(targetKindBody)) {
+            sendJson(response, 400, { error: "invalid_drift_assess_request", message: "targetKind and targetId are required; targetKind must be skill, harness, instruction, registry_package, or compatibility_profile." });
+            return;
+          }
+          const assessment = driftService.assessTarget({ targetKind: targetKindBody as (typeof allowedDriftKinds)[number], targetId: targetIdBody }, driftServiceContext);
+          sendJson(response, 201, { assessment });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "assess-all") {
+          const assessments = driftService.assessAll(driftServiceContext);
+          sendJson(response, 201, { assessments, summary: driftService.getSummary() });
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "registry_drift_route_not_found" : "method_not_allowed",
+          message: "Registry drift endpoints are advisory metadata only and never mutate registry entries or run eval/canary."
+        });
+        return;
+      }
+
+      if (segments[1] === "canary") {
+        const canaryService = context.canaryExecutionService;
+        const canaryServiceContext = {
+          actorId: apiRequestContext.authContext.actor.id,
+          principalId: apiRequestContext.authContext.principal.id,
+          serviceAccountId: typeof apiRequestContext.authContext.metadata.serviceAccountId === "string"
+            ? (apiRequestContext.authContext.metadata.serviceAccountId as string)
+            : undefined,
+          requestId: apiRequestContext.requestId,
+          correlationId: apiRequestContext.correlationId,
+          source: "api"
+        };
+        const allowedCanaryTargetKinds = ["skill", "harness", "instruction", "registry_package"] as const;
+        const allowedCanaryKinds = ["mock_deterministic", "fixture_subset", "task_subset_future", "tenant_subset_future", "provider_subset_future", "external_future"] as const;
+        if (method === "GET" && segments.length === 3 && segments[2] === "plans") {
+          sendJson(response, 200, { plans: canaryService.listCanaryPlans() });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "plans") {
+          const body = recordValue(await readJson(request));
+          const targetKind = stringValue(body.targetKind);
+          const targetId = stringValue(body.targetId);
+          if (!targetKind || !targetId || !(allowedCanaryTargetKinds as readonly string[]).includes(targetKind)) {
+            sendJson(response, 400, { error: "invalid_canary_plan_request", message: "targetKind and targetId are required; targetKind must be skill, harness, instruction, or registry_package." });
+            return;
+          }
+          const canaryKindBody = stringValue(body.canaryKind);
+          const canaryKind = canaryKindBody && (allowedCanaryKinds as readonly string[]).includes(canaryKindBody)
+            ? (canaryKindBody as (typeof allowedCanaryKinds)[number])
+            : undefined;
+          const plan = canaryService.createCanaryPlan({
+            targetKind: targetKind as (typeof allowedCanaryTargetKinds)[number],
+            targetId,
+            canaryKind,
+            proposalId: stringValue(body.proposalId),
+            draftRegistryChangeId: stringValue(body.draftRegistryChangeId),
+            requiredEvalRunIds: Array.isArray(body.requiredEvalRunIds) ? body.requiredEvalRunIds.filter((entry: unknown): entry is string => typeof entry === "string") : [],
+            requiredApprovalIds: Array.isArray(body.requiredApprovalIds) ? body.requiredApprovalIds.filter((entry: unknown): entry is string => typeof entry === "string") : [],
+            sampleStrategy: stringValue(body.sampleStrategy),
+            rollbackPlanId: stringValue(body.rollbackPlanId),
+            metadata: recordValue(body.metadata) ?? undefined
+          }, canaryServiceContext);
+          sendJson(response, 201, { plan });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "runs") {
+          sendJson(response, 200, { runs: canaryService.listCanaryRuns() });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "runs") {
+          const body = recordValue(await readJson(request));
+          const canaryPlanId = stringValue(body.canaryPlanId);
+          if (!canaryPlanId) {
+            sendJson(response, 400, { error: "invalid_canary_run_request", message: "canaryPlanId is required." });
+            return;
+          }
+          try {
+            const run = canaryService.requestCanaryRun({ canaryPlanId, metadata: recordValue(body.metadata) ?? undefined }, canaryServiceContext);
+            sendJson(response, 201, { run });
+          } catch (error) {
+            sendJson(response, 400, { error: "canary_run_request_failed", message: error instanceof Error ? error.message : "canary_run_request_failed" });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 5 && segments[2] === "runs" && segments[4] === "execute-mock") {
+          const runId = segments[3];
+          try {
+            const verdict = canaryService.executeMockCanaryRun(runId, canaryServiceContext);
+            sendJson(response, 201, { verdict });
+          } catch (error) {
+            sendJson(response, 400, { error: "canary_run_execute_failed", message: error instanceof Error ? error.message : "canary_run_execute_failed" });
+          }
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[2] === "runs") {
+          const run = canaryService.getCanaryRun(segments[3]);
+          if (!run) {
+            sendJson(response, 404, { error: "canary_run_not_found" });
+            return;
+          }
+          sendJson(response, 200, { run });
+          return;
+        }
+        if (method === "GET" && segments.length === 5 && segments[2] === "runs" && segments[4] === "verdict") {
+          const verdict = canaryService.getCanaryVerdictForRun(segments[3]);
+          if (!verdict) {
+            sendJson(response, 404, { error: "canary_verdict_not_found" });
+            return;
+          }
+          sendJson(response, 200, { verdict });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          sendJson(response, 200, { summary: context.registryCanaryApplyGetSummary() });
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "registry_canary_route_not_found" : "method_not_allowed",
+          message: "Registry canary endpoints execute deterministic mock canaries only and never mutate active registry entries, call providers, or execute real apply."
+        });
+        return;
+      }
+
+      if (segments[1] === "apply-workflows") {
+        const applyService = context.applyWorkflowService;
+        const applyServiceContext = {
+          actorId: apiRequestContext.authContext.actor.id,
+          principalId: apiRequestContext.authContext.principal.id,
+          serviceAccountId: typeof apiRequestContext.authContext.metadata.serviceAccountId === "string"
+            ? (apiRequestContext.authContext.metadata.serviceAccountId as string)
+            : undefined,
+          requestId: apiRequestContext.requestId,
+          correlationId: apiRequestContext.correlationId,
+          source: "api"
+        };
+        const allowedApplyTargetKinds = ["skill", "harness", "instruction", "registry_package"] as const;
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, { workflows: applyService.listWorkflows() });
+          return;
+        }
+        if (method === "POST" && segments.length === 2) {
+          const body = recordValue(await readJson(request));
+          const proposalId = stringValue(body.proposalId);
+          const draftRegistryChangeId = stringValue(body.draftRegistryChangeId);
+          const targetKind = stringValue(body.targetKind);
+          const targetId = stringValue(body.targetId);
+          const rollbackPlanId = stringValue(body.rollbackPlanId);
+          if (!proposalId || !draftRegistryChangeId || !targetKind || !targetId || !rollbackPlanId || !(allowedApplyTargetKinds as readonly string[]).includes(targetKind)) {
+            sendJson(response, 400, { error: "invalid_apply_workflow_request", message: "proposalId, draftRegistryChangeId, targetKind, targetId, and rollbackPlanId are required; targetKind must be skill, harness, instruction, or registry_package." });
+            return;
+          }
+          const workflow = applyService.createApplyWorkflow({
+            proposalId,
+            draftRegistryChangeId,
+            targetKind: targetKind as (typeof allowedApplyTargetKinds)[number],
+            targetId,
+            requiredEvalRunIds: Array.isArray(body.requiredEvalRunIds) ? body.requiredEvalRunIds.filter((entry: unknown): entry is string => typeof entry === "string") : [],
+            requiredCanaryRunIds: Array.isArray(body.requiredCanaryRunIds) ? body.requiredCanaryRunIds.filter((entry: unknown): entry is string => typeof entry === "string") : [],
+            requiredApprovalIds: Array.isArray(body.requiredApprovalIds) ? body.requiredApprovalIds.filter((entry: unknown): entry is string => typeof entry === "string") : [],
+            rollbackPlanId,
+            applyMode: body.applyMode === "manual_future" || body.applyMode === "automatic_forbidden" || body.applyMode === "metadata_only" ? body.applyMode : "metadata_only",
+            metadata: recordValue(body.metadata) ?? undefined
+          }, applyServiceContext);
+          sendJson(response, 201, { workflow });
+          return;
+        }
+        if (method === "GET" && segments.length === 3) {
+          const workflow = applyService.getWorkflow(segments[2]);
+          if (!workflow) {
+            sendJson(response, 404, { error: "apply_workflow_not_found" });
+            return;
+          }
+          sendJson(response, 200, { workflow });
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "evaluate-gate") {
+          try {
+            const decision = applyService.evaluateApplyGate(segments[2], applyServiceContext);
+            sendJson(response, 201, { decision });
+          } catch (error) {
+            sendJson(response, 400, { error: "apply_gate_evaluate_failed", message: error instanceof Error ? error.message : "apply_gate_evaluate_failed" });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "metadata-record") {
+          try {
+            const decision = applyService.recordMetadataOnlyApplyDecision(segments[2], applyServiceContext);
+            sendJson(response, 201, { decision });
+          } catch (error) {
+            sendJson(response, 400, { error: "apply_metadata_record_failed", message: error instanceof Error ? error.message : "apply_metadata_record_failed" });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 4 && segments[3] === "rollback-plans") {
+          const body = recordValue(await readJson(request));
+          try {
+            const plan = applyService.createRollbackPlan({
+              workflowId: segments[2],
+              rollbackKind: body.rollbackKind === "metadata_only" || body.rollbackKind === "manual_review" || body.rollbackKind === "registry_history_revert_future" || body.rollbackKind === "package_version_revert_future" ? body.rollbackKind : "metadata_only",
+              status: body.status === "planned" || body.status === "missing" || body.status === "blocked" || body.status === "future" ? body.status : "planned",
+              requiredEvidence: Array.isArray(body.requiredEvidence) ? body.requiredEvidence.filter((entry: unknown): entry is string => typeof entry === "string") : undefined,
+              metadata: recordValue(body.metadata) ?? undefined
+            });
+            sendJson(response, 201, { rollbackPlan: plan });
+          } catch (error) {
+            sendJson(response, 400, { error: "rollback_plan_create_failed", message: error instanceof Error ? error.message : "rollback_plan_create_failed" });
+          }
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "rollback-plans") {
+          sendJson(response, 200, { rollbackPlans: applyService.listRollbackPlans({ workflowId: segments[2] }) });
+          return;
+        }
+        if (method === "GET" && segments.length === 4 && segments[3] === "decisions") {
+          sendJson(response, 200, { decisions: applyService.listGateDecisions({ workflowId: segments[2] }) });
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "registry_apply_workflow_route_not_found" : "method_not_allowed",
+          message: "Registry apply workflow endpoints are metadata only and never mutate active registry entries, execute real apply, or auto-apply."
         });
         return;
       }
 
       if (segments[1] === "packages") {
         if (method === "GET" && segments.length === 2) {
-          sendJson(response, 200, { packages: registryService.listPackageManifests().map(registryPackageManifestToDto) });
+          const packages = registryService.listPackageManifests();
+          const scopeDecisions = packages.map((manifest) => context.registryTenantScopeEnforcementService.evaluateRegistryResource(registryResourceInputFromPackageManifest(manifest), registryScopeContextFromRequest(apiRequestContext)));
+          const trustDecisions = packages.map((manifest) => context.registryArtifactTrustService.evaluatePackageTrust(manifest, registryArtifactTrustContextFromRequest(apiRequestContext)));
+          sendJson(response, 200, {
+            packages: packages.map(registryPackageManifestToDto),
+            scopeSummary: registryScopeEnforcementSummaryToDto(context.registryTenantScopeEnforcementService.summarizeDecisions(scopeDecisions)),
+            artifactTrustSummary: registryArtifactTrustSummaryToDto(context.registryArtifactTrustService.summarizeDecisions(trustDecisions))
+          });
           return;
         }
         if (method === "GET" && segments.length === 3) {
           const manifest = registryService.getPackageManifest(segments[2]) ?? notFound("registry package", segments[2]);
-          sendJson(response, 200, { package: registryPackageManifestToDto(manifest) });
+          const scopeDecision = context.registryTenantScopeEnforcementService.evaluateRegistryResource(registryResourceInputFromPackageManifest(manifest), registryScopeContextFromRequest(apiRequestContext));
+          const artifactTrustDecision = context.registryArtifactTrustService.evaluatePackageTrust(manifest, registryArtifactTrustContextFromRequest(apiRequestContext));
+          sendJson(response, 200, {
+            package: registryPackageManifestToDto(manifest),
+            scopeDecision: registryScopeDecisionToDto(scopeDecision),
+            artifactTrustDecision: registryArtifactTrustDecisionToDto(artifactTrustDecision)
+          });
           return;
         }
         if (method === "POST" && segments[2] === "export") {
           try {
             const body = await readJson(request) as Parameters<RegistryService["exportPackageManifest"]>[0];
             const manifest = registryService.exportPackageManifest({ ...body, requestContext: apiRequestContext });
-            sendJson(response, 201, { package: registryPackageManifestToDto(manifest) });
+            const artifactTrustDecision = context.registryArtifactTrustService.evaluatePackageTrust(manifest, registryArtifactTrustContextFromRequest(apiRequestContext));
+            sendJson(response, 201, {
+              package: registryPackageManifestToDto(manifest),
+              artifactTrustDecision: registryArtifactTrustDecisionToDto(artifactTrustDecision)
+            });
           } catch (error) {
             sendJson(response, 400, { error: "package_export_failed", message: error instanceof Error ? error.message : "Package export failed" });
           }
@@ -5736,7 +7792,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             dryRun: segments[3] === "dry-run" ? true : body.dryRun,
             requestContext: apiRequestContext
           });
-          sendJson(response, result.errors.length > 0 ? 400 : result.dryRun ? 200 : 201, { importResult: registryImportResultToDto(result) });
+          const artifactTrustDecision = context.registryArtifactTrustService.evaluatePackageTrust(result.manifest, registryArtifactTrustContextFromRequest(apiRequestContext));
+          sendJson(response, result.errors.length > 0 ? 400 : result.dryRun ? 200 : 201, {
+            importResult: registryImportResultToDto(result),
+            artifactTrustDecision: registryArtifactTrustDecisionToDto(artifactTrustDecision)
+          });
           return;
         }
         if (method === "POST" && segments[2] === "diff") {
@@ -5759,13 +7819,21 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           dryRun: url.pathname.endsWith("/dry-run") ? true : body.dryRun,
           requestContext: apiRequestContext
         });
-        sendJson(response, result.errors.length > 0 ? 400 : result.dryRun ? 200 : 201, { importResult: registryImportResultToDto(result) });
+        const artifactTrustDecision = context.registryArtifactTrustService.evaluatePackageTrust(result.manifest, registryArtifactTrustContextFromRequest(apiRequestContext));
+        sendJson(response, result.errors.length > 0 ? 400 : result.dryRun ? 200 : 201, {
+          importResult: registryImportResultToDto(result),
+          artifactTrustDecision: registryArtifactTrustDecisionToDto(artifactTrustDecision)
+        });
         return;
       }
 
       if (method === "GET" && url.pathname === "/registry/bundle/manifest") {
         const manifest = registryService.exportPackageManifest({ packageKind: "bundle", name: "registry-bundle", version: "1.0.0", requestContext: apiRequestContext });
-        sendJson(response, 200, { package: registryPackageManifestToDto(manifest) });
+        const artifactTrustDecision = context.registryArtifactTrustService.evaluatePackageTrust(manifest, registryArtifactTrustContextFromRequest(apiRequestContext));
+        sendJson(response, 200, {
+          package: registryPackageManifestToDto(manifest),
+          artifactTrustDecision: registryArtifactTrustDecisionToDto(artifactTrustDecision)
+        });
         return;
       }
 
@@ -6338,6 +8406,376 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       const webhookService = context.gitWebhookReceiverService;
       const githubAppService = context.githubAppRuntimeService;
 
+      if (segments[1] === "merge-execution") {
+        const realMergePolicyService = context.realMergeExecutionPolicyService;
+        const repoId = url.searchParams.get("repoId") ?? undefined;
+
+        if (method === "GET" && segments.length === 3 && segments[2] === "policy") {
+          sendJson(response, 200, { policy: realMergePolicyService.getPolicy() });
+          return;
+        }
+
+        if (method === "GET" && segments.length === 3 && segments[2] === "forbidden-operations") {
+          sendJson(response, 200, { forbiddenOperations: realMergePolicyService.listForbiddenOperations() });
+          return;
+        }
+
+        if (method === "GET" && segments.length === 3 && segments[2] === "post-evidence-template") {
+          sendJson(response, 200, { postExecutionEvidenceTemplate: realMergePolicyService.getPostExecutionEvidenceTemplate() });
+          return;
+        }
+
+        if (method === "POST" && segments.length === 3 && segments[2] === "evaluate") {
+          const body = recordValue(await readJson(request));
+          const decision = realMergePolicyService.evaluateRequest({
+            id: stringValue(body.id),
+            repoId: stringValue(body.repoId),
+            baseBranch: stringValue(body.baseBranch),
+            sourceBranch: stringValue(body.sourceBranch),
+            branchName: stringValue(body.branchName),
+            mergeQueueEntryId: stringValue(body.mergeQueueEntryId),
+            branchLeaseId: stringValue(body.branchLeaseId),
+            workspaceLeaseId: stringValue(body.workspaceLeaseId),
+            prOwnershipId: stringValue(body.prOwnershipId),
+            conflictResolutionPlanId: stringValue(body.conflictResolutionPlanId),
+            dryRunMergeId: stringValue(body.dryRunMergeId),
+            requestedByActorId: stringValue(body.requestedByActorId),
+            requestedByPrincipalId: stringValue(body.requestedByPrincipalId),
+            validationStatus: realMergeEvidenceStatus(body.validationStatus),
+            approvalStatus: realMergeEvidenceStatus(body.approvalStatus),
+            rollbackPlanStatus: realMergeEvidenceStatus(body.rollbackPlanStatus),
+            tenantScopeStatus: realMergeTenantScopeStatus(body.tenantScopeStatus),
+            metadata: recordValue(body.metadata)
+          }, realMergeExecutionContextFromInput(requestContext, body));
+          const statusCode = decision.decision === "ready_for_manual_future" ? 200 : 409;
+          sendJson(response, statusCode, {
+            decision,
+            preconditions: realMergePolicyService.listPreconditions(decision.requestId),
+            mergeExecutionPerformed: false,
+            autoMergePerformed: false,
+            remotePushPerformed: false
+          });
+          return;
+        }
+
+        if (method === "GET" && segments.length === 3 && segments[2] === "decisions") {
+          sendJson(response, 200, {
+            decisions: realMergePolicyService.listDecisions(url.searchParams.get("requestId") ?? undefined)
+          });
+          return;
+        }
+
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          sendJson(response, 200, {
+            summary: realMergePolicyService.getSummary(repoId),
+            requests: realMergePolicyService.listRequests(repoId),
+            decisions: realMergePolicyService.listDecisions(),
+            preconditions: realMergePolicyService.listPreconditions(),
+            forbiddenOperations: realMergePolicyService.listForbiddenOperations()
+          });
+          return;
+        }
+
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "real_merge_execution_policy_route_not_found" : "method_not_allowed",
+          message: "Real merge execution policy endpoints are metadata-only and never execute merges, remote Git, auto-merge, branch deletion, or workspace mutation."
+        });
+        return;
+      }
+
+      if (segments[1] === "pr-ownership") {
+        const prOwnershipService = context.prOwnershipService;
+        const repoId = url.searchParams.get("repoId") ?? undefined;
+
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            ownershipRecords: prOwnershipService.listOwnership({
+              repoId,
+              branchName: url.searchParams.get("branchName") ?? undefined,
+              pullRequestId: url.searchParams.get("pullRequestId") ?? undefined,
+              branchLeaseId: url.searchParams.get("branchLeaseId") ?? undefined,
+              mergeQueueEntryId: url.searchParams.get("mergeQueueEntryId") ?? undefined,
+              conflictResolutionPlanId: url.searchParams.get("conflictResolutionPlanId") ?? undefined,
+              ownerActorId: url.searchParams.get("ownerActorId") ?? undefined,
+              ownerTeamId: url.searchParams.get("ownerTeamId") ?? undefined,
+              status: isPrOwnershipStatus(url.searchParams.get("status")) ? url.searchParams.get("status") as PrOwnershipStatus : undefined
+            })
+          });
+          return;
+        }
+
+        if (method === "POST" && segments.length === 2) {
+          const body = recordValue(await readJson(request));
+          const ownership = prOwnershipService.createOwnership({
+            id: stringValue(body.id),
+            repoId: stringValue(body.repoId),
+            pullRequestId: stringValue(body.pullRequestId),
+            pullRequestNumber: finiteNumber(body.pullRequestNumber),
+            branchName: stringValue(body.branchName),
+            branchLeaseId: stringValue(body.branchLeaseId),
+            workspaceLeaseId: stringValue(body.workspaceLeaseId),
+            mergeQueueEntryId: stringValue(body.mergeQueueEntryId),
+            conflictResolutionPlanId: stringValue(body.conflictResolutionPlanId),
+            taskId: stringValue(body.taskId),
+            taskRunId: stringValue(body.taskRunId),
+            agentRunId: stringValue(body.agentRunId),
+            ownerActorId: stringValue(body.ownerActorId),
+            ownerPrincipalId: stringValue(body.ownerPrincipalId),
+            ownerKind: isPrOwnerKind(body.ownerKind) ? body.ownerKind : undefined,
+            ownerTeamId: stringValue(body.ownerTeamId),
+            reviewerActorIds: stringArrayValue(body.reviewerActorIds),
+            reviewerTeamIds: stringArrayValue(body.reviewerTeamIds),
+            status: isPrOwnershipStatus(body.status) ? body.status : undefined,
+            metadata: recordValue(body.metadata)
+          }, prOwnershipContextFromInput(requestContext, body));
+          sendJson(response, ownership.status === "blocked" ? 403 : 201, { ownership });
+          return;
+        }
+
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          sendJson(response, 200, {
+            summary: prOwnershipService.getSummary(repoId),
+            mergeQueueOwnershipReadiness: prOwnershipService.listMergeQueueOwnershipReadiness(repoId),
+            remotePrUpdateEnabled: false,
+            remoteReviewerAssignmentEnabled: false,
+            githubApiCalls: false,
+            autoMergeEnabled: false
+          });
+          return;
+        }
+
+        const ownershipId = segments[2];
+        if (!ownershipId) {
+          sendJson(response, 400, { error: "missing_pr_ownership_id", message: "PR ownership id is required." });
+          return;
+        }
+
+        if (method === "GET" && segments.length === 3) {
+          const ownership = prOwnershipService.getOwnership(ownershipId) ?? notFound("PR ownership record", ownershipId);
+          sendJson(response, 200, {
+            ownership,
+            handoffs: prOwnershipService.listHandoffs({ ownershipRecordId: ownershipId }),
+            auditEvents: prOwnershipService.listAuditEvents({ ownershipRecordId: ownershipId })
+          });
+          return;
+        }
+
+        if (method === "POST" && segments.length === 4 && segments[3] === "review-request") {
+          const body = recordValue(await readJson(request));
+          const requestContextForOwnership = prOwnershipContextFromInput(requestContext, body);
+          const reviewerActorId = stringValue(body.reviewerActorId);
+          const reviewerTeamId = stringValue(body.reviewerTeamId);
+          const ownership = reviewerActorId || reviewerTeamId
+            ? prOwnershipService.addReviewer({
+              ownershipRecordId: ownershipId,
+              reviewerActorId,
+              reviewerTeamId,
+              metadata: recordValue(body.metadata)
+            }, requestContextForOwnership)
+            : prOwnershipService.markReviewRequested(ownershipId, requestContextForOwnership);
+          sendJson(response, ownership.status === "blocked" ? 403 : 200, { ownership });
+          return;
+        }
+
+        if (method === "POST" && segments.length === 4 && segments[3] === "handoff") {
+          const body = recordValue(await readJson(request));
+          const handoff = prOwnershipService.requestHandoff({
+            id: stringValue(body.id),
+            ownershipRecordId: ownershipId,
+            fromActorId: stringValue(body.fromActorId),
+            toActorId: stringValue(body.toActorId),
+            toTeamId: stringValue(body.toTeamId),
+            toServiceAccountId: stringValue(body.toServiceAccountId),
+            handoffKind: isPrHandoffKind(body.handoffKind) ? body.handoffKind : undefined,
+            reason: stringValue(body.reason),
+            requestedAt: dateValue(body.requestedAt),
+            expiresAt: dateValue(body.expiresAt),
+            requiredEvidence: stringArrayValue(body.requiredEvidence),
+            metadata: recordValue(body.metadata)
+          }, prOwnershipContextFromInput(requestContext, body));
+          const statusCode = handoff.status === "requested" ? 201 : handoff.status === "blocked_policy" ? 403 : 400;
+          sendJson(response, statusCode, { handoff });
+          return;
+        }
+
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "pr_ownership_route_not_found" : "method_not_allowed",
+          message: "PR ownership endpoints are metadata-only and never update remote PRs, reviewers, branches, or merge state."
+        });
+        return;
+      }
+
+      if (segments[1] === "pr-handoffs") {
+        const prOwnershipService = context.prOwnershipService;
+        if (method === "GET" && segments.length === 2) {
+          sendJson(response, 200, {
+            handoffs: prOwnershipService.listHandoffs({
+              repoId: url.searchParams.get("repoId") ?? undefined,
+              ownershipRecordId: url.searchParams.get("ownershipRecordId") ?? undefined,
+              status: isPrHandoffStatus(url.searchParams.get("status")) ? url.searchParams.get("status") as PrHandoffStatus : undefined,
+              toActorId: url.searchParams.get("toActorId") ?? undefined,
+              toTeamId: url.searchParams.get("toTeamId") ?? undefined
+            }),
+            decisions: prOwnershipService.listDecisions()
+          });
+          return;
+        }
+
+        const handoffId = segments[2];
+        if (!handoffId) {
+          sendJson(response, 400, { error: "missing_pr_handoff_id", message: "PR handoff id is required." });
+          return;
+        }
+
+        if (method === "POST" && segments.length === 4 && segments[3] === "decision") {
+          const body = recordValue(await readJson(request));
+          if (!isPrHandoffDecisionValue(body.decision)) {
+            sendJson(response, 400, { error: "invalid_pr_handoff_decision", message: "decision must be accept, reject, hold, request_more_info, expired, or blocked." });
+            return;
+          }
+          const decision = prOwnershipService.decideHandoff(handoffId, {
+            decision: body.decision,
+            decidedByActorId: stringValue(body.decidedByActorId),
+            reason: stringValue(body.reason),
+            conditions: stringArrayValue(body.conditions),
+            metadata: recordValue(body.metadata)
+          }, prOwnershipContextFromInput(requestContext, body));
+          sendJson(response, decision.decision === "blocked" ? 403 : 200, {
+            decision,
+            handoffs: prOwnershipService.listHandoffs()
+          });
+          return;
+        }
+
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "pr_handoff_route_not_found" : "method_not_allowed",
+          message: "PR handoff endpoints are metadata-only and never update remote PRs, reviewers, branches, or merge state."
+        });
+        return;
+      }
+
+      if (segments[1] === "conflicts" && segments[2] === "assistant") {
+        const assistant = context.conflictResolutionAssistantService;
+        const repoId = url.searchParams.get("repoId") ?? undefined;
+
+        if (segments[3] === "requests") {
+          if (method === "GET" && segments.length === 4) {
+            sendJson(response, 200, { requests: assistant.listRequests({ repoId }) });
+            return;
+          }
+
+          if (method === "POST" && segments.length === 4) {
+            const body = recordValue(await readJson(request));
+            const mergeQueueEntryId = stringValue(body.mergeQueueEntryId);
+            const branchLeaseIds = stringArrayValue(body.branchLeaseIds);
+            const mergeQueueEntry = mergeQueueEntryId ? store.getMergeQueueEntry(mergeQueueEntryId) ?? notFound("merge queue entry", mergeQueueEntryId) : undefined;
+            const primaryLeaseId = stringValue(body.branchLeaseId) ?? mergeQueueEntry?.branchLeaseId ?? branchLeaseIds[0];
+            const primaryLease = primaryLeaseId ? store.getBranchLease(primaryLeaseId) ?? notFound("branch lease", primaryLeaseId) : undefined;
+            const requestRepoId = stringValue(body.repoId) ?? mergeQueueEntry?.repoId ?? primaryLease?.repoId;
+            const baseBranch = stringValue(body.baseBranch) ?? primaryLease?.baseBranch;
+            const sourceBranch = stringValue(body.sourceBranch) ?? mergeQueueEntry?.branchName ?? primaryLease?.branchName;
+            if (!requestRepoId || !baseBranch || !sourceBranch) {
+              sendJson(response, 400, {
+                error: "invalid_conflict_resolution_request",
+                message: "repoId, baseBranch, and sourceBranch are required unless mergeQueueEntryId or branchLeaseId supplies them."
+              });
+              return;
+            }
+            const conflictRequest = assistant.createRequest({
+              id: stringValue(body.id),
+              repoId: requestRepoId,
+              baseBranch,
+              sourceBranch,
+              targetBranch: stringValue(body.targetBranch) ?? baseBranch,
+              mergeSimulationId: stringValue(body.mergeSimulationId),
+              mergeQueueEntryId,
+              conflictRiskId: stringValue(body.conflictRiskId),
+              branchLeaseIds: [...branchLeaseIds, primaryLeaseId].filter((value): value is string => typeof value === "string"),
+              workspaceLeaseIds: stringArrayValue(body.workspaceLeaseIds),
+              editOverlapIds: stringArrayValue(body.editOverlapIds),
+              files: stringArrayValue(body.files),
+              metadata: recordValue(body.metadata)
+            }, conflictResolutionAssistantContextFromInput(requestContext, body));
+            sendJson(response, 201, { request: conflictRequest });
+            return;
+          }
+
+          const requestId = segments[4];
+          if (!requestId) {
+            sendJson(response, 400, { error: "missing_conflict_resolution_request_id", message: "request id is required." });
+            return;
+          }
+          if (method === "GET" && segments.length === 5) {
+            const conflictRequest = assistant.getRequest(requestId) ?? notFound("conflict resolution request", requestId);
+            sendJson(response, 200, { request: conflictRequest });
+            return;
+          }
+          if (method === "POST" && segments.length === 6 && segments[5] === "summarize") {
+            const body = recordValue(await readJson(request));
+            const summary = assistant.summarizeConflict(requestId, conflictResolutionAssistantContextFromInput(requestContext, body));
+            sendJson(response, 200, { summary });
+            return;
+          }
+          if (method === "POST" && segments.length === 6 && segments[5] === "plan") {
+            const body = recordValue(await readJson(request));
+            const plan = assistant.generateResolutionPlan(requestId, conflictResolutionAssistantContextFromInput(requestContext, body));
+            sendJson(response, 201, {
+              plan,
+              recommendations: assistant.listRecommendations(plan.id)
+            });
+            return;
+          }
+        }
+
+        if (method === "GET" && segments[3] === "plans") {
+          sendJson(response, 200, { plans: assistant.listPlans() });
+          return;
+        }
+
+        if (method === "GET" && segments[3] === "recommendations") {
+          sendJson(response, 200, { recommendations: assistant.listRecommendations(url.searchParams.get("planId") ?? undefined) });
+          return;
+        }
+
+        if (method === "GET" && segments[3] === "summary") {
+          sendJson(response, 200, {
+            summary: assistant.getSummary(repoId),
+            summaries: assistant.listSummaries({ repoId }),
+            plans: assistant.listPlans()
+          });
+          return;
+        }
+
+        if (method === "POST" && segments[3] === "plans" && segments[5] === "reviewed") {
+          const body = recordValue(await readJson(request));
+          const planId = segments[4];
+          if (!planId) {
+            sendJson(response, 400, { error: "missing_conflict_resolution_plan_id", message: "plan id is required." });
+            return;
+          }
+          sendJson(response, 200, { plan: assistant.markPlanReviewed(planId, conflictResolutionAssistantContextFromInput(requestContext, body)) });
+          return;
+        }
+
+        if (method === "POST" && segments[3] === "plans" && segments[5] === "link-merge-queue-hold") {
+          const body = recordValue(await readJson(request));
+          const planId = segments[4];
+          const holdId = stringValue(body.holdId) ?? segments[6];
+          if (!planId || !holdId) {
+            sendJson(response, 400, { error: "missing_plan_or_hold_id", message: "plan id and hold id are required." });
+            return;
+          }
+          sendJson(response, 200, { plan: assistant.linkMergeQueueHold(planId, holdId, conflictResolutionAssistantContextFromInput(requestContext, body)) });
+          return;
+        }
+
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "conflict_resolution_assistant_route_not_found" : "method_not_allowed",
+          message: "Conflict Resolution Assistant endpoints are metadata-only and never apply patches or execute merges."
+        });
+        return;
+      }
+
       if (segments[1] === "merge-queue") {
         const mergeQueuePolicyService = context.mergeQueuePolicyService;
         const repoId = url.searchParams.get("repoId") ?? undefined;
@@ -6406,6 +8844,116 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
           error: method === "GET" || method === "POST" ? "merge_queue_policy_route_not_found" : "method_not_allowed",
           message: "Merge queue policy endpoints are metadata-only and never execute merges."
+        });
+        return;
+      }
+
+      if (segments[1] === "cleanup") {
+        const cleanupService = context.branchCleanupRecoveryService;
+        const cleanupRepoId = url.searchParams.get("repoId") ?? undefined;
+        const cleanupLeaseKindParam = url.searchParams.get("leaseKind");
+        const cleanupSeverityParam = url.searchParams.get("severity");
+        const cleanupLeaseKinds: OrphanLeaseKind[] = ["branch", "workspace", "worktree", "merge_queue", "pr_ownership", "agent_session"];
+        const cleanupSeverities: OrphanSeverity[] = ["low", "medium", "high", "critical"];
+        const cleanupLeaseKind = cleanupLeaseKindParam && cleanupLeaseKinds.includes(cleanupLeaseKindParam as OrphanLeaseKind)
+          ? (cleanupLeaseKindParam as OrphanLeaseKind)
+          : undefined;
+        const cleanupSeverity = cleanupSeverityParam && cleanupSeverities.includes(cleanupSeverityParam as OrphanSeverity)
+          ? (cleanupSeverityParam as OrphanSeverity)
+          : undefined;
+        const cleanupContext = (() => ({
+          actorId: requestContext.authContext.actor.id,
+          principalId: requestContext.authContext.principal.id,
+          serviceAccountId: typeof requestContext.authContext.metadata.serviceAccountId === "string"
+            ? (requestContext.authContext.metadata.serviceAccountId as string)
+            : undefined,
+          requestId: requestContext.requestId,
+          correlationId: requestContext.correlationId,
+          source: "api"
+        }));
+
+        if (method === "GET" && segments.length === 3 && segments[2] === "orphans") {
+          sendJson(response, 200, {
+            orphans: cleanupService.listOrphanRecords({ repoId: cleanupRepoId, leaseKind: cleanupLeaseKind, severity: cleanupSeverity })
+          });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "recommendations") {
+          sendJson(response, 200, { recommendations: cleanupService.listRecommendations() });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "summary") {
+          sendJson(response, 200, { summary: cleanupService.getSummary() });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "recovery-actions") {
+          sendJson(response, 200, { recoveryActions: cleanupService.listRecoveryActions() });
+          return;
+        }
+        if (method === "GET" && segments.length === 3 && segments[2] === "decisions") {
+          sendJson(response, 200, { decisions: cleanupService.listDecisions() });
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "scan") {
+          const result = cleanupService.scanForOrphans({ repoId: cleanupRepoId }, cleanupContext());
+          sendJson(response, 201, {
+            orphans: result.orphans,
+            recommendations: result.recommendations,
+            summary: cleanupService.getSummary()
+          });
+          return;
+        }
+        if (method === "POST" && segments.length === 5 && segments[2] === "recommendations" && segments[4] === "decision") {
+          const recommendationId = segments[3];
+          const body = recordValue(await readJson(request));
+          const decisionValueRaw = stringValue(body.decision);
+          const allowedDecisions: CleanupDecisionValue[] = ["approved_metadata_only", "rejected", "held", "future_destructive_review", "blocked_policy", "executed_metadata_only"];
+          if (!decisionValueRaw || !allowedDecisions.includes(decisionValueRaw as CleanupDecisionValue)) {
+            sendJson(response, 400, { error: "invalid_cleanup_decision", message: "decision is required and must be one of the documented values." });
+            return;
+          }
+          const decisionInput: BranchCleanupDecisionInput = {
+            recommendationId,
+            decision: decisionValueRaw as CleanupDecisionValue,
+            reason: stringValue(body.reason),
+            metadata: recordValue(body.metadata)
+          };
+          try {
+            const decision = cleanupService.decideRecommendation(decisionInput, cleanupContext());
+            sendJson(response, 201, { decision });
+          } catch (error) {
+            sendJson(response, 404, { error: "cleanup_recommendation_not_found", message: (error as Error).message });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 3 && segments[2] === "metadata-execute") {
+          const body = recordValue(await readJson(request));
+          const decisionId = stringValue(body.decisionId);
+          if (!decisionId) {
+            sendJson(response, 400, { error: "missing_cleanup_decision_id", message: "decisionId is required." });
+            return;
+          }
+          try {
+            const result = cleanupService.executeMetadataOnlyCleanup(decisionId, cleanupContext());
+            sendJson(response, 200, result);
+          } catch (error) {
+            sendJson(response, 409, { error: "cleanup_metadata_execute_blocked", message: (error as Error).message });
+          }
+          return;
+        }
+        if (method === "POST" && segments.length === 5 && segments[2] === "orphans" && segments[4] === "propose-recovery") {
+          const orphanId = segments[3];
+          try {
+            const actions = cleanupService.proposeRecovery(orphanId, cleanupContext());
+            sendJson(response, 201, { recoveryActions: actions });
+          } catch (error) {
+            sendJson(response, 404, { error: "cleanup_orphan_not_found", message: (error as Error).message });
+          }
+          return;
+        }
+        sendJson(response, method === "GET" || method === "POST" ? 404 : 405, {
+          error: method === "GET" || method === "POST" ? "cleanup_route_not_found" : "method_not_allowed",
+          message: "Branch cleanup endpoints are metadata-only and never delete branches, worktrees, or PRs."
         });
         return;
       }
@@ -7284,11 +9832,381 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
   const securityService = new SecurityControlService({ policyService, authorizationService, serviceAccountContextFactory });
   const localAgentProtocolService = new LocalAgentProtocolService({ policyService, securityService });
   const providerAbstractionService = new ProviderAbstractionService({ policyService, localAgentProtocolService });
+  const tenantScopeEnforcementService = createTenantScopeEnforcementService();
+  const registryTenantScopeEnforcementService = createRegistryTenantScopeEnforcementService({
+    tenantScopeEnforcementService,
+    policyEvaluator: (input) => {
+      const subject = createPolicySubject({
+        actorId: input.context.actorId ?? "registry_scope_service",
+        principalId: input.context.principalId,
+        serviceAccountId: input.context.serviceAccountId,
+        actorKind: input.context.serviceAccountId ? "service_account" : "user",
+        roles: input.context.roles?.length ? input.context.roles : ["system"],
+        tenantIds: input.context.tenantId ? [input.context.tenantId] : undefined,
+        teamIds: input.context.teamId ? [input.context.teamId] : undefined,
+        projectIds: input.context.projectId ? [input.context.projectId] : undefined,
+        resourceScopes: input.context.resourceScopes,
+        requestId: input.context.requestId,
+        correlationId: input.context.correlationId,
+        source: input.context.source,
+        isMockActor: true
+      });
+      const decision = policyService.evaluate({
+        subject,
+        resource: createPolicyResource({
+          resourceKind: "registry_scope",
+          resourceId: input.resourceId ?? "registry_scope",
+          tenantId: input.context.tenantId,
+          teamId: input.context.teamId,
+          projectId: input.context.projectId,
+          metadata: {
+            registryResourceKind: input.resourceKind,
+            ...(input.metadata ?? {})
+          }
+        }),
+        action: input.action,
+        context: createPolicyContext({
+          environment: {
+            metadataOnly: true,
+            productionEnforcement: false,
+            resolverGatesPreserved: true,
+            registryMutationExecuted: false,
+            activeRegistryMutationThroughAutoImprovement: false,
+            externalCallExecuted: false
+          },
+          metadata: {
+            registryResourceKind: input.resourceKind,
+            registryResourceId: input.resourceId,
+            ...(input.metadata ?? {})
+          }
+        })
+      });
+      return {
+        decision: decision.decision,
+        matchedRuleIds: decision.matchedRuleIds,
+        reason: decision.reason
+      };
+    }
+  });
+  const registryArtifactTrustService = createRegistryArtifactTrustService({
+    policyEvaluator: (input) => {
+      const subject = createPolicySubject({
+        actorId: input.context.actorId ?? "registry_artifact_trust_service",
+        principalId: input.context.principalId,
+        serviceAccountId: input.context.serviceAccountId,
+        actorKind: input.context.serviceAccountId ? "service_account" : "user",
+        roles: input.context.roles?.length ? input.context.roles : ["system"],
+        resourceScopes: input.context.resourceScopes,
+        requestId: input.context.requestId,
+        correlationId: input.context.correlationId,
+        source: input.context.source,
+        isMockActor: true
+      });
+      const decision = policyService.evaluate({
+        subject,
+        resource: createPolicyResource({
+          resourceKind: "registry_artifact_trust",
+          resourceId: input.artifactId ?? "registry_artifact_trust",
+          metadata: {
+            ...(input.metadata ?? {}),
+            artifactTrustMetadataOnly: true
+          }
+        }),
+        action: input.action,
+        context: createPolicyContext({
+          environment: {
+            metadataOnly: true,
+            resolverGatesPreserved: true,
+            registryMutationExecuted: false,
+            activeRegistryMutationThroughAutoImprovement: false,
+            realSigningImplemented: false,
+            realVerificationImplemented: false,
+            realSigningPerformed: false,
+            realSignatureVerificationPerformed: false,
+            signingKeyGenerated: false,
+            externalBuildSystemCalled: false,
+            externalRegistryCalls: false,
+            externalCallExecuted: false
+          },
+          metadata: {
+            artifactId: input.artifactId,
+            ...(input.metadata ?? {})
+          }
+        })
+      });
+      return {
+        decision: decision.decision,
+        matchedRuleIds: decision.matchedRuleIds,
+        reason: decision.reason
+      };
+    }
+  });
   const registryService = createRegistryService({
     ...storage.repositoryFactory.createRegistryRepositories(),
-    authorizer: new PolicyBackedRegistryMutationAuthorizer({ policyService })
+    authorizer: new PolicyBackedRegistryMutationAuthorizer({ policyService }),
+    scopeEnforcementService: registryTenantScopeEnforcementService,
+    artifactTrustService: registryArtifactTrustService
+  });
+  const registryCompatibilityService = createRegistryCompatibilityService({
+    registry: {
+      listSkills: () => registryService.listSkills(),
+      listHarnesses: () => registryService.listHarnesses(),
+      listInstructions: () => registryService.listInstructions()
+    },
+    policyEvaluator: (input) => {
+      const subject = createPolicySubject({
+        actorId: input.context.actorId,
+        principalId: input.context.principalId,
+        serviceAccountId: input.context.serviceAccountId,
+        actorKind: input.context.serviceAccountId ? "service_account" : "user",
+        roles: ["system"]
+      });
+      const decision = policyService.evaluate({
+        subject,
+        resource: createPolicyResource({ resourceKind: "registry_compatibility", resourceId: input.candidateId ?? "registry_compatibility" }),
+        action: input.action,
+        context: {
+          metadata: {
+            registryMutationExecuted: false,
+            autoApplyEnabled: false,
+            externalCallExecuted: false,
+            resolverGatesPreserved: true,
+            ...(input.metadata ?? {})
+          },
+          environment: {
+            metadataOnly: true,
+            registryMutationExecuted: false,
+            autoApplyEnabled: false,
+            resolverGatesPreserved: true,
+            externalCallExecuted: false
+          }
+        }
+      });
+      return {
+        decision: decision.decision,
+        matchedRuleIds: decision.matchedRuleIds,
+        reason: decision.reason
+      };
+    }
+  });
+  const registryDriftDetectionService = createRegistryDriftDetectionService({
+    dataSource: {
+      listSkills: () => registryService.listSkills(),
+      listHarnesses: () => registryService.listHarnesses(),
+      listInstructions: () => registryService.listInstructions()
+    },
+    policyEvaluator: (input) => {
+      const subject = createPolicySubject({
+        actorId: input.context.actorId,
+        principalId: input.context.principalId,
+        serviceAccountId: input.context.serviceAccountId,
+        actorKind: input.context.serviceAccountId ? "service_account" : "user",
+        roles: ["system"]
+      });
+      const decision = policyService.evaluate({
+        subject,
+        resource: createPolicyResource({ resourceKind: "registry_drift", resourceId: input.targetId ?? "registry_drift" }),
+        action: input.action,
+        context: {
+          metadata: {
+            registryMutationExecuted: false,
+            autoApplyEnabled: false,
+            evalExecuted: false,
+            canaryExecuted: false,
+            externalCallExecuted: false,
+            resolverGatesPreserved: true,
+            ...(input.metadata ?? {})
+          },
+          environment: {
+            metadataOnly: true,
+            registryMutationExecuted: false,
+            autoApplyEnabled: false,
+            evalExecuted: false,
+            canaryExecuted: false,
+            resolverGatesPreserved: true,
+            externalCallExecuted: false
+          }
+        }
+      });
+      return {
+        decision: decision.decision,
+        matchedRuleIds: decision.matchedRuleIds,
+        reason: decision.reason
+      };
+    }
   });
   const improvementServices = createImprovementServices(storage.repositoryFactory.createImprovementRepositories(), { policyService });
+  const evalSuiteExecutionService = createEvalSuiteExecutionService({
+    dataSource: {
+      getTarget: (targetKind, targetId) => registryEvalTargetFromServices(registryService, improvementServices, targetKind, targetId),
+      listTargets: () => [
+        ...registryService.listSkills().map((target) => registryEvalTargetFromServices(registryService, improvementServices, "skill", target.id)),
+        ...registryService.listHarnesses().map((target) => registryEvalTargetFromServices(registryService, improvementServices, "harness", target.id)),
+        ...registryService.listInstructions().map((target) => registryEvalTargetFromServices(registryService, improvementServices, "instruction", target.id)),
+        ...registryService.listPackageManifests().map((target) => registryEvalTargetFromServices(registryService, improvementServices, "registry_package", target.id))
+      ].filter((target): target is RegistryEvalTargetSnapshot => target !== undefined),
+      attachRegistryEvalResult: (input) => registryService.attachEvalResult(input.targetKind, input.targetId, {
+        evalName: input.evalName,
+        evalType: "mock",
+        status: input.status,
+        score: input.score,
+        maxScore: input.maxScore,
+        summary: input.summary,
+        details: input.details,
+        source: "mock",
+        artifactRef: input.artifactRef,
+        updateEvalStatus: input.updateEvalStatus,
+        actorId: input.context?.actorId,
+        requestContext: input.context?.requestContext,
+        authContext: input.context?.authContext,
+        metadata: {
+          ...(input.metadata ?? {}),
+          evalSuiteHarnessMetadataOnly: true,
+          noExternalProviderCall: true,
+          noActiveRegistryContentMutation: true,
+          noAutoApply: true
+        }
+      }),
+      attachProposalEvalRun: (input) => improvementServices.proposalEvalRuns.attachEvalRun({
+        proposalId: input.proposalId,
+        evalRequirementId: input.evalRequirementId,
+        status: input.status,
+        summary: input.summary,
+        score: input.score,
+        maxScore: input.maxScore,
+        requestContext: input.context?.requestContext,
+        authContext: input.context?.authContext,
+        metadata: {
+          ...(input.metadata ?? {}),
+          evalSuiteHarnessMetadataOnly: true,
+          noExternalProviderCall: true,
+          noCanaryExecution: true,
+          noAutoApply: true
+        }
+      })
+    },
+    policyEvaluator: (input) => {
+      const subject = createPolicySubject({
+        actorId: input.context.actorId ?? "registry_eval_suite_service",
+        principalId: input.context.principalId,
+        serviceAccountId: input.context.serviceAccountId,
+        actorKind: input.context.serviceAccountId ? "service_account" : "user",
+        roles: input.context.roles?.length ? input.context.roles : ["system", "registry_reviewer"],
+        resourceScopes: input.context.resourceScopes,
+        requestId: input.context.requestId,
+        correlationId: input.context.correlationId,
+        source: input.context.source,
+        isMockActor: true,
+        metadata: {
+          ...(input.context.metadata ?? {}),
+          metadataOnly: true,
+          mockExecutionOnly: true,
+          externalEvalImplemented: false
+        }
+      });
+      const decision = policyService.evaluate({
+        subject,
+        resource: createPolicyResource({
+          resourceKind: "registry_eval_suite",
+          resourceId: input.runId ?? input.suiteId ?? input.targetId ?? "registry_eval_suite",
+          metadata: {
+            ...(input.metadata ?? {}),
+            suiteId: input.suiteId,
+            runId: input.runId,
+            targetKind: input.targetKind,
+            targetId: input.targetId,
+            registryMutationExecuted: false,
+            activeRegistryMutationThroughAutoImprovement: false
+          }
+        }),
+        action: input.action,
+        context: createPolicyContext({
+          environment: {
+            metadataOnly: true,
+            mockExecutionOnly: true,
+            externalEvalImplemented: false,
+            realProviderCalls: false,
+            llmCallsExecuted: false,
+            mcpCallsExecuted: false,
+            vendorCliExecuted: false,
+            canaryExecuted: false,
+            autoApplyEnabled: false,
+            activeRegistryMutationExecuted: false,
+            externalCallExecuted: false,
+            secretsExposed: false,
+            envValuesExposed: false
+          },
+          metadata: {
+            ...(input.metadata ?? {}),
+            suiteId: input.suiteId,
+            runId: input.runId,
+            targetKind: input.targetKind,
+            targetId: input.targetId
+          }
+        })
+      });
+      return {
+        decision: decision.decision,
+        matchedRuleIds: decision.matchedRuleIds,
+        reason: decision.reason
+      };
+    }
+  });
+  const canaryApplyPolicyEvaluator = (resourceKind: "registry_canary" | "registry_apply_workflow") =>
+    (input: import("@aichestra/registry").RegistryCanaryApplyPolicyEvaluationInput): import("@aichestra/registry").RegistryCanaryApplyPolicyDecisionSnapshot => {
+      const subject = createPolicySubject({
+        actorId: input.context.actorId,
+        principalId: input.context.principalId,
+        serviceAccountId: input.context.serviceAccountId,
+        actorKind: input.context.serviceAccountId ? "service_account" : "user",
+        roles: ["system"]
+      });
+      const decision = policyService.evaluate({
+        subject,
+        resource: createPolicyResource({ resourceKind, resourceId: input.resourceId ?? resourceKind }),
+        action: input.action,
+        context: {
+          metadata: {
+            autoApplyEnabled: false,
+            activeRegistryMutationAllowed: false,
+            externalCanaryExecuted: false,
+            realProviderCallExecuted: false,
+            applyPerformed: false,
+            activeRegistryMutated: false,
+            ...(input.metadata ?? {})
+          },
+          environment: {
+            metadataOnly: true,
+            autoApplyEnabled: false,
+            activeRegistryMutationAllowed: false,
+            externalCanaryExecuted: false,
+            realProviderCallExecuted: false,
+            applyPerformed: false,
+            activeRegistryMutated: false
+          }
+        }
+      });
+      return {
+        decision: decision.decision,
+        matchedRuleIds: decision.matchedRuleIds,
+        reason: decision.reason
+      };
+    };
+  const canaryApplyDataSource = {
+    listEvalReferences: () => evalSuiteExecutionService.listEvalRuns().map((run) => ({
+      evalRunId: run.id,
+      status: (run.status === "passed" ? "pass" : run.status === "failed" ? "fail" : run.status === "skipped" ? "missing" : "missing") as "pass" | "fail" | "missing" | "future"
+    })),
+    listApprovalReferences: () => [] as { approvalId: string; status: "approved" | "missing" | "rejected" | "future" }[]
+  };
+  const { canaryService: canaryExecutionService, applyWorkflowService, getSummary: registryCanaryApplyGetSummary } = createCanaryAndApplyServices({
+    dataSource: canaryApplyDataSource,
+    policyEvaluator: (input) => {
+      const resourceKind: "registry_canary" | "registry_apply_workflow" =
+        input.action.startsWith("registry.canary.") ? "registry_canary" : "registry_apply_workflow";
+      return canaryApplyPolicyEvaluator(resourceKind)(input);
+    }
+  });
   const recordLegacyCredentialFallback = (event: {
     providerId: string;
     purpose: string;
@@ -7422,7 +10340,7 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     staticPolicyRuleCount: policyService.getConfig().ruleCount
   });
   const tenantScopePlanningService = createDashboardReadinessTenantScopePlanningService();
-  const tenantScopeEnforcementService = createTenantScopeEnforcementService();
+  const dashboardScopeFilteringService = createDashboardScopeFilteringService();
   const agentRunnerConfig = createAgentRunnerConfigFromEnv();
   const agentRunnerRepositories = createInMemoryAgentRunnerRepositories();
   const agentRunnerWorkspaceManager = new LocalAgentWorkspaceManager({
@@ -7450,6 +10368,11 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
     workspaceLifecycleService: agentWorkspaceLifecycleService,
     policyService,
     securityService
+  });
+  const agentWorktreeAllocationService = createAgentWorktreeAllocationServiceFromEnv(process.env, {
+    workspaceLifecycleService: agentWorkspaceLifecycleService,
+    branchLeaseLookup: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+    workspaceLeaseLookup: (workspaceLeaseId) => agentRunnerService.getWorkspaceLease(workspaceLeaseId)
   });
   const agentRunCoordinationService = new AgentRunCoordinationService({
     repository: new InMemoryAgentRunCoordinationRepository(),
@@ -7585,6 +10508,378 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       };
     }
   });
+  const conflictResolutionAssistantService = new ConflictResolutionAssistantService({
+    dataSource: {
+      getMergeSimulation: (mergeSimulationId) => store.listMergeSimulations().find((simulation) => simulation.id === mergeSimulationId),
+      latestMergeSimulationForLease: (branchLeaseId) => store.latestMergeSimulationForLease(branchLeaseId),
+      getMergeQueueEntry: (mergeQueueEntryId) => store.getMergeQueueEntry(mergeQueueEntryId),
+      getConflictRisk: (conflictRiskId) => store.listRepos()
+        .flatMap((repo) => store.computeRepoConflictRisks(repo.id))
+        .find((risk) => risk.id === conflictRiskId),
+      highestConflictRiskForLease: (branchLeaseId) => store.highestConflictRiskForLease(branchLeaseId),
+      getBranchLease: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+      getWorkspaceLease: (workspaceLeaseId) => {
+        const workspace = agentRunnerService.getWorkspaceLease(workspaceLeaseId);
+        if (!workspace) return undefined;
+        return {
+          id: workspace.id,
+          repoId: workspace.repoId,
+          branchLeaseId: workspace.branchLeaseId,
+          taskRunId: workspace.taskRunId,
+          branchName: workspace.branchName,
+          status: workspace.status,
+          isolationStatus: workspace.isolationStatus,
+          workspaceKind: workspace.workspaceKind,
+          metadata: {
+            workspacePathRedacted: true,
+            metadataOnly: true
+          }
+        };
+      },
+      getEditOverlap: (editOverlapId) => {
+        const overlap = editIntentGraphService.listOverlapAssessments().find((candidate) => candidate.id === editOverlapId);
+        return overlap ? {
+          id: overlap.id,
+          repoId: overlap.repoId,
+          sessionIds: overlap.sessionIds,
+          overlapKind: overlap.overlapKind,
+          files: overlap.files,
+          directories: overlap.directories,
+          severity: overlap.severity,
+          recommendation: overlap.recommendation,
+          reason: overlap.reason,
+          metadata: overlap.metadata
+        } : undefined;
+      },
+      listEditOverlapsForRequest: (conflictRequest) => {
+        const files = new Set(conflictRequest.files);
+        const directories = new Set(conflictRequest.files
+          .map((filePath) => filePath.split("/").slice(0, -1).join("/"))
+          .filter(Boolean));
+        return editIntentGraphService.listOverlapAssessments({ repoId: conflictRequest.repoId })
+          .filter((overlap) =>
+            overlap.files.some((file) => files.has(file)) ||
+            overlap.directories.some((directory) => directories.has(directory)) ||
+            conflictRequest.editOverlapIds?.includes(overlap.id))
+          .map((overlap) => ({
+            id: overlap.id,
+            repoId: overlap.repoId,
+            sessionIds: overlap.sessionIds,
+            overlapKind: overlap.overlapKind,
+            files: overlap.files,
+            directories: overlap.directories,
+            severity: overlap.severity,
+            recommendation: overlap.recommendation,
+            reason: overlap.reason,
+            metadata: overlap.metadata
+          }));
+      }
+    }
+  });
+  const prOwnershipService = new PrOwnershipService({
+    dataSource: {
+      getBranchLease: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+      getMergeQueueEntry: (mergeQueueEntryId) => store.getMergeQueueEntry(mergeQueueEntryId),
+      listMergeQueueEntries: (repoId) => store.listMergeQueueEntries(repoId),
+      getPullRequest: (pullRequestId) => store.listPullRequests().find((pullRequest) => pullRequest.id === pullRequestId),
+      getPullRequestSyncState: (repoId, pullRequestNumber) => store.getGitPullRequestSyncState(repoId, pullRequestNumber)
+    },
+    policyEvaluator: (input) => {
+      const actorKind = policyActorKindValue(input.context.actorKind) ??
+        (input.context.serviceAccountId ? "service_account" : "system");
+      const repoId = input.ownership?.repoId ?? input.handoff?.repoId;
+      const branchName = input.ownership?.branchName ?? input.handoff?.branchName;
+      const futureAgentHandoff = input.metadata.handoffKind === "human_to_agent_future";
+      const decision = policyService.evaluate({
+        subject: createPolicySubject({
+          actorId: input.context.actorId,
+          principalId: input.context.principalId,
+          actorKind,
+          roles: input.context.roles?.length ? input.context.roles : ["system"],
+          teams: input.context.teams,
+          serviceAccountId: input.context.serviceAccountId,
+          requestId: input.context.requestId,
+          correlationId: input.context.correlationId,
+          source: "pr_ownership_service",
+          metadata: {
+            metadataOnly: true,
+            noRemotePrUpdate: true
+          }
+        }),
+        action: input.action,
+        resource: createPolicyResource({
+          resourceKind: "pull_request",
+          resourceId: input.ownership?.pullRequestId ?? input.handoff?.pullRequestId ?? input.ownership?.id ?? input.handoff?.id,
+          scopeKind: "repo",
+          scopeId: repoId,
+          metadata: input.metadata
+        }),
+        context: createPolicyContext({
+          taskId: input.ownership?.taskId,
+          taskRunId: input.ownership?.taskRunId,
+          repoId,
+          branchName,
+          environment: {
+            metadataOnly: true,
+            remotePrUpdate: false,
+            remoteReviewerAssignment: false,
+            githubApiCalls: false,
+            autoMergeEnabled: false,
+            branchDeletionEnabled: false,
+            workspaceMutation: false,
+            secretsExposed: false,
+            envValuesExposed: false,
+            futureAgentHandoff
+          },
+          metadata: {
+            ...input.metadata,
+            requestId: input.context.requestId,
+            correlationId: input.context.correlationId
+          }
+        })
+      });
+      return {
+        allowed: decision.allowed,
+        decision: decision.decision,
+        reason: decision.reason,
+        policyDecisionId: decision.id,
+        matchedRuleIds: decision.matchedRuleIds
+      };
+    }
+  });
+  const realMergeExecutionPolicyService = new RealMergeExecutionPolicyService({
+    dataSource: {
+      getBranchLease: (branchLeaseId) => store.getBranchLease(branchLeaseId),
+      getMergeQueueEntry: (mergeQueueEntryId) => store.getMergeQueueEntry(mergeQueueEntryId),
+      latestMergeSimulationForLease: (branchLeaseId) => store.latestMergeSimulationForLease(branchLeaseId),
+      getMergeSimulation: (mergeSimulationId) => store.listMergeSimulations().find((simulation) => simulation.id === mergeSimulationId),
+      highestConflictRiskForLease: (branchLeaseId) => store.highestConflictRiskForLease(branchLeaseId),
+      getWorkspaceLease: (workspaceLeaseId) => {
+        const workspace = agentRunnerService.getWorkspaceLease(workspaceLeaseId);
+        if (!workspace) return undefined;
+        return {
+          id: workspace.id,
+          repoId: workspace.repoId,
+          branchLeaseId: workspace.branchLeaseId,
+          taskRunId: workspace.taskRunId,
+          branchName: workspace.branchName,
+          status: workspace.status,
+          isolationStatus: workspace.isolationStatus,
+          workspaceKind: workspace.workspaceKind,
+          metadata: {
+            workspacePathRedacted: true,
+            metadataOnly: true
+          }
+        };
+      },
+      getWorktreeAllocation: (realMergeRequest) => {
+        const allocation = agentWorktreeAllocationService.listAllocations({
+          branchLeaseId: realMergeRequest.branchLeaseId,
+          workspaceLeaseId: realMergeRequest.workspaceLeaseId
+        }).at(-1);
+        return allocation ? {
+          id: allocation.id,
+          requestId: allocation.requestId,
+          workspaceLeaseId: allocation.workspaceLeaseId,
+          branchLeaseId: allocation.branchLeaseId,
+          branchName: allocation.branchName,
+          decision: allocation.decision,
+          metadata: {
+            metadataOnly: true,
+            worktreePathRedacted: true
+          }
+        } : undefined;
+      },
+      listEditOverlapsForRequest: (realMergeRequest) => {
+        const requestFiles = Array.isArray(realMergeRequest.metadata.files)
+          ? new Set(realMergeRequest.metadata.files.filter((file): file is string => typeof file === "string"))
+          : new Set<string>();
+        return editIntentGraphService.listOverlapAssessments({ repoId: realMergeRequest.repoId })
+          .filter((overlap) =>
+            requestFiles.size === 0 ||
+            overlap.files.some((file) => requestFiles.has(file)))
+          .map((overlap) => ({
+            id: overlap.id,
+            repoId: overlap.repoId,
+            overlapKind: overlap.overlapKind,
+            files: overlap.files,
+            severity: overlap.severity,
+            recommendation: overlap.recommendation,
+            metadata: {
+              source: "edit_intent_graph",
+              reason: overlap.reason
+            }
+          }));
+      },
+      getConflictResolutionPlan: (planId) => {
+        const plan = conflictResolutionAssistantService.getPlan(planId);
+        return plan ? {
+          id: plan.id,
+          status: plan.status,
+          applyAllowed: plan.applyAllowed,
+          metadata: plan.metadata
+        } : undefined;
+      },
+      getPrOwnershipReadiness: (realMergeRequest) => {
+        if (realMergeRequest.mergeQueueEntryId) {
+          const readiness = prOwnershipService.getMergeQueueOwnershipReadiness(realMergeRequest.mergeQueueEntryId);
+          return readiness ? {
+            status: readiness.status,
+            ownershipRecordId: readiness.ownershipRecordId,
+            ownerActorId: readiness.ownerActorId,
+            metadata: {
+              mergeQueueEntryId: readiness.mergeQueueEntryId,
+              branchName: readiness.branchName
+            }
+          } : undefined;
+        }
+        if (realMergeRequest.prOwnershipId) {
+          const ownership = prOwnershipService.getOwnership(realMergeRequest.prOwnershipId);
+          return ownership ? {
+            status: ownership.status === "active" || ownership.status === "review_requested" || ownership.status === "handed_off"
+              ? "owner_present"
+              : `ownership_${ownership.status}`,
+            ownershipRecordId: ownership.id,
+            ownerActorId: ownership.ownerActorId,
+            reviewerActorIds: ownership.reviewerActorIds,
+            metadata: { branchName: ownership.branchName }
+          } : undefined;
+        }
+        return undefined;
+      },
+      getMergeQueueReadiness: (mergeQueueEntryId) => {
+        const decision = mergeQueuePolicyService.listDecisions({ queueEntryId: mergeQueueEntryId }).at(-1);
+        return decision ? {
+          decision: decision.decision,
+          blockingReasons: decision.blockingReasons,
+          warnings: decision.warnings,
+          metadata: {
+            decisionId: decision.id,
+            mergeExecutionEnabled: false
+          }
+        } : undefined;
+      }
+    },
+    policyEvaluator: (input) => {
+      const decision = policyService.evaluate({
+        subject: createPolicySubject({
+          actorId: input.context.actorId,
+          principalId: input.context.principalId,
+          actorKind: input.context.serviceAccountId ? "service_account" : "system",
+          roles: input.context.roles?.length ? input.context.roles : ["system", "reviewer", "developer"],
+          teams: input.context.teams,
+          serviceAccountId: input.context.serviceAccountId,
+          requestId: input.context.requestId,
+          correlationId: input.context.correlationId,
+          source: "real_merge_execution_policy_service",
+          metadata: {
+            metadataOnly: true,
+            mergeExecutionEnabled: false
+          }
+        }),
+        action: input.action,
+        resource: createPolicyResource({
+          resourceKind: "merge_execution",
+          resourceId: input.request.id,
+          scopeKind: "repo",
+          scopeId: input.request.repoId,
+          metadata: input.metadata
+        }),
+        context: createPolicyContext({
+          taskId: input.queueEntry?.taskId ?? input.lease?.taskId,
+          taskRunId: input.queueEntry?.taskRunId ?? input.lease?.taskRunId,
+          repoId: input.request.repoId,
+          branchName: input.request.sourceBranch,
+          environment: {
+            metadataOnly: true,
+            realMergeExecution: false,
+            mergeExecutionEnabled: false,
+            autoMergeEnabled: false,
+            remotePushEnabled: false,
+            remoteGitOperation: false,
+            branchDeletionEnabled: false,
+            workspaceMutation: false,
+            secretsExposed: false,
+            envValuesExposed: false
+          },
+          metadata: {
+            ...input.metadata,
+            requestId: input.context.requestId,
+            correlationId: input.context.correlationId
+          }
+        })
+      });
+      return {
+        allowed: decision.allowed,
+        decision: decision.decision,
+        reason: decision.reason,
+        policyDecisionId: decision.id,
+        matchedRuleIds: decision.matchedRuleIds
+      };
+    }
+  });
+  const branchCleanupRecoveryService = new BranchCleanupRecoveryService({
+    repository: new InMemoryBranchCleanupRecoveryRepository(),
+    dataSource: {
+      listBranchLeases: (repoId) => store.listBranchLeases(repoId),
+      listWorkspaceLeases: (repoId) => agentRunnerService.listWorkspaceLeases({ repoId }).map((lease) => ({
+        id: lease.id,
+        taskId: lease.taskId,
+        taskRunId: lease.taskRunId,
+        agentRunId: lease.agentRunId,
+        repoId: lease.repoId,
+        branchLeaseId: lease.branchLeaseId,
+        branchName: lease.branchName,
+        workspacePath: lease.workspacePath,
+        status: lease.status,
+        isolationStatus: lease.isolationStatus,
+        workspaceKind: lease.workspaceKind,
+        expiresAt: lease.expiresAt,
+        ownerActorId: lease.ownerActorId,
+        ownerServiceAccountId: lease.ownerServiceAccountId,
+        latestCleanupDecision: agentWorkspaceLifecycleService.getLatestCleanupDecision(lease.id)?.decision,
+        metadata: { workspacePathRedacted: true }
+      })),
+      listMergeQueueEntries: (repoId) => store.listMergeQueueEntries(repoId),
+      listBranchOwnership: (repoId) => branchOrchestratorService.listBranchOwnershipRecords({ repoId }).map((record) => ({
+        id: record.id,
+        repoId: record.repoId,
+        branchName: record.branchName,
+        branchLeaseId: record.branchLeaseId,
+        workspaceLeaseId: record.workspaceLeaseId,
+        ownerActorId: record.actorId,
+        status: record.status,
+        expiresAt: record.expiresAt
+      })),
+      listAgentSessions: (repoId) => agentRunCoordinationService.listSessions({ repoId }).map((session) => ({
+        id: session.id,
+        repoId: session.repoId,
+        taskRunId: session.taskRunId,
+        branchName: session.branchName,
+        branchLeaseId: session.branchLeaseId,
+        workspaceLeaseId: session.workspaceLeaseId,
+        ownerActorId: session.userId,
+        status: session.status,
+        lastActivityAt: session.updatedAt
+      })),
+      listWorktreeAllocations: () => [],
+      listPullRequestHandoffs: () => prOwnershipService.listHandoffs().map((handoff) => ({
+        id: handoff.id,
+        repoId: handoff.repoId,
+        pullRequestId: handoff.pullRequestId ?? handoff.ownershipRecordId,
+        fromActorId: handoff.fromActorId,
+        toActorId: handoff.toActorId ?? handoff.toTeamId ?? handoff.toServiceAccountId,
+        status: handoff.status === "accepted" || handoff.status === "rejected" || handoff.status === "expired"
+          ? handoff.status
+          : "pending",
+        expiresAt: handoff.expiresAt
+      })),
+      getTaskStatus: (taskId) => {
+        const task = store.getTask(taskId);
+        return task ? { taskId: task.id, status: task.status } : undefined;
+      }
+    }
+  });
   const observabilityService = createObservabilityService({
     sourceProvider: () => ({
       coreAuditLogs: store.listAuditLogs().filter((event) => !event.action.startsWith("git.")),
@@ -7604,6 +10899,7 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       deploymentRisks: deploymentReadinessService.listRisks()
     })
   });
+  const auditQueryScopeEnforcementService = createAuditQueryScopeEnforcementService();
   return createServer((request, response) => {
     void handleRequest(request, response, {
       store,
@@ -7618,7 +10914,20 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       llmGatewayService,
       agentRunnerService,
       agentRunCoordinationService,
+      agentWorktreeAllocationService,
       mergeQueuePolicyService,
+      conflictResolutionAssistantService,
+      prOwnershipService,
+      realMergeExecutionPolicyService,
+      registryCompatibilityService,
+      registryArtifactTrustService,
+      evalSuiteExecutionService,
+      registryDriftDetectionService,
+      canaryExecutionService,
+      applyWorkflowService,
+      registryCanaryApplyGetSummary,
+      registryTenantScopeEnforcementService,
+      branchCleanupRecoveryService,
       editIntentGraphService,
       agentRunnerConfig,
       registryService,
@@ -7633,8 +10942,10 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       mcpGatewayService,
       deploymentReadinessService,
       tenantScopePlanningService,
+      dashboardScopeFilteringService,
       tenantScopeEnforcementService,
-      observabilityService
+      observabilityService,
+      auditQueryScopeEnforcementService
     });
   });
 }

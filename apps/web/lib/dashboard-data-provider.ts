@@ -6,6 +6,8 @@ import {
   type AuthRbacProductionReadinessReadModel,
   type AuthReadModel,
   type AuditSummaryReadModel,
+  type BranchCleanupReadModel,
+  type RegistryCompatibilityReadModel,
   type CICDPipelineReadModel,
   type ConflictManagerReadModel,
   type DashboardJsonObject,
@@ -13,6 +15,7 @@ import {
   type DashboardPanelScopeSummary,
   type DashboardReadModels,
   type DashboardReadModelSource,
+  type DashboardScopeFilterReadModel,
   type DashboardTenantScopePlanningReadModel,
   type DatabaseOperationsReadModel,
   type DeploymentReadinessReadModel,
@@ -32,6 +35,8 @@ import {
   type ReadinessEndpointScopeSummary,
   type PolicyRuntimePocReadinessReadModel,
   type RegistryReadModel,
+  type RegistryDriftReadModel,
+  type RegistryCanaryApplyReadModel,
   type ScopedReadModelMetadata,
   type SecurityReadModel,
   type ScopeReadinessReadModel,
@@ -44,9 +49,10 @@ import {
   type TaskRunSummaryReadModel,
   type TenantScopeEnforcementReadModel,
   type VaultIntegrationTestReadModel,
+  type MergeQueueIntegrationTestReadModel,
   type VaultSecretBackendReadModel
 } from "@aichestra/shared";
-import { createDashboardReadinessTenantScopePlanningService } from "@aichestra/deployment-readiness";
+import { createDashboardReadinessTenantScopePlanningService, createDashboardScopeFilteringService } from "@aichestra/deployment-readiness";
 import { createTenantScopeEnforcementService } from "@aichestra/auth";
 
 export type DashboardDataProvider = {
@@ -170,8 +176,14 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       gitRepos: sections.git.repos.length,
       gitPullRequests: sections.git.pullRequests.length,
       branchOrchestratorOwnershipRecords: sections.git.branchOwnershipRecords.length,
+      prOwnershipRecords: sections.git.prOwnershipRecords.length,
+      prHandoffRequests: sections.git.prHandoffRequests.length,
       branchOrchestratorBlockedCollisions: numeric(sections.git.branchOrchestratorSummary.blockedCollisions),
       branchOrchestratorSameWorkspaceBlockers: numeric(sections.git.branchOrchestratorSummary.sameWorkspaceBlockers),
+      conflictAssistantRequests: sections.conflicts.conflictResolutionRequests.length,
+      conflictAssistantPlans: sections.conflicts.conflictResolutionPlans.length,
+      realMergeExecutionDecisions: sections.conflicts.realMergeExecutionDecisions.length,
+      realMergeForbiddenOperations: sections.conflicts.realMergeForbiddenOperations.length,
       githubAppReadinessBlockers: sections.githubApp.blockers.length,
       githubAppPermissions: sections.githubApp.permissionMatrix.length,
       githubWebhookAllowlistedEvents: sections.githubApp.webhookEventAllowlist.length,
@@ -288,6 +300,7 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       secretBackendDecision: { status: "available", count: sections.secretBackendDecision.risks.length, notes: ["Production Secret Backend Option Decision v0 selects Vault for v1 planning only; no backend is contacted and no secret values are read."] },
       vaultSecretBackend: { status: "available", count: sections.vaultSecretBackend.checks.length, notes: ["Vault Secret Backend v1 is gated and non-default; dashboard data is metadata-only and does not read Vault."] },
       vaultIntegration: { status: "available", count: sections.vaultIntegration.testCases.length, notes: ["Vault Integration-Test Profile v1 is skipped by default and never exposes tokens, secret values, raw paths, or env values."] },
+      mergeQueueIntegration: { status: "available", count: sections.mergeQueueIntegration.testCases.length, notes: ["Merge Queue Live Integration-Test Profile v1 is skipped by default; no real merge, remote rebase, force-push, or branch deletion is executed and no env values, repo URLs, or branch names are exposed."] },
       staging: { status: "available", count: sections.staging.blockers.length, notes: ["Staging Deployment Profile v0 is non-production/readiness-only; no deployment, production traffic, or external provider call is enabled."] },
       stagingDryRun: { status: "available", count: sections.stagingDryRun.blockers.length, notes: ["Staging Deployment Dry-run Profile v0 aggregates readiness only; it does not deploy, call providers, or run integration tests."] },
       stagingReleaseCandidate: { status: "available", count: sections.stagingReleaseCandidate.blockers.length, notes: ["Staging Release Candidate Checklist v0 is read-only; it does not create releases, tags, GitHub releases, deployments, or run integration tests."] },
@@ -371,6 +384,12 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     branchNamingPolicies: arrayValue(data.branchNamingPolicies),
     branchOrchestratorAuditEvents: arrayValue(data.branchOrchestratorAuditEvents),
     branchOrchestratorSummary: sanitizeDashboardObject(data.branchOrchestratorSummary),
+    prOwnershipRecords: arrayValue(data.prOwnershipRecords),
+    prHandoffRequests: arrayValue(data.prHandoffRequests),
+    prHandoffDecisions: arrayValue(data.prHandoffDecisions),
+    prOwnershipAuditEvents: arrayValue(data.prOwnershipAuditEvents),
+    prOwnershipSummary: sanitizeDashboardObject(data.prOwnershipSummary),
+    prMergeQueueOwnershipReadiness: arrayValue(data.prMergeQueueOwnershipReadiness),
     auditEvents: arrayValue(data.gitAuditEvents),
     remoteAuditEvents: arrayValue(data.gitRemoteAuditEvents),
     blockedExamples: sanitizeDashboardArray([
@@ -384,7 +403,45 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       branchOrchestratorStatus: objectValue(data.branchOrchestratorSummary).status ?? "v2_implemented",
       branchOrchestratorRemoteGitOperation: false,
       branchOrchestratorNoDestructiveGit: true,
+      prOwnershipStatus: objectValue(data.prOwnershipSummary).status ?? "v1_implemented",
+      remotePrUpdateEnabled: false,
+      remoteReviewerAssignmentEnabled: false,
+      prOwnershipGithubApiCalls: false,
+      prOwnershipAutoMergeEnabled: false,
       tokenExposed: false
+    })
+  };
+
+  const branchCleanup: BranchCleanupReadModel = {
+    summary: sanitizeDashboardObject({
+      status: objectValue(data.branchCleanupSummary).status ?? "v1_implemented",
+      orphanRecords: arrayValue(data.branchCleanupOrphans).length,
+      recommendations: arrayValue(data.branchCleanupRecommendations).length,
+      destructiveCleanupEnabled: false,
+      branchDeletionEnabled: false,
+      worktreeRemovalEnabled: false,
+      remotePrCloseEnabled: false,
+      secretsExposed: false,
+      envValuesExposed: false
+    }),
+    orphanRecords: arrayValue(data.branchCleanupOrphans),
+    criticalOrphanRecords: arrayValue(data.branchCleanupCriticalOrphans),
+    highSeverityOrphanRecords: arrayValue(data.branchCleanupHighSeverityOrphans),
+    recommendations: arrayValue(data.branchCleanupRecommendations),
+    destructiveFutureRecommendations: arrayValue(data.branchCleanupDestructiveFutureRecommendations),
+    metadataOnlyRecommendations: arrayValue(data.branchCleanupMetadataOnlyRecommendations),
+    decisions: arrayValue(data.branchCleanupDecisions),
+    recoveryActions: arrayValue(data.branchCleanupRecoveryActions),
+    policyStatus: sanitizeDashboardObject({
+      metadataOnly: true,
+      policyDenyWins: true
+    }),
+    noDestructiveStatus: sanitizeDashboardObject({
+      destructiveCleanupEnabled: false,
+      branchDeletionEnabled: false,
+      worktreeRemovalEnabled: false,
+      remotePrCloseEnabled: false,
+      realGitOperation: false
     })
   };
 
@@ -728,6 +785,18 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     mergeQueuePolicy: sanitizeDashboardObject(data.mergeQueuePolicy),
     mergeReadinessDecisions: arrayValue(data.mergeReadinessDecisions),
     mergeQueueHolds: arrayValue(data.mergeQueueHolds),
+    conflictResolutionRequests: arrayValue(data.conflictResolutionRequests),
+    conflictSummaries: arrayValue(data.conflictSummaries),
+    conflictResolutionPlans: arrayValue(data.conflictResolutionPlans),
+    conflictResolutionRecommendations: arrayValue(data.conflictResolutionRecommendations),
+    conflictAssistantSummary: sanitizeDashboardObject(data.conflictAssistantSummary),
+    realMergeExecutionPolicy: sanitizeDashboardObject(data.realMergeExecutionPolicy),
+    realMergeExecutionRequests: arrayValue(data.realMergeExecutionRequests),
+    realMergeExecutionDecisions: arrayValue(data.realMergeExecutionDecisions),
+    realMergePreconditions: arrayValue(data.realMergePreconditions),
+    realMergeForbiddenOperations: arrayValue(data.realMergeForbiddenOperations),
+    realMergePostExecutionEvidenceTemplate: sanitizeDashboardObject(data.realMergePostExecutionEvidenceTemplate),
+    realMergeExecutionSummary: sanitizeDashboardObject(data.realMergeExecutionSummary),
     summary: sanitizeDashboardObject({
       activeLeases: Array.isArray(data.activeLeases) ? data.activeLeases.length : 0,
       conflictRisks: Array.isArray(data.conflictRisks) ? data.conflictRisks.length : 0,
@@ -741,7 +810,35 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
         : 0,
       mergeQueuePolicyHolds: Array.isArray(data.mergeQueueHolds) ? data.mergeQueueHolds.length : 0,
       mergeExecutionEnabled: false,
-      autoMergeEnabled: false
+      autoMergeEnabled: false,
+      conflictAssistantStatus: typeof (data.conflictAssistantSummary as Record<string, unknown> | undefined)?.status === "string"
+        ? (data.conflictAssistantSummary as Record<string, unknown>).status
+        : "v1_implemented",
+      conflictAssistantRequests: Array.isArray(data.conflictResolutionRequests) ? data.conflictResolutionRequests.length : 0,
+      conflictAssistantPlans: Array.isArray(data.conflictResolutionPlans) ? data.conflictResolutionPlans.length : 0,
+      conflictAssistantRecommendations: Array.isArray(data.conflictResolutionRecommendations) ? data.conflictResolutionRecommendations.length : 0,
+      conflictAssistantApplyAllowed: false,
+      conflictAssistantRealLlmUsed: false,
+      realMergeExecutionStatus: typeof (data.realMergeExecutionSummary as Record<string, unknown> | undefined)?.status === "string"
+        ? (data.realMergeExecutionSummary as Record<string, unknown>).status
+        : "v1_implemented",
+      realMergePolicyStatus: typeof (data.realMergeExecutionSummary as Record<string, unknown> | undefined)?.policyStatus === "string"
+        ? (data.realMergeExecutionSummary as Record<string, unknown>).policyStatus
+        : "policy_defined",
+      realMergeRequests: Array.isArray(data.realMergeExecutionRequests) ? data.realMergeExecutionRequests.length : 0,
+      realMergeDecisions: Array.isArray(data.realMergeExecutionDecisions) ? data.realMergeExecutionDecisions.length : 0,
+      realMergeReadyForManualFuture: Array.isArray(data.realMergeExecutionDecisions)
+        ? data.realMergeExecutionDecisions.filter((decision) => (decision as Record<string, unknown>).decision === "ready_for_manual_future").length
+        : 0,
+      realMergeBlocked: Array.isArray(data.realMergeExecutionDecisions)
+        ? data.realMergeExecutionDecisions.filter((decision) => (decision as Record<string, unknown>).decision !== "ready_for_manual_future").length
+        : 0,
+      realMergePreconditions: Array.isArray(data.realMergePreconditions) ? data.realMergePreconditions.length : 0,
+      realMergeForbiddenOperations: Array.isArray(data.realMergeForbiddenOperations) ? data.realMergeForbiddenOperations.length : 0,
+      realMergeExecutionEnabled: false,
+      realMergeAutoMergeEnabled: false,
+      realMergeRemotePushEnabled: false,
+      realMergeExecutionPerformed: false
     })
   };
 
@@ -762,6 +859,120 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     auditLogs: arrayValue(data.registryAuditLogs),
     revisions: arrayValue(data.registryRevisions),
     evalResults: arrayValue(data.registryEvalResults),
+    scopeSummary: sanitizeDashboardObject({
+      totalResources: Array.isArray(data.skills) && Array.isArray(data.harnesses) && Array.isArray(data.instructions)
+        ? data.skills.length + data.harnesses.length + data.instructions.length + (Array.isArray(data.registryPackages) ? data.registryPackages.length : 0)
+        : 0,
+      inScope: 0,
+      warnings: 0,
+      denied: 0,
+      missingScope: 0,
+      enforcementMode: "warning",
+      productionEnforcement: false,
+      metadata: {
+        status: "v1_implemented_partial",
+        demoFallback: true,
+        noSecretsExposed: true,
+        envValuesExposed: false
+      }
+    }),
+    scopeDecisions: [],
+    approvalQueueScopeSummary: sanitizeDashboardObject({
+      totalResources: Array.isArray(data.registryApprovalQueue) ? data.registryApprovalQueue.length : 0,
+      inScope: 0,
+      warnings: 0,
+      denied: 0,
+      missingScope: 0,
+      enforcementMode: "warning",
+      productionEnforcement: false
+    }),
+    artifactTrustSummary: sanitizeDashboardObject({
+      totalArtifacts: Array.isArray(data.registryPackages) ? data.registryPackages.length : 0,
+      trusted: 0,
+      warnings: Array.isArray(data.registryPackages) ? data.registryPackages.length : 0,
+      blocked: 0,
+      unsigned: Array.isArray(data.registryPackages) ? data.registryPackages.length : 0,
+      missingProvenance: Array.isArray(data.registryPackages) ? data.registryPackages.length : 0,
+      realSigningImplemented: false,
+      realVerificationImplemented: false,
+      externalRegistryCalls: false,
+      metadata: {
+        status: "v1_implemented",
+        demoFallback: true,
+        noRealCrypto: true
+      }
+    }),
+    artifactTrustDecisions: [],
+    artifactTrustPolicies: [],
+    artifactTrustStatus: sanitizeDashboardObject({
+      digestStatusVisible: true,
+      signatureStatusVisible: true,
+      provenanceStatusVisible: true,
+      futureRealVerificationDisabled: true,
+      signingKeysGenerated: false,
+      noExternalRegistryCalls: true,
+      resolverGatesPreserved: true,
+      lifecycleApprovalEvalChecksumGatesPreserved: true,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    evalSuiteSummary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      executionMode: "mock_deterministic_only",
+      suiteCount: 6,
+      caseCount: 6,
+      runCount: 0,
+      resultCount: 0,
+      passedRuns: 0,
+      failedRuns: 0,
+      warningRuns: 0,
+      skippedRuns: 0,
+      blockedRuns: 0,
+      externalEvalImplemented: false,
+      realProviderCalls: false,
+      llmCallsExecuted: false,
+      mcpCallsExecuted: false,
+      vendorCliExecuted: false,
+      canaryExecuted: false,
+      autoApplyEnabled: false,
+      activeRegistryMutationExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    evalSuites: sanitizeDashboardArray([]),
+    evalCases: sanitizeDashboardArray([]),
+    evalRuns: sanitizeDashboardArray([]),
+    evalCaseResults: sanitizeDashboardArray([]),
+    evalVerdicts: sanitizeDashboardArray([]),
+    evalAttachments: sanitizeDashboardArray([]),
+    evalSuiteStatus: sanitizeDashboardObject({
+      status: "v1_implemented",
+      executionMode: "mock_deterministic_only",
+      mockExecutionOnly: true,
+      externalEvalImplemented: false,
+      realProviderCalls: false,
+      llmCallsExecuted: false,
+      mcpCallsExecuted: false,
+      vendorCliExecuted: false,
+      canaryExecuted: false,
+      autoApplyEnabled: false,
+      activeRegistryMutationExecuted: false,
+      resolverGatesPreserved: true,
+      applyGateStillRequired: true,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    resolverScopeStatus: sanitizeDashboardObject({
+      scopeMetadataAttached: true,
+      resolverGatesPreserved: true,
+      productionEnforcement: false
+    }),
+    mutationScopeStatus: sanitizeDashboardObject({
+      mutationScopeCheckEnabled: true,
+      policyDenyStillWins: true,
+      activeRegistryMutationThroughAutoImprovement: false,
+      productionEnforcement: false
+    }),
     governance: sanitizeDashboardObject({
       failureSignals: data.improvementFailureSignals,
       failureClusters: data.improvementFailureClusters,
@@ -830,6 +1041,22 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       realGitWorktreeExecutionEnabled: false,
       fullWorkspacePathsExposed: false,
       noSecretsExposed: true
+    }),
+    worktreeAllocationRequests: arrayValue(data.agentWorktreeAllocationRequests),
+    worktreeAllocationResults: arrayValue(data.agentWorktreeAllocationResults),
+    worktreeSafetyChecks: arrayValue(data.agentWorktreeSafetyChecks),
+    worktreeAllocationSummary: sanitizeDashboardObject(data.agentWorktreeAllocationSummary ?? {
+      status: "v1_implemented",
+      allocationEnabled: false,
+      fixtureOnly: true,
+      productionWorktreeAllocation: false,
+      workspaceRootAllowlistCount: 0,
+      requests: 0,
+      allocations: 0,
+      safetyChecks: 0,
+      realGitWorktreeExecuted: false,
+      destructiveCleanupExecuted: false,
+      fullLocalPathsExposed: false
     }),
     coordinationSessions: arrayValue(data.agentCoordinationSessions),
     coordinationGroups: arrayValue(data.agentCoordinationGroups),
@@ -2010,6 +2237,299 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     })
   };
 
+  const mergeQueueIntegration: MergeQueueIntegrationTestReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      planningOnly: true,
+      productionReady: false,
+      profileStatus: "disabled",
+      liveTestsEnabled: false,
+      canRunLiveTests: false,
+      defaultLiveTestsSkipped: true,
+      requiredGateCount: 9,
+      configuredGateCount: 0,
+      missingGateCount: 9,
+      unsafeGateCount: 0,
+      gitProviderConfigured: false,
+      gitProviderAllowed: false,
+      remoteGitEnabled: false,
+      githubIntegrationProfileEnabled: false,
+      allowedRepoCount: 0,
+      requiredBranchPrefix: "aichestra/test/",
+      branchPrefixConfigured: false,
+      branchPrefixMatchesRequired: false,
+      testRepoConfigured: false,
+      testRepoAllowlisted: false,
+      testBaseBranchConfigured: false,
+      testSourceBranchCount: 0,
+      testSourceBranchesMatchPrefix: false,
+      baseBranchDistinctFromSources: false,
+      dryRunOnly: false,
+      autoMergeForbidden: true,
+      remoteMergeForbidden: true,
+      remoteRebaseForbidden: true,
+      remoteForcePushForbidden: true,
+      remoteBranchDeleteForbidden: true,
+      cleanupPolicy: "manual_mark_only",
+      branchDeletionAllowed: false,
+      testCaseCount: 8,
+      gatedLiveTestCaseCount: 1,
+      activeMockTestCaseCount: 7,
+      noAutoMerge: true,
+      noForcePush: true,
+      noBranchDelete: true,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      repoUrlsExposed: false,
+      branchNamesExposed: false,
+      remoteGitCallsInDefaultTests: false,
+      realMergeExecuted: false
+    }),
+    profile: sanitizeDashboardObject({
+      id: "merge_queue_integration_test_profile_v1",
+      name: "Merge Queue live integration-test profile v1",
+      status: "disabled",
+      requiredBranchPrefix: "aichestra/test/",
+      cleanupPolicy: "manual_mark_only",
+      allowedOperations: ["config_validation", "queue_readiness_metadata_evaluation", "local_dry_run_merge_simulation_only", "policy_decision_metadata_check"],
+      forbiddenOperations: ["real_merge_execution", "auto_merge", "remote_merge_api_call", "remote_rebase", "remote_force_push", "remote_branch_delete"]
+    }),
+    testCases: sanitizeDashboardArray([
+      { id: "mq_it_config_validation", category: "config_validation", enabledByDefault: true, requiresLiveGit: false, status: "active_mock" },
+      { id: "mq_it_queue_readiness", category: "queue_readiness", enabledByDefault: true, requiresLiveGit: false, status: "active_mock" },
+      { id: "mq_it_dry_run_merge_local", category: "dry_run_merge", enabledByDefault: true, requiresLiveGit: false, status: "active_mock" },
+      { id: "mq_it_branch_lease_check", category: "branch_lease_check", enabledByDefault: true, requiresLiveGit: false, status: "active_mock" },
+      { id: "mq_it_conflict_risk_check", category: "conflict_risk_check", enabledByDefault: true, requiresLiveGit: false, status: "active_mock" },
+      { id: "mq_it_policy_decision_check", category: "policy_decision_check", enabledByDefault: true, requiresLiveGit: false, status: "active_mock" },
+      { id: "mq_it_cleanup_check", category: "cleanup_check", enabledByDefault: true, requiresLiveGit: false, status: "active_mock" },
+      { id: "mq_it_live_dry_run_evaluation_gated", category: "queue_readiness", enabledByDefault: false, requiresLiveGit: true, status: "gated_live" }
+    ]),
+    gatedLiveTestCases: sanitizeDashboardArray([
+      { id: "mq_it_live_dry_run_evaluation_gated", category: "queue_readiness" }
+    ]),
+    mockTestCases: sanitizeDashboardArray([
+      { id: "mq_it_config_validation", category: "config_validation" },
+      { id: "mq_it_queue_readiness", category: "queue_readiness" },
+      { id: "mq_it_dry_run_merge_local", category: "dry_run_merge" },
+      { id: "mq_it_branch_lease_check", category: "branch_lease_check" },
+      { id: "mq_it_conflict_risk_check", category: "conflict_risk_check" },
+      { id: "mq_it_policy_decision_check", category: "policy_decision_check" },
+      { id: "mq_it_cleanup_check", category: "cleanup_check" }
+    ]),
+    safetyChecks: sanitizeDashboardArray([
+      { id: "mq_it_env_gates_missing_skip", category: "env_gates", status: "warning", severity: "high" },
+      { id: "mq_it_repo_allowlist_required", category: "repo_allowlist", status: "warning", severity: "critical" },
+      { id: "mq_it_branch_prefix_required", category: "branch_prefix", status: "warning", severity: "critical" },
+      { id: "mq_it_no_auto_merge", category: "no_auto_merge", status: "pass", severity: "critical" },
+      { id: "mq_it_no_force_push", category: "no_force_push", status: "pass", severity: "critical" },
+      { id: "mq_it_no_branch_delete", category: "no_branch_delete", status: "pass", severity: "critical" },
+      { id: "mq_it_dry_run_only", category: "dry_run_only", status: "warning", severity: "critical" },
+      { id: "mq_it_cleanup_manual", category: "cleanup", status: "pass", severity: "high" },
+      { id: "mq_it_audit_sanitized", category: "audit", status: "pass", severity: "high" }
+    ]),
+    blockers: sanitizeDashboardArray([]),
+    warnings: sanitizeDashboardArray([
+      { id: "mq_it_env_gates_missing_skip", severity: "high" },
+      { id: "mq_it_repo_allowlist_required", severity: "critical" },
+      { id: "mq_it_branch_prefix_required", severity: "critical" },
+      { id: "mq_it_dry_run_only", severity: "critical" }
+    ]),
+    gateStatus: sanitizeDashboardObject({
+      configuredGateCount: 0,
+      missingGateCount: 9,
+      unsafeGateCount: 0,
+      gitProviderAllowed: false,
+      remoteGitEnabled: false,
+      githubIntegrationProfileEnabled: false,
+      allowedRepoCount: 0,
+      requiredBranchPrefix: "aichestra/test/",
+      branchPrefixConfigured: false,
+      branchPrefixMatchesRequired: false,
+      testRepoConfigured: false,
+      testRepoAllowlisted: false,
+      testBaseBranchConfigured: false,
+      testSourceBranchCount: 0,
+      testSourceBranchesMatchPrefix: false,
+      baseBranchDistinctFromSources: false,
+      envValuesReturned: false,
+      repoUrlsReturned: false,
+      branchNamesReturned: false
+    }),
+    operationPolicy: sanitizeDashboardObject({
+      dryRunOnly: false,
+      autoMergeForbidden: true,
+      remoteMergeForbidden: true,
+      remoteRebaseForbidden: true,
+      remoteForcePushForbidden: true,
+      remoteBranchDeleteForbidden: true,
+      realMergeExecuted: false,
+      remoteGitCallsInDefaultTests: false
+    }),
+    cleanupPolicy: sanitizeDashboardObject({
+      status: "manual_mark_only",
+      branchDeletionAllowed: false,
+      manualMarkOnly: true,
+      remoteCleanupCallsEnabledByDefault: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      repoUrlsExposed: false,
+      branchNamesExposed: false,
+      remoteGitCallsInDefaultTests: false,
+      realMergeExecuted: false,
+      noAutoMerge: true,
+      noForcePush: true,
+      noBranchDelete: true
+    })
+  };
+
+  const registryCompatibility: RegistryCompatibilityReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      planningOnly: true,
+      totalCandidates: 0,
+      compatibleCount: 0,
+      compatibleWithWarningsCount: 0,
+      incompatibleCount: 0,
+      blockedByPolicyCount: 0,
+      blockedByRegistryGateCount: 0,
+      futureUnknownCount: 0,
+      ruleCount: 16,
+      skillProfileCount: 3,
+      harnessProfileCount: 3,
+      instructionProfileCount: 2,
+      resolverGatesPreserved: true,
+      autoApplyEnabled: false,
+      registryMutationsExecuted: false,
+      externalCallsExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    rules: sanitizeDashboardArray([]),
+    skillProfiles: sanitizeDashboardArray([]),
+    harnessProfiles: sanitizeDashboardArray([]),
+    instructionProfiles: sanitizeDashboardArray([]),
+    candidateDecisions: sanitizeDashboardArray([]),
+    compatibleCandidates: sanitizeDashboardArray([]),
+    warningCandidates: sanitizeDashboardArray([]),
+    incompatibleCandidates: sanitizeDashboardArray([]),
+    blockedByPolicyCandidates: sanitizeDashboardArray([]),
+    blockedByRegistryGateCandidates: sanitizeDashboardArray([]),
+    futureUnknownCandidates: sanitizeDashboardArray([]),
+    resolverGateRelationship: sanitizeDashboardObject({
+      resolverGatesPreserved: true,
+      lifecycleGate: "preserved",
+      approvalGate: "preserved",
+      evalGate: "preserved",
+      checksumGate: "preserved",
+      semverGate: "preserved",
+      compatibilityCanBypassResolver: false
+    }),
+    scopeRelationship: sanitizeDashboardObject({
+      productionTenantEnforcement: false,
+      scopeMismatchSeverity: "warning",
+      tenantScopeEnforcementImplemented: "partial",
+      autoApplyEnabled: false
+    }),
+    noAutoApplyStatus: sanitizeDashboardObject({
+      autoApplyEnabled: false,
+      registryMutationsExecuted: false,
+      externalCallsExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    })
+  };
+
+  const registryDrift: RegistryDriftReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      planningOnly: true,
+      signalCount: 0,
+      baselineCount: 0,
+      assessmentCount: 0,
+      recommendationCount: 0,
+      criticalSignalCount: 0,
+      highSignalCount: 0,
+      applyAllowed: false,
+      registryMutationExecuted: false,
+      evalExecuted: false,
+      canaryExecuted: false,
+      autoImprovementApplied: false,
+      externalCallExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    signals: sanitizeDashboardArray([]),
+    baselines: sanitizeDashboardArray([]),
+    assessments: sanitizeDashboardArray([]),
+    recommendations: sanitizeDashboardArray([]),
+    criticalAssessments: sanitizeDashboardArray([]),
+    degradedAssessments: sanitizeDashboardArray([]),
+    watchAssessments: sanitizeDashboardArray([]),
+    insufficientDataAssessments: sanitizeDashboardArray([]),
+    governanceFollowUps: sanitizeDashboardArray([]),
+    noAutoApplyStatus: sanitizeDashboardObject({
+      applyAllowed: false,
+      autoImprovementApplied: false,
+      registryMutationExecuted: false,
+      evalExecuted: false,
+      canaryExecuted: false,
+      externalCallExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    })
+  };
+
+  const registryCanaryApply: RegistryCanaryApplyReadModel = {
+    summary: sanitizeDashboardObject({
+      status: "v1_implemented",
+      planningOnly: true,
+      canaryPlanCount: 0,
+      canaryRunCount: 0,
+      canaryResultCount: 0,
+      canaryVerdictCount: 0,
+      applyWorkflowCount: 0,
+      applyGateDecisionCount: 0,
+      rollbackPlanCount: 0,
+      passedCanaryRunCount: 0,
+      failedCanaryRunCount: 0,
+      warningCanaryRunCount: 0,
+      readyForManualApplyCount: 0,
+      blockedApplyDecisionCount: 0,
+      metadataOnlyApplyDecisionCount: 0,
+      externalCanaryExecuted: false,
+      realEvalExecuted: false,
+      realProviderCallExecuted: false,
+      autoApplyEnabled: false,
+      activeRegistryMutationAllowed: false,
+      applyPerformed: false,
+      activeRegistryMutated: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    canaryPlans: sanitizeDashboardArray([]),
+    canaryRuns: sanitizeDashboardArray([]),
+    canaryResults: sanitizeDashboardArray([]),
+    canaryVerdicts: sanitizeDashboardArray([]),
+    applyWorkflows: sanitizeDashboardArray([]),
+    applyGateDecisions: sanitizeDashboardArray([]),
+    rollbackPlans: sanitizeDashboardArray([]),
+    blockedApplyDecisions: sanitizeDashboardArray([]),
+    metadataOnlyApplyDecisions: sanitizeDashboardArray([]),
+    noAutoApplyStatus: sanitizeDashboardObject({
+      autoApplyEnabled: false,
+      activeRegistryMutationAllowed: false,
+      applyPerformed: false,
+      activeRegistryMutated: false,
+      externalCanaryExecuted: false,
+      realEvalExecuted: false,
+      realProviderCallExecuted: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    })
+  };
+
   const staging: StagingDeploymentReadModel = {
     summary: sanitizeDashboardObject({
       status: "v0_implemented",
@@ -2735,6 +3255,57 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       rowLevelSecurityImplemented: tenantScopeEnforcementSummary.rowLevelSecurityImplemented
     })
   };
+  const dashboardScopeFilteringService = createDashboardScopeFilteringService();
+  const dashboardScopeFilterContext = dashboardScopeFilteringService.buildFilterContext({
+    source: "demo",
+    authMode: "mock_actor"
+  });
+  const dashboardScopeFilterDecisions = dashboardScopeFilteringService.evaluatePanels(
+    tenantScopePlanningService.listDashboardPanelScopeSummaries(),
+    dashboardScopeFilterContext
+  );
+  const dashboardScopeFilterSummary = dashboardScopeFilteringService.summarizeDecisions(
+    dashboardScopeFilterDecisions,
+    dashboardScopeFilterContext
+  );
+  const dashboardScopeFilter: DashboardScopeFilterReadModel = {
+    summary: sanitizeDashboardObject(dashboardScopeFilterSummary),
+    decisions: sanitizeDashboardArray(dashboardScopeFilterDecisions),
+    visiblePanels: sanitizeDashboardArray(dashboardScopeFilterDecisions
+      .filter((decision) => decision.decision === "visible")
+      .map((decision) => ({ panelId: decision.panelId, panelName: decision.panelName, decision: decision.decision }))),
+    redactedPanels: sanitizeDashboardArray(dashboardScopeFilterDecisions
+      .filter((decision) => decision.decision === "redacted")
+      .map((decision) => ({ panelId: decision.panelId, panelName: decision.panelName, redactedFields: decision.redactedFields }))),
+    hiddenPanels: sanitizeDashboardArray(dashboardScopeFilterDecisions
+      .filter((decision) => decision.decision === "hidden")
+      .map((decision) => ({ panelId: decision.panelId, panelName: decision.panelName, requiredRoles: decision.requiredRoles, requiredScopes: decision.requiredScopes }))),
+    warningPanels: sanitizeDashboardArray(dashboardScopeFilterDecisions
+      .filter((decision) => decision.decision === "warning_only")
+      .map((decision) => ({ panelId: decision.panelId, panelName: decision.panelName, reason: decision.reason }))),
+    context: sanitizeDashboardObject({
+      actorId: dashboardScopeFilterContext.actorId,
+      principalId: dashboardScopeFilterContext.principalId,
+      roles: dashboardScopeFilterContext.roles,
+      tenantIds: dashboardScopeFilterContext.tenantIds,
+      teamIds: dashboardScopeFilterContext.teamIds,
+      projectIds: dashboardScopeFilterContext.projectIds,
+      resourceScopes: dashboardScopeFilterContext.resourceScopes,
+      source: dashboardScopeFilterContext.source,
+      authMode: dashboardScopeFilterContext.authMode,
+      productionAuthImplemented: false,
+      productionTenantEnforcement: false,
+      externalIdentityProviderCalled: false
+    }),
+    noSecretStatus: sanitizeDashboardObject({
+      productionFiltering: false,
+      productionAuthImplemented: false,
+      productionTenantEnforcement: false,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      externalIdentityProviderCalled: false
+    })
+  };
   const observability: ObservabilityReadModel = {
     config: sanitizeDashboardObject({
       status: "v0_implemented",
@@ -2810,6 +3381,43 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       { moduleName: "Deployment Readiness", normalized: "partial", eventCount: readiness.checks.length }
     ]),
     productionReadinessBlockers: readiness.checks.filter((check) => check.category === "observability" || check.category === "audit"),
+    auditScopeSummary: sanitizeDashboardObject({
+      status: "v1_implemented_partial",
+      defaultDetailLevel: "summary",
+      redactionPlanCount: 4,
+      rawPayloadAllowed: false,
+      productionStorageEnforcement: false,
+      externalExportEnabled: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    auditScopeDecision: sanitizeDashboardObject({
+      decision: "deny_detail",
+      reason: "viewer_detail_not_allowed",
+      allowedDetailLevel: "summary",
+      redactedFieldCount: 26,
+      missingScopes: ["role_with_audit_metadata_access", "tenant_or_team_or_project", "project_or_repo_or_provider", "audit_query"],
+      rawPayloadAllowed: false,
+      productionStorageEnforcement: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    auditScopeRedactionPlans: sanitizeDashboardArray([
+      { id: "audit_scope_plan_summary", detailLevel: "summary", fieldsToRedact: ["rawPayload", "Authorization", "cookie", "prompt"] },
+      { id: "audit_scope_plan_metadata", detailLevel: "metadata", fieldsToRedact: ["rawPayload", "Authorization", "cookie"] },
+      { id: "audit_scope_plan_detail", detailLevel: "detail", fieldsToRedact: ["rawPayload", "Authorization", "cookie"] },
+      { id: "audit_scope_plan_raw_forbidden", detailLevel: "raw_payload_forbidden", fieldsToRedact: ["rawPayload", "Authorization", "cookie", "prompt"] }
+    ]),
+    auditScopeStatus: sanitizeDashboardObject({
+      status: "v1_implemented_partial",
+      allowedDetailLevel: "summary",
+      redactedDetailCount: 26,
+      missingScopeWarnings: ["audit_query"],
+      rawPayloadForbidden: true,
+      productionStorageEnforcement: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
     noSecretStatus: sanitizeDashboardObject({
       noSecretsExposed: true,
       rawPayloadsStored: false,
@@ -2841,6 +3449,19 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
       ...readiness.productionBlockers.slice(-3),
       ...localAgents.auditEvents.slice(-3)
     ]),
+    auditScopeSummary: sanitizeDashboardObject({
+      status: "v1_implemented_partial",
+      rawPayloadAllowed: false,
+      productionStorageEnforcement: false,
+      noSecretsExposed: true,
+      envValuesExposed: false
+    }),
+    auditScopeDecision: sanitizeDashboardObject({
+      decision: "deny_detail",
+      allowedDetailLevel: "summary",
+      rawPayloadAllowed: false,
+      productionStorageEnforcement: false
+    }),
     summary: sanitizeDashboardObject({
       groupCount: 11,
       totalEvents: git.auditEvents.length + llm.auditEvents.length + agents.auditEvents.length + policy.auditEntries.length + auth.auditEvents.length + security.auditEvents.length + mcp.auditEvents.length + readiness.checks.length + readiness.risks.length + providers.auditEvents.length + localAgents.auditEvents.length + registry.auditLogs.length,
@@ -2873,12 +3494,18 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     scopes,
     tenantScopePlanning,
     tenantScopeEnforcement,
+    dashboardScopeFilter,
     readiness,
     database,
     secretBackend,
     secretBackendDecision,
     vaultSecretBackend,
     vaultIntegration,
+    mergeQueueIntegration,
+    branchCleanup,
+    registryCompatibility,
+    registryDrift,
+    registryCanaryApply,
     staging,
     stagingDryRun,
     stagingReleaseCandidate,
@@ -2921,12 +3548,18 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     scopes: withScopeMetadata(scopes, scopeMetadataFor("scope_model")),
     tenantScopePlanning,
     tenantScopeEnforcement,
+    dashboardScopeFilter: withScopeMetadata(dashboardScopeFilter, scopeMetadataFor("tenant_scope_enforcement")),
     readiness: withScopeMetadata(readiness, scopeMetadataFor("production_readiness")),
     database: withScopeMetadata(database, scopeMetadataFor("database")),
     secretBackend: withScopeMetadata(secretBackend, scopeMetadataFor("secret_backend")),
     secretBackendDecision: withScopeMetadata(secretBackendDecision, scopeMetadataFor("secret_backend_decision")),
     vaultSecretBackend: withScopeMetadata(vaultSecretBackend, scopeMetadataFor("vault_secret_backend")),
     vaultIntegration: withScopeMetadata(vaultIntegration, scopeMetadataFor("vault_integration")),
+    mergeQueueIntegration: withScopeMetadata(mergeQueueIntegration, scopeMetadataFor("merge_queue_integration")),
+    branchCleanup: withScopeMetadata(branchCleanup, scopeMetadataFor("branch_cleanup")),
+    registryCompatibility: withScopeMetadata(registryCompatibility, scopeMetadataFor("registry_compatibility")),
+    registryDrift: withScopeMetadata(registryDrift, scopeMetadataFor("registry_drift")),
+    registryCanaryApply: withScopeMetadata(registryCanaryApply, scopeMetadataFor("registry_canary_apply")),
     staging: withScopeMetadata(staging, scopeMetadataFor("staging")),
     stagingDryRun: withScopeMetadata(stagingDryRun, scopeMetadataFor("staging_dry_run")),
     stagingReleaseCandidate: withScopeMetadata(stagingReleaseCandidate, scopeMetadataFor("staging_rc")),
@@ -2974,6 +3607,11 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         llmResponse,
         llmIntegrationResponse,
         vaultIntegrationResponse,
+        mergeQueueIntegrationResponse,
+        branchCleanupResponse,
+        registryCompatibilityResponse,
+        registryDriftResponse,
+        registryCanaryApplyResponse,
         agentsResponse,
         policyResponse,
         policyBundlesResponse,
@@ -2989,6 +3627,7 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         scopesResponse,
         tenantScopePlanningResponse,
         tenantScopeEnforcementResponse,
+        dashboardScopeFilterResponse,
         readinessResponse,
         databaseResponse,
         secretBackendResponse,
@@ -3028,12 +3667,18 @@ export class ApiDashboardDataProvider implements DashboardDataProvider {
         scopes: objectValue((scopesResponse as Record<string, unknown>).scopes) as unknown as ScopeReadinessReadModel,
         tenantScopePlanning: objectValue((tenantScopePlanningResponse as Record<string, unknown>).tenantScopePlanning) as unknown as DashboardTenantScopePlanningReadModel,
         tenantScopeEnforcement: objectValue((tenantScopeEnforcementResponse as Record<string, unknown>).tenantScopeEnforcement) as unknown as TenantScopeEnforcementReadModel,
+        dashboardScopeFilter: objectValue((dashboardScopeFilterResponse as Record<string, unknown>).dashboardScopeFilter) as unknown as DashboardScopeFilterReadModel,
         readiness: objectValue((readinessResponse as Record<string, unknown>).readiness) as unknown as DeploymentReadinessReadModel,
         database: objectValue((databaseResponse as Record<string, unknown>).database) as unknown as DatabaseOperationsReadModel,
         secretBackend: objectValue((secretBackendResponse as Record<string, unknown>).secretBackend) as unknown as SecretBackendMigrationReadModel,
         secretBackendDecision: objectValue((secretBackendDecisionResponse as Record<string, unknown>).secretBackendDecision) as unknown as SecretBackendDecisionReadModel,
         vaultSecretBackend: objectValue((vaultSecretBackendResponse as Record<string, unknown>).vaultSecretBackend) as unknown as VaultSecretBackendReadModel,
         vaultIntegration: objectValue((vaultIntegrationResponse as Record<string, unknown>).vaultIntegration) as unknown as VaultIntegrationTestReadModel,
+        mergeQueueIntegration: objectValue((mergeQueueIntegrationResponse as Record<string, unknown>).mergeQueueIntegration) as unknown as MergeQueueIntegrationTestReadModel,
+        branchCleanup: objectValue((branchCleanupResponse as Record<string, unknown>).branchCleanup) as unknown as BranchCleanupReadModel,
+        registryCompatibility: objectValue((registryCompatibilityResponse as Record<string, unknown>).registryCompatibility) as unknown as RegistryCompatibilityReadModel,
+        registryDrift: objectValue((registryDriftResponse as Record<string, unknown>).registryDrift) as unknown as RegistryDriftReadModel,
+        registryCanaryApply: objectValue((registryCanaryApplyResponse as Record<string, unknown>).registryCanaryApply) as unknown as RegistryCanaryApplyReadModel,
         staging: objectValue((stagingResponse as Record<string, unknown>).staging) as unknown as StagingDeploymentReadModel,
         stagingDryRun: objectValue((stagingDryRunResponse as Record<string, unknown>).stagingDryRun) as unknown as StagingDeploymentDryRunReadModel,
         stagingReleaseCandidate: objectValue((stagingReleaseCandidateResponse as Record<string, unknown>).stagingReleaseCandidate) as unknown as StagingReleaseCandidateReadModel,

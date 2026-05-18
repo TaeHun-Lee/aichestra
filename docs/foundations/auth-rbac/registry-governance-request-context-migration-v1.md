@@ -11,6 +11,7 @@ Status:
 - API AuthContext Middleware Skeleton: `v1_implemented`
 - Service Account Actor Boundary: `v1_implemented`
 - Tenant/Repo/Provider Scope Model: `v1_implemented`
+- Registry Tenant Scope Enforcement: `v1_implemented_partial`
 - Production Auth/RBAC Planning: `v1_implemented`
 - Phase 5: `preparation_started`
 
@@ -26,6 +27,7 @@ This is not production auth or production governance.
 - API ingress `RequestContext` propagation into representative `/registry/*` and `/improvement/*` mutation paths.
 - Mock service-account attribution for `registry_governance_service` and `improvement_governance_service` where service/system context is used.
 - Registry package scope metadata on migrated registry/governance policy resources and audit metadata where low risk.
+- Registry Tenant Scope Enforcement v1 attaches representative `RegistryScopeDecision` metadata to resolver/readiness/dashboard surfaces and runs mutation scope checks without weakening existing registry gates.
 - Deterministic tests in `tests/registry-governance-request-context-migration-v1.test.ts`.
 
 ## What v1 Does Not Implement
@@ -105,6 +107,7 @@ Coverage includes:
 - Registry resolver gates unchanged for pending approval entries.
 - Registry governance service-account context attribution.
 - Governance decision/eval/canary/apply gate RequestContext metadata.
+- Eval Suite Execution Harness v1 run/request/attach metadata with request/correlation actor attribution.
 - Improvement governance service-account apply gate attribution while apply remains blocked.
 - Representative API registry and governance route propagation.
 - No-secret/no-env regression checks.
@@ -113,9 +116,10 @@ Coverage includes:
 
 - Production auth, tenant isolation, and durable scoped authorization are future work.
 - Registry read/resolve paths carry optional metadata but do not enforce production tenant/team scoping.
+- Registry Tenant Scope Enforcement v1 now provides partial representative scope warnings/denials for registry paths, but it still does not implement production tenant isolation or row-level filtering.
 - Registry/Governance still expose legacy actor fields for compatibility.
 - Dashboard/readiness registry/governance scoping remains future planning.
-- Apply remains blocked; real eval/canary execution remains out of scope.
+- Apply remains blocked; Eval Suite Execution Harness v1 provides deterministic mock eval execution only, while real external eval/canary execution remains out of scope.
 
 Dashboard/Readiness Tenant Scope Planning v1 inventories registry and governance dashboard/readiness panels as target tenant/team/project/registry-package/audit-query scoped surfaces. It does not mutate active registry entries, approve proposals, execute evals/canaries, or enforce package-level tenant filtering.
 

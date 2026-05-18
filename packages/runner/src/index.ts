@@ -14,3 +14,4 @@ export * from "./service.ts";
 export * from "./test-runner.ts";
 export * from "./workspace.ts";
 export * from "./workspace-lifecycle.ts";
+export * from "./worktree-allocation.ts";

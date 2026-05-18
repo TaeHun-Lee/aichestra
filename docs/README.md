@@ -63,13 +63,19 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 | Feature | 위치 | 보유 버전 |
 |---|---|---|
 | Conflict Manager | [features/conflict-manager/](features/conflict-manager/) | v0, v1 |
+| Conflict Resolution Assistant | [features/conflict-resolution-assistant/](features/conflict-resolution-assistant/) | v1 (+ plan) |
+| PR Ownership / Handoff | [features/pr-ownership-handoff/](features/pr-ownership-handoff/) | v1 (+ plan) |
+| Real Merge Execution Policy | [features/real-merge-execution-policy/](features/real-merge-execution-policy/) | v1 (+ plan) |
 | Merge Queue Policy | [features/merge-queue-policy/](features/merge-queue-policy/) | v2 (+ plan) |
+| Merge Queue Live Integration-Test Profile | [features/merge-queue-live-integration-test-profile/](features/merge-queue-live-integration-test-profile/) | v1 (+ plan) |
+| Branch Cleanup / Orphan Lease Recovery | [features/branch-cleanup-orphan-lease-recovery/](features/branch-cleanup-orphan-lease-recovery/) | v1 (+ plan) |
 | Persistent DB | [features/persistent-db/](features/persistent-db/) | v1 (+ plan) |
 | Real Git Adapter | [features/real-git-adapter/](features/real-git-adapter/) | v0, v1, v2, github-app-controlled-v1 (+ plans, audits/v0-readiness) |
 | LLM Gateway | [features/llm-gateway/](features/llm-gateway/) | v0, v1, v2 (+ plans) |
 | MCP Gateway | [features/mcp-gateway/](features/mcp-gateway/) | v0 (+ plan) |
 | Local Agent Runner | [features/local-agent-runner/](features/local-agent-runner/) | v0, v1 (+ plans) |
 | Agent Workspace Lifecycle | [features/agent-workspace-lifecycle/](features/agent-workspace-lifecycle/) | v2 (+ plan) |
+| Agent Worktree Allocation | [features/agent-worktree-allocation/](features/agent-worktree-allocation/) | v1 (+ plan) |
 | Multi-session Agent Run Coordination | [features/multi-session-agent-run-coordination/](features/multi-session-agent-run-coordination/) | v1 (+ plan) |
 | Multi-user / Multi-session Branch Orchestrator | [features/multi-user-branch-orchestrator/](features/multi-user-branch-orchestrator/) | v2 (+ plan) |
 | Cross-session File Lease / Edit Intent Graph | [features/cross-session-file-lease-edit-intent/](features/cross-session-file-lease-edit-intent/) | v1 (+ plan) |
@@ -81,6 +87,14 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 | Governance (Phase 4) | [features/governance/](features/governance/) | v1 (+ plan) |
 | Auto-Improvement (Phase 4) | [features/auto-improvement/](features/auto-improvement/) | v0 (+ plan, preparation\*, v0-blocked) |
 | Registry (Phase 3) | [features/registry/](features/registry/) | v0, v1-hardening, v2-operational-hardening, v3-packaging-versioning, + concept (skill/harness-design) |
+| Skill / Harness Compatibility Matrix | [features/registry-compatibility-matrix/](features/registry-compatibility-matrix/) | v1 (+ plan) |
+| Skill / Harness Drift Detection | [features/skill-harness-drift-detection/](features/skill-harness-drift-detection/) | v1 (+ plan) |
+| Canary Execution Harness + Apply Workflow | [features/canary-execution-apply-workflow/](features/canary-execution-apply-workflow/) | v1 (+ plan) |
+| Dashboard Scope Filtering | [features/dashboard-scope-filtering/](features/dashboard-scope-filtering/) | v1 (+ plan) |
+| Audit Query Scope Enforcement | [features/audit-query-scope-enforcement/](features/audit-query-scope-enforcement/) | v1 partial (+ plan) |
+| Registry Tenant Scope Enforcement | [features/registry-tenant-scope-enforcement/](features/registry-tenant-scope-enforcement/) | v1 partial (+ plan) |
+| Registry Signed Package / Artifact Trust | [features/registry-artifact-trust/](features/registry-artifact-trust/) | v1 (+ plan) |
+| Eval Suite Execution Harness | [features/eval-suite-execution-harness/](features/eval-suite-execution-harness/) | v1 (+ plan) |
 | Dashboard | [features/dashboard/](features/dashboard/) | read-model-plan, v0-plan, v0 |
 
 ## roadmaps/
@@ -105,7 +119,8 @@ feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `a
 - [github-app-integration-test-profile/](roadmaps/github-app-integration-test-profile/) - GitHub App integration-test profile v1: skipped-by-default live-test profile, required gates, safety checks, cleanup policy, readiness APIs, health, and dashboard planning.
 - [llm-gateway-integration-test-profile/](roadmaps/llm-gateway-integration-test-profile/) - LLM Gateway integration-test profile v1: skipped-by-default OpenAI-compatible live-test profile, model allowlist, budget cap, SecretRef preference, readiness APIs, health, and dashboard planning.
 - [vault-integration-test-profile/](roadmaps/vault-integration-test-profile/) - Vault Integration-Test Profile v1: skipped-by-default Vault KV v2 test profile, required gates, test-only path and allowlist policy, safety checks, readiness APIs, health, and dashboard planning.
-- [dashboard-readiness-tenant-scope/](roadmaps/dashboard-readiness-tenant-scope/) - Dashboard/Readiness Tenant Scope Planning and Implementation v1: dashboard/readiness inventories, role visibility matrices, fallback behavior, future filtering architecture, safe scope metadata, missing-scope warnings, redaction labels, read-only planning APIs, health metadata, and dashboard panel. Tenant Scope Enforcement v1 is documented under foundations as partial representative helper metadata. It does not implement production tenant enforcement.
+- [dashboard-readiness-tenant-scope/](roadmaps/dashboard-readiness-tenant-scope/) - Dashboard/Readiness Tenant Scope Planning and Implementation v1: dashboard/readiness inventories, role visibility matrices, fallback behavior, future filtering architecture, safe scope metadata, missing-scope warnings, redaction labels, read-only planning APIs, health metadata, and dashboard panel. Tenant Scope Enforcement v1 is documented under foundations as partial representative helper metadata, and Audit Query Scope Enforcement v1 is documented under features as partial representative observability query scoping. Neither implements production tenant enforcement.
+- [features/real-merge-execution-policy/](features/real-merge-execution-policy/) - Real Merge Execution Policy v1: disabled-by-default merge execution policy/readiness boundary, preconditions, forbidden operations, post-execution evidence template, policy gates, API/dashboard/readiness metadata, and no-real-merge/no-auto-merge guarantees.
 
 ## audits/
 

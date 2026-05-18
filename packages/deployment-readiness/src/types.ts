@@ -2387,6 +2387,119 @@ export type VaultIntegrationTestReadinessSummary = {
   metadata: Record<string, unknown>;
 };
 
+export type MergeQueueIntegrationTestProfileStatus = "disabled" | "ready_if_configured" | "blocked" | "future";
+export type MergeQueueIntegrationTestCaseCategory =
+  | "config_validation"
+  | "queue_readiness"
+  | "dry_run_merge"
+  | "branch_lease_check"
+  | "conflict_risk_check"
+  | "policy_decision_check"
+  | "cleanup_check";
+export type MergeQueueIntegrationTestCaseStatus = "planned" | "active_mock" | "gated_live" | "future";
+export type MergeQueueIntegrationSafetyCategory =
+  | "env_gates"
+  | "repo_allowlist"
+  | "branch_prefix"
+  | "no_auto_merge"
+  | "no_force_push"
+  | "no_branch_delete"
+  | "dry_run_only"
+  | "cleanup"
+  | "audit";
+
+export type MergeQueueIntegrationTestProfile = {
+  id: string;
+  name: string;
+  status: MergeQueueIntegrationTestProfileStatus;
+  requiredEnvVars: string[];
+  requiredRepoAllowlist: string[];
+  requiredBranchPrefix: "aichestra/test/";
+  allowedOperations: string[];
+  forbiddenOperations: string[];
+  cleanupPolicy: "manual_mark_only";
+  metadata: Record<string, unknown>;
+};
+
+export type MergeQueueIntegrationTestCase = {
+  id: string;
+  profileId: string;
+  name: string;
+  category: MergeQueueIntegrationTestCaseCategory;
+  enabledByDefault: boolean;
+  requiresLiveGit: boolean;
+  requiredEnvVars: string[];
+  expectedSideEffects: string[];
+  cleanupRequired: boolean;
+  status: MergeQueueIntegrationTestCaseStatus;
+  metadata: Record<string, unknown>;
+};
+
+export type MergeQueueIntegrationSafetyCheck = {
+  id: string;
+  category: MergeQueueIntegrationSafetyCategory;
+  status: ReadinessCheckStatus;
+  severity: ReadinessSeverity;
+  description: string;
+  remediation: string;
+  evidence: string[];
+  metadata: Record<string, unknown>;
+};
+
+export type MergeQueueIntegrationTestReadinessSummary = {
+  generatedAt: Date;
+  id: string;
+  status: "v1_implemented";
+  planningOnly: true;
+  productionReady: false;
+  profileStatus: MergeQueueIntegrationTestProfileStatus;
+  liveTestsEnabled: boolean;
+  canRunLiveTests: boolean;
+  defaultLiveTestsSkipped: true;
+  requiredGateCount: number;
+  configuredGateCount: number;
+  missingGateCount: number;
+  unsafeGateCount: number;
+  missingRequiredEnvVars: string[];
+  unsafeGateWarnings: string[];
+  reason: string;
+  gitProviderConfigured: boolean;
+  gitProviderAllowed: boolean;
+  remoteGitEnabled: boolean;
+  githubIntegrationProfileEnabled: boolean;
+  allowedRepoCount: number;
+  requiredBranchPrefix: "aichestra/test/";
+  branchPrefixConfigured: boolean;
+  branchPrefixMatchesRequired: boolean;
+  testRepoConfigured: boolean;
+  testRepoAllowlisted: boolean;
+  testBaseBranchConfigured: boolean;
+  testSourceBranchCount: number;
+  testSourceBranchesMatchPrefix: boolean;
+  baseBranchDistinctFromSources: boolean;
+  dryRunOnly: boolean;
+  autoMergeForbidden: true;
+  remoteMergeForbidden: boolean;
+  remoteRebaseForbidden: boolean;
+  remoteForcePushForbidden: boolean;
+  remoteBranchDeleteForbidden: boolean;
+  cleanupPolicy: "manual_mark_only";
+  branchDeletionAllowed: false;
+  testCaseCount: number;
+  gatedLiveTestCaseCount: number;
+  activeMockTestCaseCount: number;
+  noAutoMerge: true;
+  noForcePush: true;
+  noBranchDelete: true;
+  noSecretsExposed: true;
+  envValuesExposed: false;
+  repoUrlsExposed: false;
+  branchNamesExposed: false;
+  remoteGitCallsInDefaultTests: false;
+  realMergeExecuted: false;
+  metadata: Record<string, unknown>;
+};
+
 export type StagingDeploymentDryRunProfile = {
   id: string;
   name: string;

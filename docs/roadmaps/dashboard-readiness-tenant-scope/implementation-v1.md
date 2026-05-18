@@ -6,12 +6,13 @@ Status:
 - Dashboard/Readiness Tenant Scope Planning: `v1_implemented`
 - Tenant/Repo/Provider Scope Model: `v1_implemented`
 - Tenant Scope Enforcement: `v1_implemented_partial`
+- Audit Query Scope Enforcement: `v1_implemented_partial`
 
 Plain status: Dashboard/Readiness Tenant Scope Implementation: v1_implemented.
 
 Dashboard/Readiness Tenant Scope Implementation v1 adds safe scope-aware metadata, warnings, role visibility hints, and redaction labels to dashboard and readiness read models. It prepares the dashboard/readiness layer for future filtering without enforcing tenant isolation.
 
-This milestone keeps the rule explicit: production tenant enforcement remains future. Tenant Scope Enforcement v1 now adds partial representative enforcement metadata, but production tenant enforcement remains false. It does not implement tenant provisioning, row-level security, production Auth/RBAC, real IdP calls, real sessions/JWTs/API keys, real provider calls, or production-ready tenant filtering.
+This milestone keeps the rule explicit: production tenant enforcement remains future. Tenant Scope Enforcement v1 now adds partial representative enforcement metadata, and Audit Query Scope Enforcement v1 adds partial representative audit query redaction/check metadata, but production tenant enforcement remains false. It does not implement tenant provisioning, row-level security, production Auth/RBAC, real IdP calls, real sessions/JWTs/API keys, real provider calls, production audit storage filtering, or production-ready tenant filtering.
 
 ## What v1 Implements
 
@@ -26,6 +27,7 @@ This milestone keeps the rule explicit: production tenant enforcement remains fu
 - Dashboard UI section `Scope / Visibility / Redaction`.
 - Safe `/health` metadata for implementation status.
 - Partial representative Tenant Scope Enforcement v1 metadata on dashboard/readiness scope summaries, including `enforcementMode` and `scopeDecisionSummary`.
+- Audit Query Scope Enforcement v1 dashboard/readiness metadata for audit detail level, redaction plans, raw-payload-forbidden status, and production audit storage enforcement false.
 
 ## What v1 Does Not Implement
 
@@ -92,6 +94,14 @@ Tenant Scope Enforcement v1 adds read-only endpoint metadata through:
 - `GET /readiness/tenant-enforcement/summary`
 - representative `scopeDecisionSummary` fields on readiness summary envelopes.
 
+Audit Query Scope Enforcement v1 adds:
+
+- `GET /readiness/audit-scope/summary`
+- `GET /readiness/audit-scope/redaction-plans`
+- `POST /observability/audit/query-scope/check`
+- `scopeDecisionSummary` metadata on `GET /observability/audit/events`
+- dashboard Observability rows for raw-payload-forbidden and production-storage-enforcement false.
+
 ## Fallback Behavior
 
 Fallback behavior is implemented as metadata:
@@ -134,7 +144,7 @@ The following remain future work:
 - durable tenant/team/project/repo/provider/model/SecretRef/MCP/package/host/audit-query repositories;
 - dashboard read-model filtering;
 - readiness endpoint filtering;
-- audit query filtering;
+- audit query filtering beyond v1 representative redaction/check metadata;
 - cache partitioning by tenant/role/scope/redaction class;
 - repository/query-layer tenant filters;
 - production empty/error states for missing scope;
@@ -163,10 +173,10 @@ Implementation v1 adds deterministic tests for:
 - Missing-scope warnings are readiness hints, not authorization failures.
 - Role visibility hints are not active RBAC.
 - Dashboard and readiness responses are still unfiltered.
-- Audit query scoping is not enforced.
+- Audit query scoping is partially represented through read-model redaction/check metadata; production audit query security is not enforced.
 - Tenant Scope Enforcement v1 is partial and representative only.
 - Production readiness remains false.
 
 ## Recommended Next Task
 
-OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Audit Query Scope Enforcement v1 has now landed (`docs/features/audit-query-scope-enforcement/v1.md`) as representative read-model redaction/check metadata. The next recommended tasks are Readiness Endpoint Scope Filtering v1, Tenant Scope Enforcement v2, or External Observability Export v1 planning. Tenant Scope Enforcement v1 remains partial representative metadata; production dashboard/readiness filtering, audit storage filtering, and production tenant isolation remain future work.

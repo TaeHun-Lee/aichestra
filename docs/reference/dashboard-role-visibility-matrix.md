@@ -4,10 +4,11 @@ Status:
 
 - Dashboard/Readiness Tenant Scope Planning: `v1_implemented`
 - Dashboard/Readiness Tenant Scope Implementation: `v1_implemented`
+- Dashboard Scope Filtering: `v1_implemented_partial`
 
-This matrix defines target dashboard visibility for future tenant-scoped filtering. It is not active production enforcement.
+This matrix defines target dashboard visibility for tenant-scoped filtering. It is not active production enforcement.
 
-Implementation v1 exposes these rows as role visibility hints inside `ScopedReadModelMetadata`; they are display metadata only and do not hide panels or grant access.
+Implementation v1 exposes these rows as role visibility hints inside `ScopedReadModelMetadata`; they are display metadata only and do not hide panels or grant access. Dashboard Scope Filtering v1 adds representative redaction/hiding for a selected set of sensitive panels when a non-default role is supplied via safe demo headers — see `docs/features/dashboard-scope-filtering/v1.md`. Default mock-admin runs continue to render every panel unchanged.
 
 | Role | Visible Panels | Hidden Panels | Redacted Panels | Tenant-scoped Panels | Team-scoped Panels | Project-scoped Panels | Global Panels | Production Restrictions | Staging Restrictions |
 |---|---|---|---|---|---|---|---|---|---|

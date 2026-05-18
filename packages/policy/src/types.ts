@@ -35,6 +35,7 @@ export type PolicyResourceKind =
   | "branch"
   | "pull_request"
   | "merge_queue"
+  | "merge_execution"
   | "git_operation"
   | "github_app"
   | "github_app_installation"
@@ -51,6 +52,13 @@ export type PolicyResourceKind =
   | "harness"
   | "instruction"
   | "registry_item"
+  | "registry_compatibility"
+  | "registry_drift"
+  | "registry_canary"
+  | "registry_apply_workflow"
+  | "registry_scope"
+  | "registry_artifact_trust"
+  | "registry_eval_suite"
   | "improvement_proposal"
   | "draft_registry_change"
   | "provider"
@@ -67,7 +75,8 @@ export type PolicyResourceKind =
   | "mcp_tool"
   | "secret_scope"
   | "dashboard"
-  | "auth";
+  | "auth"
+  | "cleanup";
 
 export type PolicyResourceScopeKind =
   | "global"
@@ -128,6 +137,65 @@ export type PolicyAction =
   | "merge_queue.hold"
   | "merge_queue.release_hold"
   | "merge_queue.merge_execute_future"
+  | "merge_execution.policy.read"
+  | "merge_execution.evaluate"
+  | "merge_execution.request"
+  | "merge_execution.execute_future"
+  | "merge_execution.override_future"
+  | "merge_execution.post_evidence.record_future"
+  | "pr_ownership.read"
+  | "pr_ownership.create"
+  | "pr_ownership.update"
+  | "pr_handoff.request"
+  | "pr_handoff.accept"
+  | "pr_handoff.reject"
+  | "pr_handoff.expire"
+  | "pr_reviewer.assign_future"
+  | "pr_remote_update_future"
+  | "registry.compatibility.read"
+  | "registry.compatibility.evaluate"
+  | "registry.compatibility.matrix.update_future"
+  | "registry.compatibility.override_future"
+  | "registry.drift.read"
+  | "registry.drift.assess"
+  | "registry.drift.recommend"
+  | "registry.drift.create_candidate_future"
+  | "registry.drift.auto_apply_future"
+  | "registry.canary.plan"
+  | "registry.canary.run_mock"
+  | "registry.canary.run_external_future"
+  | "registry.apply_workflow.create"
+  | "registry.apply_gate.evaluate"
+  | "registry.apply.metadata_record"
+  | "registry.apply.execute_future"
+  | "registry.apply.auto_apply_future"
+  | "registry.scope.read"
+  | "registry.scope.evaluate"
+  | "registry.scope.enforce_future"
+  | "registry.audit.read"
+  | "registry.approval_queue.read"
+  | "registry.mutation.scope_check"
+  | "registry.artifact_trust.read"
+  | "registry.artifact_trust.evaluate"
+  | "registry.artifact_signature.attach_mock"
+  | "registry.artifact_provenance.attach"
+  | "registry.artifact_signature.verify_future"
+  | "registry.artifact.sign_future"
+  | "registry.artifact.import_trusted_future"
+  | "registry.eval_suite.read"
+  | "registry.eval_suite.run_mock"
+  | "registry.eval_suite.attach_result"
+  | "registry.eval_suite.run_external_future"
+  | "governance.eval.require"
+  | "governance.eval.override_future"
+  | "cleanup.scan"
+  | "cleanup.recommend"
+  | "cleanup.decide"
+  | "cleanup.metadata_execute"
+  | "cleanup.destructive_execute_future"
+  | "branch.delete_future"
+  | "worktree.remove_future"
+  | "pr.close_future"
   | "github_app.configure"
   | "github_app.installation.use"
   | "github_app.repo_grant.use"
@@ -348,6 +416,65 @@ const policyActions = new Set<PolicyAction>([
   "merge_queue.hold",
   "merge_queue.release_hold",
   "merge_queue.merge_execute_future",
+  "merge_execution.policy.read",
+  "merge_execution.evaluate",
+  "merge_execution.request",
+  "merge_execution.execute_future",
+  "merge_execution.override_future",
+  "merge_execution.post_evidence.record_future",
+  "pr_ownership.read",
+  "pr_ownership.create",
+  "pr_ownership.update",
+  "pr_handoff.request",
+  "pr_handoff.accept",
+  "pr_handoff.reject",
+  "pr_handoff.expire",
+  "pr_reviewer.assign_future",
+  "pr_remote_update_future",
+  "registry.compatibility.read",
+  "registry.compatibility.evaluate",
+  "registry.compatibility.matrix.update_future",
+  "registry.compatibility.override_future",
+  "registry.drift.read",
+  "registry.drift.assess",
+  "registry.drift.recommend",
+  "registry.drift.create_candidate_future",
+  "registry.drift.auto_apply_future",
+  "registry.canary.plan",
+  "registry.canary.run_mock",
+  "registry.canary.run_external_future",
+  "registry.apply_workflow.create",
+  "registry.apply_gate.evaluate",
+  "registry.apply.metadata_record",
+  "registry.apply.execute_future",
+  "registry.apply.auto_apply_future",
+  "registry.scope.read",
+  "registry.scope.evaluate",
+  "registry.scope.enforce_future",
+  "registry.audit.read",
+  "registry.approval_queue.read",
+  "registry.mutation.scope_check",
+  "registry.artifact_trust.read",
+  "registry.artifact_trust.evaluate",
+  "registry.artifact_signature.attach_mock",
+  "registry.artifact_provenance.attach",
+  "registry.artifact_signature.verify_future",
+  "registry.artifact.sign_future",
+  "registry.artifact.import_trusted_future",
+  "registry.eval_suite.read",
+  "registry.eval_suite.run_mock",
+  "registry.eval_suite.attach_result",
+  "registry.eval_suite.run_external_future",
+  "governance.eval.require",
+  "governance.eval.override_future",
+  "cleanup.scan",
+  "cleanup.recommend",
+  "cleanup.decide",
+  "cleanup.metadata_execute",
+  "cleanup.destructive_execute_future",
+  "branch.delete_future",
+  "worktree.remove_future",
+  "pr.close_future",
   "github_app.configure",
   "github_app.installation.use",
   "github_app.repo_grant.use",
@@ -435,6 +562,7 @@ const policyResourceKinds = new Set<PolicyResourceKind>([
   "branch",
   "pull_request",
   "merge_queue",
+  "merge_execution",
   "git_operation",
   "github_app",
   "github_app_installation",
@@ -451,6 +579,13 @@ const policyResourceKinds = new Set<PolicyResourceKind>([
   "harness",
   "instruction",
   "registry_item",
+  "registry_compatibility",
+  "registry_drift",
+  "registry_canary",
+  "registry_apply_workflow",
+  "registry_scope",
+  "registry_artifact_trust",
+  "registry_eval_suite",
   "improvement_proposal",
   "draft_registry_change",
   "provider",
@@ -467,7 +602,8 @@ const policyResourceKinds = new Set<PolicyResourceKind>([
   "mcp_tool",
   "secret_scope",
   "dashboard",
-  "auth"
+  "auth",
+  "cleanup"
 ]);
 
 export function isPolicyAction(value: unknown): value is PolicyAction {

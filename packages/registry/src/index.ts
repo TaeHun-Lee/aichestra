@@ -48,6 +48,8 @@ import type {
   SkillPackage,
   Task
 } from "@aichestra/core";
+import type { RegistryTenantScopeEnforcementService } from "./scope-enforcement.ts";
+import type { RegistryArtifactTrustService } from "./artifact-trust.ts";
 
 export type RegistrySnapshot = {
   skills: SkillPackage[];
@@ -111,6 +113,8 @@ export type RegistryServiceInput = {
   defaultActorId?: string;
   defaultActor?: RegistryActor;
   repoRoot?: string;
+  scopeEnforcementService?: RegistryTenantScopeEnforcementService;
+  artifactTrustService?: RegistryArtifactTrustService;
 };
 
 export type RegistryAuditInput = Omit<RegistryAuditLogEntry, "id" | "createdAt">;
@@ -427,6 +431,10 @@ export type RegistryResolutionDto = {
   warnings: string[];
   errors: string[];
   resolvedAt: string;
+  scopeDecisions?: Record<string, unknown>[];
+  scopeSummary?: Record<string, unknown>;
+  artifactTrustDecisions?: Record<string, unknown>[];
+  artifactTrustSummary?: Record<string, unknown>;
 };
 
 export type RegistryAuditLogDto = {
@@ -1447,7 +1455,11 @@ export function registryResolutionToDto(resolution: RegistryResolution): Registr
     selectedInstructions: resolution.selectedInstructions,
     warnings: [...resolution.warnings],
     errors: [...resolution.errors],
-    resolvedAt: resolution.resolvedAt.toISOString()
+    resolvedAt: resolution.resolvedAt.toISOString(),
+    scopeDecisions: resolution.scopeDecisions ? structuredClone(resolution.scopeDecisions) : undefined,
+    scopeSummary: resolution.scopeSummary ? structuredClone(resolution.scopeSummary) : undefined,
+    artifactTrustDecisions: resolution.artifactTrustDecisions ? structuredClone(resolution.artifactTrustDecisions) : undefined,
+    artifactTrustSummary: resolution.artifactTrustSummary ? structuredClone(resolution.artifactTrustSummary) : undefined
   };
 }
 
@@ -2355,6 +2367,8 @@ export class RegistryService {
   private readonly defaultActor: RegistryActor;
   private readonly defaultActorId: string;
   private readonly repoRoot?: string;
+  private readonly scopeEnforcementService?: RegistryTenantScopeEnforcementService;
+  private readonly artifactTrustService?: RegistryArtifactTrustService;
 
   constructor(input: RegistryServiceInput) {
     const fallbackRepository = new InMemoryRegistryRepository();
@@ -2373,6 +2387,8 @@ export class RegistryService {
     };
     this.defaultActorId = this.defaultActor.id;
     this.repoRoot = input.repoRoot;
+    this.scopeEnforcementService = input.scopeEnforcementService;
+    this.artifactTrustService = input.artifactTrustService;
   }
 
   listSkills(actor = this.defaultActor): SkillPackage[] {
@@ -2858,6 +2874,14 @@ export class RegistryService {
       : [this.entryForTarget(packageKind, requireString(input.targetId, "export.targetId"))];
     const metadata = {
       ...(input.metadata ?? {}),
+      artifactTrust: {
+        status: "v1_metadata_only",
+        signatureStatus: "unsigned",
+        provenanceStatus: "missing",
+        realSigningImplemented: false,
+        realVerificationImplemented: false,
+        externalRegistryCalls: false
+      },
       artifacts: Object.fromEntries(entries.map((entry) => [entry.id, registryEntityFullSnapshot(this.requireRegistryEntity(entry.kind, entry.id))]))
     };
     const first = entries[0];
@@ -2919,6 +2943,29 @@ export class RegistryService {
     }
     const importMode = input.importMode ?? "create_only";
     const result: RegistryPackageImportResult = emptyResult(manifest);
+    if (this.artifactTrustService) {
+      const trustDecision = this.artifactTrustService.evaluatePackageTrust(manifest, {
+        requestContext: input.requestContext,
+        authContext: input.authContext,
+        actorId: actor.id,
+        principalId: actor.principalId,
+        serviceAccountId: actor.serviceAccountId,
+        requestId: actor.requestId,
+        correlationId: actor.correlationId,
+        source: actor.source,
+        roles: actor.roles,
+        resourceScopes: policyResourceScopesFromMetadata(actor.metadata),
+        metadata: {
+          ...(actor.metadata ?? {}),
+          packageImport: true,
+          dryRun: input.dryRun ?? false
+        }
+      });
+      result.warnings.push(...trustDecision.warnings.map((warning) => `Artifact trust warning: ${warning}`));
+      if (trustDecision.resolverImpact === "block_sensitive") {
+        result.errors.push(`Artifact trust blocked import: ${trustDecision.blockers.join(", ")}`);
+      }
+    }
     const artifacts = manifest.metadata.artifacts as Record<string, Record<string, unknown>> | undefined;
     for (const entry of manifest.entries) {
       const existing = this.findByNameVersion(entry.kind, entry.name, entry.version);
@@ -3020,12 +3067,34 @@ export class RegistryService {
   resolveRegistryContextForTask(input: Omit<ResolveRegistryContextInput, "skills" | "harnesses" | "instructions"> & RegistryRequestContextInput): RegistryResolution {
     const actor = actorFromInput(this.defaultActor, input.actor, input.actorId, input);
     this.authorize(actor, "registry.read");
-    return resolveRegistryContextForTask({
+    const resolution = resolveRegistryContextForTask({
       ...input,
       skills: this.skillRepository.listSkills(),
       harnesses: this.harnessRepository.listHarnesses(),
       instructions: this.instructionRepository.listInstructions()
     });
+    const registryContext = {
+        requestContext: input.requestContext,
+        authContext: input.authContext,
+        actorId: actor.id,
+        principalId: actor.principalId,
+        serviceAccountId: actor.serviceAccountId,
+        requestId: actor.requestId,
+        correlationId: actor.correlationId,
+        source: actor.source,
+        roles: actor.roles,
+        tenantId: stringMetadata(actor.metadata?.tenantId),
+        teamId: stringMetadata(actor.metadata?.teamId),
+        projectId: stringMetadata(actor.metadata?.projectId),
+        resourceScopes: policyResourceScopesFromMetadata(actor.metadata),
+        metadata: actor.metadata
+      };
+    const scopedResolution = this.scopeEnforcementService
+      ? this.scopeEnforcementService.attachResolverScopeMetadata(resolution, registryContext)
+      : resolution;
+    return this.artifactTrustService
+      ? this.artifactTrustService.attachResolverTrustMetadata(scopedResolution, registryContext)
+      : scopedResolution;
   }
 
   listAuditLogs(filter: { targetKind?: RegistryKind; targetId?: string; actor?: RegistryActor; actorId?: string; requestContext?: RequestContext; authContext?: AuthContext } = {}): RegistryAuditLogEntry[] {
@@ -3186,6 +3255,40 @@ export class RegistryService {
     const decision = this.authorizer.authorize(actor, permission, target);
     if (!decision.allowed) {
       throw new RegistryAuthorizationError(decision);
+    }
+    if (this.scopeEnforcementService && permission !== "registry.read" && permission !== "registry.audit.read" && permission !== "registry.history.read") {
+      const scopeDecision = this.scopeEnforcementService.evaluateMutationScope({
+        registryResourceKind: target.targetKind ?? "package",
+        resourceId: target.targetId ?? `${target.targetKind ?? "registry"}:new`,
+        packageKind: target.targetKind ?? "unknown",
+        enforcementMode: "warning",
+        metadata: {
+          permission,
+          targetKind: target.targetKind,
+          targetId: target.targetId,
+          policyDecisionId: decision.policyDecisionId
+        }
+      }, {
+        actorId: actor.id,
+        principalId: actor.principalId,
+        serviceAccountId: actor.serviceAccountId,
+        requestId: actor.requestId,
+        correlationId: actor.correlationId,
+        source: actor.source,
+        roles: actor.roles,
+        tenantId: stringMetadata(actor.metadata?.tenantId),
+        teamId: stringMetadata(actor.metadata?.teamId),
+        projectId: stringMetadata(actor.metadata?.projectId),
+        resourceScopes: policyResourceScopesFromMetadata(actor.metadata),
+        metadata: actor.metadata
+      });
+      if (scopeDecision.decision.endsWith("_denied")) {
+        throw new RegistryAuthorizationError({
+          ...decision,
+          allowed: false,
+          reason: scopeDecision.reason
+        });
+      }
     }
     return decision;
   }
@@ -3365,3 +3468,10 @@ export class InMemoryRegistryResolver extends InMemoryRegistryBase implements Re
     return resolveRegistryContextForTask(input);
   }
 }
+
+export * from "./compatibility.ts";
+export * from "./drift-detection.ts";
+export * from "./canary-apply.ts";
+export * from "./scope-enforcement.ts";
+export * from "./artifact-trust.ts";
+export * from "./eval-suite-execution.ts";

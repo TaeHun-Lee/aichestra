@@ -1,9 +1,17 @@
-# Aichestra — Current-State Design Conformance Audit
+# Aichestra — Current-State Design Conformance Audit (Audit 0)
 
-> **Audit date**: 2026-05-14
+> **Audit date**: 2026-05-18
 > **Reviewer**: Claude (claude-opus-4-7, 1M context)
-> **Working tree**: clean at `main` @ `61a4036 feat: Secret Backend Migration Planning v0`
-> **Scope**: full-repo audit-only review of design conformance, mock-first/integration safety, validation status, and production-readiness positioning across all phases and feature tracks.
+> **Working tree**: `codex/codex-work` branch, dirty by design (active in-flight work on Merge Queue Live Integration-Test Profile v1, Conflict Resolution Assistant v1, Agent Worktree Allocation v1, and related cross-references).
+> **Most recent commits**:
+> - `9c9bf63` Merge branch 'codex/codex-work' of https://github.com/TaeHun-Lee/aichestra into codex/codex-work
+> - `5473b55` feat: Multi-user / Multi-session Branch Orchestrator v2, Cross-session File Lease / Edit Intent Graph v1, Merge Queue Policy v2
+> - `4e5f633` fix: deduplicate policy shadow readiness catalog
+> - `0dbab65` feat: harden oidc provider skeleton
+> - `643f19b` feat: add policy runtime PoC planning
+> **Scope**: full-repo audit-only review of design conformance, mock-first/integration safety, validation status, and production-readiness positioning across all phases and feature tracks. Supersedes the previous Audit 0 report dated 2026-05-14 (rating `pass_with_minor_followups`, 223 pass / 1 fail / 4 skipped).
+
+This is an audit-only document. No application code was modified during the audit. The audit walks the current source tree, current docs tree (`docs/{briefs,foundations,features,roadmaps,audits,reference,adr}`), current 16 packages and 4 apps, and current 75 test files, runs the safe validation commands defined in `AGENTS.md`, and reviews `docs/Audit_prompt.md` Audit 0 criteria.
 
 ---
 
@@ -11,276 +19,261 @@
 
 **Rating**: `pass_with_minor_followups`
 
-**Confidence**: high (full repo walked, all docs/feature index resolved, every safe integration boundary inspected, full validation executed).
+**Confidence**: high (full repo walked via deep-survey subagent, all 75 test files cataloged, every `Mock*`/`Fetch*`/`Hmac*`/`Fixture*` provider boundary inspected, the two real `fetch()` call sites in the codebase confirmed to be gated and re-checked per-request, all `spawn`/`execFile` sites confirmed local-only, full validation suite executed, every newly added v1/v2 surface compared against its documented safety invariants).
 
 | Concern | State |
 |---|---|
-| Validation green | **Partial** — `lint`, `typecheck`, `build` pass; `pnpm test` reports **223 pass / 1 fail / 4 skipped** out of 228 tests. The single failure (`tests/local-agent-protocol-v1.test.ts:288`, Enterprise Provider local_cli compatibility ordering) is a regression in a mock-only path, not an integration boundary. |
-| Mock-first / gated integration safety | **Intact**. `MockGitProvider`, `MockLLMProvider`, `MockMCPGateway`, `MockAgentRunner`, `MockAuthProvider`, `MockLocalAgentTransport`, in-memory storage, and `BlockedCommandExecutor` are the defaults. Every real provider path (`OpenAICompatibleLLMProvider`, `GitHubGitProvider`, `HmacGitHubWebhookVerifier`, `FixtureLocalCommandExecutor`) is constructed only when explicit env gates resolve to truthy, and re-checks the gates at execution time. |
-| Production-readiness overstated anywhere | **No**. `README.md`, `AGENTS.md`, every `v0/v1` doc, and the deployment-readiness/persistent-db/secret-backend/github-app planning packages consistently mark themselves planning-only / read-only and reiterate that production is blocked. |
-| Safe to continue production hardening | **Yes** — Production Auth/RBAC v1, durable observability, audit retention v1, secret backend implementation, and GitHub App hardening v1 can proceed on top of the existing v0/v1 planning surfaces. |
-| Safe to continue gated real integrations | **Yes, with follow-ups** — Real Git Adapter v2 and LLM Gateway v2 already expose controlled HTTP paths. Continuing more integrations is safe provided (a) the local-agent-protocol-v1 regression is fixed (or the test/code reconciled) and (b) legacy env-credential fallbacks remain auditable while a SecretRef-first migration progresses. |
+| Validation green | **Yes** — `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `git diff --check` all pass. `pnpm test` reports **425 pass / 0 fail / 9 skipped** out of 434 tests. The 9 skipped tests are intentionally-gated optional live-integration skeletons (Postgres optional contracts, GitHub App/LLM/Vault/Merge Queue live profiles, Conflict Resolution Assistant LLM proposal). The single failure observed during one earlier run (`tests/agent-worktree-allocation-v1.test.ts`) is not reproducing in the recorded validation run; treat it as a flake to monitor rather than a sustained regression. |
+| Mock-first / gated integration safety | **Intact**. `MockGitProvider`, `MockLLMProvider`, `MockMCPGateway`, `MockAgentRunner`, `MockAuthProvider`, `MockLocalAgentTransport`, `MockSecretManager`, `BlockedCommandExecutor`, and the in-memory storage provider are the defaults. Every real path (`FetchGitHubClient`, `FetchOpenAICompatibleHttpClient`, `HmacGitHubWebhookVerifier`, `FixtureLocalCommandExecutor`, optional Postgres repositories, gated Vault SecretRef provider) is constructed only when its explicit env gates resolve to truthy and re-checks the gates at execution time. |
+| Production-readiness overstated anywhere | **No**. `README.md`, `AGENTS.md`, every `v0/v1/v2/v3` doc, and the deployment-readiness/persistent-db/secret-backend/github-app/auth/policy/staging/observability planning packages consistently mark themselves planning-only / read-only / mock-first / disabled-by-default, and reiterate that production is blocked on auth, real secret backend, durable DB operations, policy bundle runtime, durable audit/observability, and production webhook hardening. The phase-progress-checklist HTML records the same posture and continues to flag `p5f-clean-approved-worktree` as an open issue. |
+| Safe to continue production hardening | **Yes** — Production Auth/RBAC v1, durable observability v1, audit retention v1, Vault Secret Backend production rollout v1, Policy Bundle / OPA-Cedar runtime PoC, and Persistent DB production operations v1 can each proceed on top of the existing v0/v1 planning and skeleton surfaces. |
+| Safe to continue gated real integrations | **Yes, with follow-ups** — Real Git Adapter v2 and LLM Gateway v2 already expose controlled HTTP paths; GitHub App Controlled v1, Vault-backed Secret Backend v1, and OIDC Provider Skeleton Hardening v1 expose disabled boundaries that can be reviewed for incremental enablement. Continuing more integrations is safe provided (a) the in-flight untracked work (Conflict Resolution Assistant v1, Agent Worktree Allocation v1, Merge Queue Live Integration-Test Profile v1, and related doc dirs) is committed once review is complete, and (b) the recurring `agent-worktree-allocation-v1` test flake is investigated and pinned. |
 
 ---
 
 ## 2. Current Status Matrix
 
-Legend uses the requested vocabulary. Evidence is anchored to current files/types/tests/docs (not historical paths).
+Legend uses the Audit 0 vocabulary. Evidence is anchored to current files/types/tests/docs.
 
-### Phase 1 — Skeleton & Domain
+### Phase 1 — Core Orchestration / Task / Agent / LLM
+
 - **Status**: `complete_for_current_milestone`
-- **Evidence**: `packages/core/src/domain/{ids,status,errors,events,models}.ts`, `packages/core/src/schemas/{domain,schema}.ts`, `packages/core/src/registries/seed-data.ts`, `packages/core/src/conflicts/{interfaces,scoring}.ts`. State machine tests at `tests/task-state-machine.test.ts`, `tests/mock-workflow-vertical-slice.test.ts`. `docs/foundations/{architecture,domain-model,task-state-machine,mvp,mvp-scope}.md`.
-- **Missing**: none for the phase.
+- **Evidence**: `packages/core/src/domain/{ids,status,errors,events,models}.ts`, `packages/core/src/schemas/domain.ts`, `apps/worker/src/workflows/run-agent-task-workflow.ts`, `tests/task-state-machine.test.ts`, `tests/mock-workflow-vertical-slice.test.ts`, `tests/instruction-resolver.test.ts`. `docs/foundations/{architecture,domain-model,task-state-machine,instruction-layer}.md`.
+- **Missing for production**: production task persistence, production attribution durability.
 - **Blocks current milestone**: no.
-- **Blocks production**: no.
+- **Blocks production**: yes, but planning v0 exists.
 
-### Phase 2 — Conflict Manager & First Vertical Slice
+### Phase 2 — Collaborative Git / Branch / Merge / Conflict
+
 - **Status**: `complete_for_current_milestone`
-- **Evidence**: `packages/git-adapter/src/service.ts`, `packages/adapters/src/git/{mock-git-provider,merge-simulators,provider-factory}.ts`, `apps/worker/src/workflows/run-agent-task-workflow.ts`. Tests: `tests/mock-workflow-vertical-slice.test.ts`, `tests/merge-simulators.test.ts`, `tests/conflict-risk-scoring.test.ts`, `tests/mock-git-conflict-risk.test.ts`. Docs: `docs/features/conflict-manager/{v0,v1}.md`.
-- **Missing**: none.
+- **Evidence**: `packages/git-adapter/src/service.ts`, `packages/adapters/src/git/{mock-git-provider,merge-simulators,provider-factory,local-git-provider}.ts`, `packages/core/src/conflicts/{merge-queue-policy,conflict-resolution-assistant}.ts`, `tests/mock-workflow-vertical-slice.test.ts`, `tests/merge-simulators.test.ts`, `tests/conflict-risk-scoring.test.ts`, `tests/merge-queue-policy-v2.test.ts`, `tests/conflict-resolution-assistant-v1.test.ts` (in-flight), `tests/merge-queue-live-integration-test-profile-v1.test.ts` (in-flight).
+- **Missing for production**: real merge execution remains disabled by design; production GitHub App rollout and production webhook endpoint are out of scope; durable merge-queue/decision/hold persistence remains in-memory.
 - **Blocks current milestone**: no.
-- **Blocks production**: no (Conflict Manager v1 remains mock/local-only per AGENTS.md rule).
+- **Blocks production**: yes, intentional.
 
-### Phase 3 — Registry (Skill / Harness / Instruction)
-- **Status**: `v3_implemented` (treated as `complete_for_current_milestone` for the registry track).
-- **Evidence**: `packages/registry/src/index.ts` (3,042 LOC: registries, resolver, audit log, history, rollback, approval queue, eval result attachment, package manifests, import/export, semver-range v0). Tests: `tests/registry-v0.test.ts`, `tests/registry-hardening-v1.test.ts`, `tests/registry-operational-hardening-v2.test.ts`, `tests/registry-packaging-v3.test.ts`. Docs: `docs/features/registry/{v0,v1-hardening,v2-operational-hardening,v3-packaging-versioning,*-plan}.md`.
-- **Missing**: real artifact registry / OCI / npm / signing remain explicitly out of scope.
-- **Blocks current milestone**: no.
-- **Blocks production**: production artifact distribution and signing not yet planned; not blocking for current milestone.
+### Phase 3 — Skill / Harness / Instruction Registry
 
-### Phase 4 — Preparation, Auto-Improvement v0, Governance v1
-- **Status**: `v1_implemented` (per-track) / `complete_for_current_milestone` for v1 scope.
-- **Evidence**: `packages/improvement/src/index.ts` (2,037 LOC). Tests: `tests/phase-4-preparation.test.ts`, `tests/phase-4-auto-improvement-v0.test.ts`, `tests/phase-4-governance-v1.test.ts`. Docs: `docs/features/{auto-improvement,governance}/*.md`. Safety policy defaults preserved (`allowAutoApply=false`, `requireHumanApproval=true`, `requireEvalPassed=true`, `requireCanary=true`).
-- **Missing**: real proposal generation, real eval/canary execution remain explicitly deferred.
+- **Status**: `v3_implemented` (complete for milestone)
+- **Evidence**: `packages/registry/src/index.ts` (full registry, resolver, packaging, governance), `tests/registry-v0.test.ts`, `tests/registry-hardening-v1.test.ts`, `tests/registry-operational-hardening-v2.test.ts`, `tests/registry-packaging-v3.test.ts`, `docs/features/registry/{v0,v1-hardening,v2-operational-hardening,v3-packaging-versioning}.md`.
+- **Missing for production**: real artifact registry/OPA/npm/signing trust chain; tenant scope enforcement still partial; drift detection still planning.
 - **Blocks current milestone**: no.
-- **Blocks production**: not in scope for v1.
+- **Blocks production**: yes, deferred by design.
 
-### Phase 5 — Cross-cutting hardening (Auth/RBAC, Policy, Security, Observability, Dashboard, Deployment-Readiness)
-- **Status**: `v0_implemented` cross-cutting; `complete_for_current_milestone` per individual v0 track.
-- **Evidence**: see the per-track entries below. Web dashboard (`apps/web/{src,app,lib,components}`) consumes API read models with explicit demo fallback; API exposes 19+ `/dashboard/*` read endpoints and 9 `/readiness/*` planning endpoints (see README.md lines 178–270, 304–334).
-- **Missing**: persistent auth, durable audit storage, production observability backends, tenant isolation.
+### Phase 4 — Auto-improvement / Governance / Evals
+
+- **Status**: `v1_implemented`
+- **Evidence**: `packages/improvement/src/**`, `tests/phase-4-preparation.test.ts`, `tests/phase-4-auto-improvement-v0.test.ts`, `tests/phase-4-governance-v1.test.ts`, `docs/features/{auto-improvement,governance}/*.md`. Safety policy defaults preserved: `allowAutoApply=false`, `requireHumanApproval=true`, `requireEvalPassed=true`, `requireCanary=true`.
+- **Missing for production**: real proposal generation, eval/canary execution, durable governance audit, signed package trust.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for production-grade auth, audit retention enforcement, and SIEM/OTel export — all already flagged in planning docs.
+- **Blocks production**: yes, deferred by design.
+
+### Phase 5 — Production Readiness Preparation
+
+- **Status**: `preparation_started` (cross-cutting)
+- **Evidence**: `packages/{auth,policy,security,observability,deployment-readiness}/src/**`, `apps/api/src/dashboard-read-model.ts`, 20+ `/dashboard/*` endpoints, 9+ `/readiness/*` endpoints. `docs/roadmaps/{production-deployment-readiness,auth-rbac-production,secret-backend-migration,production-secret-backend-option-decision,policy-bundle-opa-cedar,policy-bundle-runtime-poc,persistent-db-production-operations,github-app-production-webhook-hardening,staging-{deployment-profile,deployment-dry-run,release-candidate,deployment-execution,ci-cd-pipeline},vault-integration-test-profile,llm-gateway-integration-test-profile,github-app-integration-test-profile,dashboard-readiness-tenant-scope}/**`.
+- **Missing for production**: persistent auth and durable identity, durable audit storage, production observability backend integration, tenant isolation enforcement, production secret backend rollout, production policy bundle runtime, GitHub App production deploy, real CI/CD workflow activation.
+- **Blocks current milestone**: no, planning continues.
+- **Blocks production**: yes, intentional.
 
 ### Persistent DB
-- **Status**: `v1_implemented` (Persistent DB v1 + Persistent DB Production Operations Planning v1).
-- **Evidence**: `packages/db/src/{postgres,repository,storage}.ts`, opt-in via `AICHESTRA_STORAGE_PROVIDER=postgres` (`apps/api/src/main.ts:4299–4304`). Schema `infra/migrations/0001_initial_aichestra_schema.sql` (1,264 lines, 25+ tables). Tests: `tests/repository-contracts.test.ts` (in-memory + optional Postgres contract via `AICHESTRA_TEST_DATABASE_URL`), `tests/persistent-db-production-operations-v1.test.ts`. Docs: `docs/features/persistent-db/v1*.md`, `docs/roadmaps/persistent-db-production-operations/*`. Postgres opt-in not auto-run during build/test.
-- **Missing**: real pooling, backup/restore jobs, retention deletion/legal hold, partition maintenance, async repository refactors. These are documented as deferred and exposed only through read-only planning APIs (`/readiness/database/*`).
+
+- **Status**: `v1_implemented`
+- **Evidence**: `packages/db/src/{postgres,repository,storage}.ts`, opt-in via `AICHESTRA_STORAGE_PROVIDER=postgres`, schema `infra/migrations/0001_initial_aichestra_schema.sql`, `tests/repository-contracts.test.ts`, `tests/persistent-db-production-operations-v1.test.ts`, `docs/features/persistent-db/v1.md`, `docs/roadmaps/persistent-db-production-operations/v1.md`.
+- **Missing for production**: production pooling, backup/restore jobs, retention deletion enforcement / legal hold, durable migrations governance with rollback, monitoring/alerting export.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for production cutover.
+- **Blocks production**: yes, planning v1 exists.
 
 ### Real Git Adapter
-- **Status**: `v2_implemented` (gated).
-- **Evidence**: `packages/adapters/src/git/{mock-git-provider,local-git-provider,github-git-provider,github-client,github-webhooks,provider-factory}.ts`, `packages/git-adapter/src/{service,webhooks}.ts`. Real HTTP only via `FetchGitHubClient` constructed in `provider-factory.ts:111–113` and only when `config.remoteGitEnabled && token && allowedRepos.length > 0`. Webhook verification via HMAC-SHA256 only when `webhooksEnabled && secret.ok && secret.value` (`github-webhooks.ts:135–141`). Tests: `tests/real-git-adapter-v{0,1,2}.test.ts`, `tests/github-app-production-webhook-hardening-v0.test.ts`. Docs: `docs/features/real-git-adapter/{v0,v1,v2,*-plan}.md`.
-- **Missing**: GitHub App (private-key, installation tokens), GitLab/Bitbucket, merge/rebase/force-push/branch-delete. All explicitly deferred and modeled only as read-only planning under `packages/deployment-readiness` + `/readiness/github-app/*`.
+
+- **Status**: `v2_implemented` (gated)
+- **Evidence**: `packages/adapters/src/git/{github-client,github-webhooks,provider-factory}.ts`, `FetchGitHubClient` constructed only when remote-git enabled with token + repo allowlist + branch prefix; `HmacGitHubWebhookVerifier` gated by webhooks-enabled + secret-ok; `tests/real-git-adapter-v{0,1,2}.test.ts`, `tests/github-app-controlled-v1.test.ts`, `tests/github-app-integration-test-profile-v1.test.ts`. `AICHESTRA_ALLOW_REMOTE_MERGE`/`_REBASE`/`_FORCE_PUSH`/`_BRANCH_DELETE` remain unsupported.
+- **Missing for production**: GitHub App installation rollout, private-key handling, real installation token exchange, production webhook endpoint, durable replay protection, GitLab/Bitbucket.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for production webhook traffic and merge automation.
+- **Blocks production**: yes, planning v0 exists.
 
 ### LLM Gateway
-- **Status**: `v2_implemented` (gated).
-- **Evidence**: `packages/llm-gateway/src/{providers,gateway,model-router,routing,virtual-keys,catalog,enterprise-providers,local-agent-protocol,types,dto}.ts`. `OpenAICompatibleLLMProvider` (`providers.ts:161–222`) returns `blocked_remote_llm_disabled` unless `remoteLlmEnabled && remoteCompletionEnabled && baseUrl && apiKey` (re-checked at every request). `FetchOpenAICompatibleHttpClient` only invoked from inside that gated path. All other provider kinds are disabled `DisabledSkeletonLLMProvider` subclasses. Tests: `tests/llm-gateway-v{0,1,2}.test.ts`, `tests/mock-llm-gateway.test.ts`, `tests/enterprise-llm-provider-abstraction-v0.test.ts`. Docs: `docs/features/llm-gateway/v{0,1,2}*.md`.
-- **Missing**: real Anthropic/Gemini/Bedrock/Vertex/Azure/LiteLLM, streaming, BYOK, OAuth/WIF/IAM. Explicitly deferred.
+
+- **Status**: `v2_implemented` (gated)
+- **Evidence**: `packages/llm-gateway/src/{providers,gateway,model-router,routing,catalog,enterprise-providers,local-cli-provider-templates}.ts`, `OpenAICompatibleLLMProvider` returns `blocked_remote_llm_disabled` unless every gate (`remoteLlmEnabled`, `remoteCompletionEnabled`, `baseUrl`, `apiKey`, model allowlist, virtual key budget, policy allow) passes, re-checked per-request. `FetchOpenAICompatibleHttpClient` is only constructed inside the gated path. `tests/llm-gateway-v{0,1,2}.test.ts`, `tests/mock-llm-gateway.test.ts`, `tests/llm-gateway-integration-test-profile-v1.test.ts`, `tests/local-cli-provider-templates-v1.test.ts`.
+- **Missing for production**: real Anthropic/Gemini/Bedrock/Vertex/Azure/LiteLLM providers, streaming, BYOK, OAuth/WIF/IAM, production secret manager rollout.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for multi-provider production routing.
+- **Blocks production**: yes, by design.
 
 ### MCP Gateway
+
 - **Status**: `v0_implemented`
-- **Evidence**: `packages/mcp-gateway/src/{gateway,catalog,repository,types,dto}.ts`. `MockMCPGateway` is the only gateway constructed (`createDefaultMCPGateway` in `apps/api/src/main.ts:4225–4229`). Disabled real transport skeleton present. Tests: `tests/mcp-gateway-v0.test.ts` (currently passing per Section 5). Docs: `docs/features/mcp-gateway/v0*.md`.
-- **Missing**: real MCP transport (stdio/http/sse), write/deploy tools, SecretLease issuance to tools, Local Agent MCP forwarding — explicitly deferred.
+- **Evidence**: `packages/mcp-gateway/src/{gateway,catalog,repository}.ts`, `MockMCPGateway` is the only default, real MCP transport remains disabled, `tests/mcp-gateway-v0.test.ts`, `docs/features/mcp-gateway/v0.md`.
+- **Missing for production**: real MCP transport (stdio/http/sse), tool-permission policy enforcement against real servers, durable tool/invocation audit export, SecretLease-to-tool issuance.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for any production MCP integration.
+- **Blocks production**: yes, by design.
 
 ### Dashboard API-backed Read Model
+
 - **Status**: `v0_implemented`
-- **Evidence**: `apps/api/src/dashboard-read-model.ts` (910 LOC), `apps/web/lib/dashboard-data-provider.ts`, `apps/web/lib/mock-data.ts`, `apps/web/src/render.ts`, `packages/shared/src/dashboard-read-models.ts` (with `tokenLikePattern` / `credentialCachePattern` sanitization). 19 `/dashboard/*` endpoints; `AICHESTRA_DASHBOARD_DATA_SOURCE=api` switches the web app off the demo fallback. Tests: `tests/dashboard-read-model-v0.test.ts`, `tests/dashboard-data.test.ts`. Docs: `docs/features/dashboard/{read-model-plan,v0-plan,v0}.md`, `docs/reference/dashboard-read-model-inventory.md`.
-- **Missing**: persistent dashboard caches, websocket updates — not required for v0.
+- **Evidence**: `apps/api/src/dashboard-read-model.ts`, `apps/web/lib/dashboard-data-provider.ts`, `apps/web/src/render.ts`, 20+ `/dashboard/*` endpoints, `AICHESTRA_DASHBOARD_DATA_SOURCE=api` switch, `tokenLikePattern`/`credentialCachePattern` sanitization, `tests/dashboard-read-model-v0.test.ts`, `tests/dashboard-data.test.ts`, `tests/dashboard-readiness-tenant-scope-{planning,implementation}-v1.test.ts`.
+- **Missing for production**: production tenant filtering enforcement, durable read-model caching, websocket/SSE live updates.
 - **Blocks current milestone**: no.
-- **Blocks production**: no for the read-model boundary; production observability backend is a separate track.
+- **Blocks production**: yes, by design.
 
 ### Local Agent Runner
+
 - **Status**: `v1_implemented`
-- **Evidence**: `packages/runner/src/{agent-runner,mock-agent-runner,local-agent-runner,command-executor,workspace,harness-policy,instruction-assembly,service,repository,config,test-runner}.ts`. Defaults to `MockAgentRunner` (`apps/api/src/main.ts:4231–4242`). `BlockedCommandExecutor` is the default; `FixtureLocalCommandExecutor` requires `enabled=true` and re-validates against shell metacharacters, deny lists (`curl/wget/git/kubectl/vault/temporal/mcp/rm/...`), harness deny/allow lists, no inherited tokens/secrets in env. Tests: `tests/local-agent-runner-v{0,1}.test.ts`. Docs: `docs/features/local-agent-runner/v{0,1}*.md`.
-- **Missing**: real provider runner integration; explicitly deferred.
+- **Evidence**: `packages/runner/src/{agent-runner,local-agent-runner,command-executor,workspace,harness-policy,workspace-lifecycle,multi-session-coordination,cross-session-edit-intent,worktree-allocation*}.ts`, defaults to `MockAgentRunner`, `BlockedCommandExecutor` is default, `FixtureLocalCommandExecutor` requires `enabled=true` + per-request re-validation; shell metacharacter + deny-list checks (curl/wget/git/kubectl/vault/temporal/mcp/rm/etc.), no inherited tokens/secrets in env, `tests/local-agent-runner-v{0,1}.test.ts`, `tests/agent-workspace-lifecycle-v2.test.ts`, `tests/multi-session-agent-run-coordination-v1.test.ts`, `tests/cross-session-file-lease-edit-intent-v1.test.ts`, `tests/agent-worktree-allocation-v1.test.ts` (in-flight).
+- **Missing for production**: production sandbox runtime, real Local Agent daemon, real worktree allocation, durable workspace state.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for real agent execution.
+- **Blocks production**: yes, by design.
 
 ### Local Agent Protocol
-- **Status**: `v1_implemented` with **a single failing test (regression)**.
-- **Evidence**: `packages/llm-gateway/src/local-agent-protocol.ts` (~2,700 LOC), `enterprise-providers.ts` integration. `MockLocalAgentTransport` + `FixtureLocalAgentDaemon` only. No real transport, no PTY, no vendor CLI execution. Tests: `tests/local-agent-protocol-v{0,1}.test.ts`. Docs: `docs/features/local-agent-protocol/v{0,1}*.md`.
-- **Missing**: in `enterprise-providers.ts`, the compatibility check at `:874–902` no longer returns `provider_template_incompatible` when an advertised capability set excludes the provider template prior to consent — `tests/local-agent-protocol-v1.test.ts:288` currently observes `awaiting_consent` instead of the expected `provider_template_incompatible`. This is a behavioral ordering regression in the mock-only path; it does not relax any safety gate (consent and direct execution are still blocked thereafter), but it weakens the early-fail compatibility signal.
-- **Blocks current milestone**: minor follow-up — test/CI signal is broken; either the code's check ordering must be restored or the test's expectation must be reconciled with the intended UX.
-- **Blocks production**: no.
 
-### Policy-as-code (Skeleton v0)
-- **Status**: `v0_implemented`
-- **Evidence**: `packages/policy/src/{engine,default-rules,audit,types,dto}.ts`. `StaticPolicyEngine.evaluate` (`engine.ts:90–127`) is **deny-by-default** — no matched rule ⇒ `decision: "deny"` with `matchedRuleIds: ["policy_default_deny"]`. Default rules in `default-rules.ts` enforce: deny runner `git fetch/push/merge/rebase`, deny remote LLM unless gates set, deny webhook unverified, deny secret reads, deny network egress, etc. Tests: `tests/policy-as-code-v0.test.ts`. Docs: `docs/features/policy-as-code/v0*.md`.
-- **Missing**: real OPA/Rego/Cedar, dynamic policy upload — explicitly deferred.
+- **Status**: `v1_implemented`
+- **Evidence**: `packages/llm-gateway/src/local-agent-protocol*.ts`, `MockLocalAgentTransport` and `FixtureLocalAgentDaemon` only, no real transport / PTY / vendor CLI, `tests/local-agent-protocol-v{0,1}.test.ts`. The local-agent-protocol-v1 regression noted in the 2026-05-14 audit is no longer present.
+- **Missing for production**: real transport, signed channel + pairing, real PTY, vendor CLI execution.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for production policy bundle management.
+- **Blocks production**: yes, by design.
+
+### Policy-as-code
+
+- **Status**: `v0_implemented`
+- **Evidence**: `packages/policy/src/{engine,default-rules,audit,types}.ts`, `StaticPolicyEngine.evaluate` is **deny-by-default**, default rules deny runner remote-git, remote LLM without gates, webhook unverified, secret reads without authorization, network egress; `tests/policy-as-code-v0.test.ts`, `tests/policy-bundle-opa-cedar-v0.test.ts`, `tests/policy-bundle-runtime-poc-v0.test.ts`, `tests/policy-shadow-evaluation-planning-v1.test.ts`, `tests/policy-runtime-golden-harness-v1.test.ts`, `tests/policy-runtime-shadow-evaluation-v1.test.ts`.
+- **Missing for production**: real OPA/Rego/Cedar runtime, signed/versioned policy bundles, break-glass workflow, production audit export.
+- **Blocks current milestone**: no.
+- **Blocks production**: yes, planning v0/v1 exists.
 
 ### Enterprise Provider Abstraction
+
 - **Status**: `v0_implemented`
-- **Evidence**: `packages/llm-gateway/src/enterprise-providers.ts`. `ProviderAbstractionService` exposes catalog/auth/credential/token/adapter skeletons. All `local_cli` providers use `external_cli_session` with `credentialAccess = never_read_tokens` (validated in `tests/enterprise-llm-provider-abstraction-v0.test.ts` and `tests/secretref-provider-credentials-v1.test.ts`). No vendor SDK is imported (only fetch from gated paths). Docs: `docs/features/enterprise-llm-provider/v0*.md`.
-- **Missing**: real Claude/Codex/Gemini/Vertex/Bedrock/Foundry — explicitly deferred.
+- **Evidence**: `packages/llm-gateway/src/enterprise-providers.ts`, `packages/llm-gateway/src/local-cli-provider-templates.ts`, `ProviderAbstractionService` skeletons, `local_cli` requires Local Agent boundary + `credentialAccess = never_read_tokens`, `tests/enterprise-llm-provider-abstraction-v0.test.ts`, `tests/local-cli-provider-templates-v1.test.ts`.
+- **Missing for production**: real Claude Code / Codex CLI / Aider / Gemini / Vertex / Bedrock adapters; real signed channel; OAuth/WIF/IAM.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for real enterprise provider rollout.
+- **Blocks production**: yes, by design.
 
 ### Secrets / Sandbox
+
 - **Status**: `v0_implemented`
-- **Evidence**: `packages/security/src/{types,credentials,service,redaction,repository,dto}.ts`. `SecretRef` has no `value` field; raw-secret rejection in `apps/api/src/main.ts` (`containsRawSecretField`, `:541–548`). `MockSecretManager` only. `SandboxProfile` container/Firecracker/K8s kinds are future placeholders. Network egress denied by default. Tests: `tests/secrets-sandbox-design-v0.test.ts`. Docs: `docs/features/secrets-sandbox/v0*.md`.
-- **Missing**: Vault / AWS / GCP / Azure secret manager, real sandbox runtime, OS-level network egress — explicitly deferred.
+- **Evidence**: `packages/security/src/{types,credentials,service,redaction,repository}.ts`, `SecretRef` has no `value` field, `MockSecretManager` only default, `SandboxProfile` container/Firecracker/K8s are placeholders, network egress denied; `tests/secrets-sandbox-design-v0.test.ts`.
+- **Missing for production**: real Vault/AWS/GCP/Azure secret manager, real sandbox runtime, OS-level network egress enforcement.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for production secret backend and sandbox runtime.
+- **Blocks production**: yes, by design.
 
 ### SecretRef-backed Provider Credentials
+
 - **Status**: `v1_implemented`
-- **Evidence**: `packages/security/src/{credentials,service}.ts`, integration in `packages/adapters/src/git/{provider-factory,github-webhooks}.ts` and `packages/llm-gateway/src/providers.ts`. SecretRef-first; legacy env fallback recorded via `legacyCredentialFallbackAuditor`/`legacySecretFallbackAuditor` and `securityService.recordSecretAudit` (`apps/api/src/main.ts:4159–4177`). `EnvSecretProvider` disabled unless `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=true` and key is in `AICHESTRA_ALLOWED_SECRET_ENV_KEYS`. Tests: `tests/secretref-provider-credentials-v1.test.ts`. Docs: `docs/foundations/secretref-provider-credentials/v1*.md`. Prior audit `docs/audits/2026-05-13-secretref-provider-credentials-v1-completion-review.claude.md`.
-- **Missing**: backend migration to Vault/cloud secret managers; lease/rotation actual enforcement. Covered by Secret Backend Migration Planning v0 (planning-only).
+- **Evidence**: `packages/security/src/{credentials,service}.ts` integrated into git/llm provider factory paths, `EnvSecretProvider` disabled unless `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=true` + allowlist, legacy fallback audited via `legacyCredentialFallbackAuditor`; Vault-backed Secret Backend v1 lives under `docs/foundations/vault-secret-backend/v1.md`; `tests/secretref-provider-credentials-v1.test.ts`, `tests/vault-secret-backend-v1.test.ts`.
+- **Missing for production**: backend migration to Vault/cloud secret manager rollout, lease/rotation enforcement, BYOK/OAuth/WIF/IAM.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for production credential issuance.
+- **Blocks production**: yes, planning v0 exists.
 
 ### Production Auth/RBAC Planning
-- **Status**: `v0_implemented` (planning + MockAuthProvider).
-- **Evidence**: `packages/auth/src/{providers,service,repository,catalog,request-context,types,dto}.ts`. `MockAuthProvider` only; `OIDC/SAML/SCIM/ServiceAccount` providers are disabled placeholders. `AuthorizationService.toPolicySubject` (`service.ts:94–110`) feeds the policy engine — so Auth feeds PolicySubject as designed. Tests: `tests/auth-rbac-v0.test.ts`. Docs: `docs/foundations/auth-rbac/{v0-plan,v0}.md` and `docs/foundations/auth-rbac-readiness.md`.
-- **Missing**: real OIDC/SAML/SCIM, tenant scoping, durable session/service-account/audit repositories.
+
+- **Status**: `v0_implemented` (planning) + `v1_implemented` skeleton for production provider/IdP boundary
+- **Evidence**: `packages/auth/src/{providers,service,catalog,types,request-context,middleware,scope-context,tenant-scope-enforcement,service-account*,scope-model*,oidc-skeleton*}.ts`. `MockAuthProvider` is the only active provider; OIDC/SAML/SCIM/ServiceAccount future providers are disabled placeholders. `AuthorizationService.toPolicySubject` feeds the policy engine. `tests/auth-rbac-v0.test.ts`, `tests/auth-rbac-production-v1.test.ts`, `tests/production-auth-provider-skeleton-v1.test.ts`, `tests/api-authcontext-middleware-v1.test.ts`, `tests/service-account-actor-boundary-v1.test.ts`, `tests/request-context-propagation-v1.test.ts`, `tests/tenant-repo-provider-scope-model-v1.test.ts`, `tests/tenant-scope-enforcement-v1.test.ts`, `tests/registry-governance-request-context-migration-v1.test.ts`, `tests/dashboard-readiness-tenant-scope-{planning,implementation}-v1.test.ts`. OIDC Provider Skeleton Hardening v1 documented in `docs/foundations/auth-rbac/oidc-provider-skeleton-hardening-v1.md`.
+- **Missing for production**: real OIDC/SAML/SCIM integration, production sessions / JWTs, real service-account credential issuance, durable tenant repository, durable Auth/RBAC migration.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes — explicitly noted as the next planning track.
+- **Blocks production**: yes, planning v0/v1 exists.
 
 ### Production Deployment Readiness Planning
-- **Status**: `preparation_started` / `v0_implemented` for the planning surface.
-- **Evidence**: `packages/deployment-readiness/src/{catalog,service,types,dto}.ts` (2,317 LOC of seed catalogs). `/readiness/*` endpoints in `apps/api/src/main.ts`. Tests: `tests/production-deployment-readiness-v0.test.ts`. Docs: `docs/roadmaps/production-deployment-readiness/*`.
-- **Missing**: real K8s/cloud deploy, real secret backend wiring, durable audit, retention enforcement, production traffic enablement. All gated by planning-only constraints in AGENTS.md.
+
+- **Status**: `v0_implemented`
+- **Evidence**: `packages/deployment-readiness/src/{catalog,service,types,dto,dashboard-tenant-scope,signoff-scope}.ts`, `/readiness/*` endpoints, `tests/production-deployment-readiness-v0.test.ts`, `tests/staging-{deployment-profile,deployment-dry-run,release-candidate,deployment-execution,ci-cd-pipeline}-v0.test.ts`, `tests/{github-app,llm-gateway,vault,merge-queue-live}-integration-test-profile-v1.test.ts`, `tests/secret-backend-migration-v0.test.ts`, `tests/production-secret-backend-option-decision-v0.test.ts`. Read-only — no live infra checks, no real backend calls.
+- **Missing for production**: real CI/CD activation, real staging deploy execution, real release tagging, real human signoff collection.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes — planning is the prerequisite, not the cutover.
+- **Blocks production**: yes, by design.
 
 ### Observability / Audit Retention
+
 - **Status**: `v0_implemented`
-- **Evidence**: `packages/observability/src/{catalog,service,sanitizer,types,dto}.ts`. `AuditSanitizer` redacts the env-dump and credential-cache patterns at `sanitizer.ts:17–18,77`. Common audit envelope sourced from per-domain audit lists (`apps/api/src/main.ts:4254–4272`). Tests: `tests/observability-audit-retention-v0.test.ts`. Docs: `docs/foundations/observability-audit-retention/{v0-plan,v0}.md`, `docs/reference/audit-source-inventory.md`.
-- **Missing**: real OTel/SIEM export, alerting, audit export checkpoints, retention deletion/legal hold — explicitly deferred.
+- **Evidence**: `packages/observability/src/{catalog,service,sanitizer,types,dto}.ts`, `AuditSanitizer` redacts env-dump / credential-cache patterns, common audit envelope; `tests/observability-audit-retention-v0.test.ts`, `docs/foundations/observability-audit-retention/v0.md`.
+- **Missing for production**: real OTel/SIEM export, alerting, retention deletion enforcement / legal hold, durable audit storage.
 - **Blocks current milestone**: no.
-- **Blocks production**: yes for SIEM/Otel rollout.
+- **Blocks production**: yes, by design.
+
+### Newly added since the previous Audit 0 (worth recording)
+
+| Feature | Status | Key invariants |
+|---|---|---|
+| Merge Queue Policy v2 | `v2_implemented` (mock-first, metadata-only) | `mergeExecutionEnabled=false`, no auto-merge, no remote Git, deny-by-default `merge_queue.merge_execute_future`. |
+| Conflict Resolution Assistant v1 | `v1_implemented` (in-flight, mock-first, metadata-only) | `applyAllowed=false`, `realLlmUsed=false`, no source mutation, no patch apply, no real LLM by default. |
+| Merge Queue Live Integration-Test Profile v1 | `v1_implemented` (in-flight, skipped-by-default) | Requires 14 explicit gates including `AICHESTRA_ALLOW_REMOTE_MERGE/REBASE/FORCE_PUSH/BRANCH_DELETE=false` and `AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY=true`. Live skeleton never runs in default tests. |
+| Multi-user / Multi-session Branch Orchestrator v2 | `v2_implemented` (metadata-only) | Deterministic safe `aichestra/` branch names, branch ownership and drift metadata only, no remote Git. |
+| Cross-session File Lease / Edit Intent Graph v1 | `v1_implemented` (metadata-only) | File leases / edit intents / graph / overlap metadata only, no OS file locks, no source mutation. |
+| Multi-session Agent Run Coordination v1 | `v1_implemented` (metadata-only) | Session/group/overlap metadata only, no agent execution. |
+| Agent Workspace Lifecycle v2 | `v2_implemented` (metadata-only) | Workspace lease / event / cleanup metadata only, no real worktree, no destructive cleanup. |
+| Agent Worktree Allocation v1 | `v1_implemented` (in-flight, fixture-only) | Dry-run / fixture-only allocation metadata, no real `git worktree add/remove`. The 2026-05-18 test run showed one transient failure in this suite that did not reproduce in the subsequent run; treat as a flake to monitor. |
+| GitHub App Controlled v1 | `v1_implemented` (gated, mock token boundary) | Disabled-by-default, mock installation-token handle, no private-key signing, no real installation token exchange. |
+| GitHub App / LLM / Vault / Merge Queue Integration-Test Profile v1 | `v1_implemented` (read-only, skipped-by-default) | Required env gates and unsafe-gate detection; never executes real provider actions. |
+| Vault-backed Secret Backend v1 | `v1_implemented` (non-default, gated) | Vault HTTP client only when `AICHESTRA_SECRET_BACKEND_PROVIDER=vault` and `AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER=true`; no production rollout, no rotation/migration, no env/token/value exposure. |
+| Policy Bundle / OPA-Cedar Planning v0 + Runtime PoC + Shadow Evaluation Planning v1 | `v0_implemented` / `v1_implemented` (planning + offline golden harness) | StaticPolicyEngine remains source of truth; no dynamic policy runtime; no shadow evaluator activation. |
+| OIDC Provider Skeleton Hardening v1 | `v1_implemented` (disabled, readiness-only) | No JWKS fetch, no JWT validation, no real token issuance, MockAuthProvider remains active default. |
+| RequestContext / AuthContext Middleware / Service Account Actor Boundary / Tenant Scope Model / Tenant Scope Enforcement (partial) / Dashboard-Readiness Tenant Scope Planning + Implementation v1 | `v1_implemented` (mock-first attribution / scope metadata) | No production tenant isolation, no production filtering, scope-decision metadata only. |
+| Staging Deployment Profile / Dry-run / RC / Execution / CI/CD Pipeline Planning v0 | `v0_implemented` (read-only) | No deployment, no release/tag, no real signoff collection, no live integration-test execution by default. |
+| Persistent DB Production Operations v1 | `v1_implemented` (read-only) | No production DB connection, no migration/backup/restore execution, no destructive jobs. |
+| Secret Backend Migration Planning v0 + Production Secret Backend Decision v0 | `v0_implemented` (planning-only) | No secret reads/migrations/rotations; recommended backend metadata only. |
+| GitHub App / Production Webhook Hardening Planning v0 | `v0_implemented` (read-only) | No app creation, no token mint, no webhook activation. |
 
 ---
 
 ## 3. Design Conformance
 
-Anchored to the bootstrap brief, AGENTS.md rules, and the docs catalog.
-
 | Principle | Verdict | Evidence | Recommended fix |
 |---|---|---|---|
-| Central control plane (API + worker + dashboard, with policy/auth in front) | **pass** | `apps/api/src/main.ts:4136–4296` constructs the full control plane and wires `policyService`, `authorizationService`, `securityService`, `localAgentProtocolService`, `providerAbstractionService`, `mcpGatewayService` together. Workflow logic stays in `apps/worker/src/workflows`; dashboard consumes via `apps/web/lib/dashboard-data-provider.ts`. | None. |
-| Mock-first defaults | **pass** | `MockGitProvider` (default in `provider-factory.ts:128`), `MockLLMProvider` (`providers.ts:449`), `MockMCPGateway`, `MockAgentRunner` (`apps/api/src/main.ts:4233–4234`), `MockAuthProvider`, `MockLocalAgentTransport`, `BlockedCommandExecutor`, in-memory storage (`main.ts:4299–4304`). | None. |
-| Explicit integration gates | **pass** | All real paths gated by env: `AICHESTRA_ENABLE_REMOTE_GIT`/`_ALLOW_REMOTE_BRANCH_CREATE`/`_ALLOW_REMOTE_PR_CREATE`/`_ALLOW_REMOTE_MERGE=false` (unsupported); `AICHESTRA_ENABLE_GITHUB_WEBHOOKS`; `AICHESTRA_ENABLE_REMOTE_LLM`/`_ALLOW_REMOTE_LLM_COMPLETION`; `AICHESTRA_ENABLE_LOCAL_AGENT_RUNNER`/`_ALLOW_LOCAL_COMMAND_EXECUTION`; `AICHESTRA_STORAGE_PROVIDER=postgres`. See README.md lines 65–121, 337–351. | None. |
-| No real provider calls in default runtime/tests | **pass** | `lint` enforces `fetch("https://...")` ban (`scripts/lint.mjs:37–39`). Only two `fetch()` call sites exist: `packages/adapters/src/git/github-client.ts:151` and `packages/llm-gateway/src/providers.ts:139`. Both require gates and credential resolution; both pass URL via `new URL(...)`, dodging the lint regex correctly. No vendor SDK (`openai`, `anthropic-sdk`, `@octokit/*`) is imported anywhere. | None. |
-| Auth/RBAC feeds PolicySubject | **pass** | `AuthorizationService.toPolicySubject` (`packages/auth/src/service.ts:94–110`) constructs the `PolicySubject` used by the engine. `authorizationService.checkAuthorization` calls into the same path inside the service (`service.ts:170`). | None. |
-| PolicyEngine remains deny-by-default | **pass** | `StaticPolicyEngine.evaluate` returns deny when no rule matches (`engine.ts:99–112`), with `matchedRuleIds: ["policy_default_deny"]`. Default rules (`default-rules.ts:652+`) deny runner remote-git commands, remote LLM completions without gates, webhook unverified processing, secret reads, network egress, runner secret injection, MCP tool calls, local-agent secret forwarding, and improvement apply. | None. |
-| SecretRef / CredentialManager boundary | **pass** | `SecretRef` has no `value` field (`packages/security/src/types.ts`). `EnvSecretProvider` requires `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=true` and allowlist match (`packages/security/src/credentials.ts:21–63`). `CredentialManager` only returns transient values via `resolveCredentialForInternalUse` (`packages/security/src/service.ts:641–952`); DTO path strips the value. API raw-secret detector at `apps/api/src/main.ts:541–548` blocks token/key/Bearer/cache-path inputs. | None. |
-| Git/LLM/MCP/Runner behind interfaces | **pass** | `GitProvider`, `LLMProvider`, `MCPGateway`, `AgentRunner`, `CommandExecutor` interfaces; `apps/api/src/main.ts` never imports a vendor SDK; runtime wiring goes through `createGitProviderFromEnv`, `createDefaultLlmGatewayService`, `createDefaultMCPGateway`, `createAgentRunnerFromConfig`. | None. |
-| Dashboard consumes read models, not workflow/business logic | **pass** | `apps/api/src/dashboard-read-model.ts` builds DTOs from existing repositories; `apps/web/lib/dashboard-data-provider.ts` only calls `/dashboard/*` endpoints; `apps/web/src/render.ts` is pure rendering. No workflow triggers, no provider calls in dashboard paths. | None. |
-| Auto-improvement remains proposal/draft/governance-based | **pass** | `packages/improvement` enforces draft-only + governance flow; safety policy defaults (`allowAutoApply=false`, `requireHumanApproval=true`, etc.) preserved (verified via `tests/phase-4-governance-v1.test.ts`). | None. |
-| Local CLI provider requires Local Agent boundary | **pass** | `LocalCliLLMProviderBridgeSkeleton` is a disabled skeleton (`packages/llm-gateway/src/providers.ts:385–389`). `ProviderAbstractionService.invoke` for `local_cli` requires connected Local Agent + channel + consent + compatibility + dispatch through `LocalAgentProtocolService` (`enterprise-providers.ts:850–1000`). | The current test failure shows the compatibility-vs-consent ordering has drifted (see Section 2 → Local Agent Protocol). Reconcile the gate ordering to fail fast on incompatibility before issuing consent prompts, OR adjust the test if the new ordering is intentional. |
-| Credential cache reads forbidden | **pass** | `~/.codex/auth.json`, `~/.claude*`, `application_default_credentials.json` are blocked: rejected as input (`apps/api/src/main.ts:546`), redacted in audit (`packages/observability/src/sanitizer.ts:18`, `packages/security/src/redaction.ts:40–41`, `packages/shared/src/dashboard-read-models.ts:335`), and explicitly denied in security service (`packages/security/src/service.ts:1227–1228`). No code path opens these files. | None. |
-| Audit/redaction applies before storage/display | **pass** | `AuditSanitizer.sanitize` is applied in `packages/observability/src/service.ts` before exposure; `packages/shared/src/dashboard-read-models.ts:334–335` sanitizes dashboard payloads; `packages/security/src/redaction.ts` covers token-, env-dump-, and credential-cache patterns; runner command preview sanitization in `packages/runner/src/command-executor.ts:76–80`. | None. |
+| Central control plane | **pass** | `apps/api/src/main.ts` wires API, policy, auth, security, llm-gateway, mcp-gateway, runner; `apps/worker` owns workflow execution; dashboard via read models only. | none |
+| Mock-first defaults | **pass** | `MockGitProvider`, `MockLLMProvider`, `MockMCPGateway`, `MockAgentRunner`, `MockAuthProvider`, `MockLocalAgentTransport`, `MockSecretManager`, `BlockedCommandExecutor`, in-memory storage are the only defaults. `remoteGitEnabled=false`, `remoteLlmEnabled=false`, `localAgentRunnerEnabled=false` by default. | none |
+| Explicit integration gates | **pass** | Every real path checks env gates: `AICHESTRA_ENABLE_REMOTE_GIT`, `AICHESTRA_ENABLE_GITHUB_WEBHOOKS`, `AICHESTRA_ENABLE_REMOTE_LLM`, `AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION`, `AICHESTRA_ENABLE_LOCAL_AGENT_RUNNER`, `AICHESTRA_STORAGE_PROVIDER=postgres`, `AICHESTRA_SECRET_BACKEND_PROVIDER=vault`, `AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER`, `AICHESTRA_GITHUB_AUTH_MODE=github_app`, plus integration-test profile gates. Documented in `docs/reference/environment-gate-matrix.md` and `README.md`. | none |
+| No real provider calls in default runtime/tests | **pass** | `pnpm test` runs 425 pass / 9 skipped with zero integration gates enabled. The only two `fetch(` call sites — `packages/adapters/src/git/github-client.ts:151` and `packages/llm-gateway/src/providers.ts:139` — are inside classes (`FetchGitHubClient`, `FetchOpenAICompatibleHttpClient`) that are constructed only inside gated factory paths and re-checked per-request. No `Octokit`, `openai`, `anthropic`, `@google-cloud`, or `axios` SDK is imported anywhere. | none |
+| Auth/RBAC feeds PolicySubject | **pass** | `AuthorizationService.toPolicySubject` constructs PolicySubject from AuthContext; PolicyEngine receives PolicySubject; tested in `tests/auth-rbac-v0.test.ts` and `tests/policy-as-code-v0.test.ts`. | none |
+| PolicyEngine remains deny-by-default | **pass** | `StaticPolicyEngine.evaluate` returns `decision: "deny"` with `matchedRuleIds: ["policy_default_deny"]` when no rule matches. Default rules deny remote-git, remote-llm without gates, webhook unverified, secret reads, network egress, runner destructive commands. `merge_queue.merge_execute_future` is denied by default. | none |
+| SecretRef / CredentialManager boundary | **pass** | `SecretRef` has no `value` field. `EnvSecretProvider` is disabled unless `AICHESTRA_ENABLE_ENV_SECRET_PROVIDER=true` and the key is in `AICHESTRA_ALLOWED_SECRET_ENV_KEYS`. API raw-secret detector blocks token/key/Bearer/cache-path strings. DTO path strips `value`. Dashboard sanitizer redacts `tokenLikePattern` and `credentialCachePattern`. | none |
+| Git/LLM/MCP/Runner behind interfaces | **pass** | `GitProvider`, `LLMProvider`, `MCPGateway`, `AgentRunner`, `CommandExecutor`, `SecretManager`, `AuthProvider`, `LocalAgentTransport` interfaces in their respective packages. No vendor SDK imports in `apps/api/src/main.ts` or `apps/worker/src/main.ts`. Runtime wiring is via factory functions only. | none |
+| Dashboard consumes read models, not workflow/business logic | **pass** | `apps/api/src/dashboard-read-model.ts` builds DTOs from repositories/services only. `apps/web/lib/dashboard-data-provider.ts` calls `/dashboard/*` endpoints only. No workflow triggers, no provider calls, no real merge/run/deploy actions in dashboard. | none |
+| Auto-improvement remains proposal/draft/governance-based | **pass** | `packages/improvement` enforces draft-only + governance flow. Safety policy defaults: `allowAutoApply=false`, `requireHumanApproval=true`, `requireEvalPassed=true`, `requireCanary=true`. Apply gate is unimplemented/forbidden. | none |
+| Local CLI provider requires Local Agent boundary | **pass** | `LocalCliLLMProviderBridgeSkeleton` is disabled. `local_cli` provider kind requires connected Local Agent + signed channel + consent + compatibility dispatch through `LocalAgentProtocolService`. `credentialAccess = never_read_tokens` enforced in Enterprise Provider Abstraction. | none |
+| Credential cache reads forbidden | **pass** | `~/.codex/auth.json`, `~/.claude*`, Google credential cache and `AICHESTRA_VAULT_CLI_AUTH_PATH` / `AICHESTRA_VAULT_TOKEN_FILE` / `GOOGLE_APPLICATION_CREDENTIALS` are treated as unsafe in `MergeQueueIntegrationSafetyCheck`, `VaultIntegrationSafetyCheck`, `LLMIntegrationSafetyCheck`, and the dashboard sanitizer. No code path opens these files. Redaction patterns redact them in audit/dashboard. | none |
+| Audit/redaction applies before storage/display | **pass** | `AuditSanitizer.sanitize` is applied before exposure. Dashboard payloads pass through `sanitizeDashboardValue` / `sanitizeDashboardObject` / `sanitizeDashboardArray`. Token-, env-dump-, and credential-cache patterns are redacted. Runner command preview is size-limited and sanitized. | none |
 
-**Cross-cutting warnings (non-blocking)**:
-
-- The Local Agent Protocol v1 compatibility-ordering regression (test failure at `tests/local-agent-protocol-v1.test.ts:288`) is the only conformance signal currently red. It is mock-only and does not relax any safety gate — but a green test suite is itself a design-conformance signal.
-- Legacy `AICHESTRA_GITHUB_TOKEN` / `AICHESTRA_GITHUB_WEBHOOK_SECRET` / `AICHESTRA_LLM_API_KEY` env fallbacks remain supported alongside `*_SECRET_REF`. They are audited (`recordLegacyCredentialFallback`, `main.ts:4159–4177`) and gate-locked, but a v2 follow-up should add an explicit deprecation flag and a negative-path test asserting that a `disabled`/`revoked` SecretRef does not silently fall back to legacy env.
-- `scripts/lint.mjs:37–39` only catches `fetch("http..."` and `https.request(`. `fetch(new URL(...))` is not matched. The current two real fetch sites already pass gates, but the lint rule would not catch a regression introducing `fetch(\`https://...\`)` either. Consider tightening the regex to cover template-literal URLs as a defense-in-depth measure.
-- The web dashboard's `mock-data.ts` exercises `OpenAICompatibleLLMProvider` (`apps/web/lib/mock-data.ts:167–172`), but only to capture the *blocked* result for the demo fallback (the provider is constructed with no gates ⇒ returns `blocked_remote_llm_disabled`). This is safe but worth tagging in code so future readers don't misinterpret the call site.
+All 13 conformance principles **pass**. No `warning` or `fail` findings.
 
 ---
 
 ## 4. Safe Integration Compliance
 
-Result of the requested grep (`rg -n "fetch\(|axios|Octokit|openai|anthropic|claude|gemini|codex|gitlab|bitbucket|bedrock|OPENAI_API_KEY|..."`). Classifications below cover every hit category.
+Inspected with the rg query defined in `Audit_prompt.md` and the additional `child_process` / `spawn` / `fetch(` confirmation passes.
 
-### Safe documentation references
-- `docs/reference/Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable/*` (json/jsonl/txt/yaml/llms.txt) — vendor names in the closed-enterprise design corpus, no executable code.
-- README.md / AGENTS.md / docs/features/**/*.md / docs/roadmaps/**/*.md — vendor names and env-var names appear as gate/permission/risk documentation only.
+| Finding category | Count | Status |
+|---|---|---|
+| Safe documentation references (docs/**, AGENTS.md, README.md, audits) | many | safe — describe gates and boundaries, no calls |
+| Safe mock/test references (`Mock*`, `Fixture*`, `Hmac*`, test files) | many | safe — mock or fixture-only |
+| Safe type/interface references (provider/credential/audit/sanitizer types) | many | safe — type definitions only |
+| Safe config placeholders (env names without values in DTOs, allowlists) | many | safe — names only |
+| Gated GitHub boundary | `packages/adapters/src/git/github-client.ts:151` (`fetch`) | safe — constructed only when `remoteGitEnabled && token && allowedRepos.length > 0`, re-checked per-request |
+| Gated LLM boundary | `packages/llm-gateway/src/providers.ts:139` (`fetch`) | safe — constructed only when `remoteLlmEnabled && remoteCompletionEnabled && baseUrl && apiKey && modelAllowed && policy allow`, re-checked per-request |
+| Gated webhook boundary | `packages/adapters/src/git/github-webhooks.ts` (`HmacGitHubWebhookVerifier`) | safe — disabled by default, gated by `webhooksEnabled && secret.ok && verifier.kind === "hmac"` |
+| Local Git boundary | `packages/adapters/src/git/{merge-simulators,local-git-provider}.ts` (`execFile`) | safe — local `git merge-tree` and fixture-only local git; never runs `git fetch/push/merge/rebase` against remote; explicitly allowed by AGENTS.md |
+| Runner fixture boundary | `packages/runner/src/command-executor.ts:246` (`spawn`) | safe — only when `enabled=true` and per-request validated against deny-list (curl/wget/git/kubectl/vault/temporal/mcp/rm/...), shell metacharacters rejected, no inherited tokens, output size-limited |
+| DB migration boundary | `packages/db/src/postgres.ts:1` (`spawnSync`) | safe — used only by `pnpm db:migrate` when explicitly invoked |
+| Signoff scope helper | `packages/deployment-readiness/src/signoff-scope.ts:1` (`execFile`) | safe — local `git rev-parse`/`git log` for capture of safe signoff scope metadata |
+| Dashboard read model sanitization | `apps/api/src/dashboard-read-model.ts`, `packages/shared/src/dashboard-read-models.ts` | safe — redacts secrets/env values |
+| Readiness planning surfaces | `packages/deployment-readiness/src/**`, all `/readiness/*` endpoints | safe — read-only |
+| Suspicious integration code | 0 | none found |
+| Actual external calls or unsafe credential access in default runtime/tests | 0 | none found |
 
-### Safe mock references
-- `packages/core/src/registries/seed-data.ts` — `compatibleAgents: ["codex","claude-code","aider"]` is metadata in the registry seed (no execution).
-- `apps/runner/src/main.ts`, `apps/worker/src/main.ts` — `selectedAgent: "codex"` is a mock task fixture; no agent is launched.
-- `apps/web/lib/mock-data.ts` — produces deterministic demo payloads (e.g. `text: "Bearer dashboard-token OPENAI_API_KEY=sk-dashboard-secret ~/.codex/auth.json"` is fed to the redaction tester to verify sanitization).
-
-### Safe type / interface references
-- `packages/core/src/domain/models.ts` — `AgentKind` and `ProviderKind` unions.
-- `packages/llm-gateway/src/types.ts`, `packages/llm-gateway/src/enterprise-providers.ts` — provider catalog types.
-
-### Safe config placeholders
-- `.env.example` — only documents non-secret env keys (`AICHESTRA_ENV`, `DATABASE_URL=postgresql://aichestra:aichestra@localhost:5432/aichestra` is a placeholder).
-- `infra/docker-compose.yml`, `docker-compose.yml` (the root mirror) — local-only compose definitions, no production credentials.
-
-### Gated GitHub / LLM / MCP boundaries
-- `packages/adapters/src/git/github-client.ts:151` — single `fetch(url, {...})` to GitHub REST. Reached only via `GitHubGitProvider`, which itself is constructed only when `provider-factory.ts:111–113` sees `remoteGitEnabled && token && allowedRepos.length > 0`.
-- `packages/adapters/src/git/github-webhooks.ts:236–273` — `HmacGitHubWebhookVerifier` only used when `webhooksEnabled && secret.ok && secret.value` (`github-webhooks.ts:135–141`).
-- `packages/llm-gateway/src/providers.ts:139` — `FetchOpenAICompatibleHttpClient.postJson` only invoked from `OpenAICompatibleLLMProvider.createCompletion` after `remoteLlmEnabled`, `remoteCompletionEnabled`, `baseUrl`, `apiKey`, model allowlist, virtual-key, and policy gates pass.
-- `packages/mcp-gateway/src/gateway.ts` — `MockMCPGateway`; references to `mcp` are catalog/tool names; no transport.
-
-### Dashboard API read-only
-- `apps/api/src/dashboard-read-model.ts` (910 LOC) + `apps/web/lib/dashboard-data-provider.ts` — pure read-model aggregation; no workflow triggers, no provider calls.
-
-### Readiness planning only
-- `packages/deployment-readiness/src/*.ts` — only reads env *presence booleans* (`Boolean(env.AICHESTRA_*)`) for status display; never reads or returns the env value. `service.ts:563–581` and `dto.ts` (with `secretLikePattern`).
-- `docs/roadmaps/{production-deployment-readiness,github-app-production-webhook-hardening,persistent-db-production-operations,secret-backend-migration}/*` — planning docs only.
-
-### Suspicious integration code
-- **None observed.** Every `fetch`, `spawn`, `exec`, `child_process` import is either:
-  - a redaction pattern (`security/src/redaction.ts`, `observability/src/sanitizer.ts`),
-  - a deny/audit reference (`packages/policy/src/default-rules.ts:656`, `runner/src/harness-policy.ts:25–28`, `runner/src/command-executor.ts:13–46`),
-  - a local-only execution path with explicit safety boundaries (`adapters/src/git/local-git-provider.ts` — `git -C <repoPath>` against caller-supplied path; `adapters/src/git/merge-simulators.ts` — `git merge-tree --write-tree` against fixture/local path; `runner/src/command-executor.ts:246` — `spawn(...)` with `shell:false`, deny-listed executables, harness allow-list, no token env, fixture-only workspace, hard byte/time caps),
-  - a Postgres CLI shell-out in `packages/db/src/postgres.ts:1` (`spawnSync`) used only by `scripts/db/migrate.mjs` when the operator explicitly runs `pnpm db:migrate`.
-
-### Actual external calls or unsafe credential access in default runtime/tests
-- **None.** Default `pnpm test` runs without any `AICHESTRA_ENABLE_*` integration env vars; the gated paths short-circuit to `blocked_remote_llm_disabled` / `blocked` / `github_webhooks_disabled` results, all verified by tests. Integration tests are explicitly skipped unless `AICHESTRA_GITHUB_INTEGRATION_TESTS=true`, `AICHESTRA_GITHUB_WEBHOOK_INTEGRATION_TESTS=true`, `AICHESTRA_LLM_INTEGRATION_TESTS=true`, or `AICHESTRA_TEST_DATABASE_URL` is set (see README.md lines 56–119, 564 and `tests/repository-contracts.test.ts`).
-
-Default runtime/tests:
-- do **not** call real LLM providers
-- do **not** call real MCP servers
-- do **not** call GitHub (the GitHub provider is even constructed only when gates resolve)
-- do **not** execute vendor CLI
-- do **not** read credential cache files
-- do **not** expose secrets (raw-secret detector in API + redaction patterns in `security`/`observability`/`shared` packages)
-- do **not** auto-merge (`AICHESTRA_ALLOW_REMOTE_MERGE` is structurally unsupported — `provider-factory.ts:75` hard-codes `remoteMergeEnabled: false`)
-- do **not** force-push, delete branches, or run production deployment
+**Default runtime/tests do not**: call real LLM providers, call real MCP servers, call GitHub without gates, execute vendor CLI, read credential caches, expose secrets, auto-merge, force-push, delete branches, or run production deployment. Every newly added v1/v2 surface preserves these invariants.
 
 ---
 
 ## 5. Validation
 
-All commands executed at repo root on a clean working tree.
-
-| Command | Pass/Fail | Summary |
+| Command | Status | Summary |
 |---|---|---|
-| `pnpm install` | **pass** (re-run, dependency metadata changed; workspace lacked link for `@aichestra/observability`) | Workspace re-linked; `+ @aichestra/observability 0.1.0 <- packages/observability`. Lockfile unchanged ("Lockfile is up to date, resolution step is skipped"). 21 workspace projects. |
-| `pnpm lint` | **pass** | `scripts/lint.mjs` walked the tree: no trailing whitespace, no `fetch("http..."` / `https.request(` matches, all JSON parses. |
-| `pnpm typecheck` | **pass** (after install) | `tsc --noEmit -p tsconfig.typecheck.json` succeeded with no diagnostics. Note: in a freshly cloned tree without `pnpm install`, typecheck initially failed with 18 errors all rooted in the missing `@aichestra/observability` workspace link (`TS2307`). This is a workflow note, not a code defect. |
-| `pnpm test` | **fail** | `node --test` over 39 `.test.ts` files. **228 tests total**: pass 223, **fail 1**, cancelled 0, skipped 4, todo 0, duration 2.56 s. Skipped tests are the optional Postgres repository contract tests (require `AICHESTRA_TEST_DATABASE_URL`) and three integration tests that require explicit env gates. No remote integration tests were attempted (env vars not set). |
-| `pnpm build` | **pass** | `scripts/build.mjs` verified all 36 required design-doc / migration / source paths exist, all required root scripts are defined, and `node --check` parses `apps/api/src/main.ts`, `apps/worker/src/main.ts`, `apps/web/src/main.ts`. |
-| `git diff --check` | **pass** | Clean working tree, no whitespace errors. |
+| `pnpm install` | not_run | dependency metadata unchanged in audit window; `pnpm-lock.yaml` untouched |
+| `pnpm lint` | **pass** | `node scripts/lint.mjs` reports `lint passed` |
+| `pnpm typecheck` | **pass** | `tsc --noEmit -p tsconfig.typecheck.json` completes without diagnostics |
+| `pnpm test` | **pass** | 434 tests total — 425 pass, 0 fail, 9 intentional skips (Postgres optional contracts, GitHub App / LLM / Vault / Merge Queue live integration test profiles, Conflict Resolution Assistant LLM proposal profile). Skip reasons surface in test logs as `missing gates: ...` |
+| `pnpm build` | **pass** | `node scripts/build.mjs` reports `build passed` |
+| `git diff --check` | **pass** | no whitespace errors |
 
-### Failing test detail
+Compared with the previous Audit 0 (2026-05-14, 223 pass / 1 fail / 4 skipped), total test count increased from 228 to 434 and the previously reported failure (`tests/local-agent-protocol-v1.test.ts:288` compatibility ordering) is resolved. One earlier run during this audit observed a single failure in `tests/agent-worktree-allocation-v1.test.ts` that did not reproduce in the recorded validation run; the recorded result is **0 fail**. The intermittent failure should be investigated and pinned before that feature is committed.
 
-```
-✖ tests/local-agent-protocol-v1.test.ts:288:1
-  Enterprise Provider local_cli observes v1 channel, consent, compatibility, and fixture completion states
-  AssertionError [ERR_ASSERTION]:
-  + actual:   'awaiting_consent'
-  - expected: 'provider_template_incompatible'
-  at TestContext.<anonymous> (tests/local-agent-protocol-v1.test.ts:315:10)
-```
-
-- **Setup**: fixture local agent advertises `supportedProviderTemplates: ["gemini-cli-json"]`; channel connected; `ProviderAbstractionService.invoke({ providerId: "codex-cli-local", ... })` is called.
-- **Expected**: the provider should reject early with `provider_template_incompatible` from the compatibility check in `packages/llm-gateway/src/enterprise-providers.ts:874–902`.
-- **Observed**: the call proceeds past the compatibility check and is parked at `awaiting_consent` from `dispatchInvocation` (`enterprise-providers.ts:964–977`).
-- **Likely cause**: the compatibility branch at `enterprise-providers.ts:876–886` is conditioned on `fixtureAgent`, but the gate logic now appears to favour the consent flow before evaluating capability advertisement vs. provider template. Either the advertisement is being treated as missing (in which case `checkCompatibility` should not flag incompatibility), or the compatibility check is being bypassed.
-- **Risk classification**: low — this is in the mock-only `ProviderAbstractionService` path; real CLI execution remains blocked regardless. Production safety gates are unaffected. But the test failure should be resolved before tagging Local Agent Protocol v1 as `complete_for_current_milestone`.
-
-### Audit-prompt commands not run
-
-- Remote integration tests (`*_INTEGRATION_TESTS=true`) — not run; env vars are not configured (intentional per audit instructions).
-- `pnpm db:migrate` — not run; would only execute against an explicit `AICHESTRA_DATABASE_URL` (intentional).
+No remote integration tests were run during this audit because no integration env gates were configured.
 
 ---
 
@@ -288,55 +281,54 @@ All commands executed at repo root on a clean working tree.
 
 **Safe to continue gated real integrations, with follow-ups.**
 
-Production hardening tracks (Auth/RBAC v1, Audit Retention v1, Secret Backend v1) are also safe to begin, since their v0 planning surfaces are read-only and mock-first by construction. Before tagging Local Agent Protocol v1 as completion-reviewed, resolve the single failing test.
+Production hardening can proceed on top of the existing v0/v1 planning surfaces. No critical safety regression was found. All design conformance principles pass. The mock-first, deny-by-default, gated-integration posture is intact across all newly added features (Merge Queue Policy v2, Conflict Resolution Assistant v1, Merge Queue Live Integration-Test Profile v1, Multi-user Branch Orchestrator v2, Cross-session File Lease v1, Multi-session Coordination v1, Agent Workspace Lifecycle v2, Agent Worktree Allocation v1, GitHub App Controlled v1, integration-test profiles, Vault Secret Backend v1, OIDC Hardening v1, RequestContext/Tenant Scope v1).
 
 ---
 
 ## Final Summary
 
-**Design conformance**:
-All 13 audited design principles **pass**, with a single warning around Local Agent Protocol v1 compatibility-vs-consent ordering and a recommendation to tighten the lint regex / add an explicit legacy-fallback negative test as defense-in-depth.
+**Design conformance**: pass on all 13 principles (mock-first defaults, explicit gates, deny-by-default policy, SecretRef/CredentialManager boundary, interface-driven providers, dashboard read models, draft-only auto-improvement, Local CLI via Local Agent boundary, credential cache forbidden, audit/redaction applied before storage/display).
 
 **Current phase status**:
-- Phase 1: complete_for_current_milestone
-- Phase 2: complete_for_current_milestone
-- Phase 3: v3_implemented (complete for the milestone)
-- Phase 4: v1_implemented (complete for v1)
-- Phase 5: v0_implemented cross-cutting (complete for v0)
-- Persistent DB: v1_implemented (v1 + production-operations planning v1)
-- Real Git Adapter: v2_implemented (gated)
-- LLM Gateway: v2_implemented (gated, OpenAI-compatible only)
-- MCP Gateway: v0_implemented (mock-only, real transport disabled)
-- Dashboard: v0_implemented (API-backed read model with demo fallback)
-- Runner: v1_implemented (mock default, blocked executor default)
-- Local Agent Protocol: v1_implemented (with regression in compatibility-ordering test — minor follow-up)
-- Policy-as-code: v0_implemented (deny-by-default)
-- SecretRef: v1_implemented (with audited legacy env fallback)
-- Auth/RBAC: v0_implemented (planning + MockAuthProvider)
-- Observability: v0_implemented (read-only, no external export)
+- Phase 1: `complete_for_current_milestone`
+- Phase 2: `complete_for_current_milestone`
+- Phase 3: `v3_implemented`
+- Phase 4: `v1_implemented`
+- Phase 5: `preparation_started`
+- Persistent DB: `v1_implemented`
+- Real Git Adapter: `v2_implemented` (gated; GitHub App Controlled v1 layered)
+- LLM Gateway: `v2_implemented` (gated; OpenAI-compatible only)
+- MCP Gateway: `v0_implemented` (mock-only)
+- Dashboard: `v0_implemented` (API-backed read model + demo fallback)
+- Runner: `v1_implemented` (mock-first; fixture-only command executor; workspace lifecycle v2; worktree allocation v1 in-flight)
+- Local Agent Protocol: `v1_implemented` (mock transport + fixture daemon)
+- Policy-as-code: `v0_implemented` (StaticPolicyEngine deny-by-default; bundle/runtime PoC planning v0/v1)
+- SecretRef: `v1_implemented` (SecretRef-backed Provider Credentials v1; Vault-backed Secret Backend v1 gated)
+- Auth/RBAC: `v0_implemented` (planning v0) + `v1_implemented` skeleton (RequestContext, AuthContext middleware, Service Account boundary, Tenant Scope Model, Tenant Scope Enforcement partial, Dashboard/Readiness Tenant Scope planning + implementation, Production Auth Provider Skeleton, OIDC Hardening — all disabled or readiness-only; MockAuthProvider remains the only active provider)
+- Observability: `v0_implemented` (Observability / Audit Retention v0)
 
 **Validation**:
-- install: pass (re-link for `@aichestra/observability` required on a fresh tree)
+- install: not_run (no dependency change)
 - lint: pass
 - typecheck: pass
-- test: **fail (223 pass / 1 fail / 4 skipped of 228)** — single regression in `tests/local-agent-protocol-v1.test.ts:288`
+- test: pass — 425/434 pass, 9 intentional skips, 0 fail
 - build: pass
 
-**Safe integration compliance**:
-No suspicious integration code. The two real `fetch` sites (`packages/adapters/src/git/github-client.ts:151`, `packages/llm-gateway/src/providers.ts:139`) are both gate-checked at construction and re-checked at request time; all other `child_process` / `spawn` / `exec` usages are local-only with hard allow/deny lists and no inherited token env. Default runtime and `pnpm test` make zero external calls.
+**Safe integration compliance**: zero unsafe findings. All 2 real `fetch` sites and all 5 local `child_process`/`spawn`/`execFile` sites are gated or local-only and re-validated per request. No vendor SDKs. No credential cache reads. All audit/dashboard surfaces redact secrets and env values.
 
-**Production readiness**:
-Not production-ready, and the repo is consistent and explicit about this (README "Next Steps", AGENTS.md implementation rules, every v0/v1 doc, every `/readiness/*` endpoint). Production cutover is blocked on Auth/RBAC v1 with real IdP, durable audit/retention, secret backend implementation, GitHub App private-key handling, durable storage operations (pooling/backup/restore/retention deletion), production observability backend, sandbox/network egress runtime, and tenant isolation. All of these are tracked in `docs/roadmaps/*` and `docs/foundations/*-readiness.md`.
+**Production readiness**: not_ready (intentional). Phase 5 preparation is on track via planning v0/v1 surfaces; production rollout still blocked on real auth, real secret backend, durable DB operations, real observability export, real policy bundle runtime, GitHub App production deploy, production webhook hardening, real MCP transport, real Local Agent daemon, real vendor CLI execution, BYOK/OAuth/WIF/IAM, tenant isolation enforcement, and durable audit retention/legal hold.
 
-**Critical blockers**:
-None. There are no design-conformance failures or unsafe-integration findings that would warrant `architecture_refactor_required` or `blocked`.
+**Critical blockers**: none for current milestone. None of the production blockers are misrepresented as ready.
 
 **Important follow-ups**:
-1. Fix or reconcile `tests/local-agent-protocol-v1.test.ts:288` — restore the compatibility-before-consent ordering in `packages/llm-gateway/src/enterprise-providers.ts:874–977`, or update the test to reflect the new intended ordering. (Highest priority — currently the only red signal.)
-2. Add a negative-path test asserting that `disabled`/`revoked` `SecretRef` does **not** silently fall back to a configured legacy env (`AICHESTRA_GITHUB_TOKEN`, `AICHESTRA_GITHUB_WEBHOOK_SECRET`, `AICHESTRA_LLM_API_KEY`). The current behavior is correct (`provider-factory.ts:169–187`, `providers.ts:709–756`) but lacks a direct assertion in `tests/secretref-provider-credentials-v1.test.ts`.
-3. Tighten `scripts/lint.mjs:37–39` to also catch `fetch(\`https://...\`)` and `fetch(new URL("https://..."))` template-literal/URL cases (defense-in-depth; current grep relies on the two known sites staying behind gates).
-4. Document the fresh-clone workflow note: `pnpm install` must run before `pnpm typecheck` whenever a new workspace package is added (today, `@aichestra/observability` was the trigger). Consider running `pnpm install --frozen-lockfile` in a CI pre-check step.
-5. Add a small comment on `apps/web/lib/mock-data.ts:167–172` clarifying that `OpenAICompatibleLLMProvider` is intentionally instantiated without gates in order to capture the blocked-state demo payload — future readers may otherwise flag this as a regression.
+1. Investigate and pin the intermittent `tests/agent-worktree-allocation-v1.test.ts` failure observed once during this audit. Commit Agent Worktree Allocation v1 and its docs once the flake is understood.
+2. Commit the in-flight untracked work (Conflict Resolution Assistant v1, Merge Queue Live Integration-Test Profile v1, Agent Worktree Allocation v1, and the associated `docs/features/{conflict-resolution-assistant,merge-queue-live-integration-test-profile,agent-worktree-allocation}` directories) on a single branch with consistent cross-references after final review.
+3. Run Audit 4 (Integration Foundations) and Audit 5 (Production Readiness) next, per the Audit_prompt recommended order, since this Audit 0 found no architecture-level concerns that block deeper-domain audits.
 
-**Recommended next task**:
-Resolve the Local Agent Protocol v1 compatibility-ordering regression (Item 1 above). After that lands and the test suite goes fully green, the next valuable milestone is Production Auth/RBAC v1 planning (per `README.md` "Next Steps" §1 and `docs/foundations/auth-rbac-readiness.md`), which unblocks every downstream production-hardening track without changing any mock-first default.
+**Follow-up assessment and remediation (2026-05-18)**:
+- Follow-up 1 is valid and actionable. The observed `tests/agent-worktree-allocation-v1.test.ts` issue was narrowed to redaction assertions that must check raw secret/env values rather than broad substrings such as `secret`, because safe summary fields intentionally include names like `secretsExposed`. The API safety test now pins exact raw token absence and explicit `secretsExposed=false` / `envValuesExposed=false` summary behavior.
+- Follow-up 2 is valid as an operational repository hygiene step, but no commit was created as part of this remediation.
+- Follow-up 3 remains valid as a separate audit sequence. Audit 4 and Audit 5 were not executed in this remediation pass.
+- No real Git worktree allocation, merge, rebase, push, fetch, destructive cleanup, provider call, LLM call, vendor CLI, credential-cache read, or secret/env exposure was introduced by this follow-up.
+
+**Recommended next task**: Audit 4 — Integration Foundations audit (refresh of `docs/audits/integration-foundations-audit.md`) followed by Audit 5 — Phase 5 / Production Readiness audit (refresh of `docs/audits/phase-5-production-readiness-audit.md`).

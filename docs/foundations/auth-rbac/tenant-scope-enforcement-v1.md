@@ -6,6 +6,8 @@ Status:
 - Tenant/Repo/Provider Scope Model: `v1_implemented`
 - Dashboard/Readiness Tenant Scope Planning: `v1_implemented`
 - Dashboard/Readiness Tenant Scope Implementation: `v1_implemented`
+- Registry Tenant Scope Enforcement: `v1_implemented_partial`
+- Audit Query Scope Enforcement: `v1_implemented_partial`
 - Production Auth Provider Skeleton: `v1_implemented`
 - Production tenant enforcement: not implemented
 - Production Auth/RBAC: not implemented
@@ -32,6 +34,8 @@ Tenant Scope Enforcement v1 adds a reusable, deterministic scope-decision helper
 - Read-only `/readiness/tenant-enforcement/*` endpoints.
 - `/dashboard/tenant-enforcement` and representative dashboard/readiness scope-decision metadata.
 - Dashboard UI rows for enforcement mode, missing-scope warnings, audit-query scope warnings, secret-adjacent warnings, and explicit false production enforcement flags.
+- Registry Tenant Scope Enforcement v1 uses this helper to produce registry `RegistryScopeDecision` metadata for skills, harnesses, instructions, package manifests, resolver results, approval queue items, audit/readiness queries, and representative mutation checks.
+- Registry Signed Package / Artifact Trust v1 remains a separate trust metadata layer. It may carry RequestContext/AuthContext attribution and registry package scope metadata on trust decisions, but tenant scope allow/warning results do not bypass artifact trust blockers, and artifact trust results do not implement production tenant isolation.
 
 ## What v1 Does Not Implement
 
@@ -90,7 +94,7 @@ Read-only APIs:
 
 `evaluateAuditQueryAccess` requires tenant and audit-query scope metadata and returns warnings in v1. Missing audit-query scope is marked with `audit_scope_missing` and the warning `audit_query_scope_required_before_production`.
 
-v1 does not implement production audit query filtering, raw audit payload access, export controls, or tenant-scoped audit repositories.
+Audit Query Scope Enforcement v1 now consumes this foundation from `packages/observability` to produce representative audit query decisions, redaction plans, API readiness metadata, and dashboard observability status. It can deny raw-payload requests, reduce unscoped detail requests to summary metadata, and redact secret-like/raw fields. It still does not implement production audit query filtering, raw audit payload access, export controls, tenant-scoped audit repositories, row-level security, or durable audit-query grants.
 
 ## Secret-adjacent Scope Handling
 
@@ -109,6 +113,14 @@ Tenant Scope Enforcement v1 is a companion metadata service, not a replacement p
 - service accounts cannot bypass missing or mismatched scope metadata.
 - scope decisions may be attached to `PolicySubject` and policy resource metadata for audit/readiness context.
 
+## Registry Tenant Scope Enforcement
+
+Registry Tenant Scope Enforcement v1 is implemented as a package-specific representative enforcement layer in `packages/registry`. It maps registry resources to tenant/team/project/repo/provider/package scope metadata, attaches resolver scope summaries, evaluates approval queue metadata, and exposes `/registry/scope/*` plus `/readiness/registry/scope/summary`.
+
+This integration does not filter production registry data or bypass resolver gates. Pending approval, failed evals, non-active lifecycle, checksum mismatch, semver errors, policy deny, and governance/apply gates remain authoritative. Production registry tenant isolation remains future work.
+
+Registry Artifact Trust v1 can attach digest/mock-signature/provenance decisions to registry package and resolver metadata. Those decisions remain mock trust metadata and do not change tenant scope enforcement behavior.
+
 ## Relationship To Future Production Auth
 
 Future production auth must provide trusted tenant/team/project/repo/provider/model/secret/MCP/registry/local-agent/audit-query claims before this scaffold can become active tenant filtering. Until then, mock AuthContext and RequestContext scope metadata are readiness signals only.
@@ -118,7 +130,7 @@ Future production auth must provide trusted tenant/team/project/repo/provider/mo
 - No production Auth/RBAC provider.
 - No durable tenant/team/project/repo/provider/model/secret/MCP/package/host/audit-query grants.
 - No dashboard/readiness filtering.
-- No audit query filtering.
+- No production audit query filtering. Audit Query Scope Enforcement v1 adds representative read-model redaction only.
 - No repository/query-layer tenant enforcement.
 - No cache partitioning by tenant/role/scope.
 - row-level security is not implemented.
@@ -129,12 +141,12 @@ Future production auth must provide trusted tenant/team/project/repo/provider/mo
 - Decisions are deterministic comparisons over metadata, not proof of production authorization.
 - Dashboard/readiness integrations are representative and partial.
 - Secret-adjacent helper denial is not a production secret authorization system.
-- Audit query warnings do not filter audit storage or query results.
+- Audit query warnings do not filter audit storage. Audit Query Scope Enforcement v1 can redact read-model detail, but production query security remains future work.
 - Production readiness remains false.
 
 ## Recommended Next Task
 
-OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Audit Query Scope Enforcement v1 has now landed (`docs/features/audit-query-scope-enforcement/v1.md`) as a representative, mock-first audit query redaction/check layer. Production tenant filtering, row-level security, production Auth/RBAC, and durable audit-query grants remain future work. The next recommended task is Readiness Endpoint Scope Filtering v1, Tenant Scope Enforcement v2, or External Observability Export v1 planning.
 
 ## OIDC tenant mapping boundary
 

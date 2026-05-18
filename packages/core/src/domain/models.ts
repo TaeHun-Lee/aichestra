@@ -94,6 +94,10 @@ export type RegistryResolution = {
   warnings: string[];
   errors: string[];
   resolvedAt: Date;
+  scopeDecisions?: Record<string, unknown>[];
+  scopeSummary?: Record<string, unknown>;
+  artifactTrustDecisions?: Record<string, unknown>[];
+  artifactTrustSummary?: Record<string, unknown>;
 };
 
 export type Task = {

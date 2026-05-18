@@ -534,7 +534,20 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       action: "merge_queue.read",
       resourceKind: "merge_queue",
       conditions: {
-        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        subjectRolesAny: [
+          "viewer",
+          "developer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
         environmentEquals: {
           metadataOnly: true,
           realMergeExecution: false,
@@ -606,6 +619,1157 @@ export function createDefaultPolicyRules(): PolicyRule[] {
       effect: "deny",
       action: "merge_queue.merge_execute_future",
       resourceKind: "merge_queue",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_real_merge_execution_policy_read_allow_v1",
+      name: "Allow real merge execution policy reads",
+      description: "Real Merge Execution Policy v1 may expose safe policy/readiness metadata while merge execution remains disabled.",
+      effect: "allow",
+      action: "merge_execution.policy.read",
+      resourceKind: "merge_execution",
+      conditions: {
+        subjectRolesAny: [
+          "viewer",
+          "developer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          mergeExecutionEnabled: false,
+          autoMergeEnabled: false,
+          remotePushEnabled: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_real_merge_execution_evaluate_allow_v1",
+      name: "Allow real merge execution evaluation metadata",
+      description: "Real Merge Execution Policy v1 may evaluate preconditions without running Git, pushing, auto-merging, or mutating workspaces.",
+      effect: "allow",
+      action: "merge_execution.evaluate",
+      resourceKind: "merge_execution",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          realMergeExecution: false,
+          mergeExecutionEnabled: false,
+          autoMergeEnabled: false,
+          remotePushEnabled: false,
+          remoteGitOperation: false,
+          branchDeletionEnabled: false,
+          workspaceMutation: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_real_merge_execution_request_allow_v1",
+      name: "Allow real merge execution request metadata",
+      description: "Real merge execution requests are local metadata records only and never execute merges in v1.",
+      effect: "allow",
+      action: "merge_execution.request",
+      resourceKind: "merge_execution",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          realMergeExecution: false,
+          mergeExecutionEnabled: false,
+          autoMergeEnabled: false,
+          remotePushEnabled: false,
+          remoteGitOperation: false,
+          branchDeletionEnabled: false,
+          workspaceMutation: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_real_merge_execution_execute_future_deny_v1",
+      name: "Deny future real merge execution",
+      description: "Real merge execution is not implemented in v1 and must remain denied by default.",
+      effect: "deny",
+      action: "merge_execution.execute_future",
+      resourceKind: "merge_execution",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_real_merge_execution_override_future_deny_v1",
+      name: "Deny future real merge execution override",
+      description: "Approval, policy, dry-run, tenant scope, and safety gates cannot be bypassed.",
+      effect: "deny",
+      action: "merge_execution.override_future",
+      resourceKind: "merge_execution",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_real_merge_execution_post_evidence_future_deny_v1",
+      name: "Deny future post-merge evidence recording",
+      description: "Post-execution evidence is a template only until a later real execution profile exists.",
+      effect: "deny",
+      action: "merge_execution.post_evidence.record_future",
+      resourceKind: "merge_execution",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_pr_ownership_read_allow_mock_v1",
+      name: "Allow PR ownership metadata reads",
+      description: "PR Ownership / Handoff Model v1 may read safe local ownership metadata without remote PR updates.",
+      effect: "allow",
+      action: "pr_ownership.read",
+      resourceKind: "pull_request",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          remotePrUpdate: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_pr_ownership_create_allow_mock_v1",
+      name: "Allow PR ownership metadata creation",
+      description: "PR ownership records are metadata-only and do not assign GitHub users, mutate branches, or execute merges.",
+      effect: "allow",
+      action: "pr_ownership.create",
+      resourceKind: "pull_request",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          remotePrUpdate: false,
+          remoteReviewerAssignment: false,
+          autoMergeEnabled: false,
+          branchDeletionEnabled: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_pr_ownership_update_allow_mock_v1",
+      name: "Allow PR ownership metadata updates",
+      description: "PR ownership review status and local reviewer metadata may be updated without GitHub API calls.",
+      effect: "allow",
+      action: "pr_ownership.update",
+      resourceKind: "pull_request",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          remotePrUpdate: false,
+          remoteReviewerAssignment: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_pr_handoff_request_allow_mock_v1",
+      name: "Allow PR handoff requests",
+      description: "PR handoff requests are local metadata records and do not update provider PR assignments.",
+      effect: "allow",
+      action: "pr_handoff.request",
+      resourceKind: "pull_request",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          remotePrUpdate: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_pr_handoff_accept_future_agent_deny_v1",
+      name: "Deny future agent handoff acceptance",
+      description: "Human-to-agent handoff acceptance remains future-only until explicit agent acceptance gates exist.",
+      effect: "deny",
+      action: "pr_handoff.accept",
+      resourceKind: "pull_request",
+      conditions: {
+        environmentEquals: {
+          futureAgentHandoff: true
+        }
+      },
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_pr_handoff_accept_allow_mock_v1",
+      name: "Allow PR handoff acceptance",
+      description: "Accepted PR handoffs transfer owner metadata locally only.",
+      effect: "allow",
+      action: "pr_handoff.accept",
+      resourceKind: "pull_request",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          remotePrUpdate: false,
+          autoMergeEnabled: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_pr_handoff_reject_allow_mock_v1",
+      name: "Allow PR handoff rejection or hold",
+      description: "Rejected or held PR handoffs preserve the existing owner and remain metadata-only.",
+      effect: "allow",
+      action: "pr_handoff.reject",
+      resourceKind: "pull_request",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          remotePrUpdate: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_pr_handoff_expire_allow_mock_v1",
+      name: "Allow PR handoff expiry",
+      description: "Expired PR handoffs preserve existing ownership and are recorded locally only.",
+      effect: "allow",
+      action: "pr_handoff.expire",
+      resourceKind: "pull_request",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          remotePrUpdate: false,
+          secretsExposed: false,
+          envValuesExposed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_pr_reviewer_assign_future_deny_v1",
+      name: "Deny remote PR reviewer assignment",
+      description: "Provider reviewer assignment remains future-only and denied by default.",
+      effect: "deny",
+      action: "pr_reviewer.assign_future",
+      resourceKind: "pull_request",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_pr_remote_update_future_deny_v1",
+      name: "Deny remote PR updates",
+      description: "Remote PR mutation, including assignees, reviewers, state, labels, or provider updates, remains future-only and denied by default.",
+      effect: "deny",
+      action: "pr_remote_update_future",
+      resourceKind: "pull_request",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_cleanup_scan_allow_mock_v1",
+      name: "Allow cleanup scan",
+      description: "Branch Cleanup / Orphan Lease Recovery v1 may scan for orphan records under mock-first metadata-only context.",
+      effect: "allow",
+      action: "cleanup.scan",
+      resourceKind: "cleanup",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          destructiveCleanupEnabled: false,
+          realBranchDeletion: false,
+          realWorktreeRemoval: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_cleanup_recommend_allow_mock_v1",
+      name: "Allow cleanup recommendation",
+      description: "Branch Cleanup / Orphan Lease Recovery v1 may produce metadata-only cleanup recommendations.",
+      effect: "allow",
+      action: "cleanup.recommend",
+      resourceKind: "cleanup",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          destructiveCleanupEnabled: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_cleanup_decide_allow_mock_v1",
+      name: "Allow cleanup decision",
+      description: "Branch Cleanup / Orphan Lease Recovery v1 may record metadata-only cleanup decisions.",
+      effect: "allow",
+      action: "cleanup.decide",
+      resourceKind: "cleanup",
+      conditions: {
+        subjectRolesAny: ["reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          destructiveCleanupEnabled: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_cleanup_metadata_execute_allow_mock_v1",
+      name: "Allow metadata-only cleanup execution",
+      description: "Metadata-only cleanup may execute when destructive cleanup remains disabled.",
+      effect: "allow",
+      action: "cleanup.metadata_execute",
+      resourceKind: "cleanup",
+      conditions: {
+        subjectRolesAny: ["reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          destructiveCleanupEnabled: false,
+          realBranchDeletion: false,
+          realWorktreeRemoval: false,
+          realPullRequestClosed: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_cleanup_destructive_execute_future_deny_v1",
+      name: "Deny destructive cleanup execution",
+      description: "Destructive cleanup remains future-only and is denied by default.",
+      effect: "deny",
+      action: "cleanup.destructive_execute_future",
+      resourceKind: "cleanup",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_branch_delete_future_deny_v1",
+      name: "Deny future branch deletion",
+      description: "Future branch deletion is denied; metadata-only review continues.",
+      effect: "deny",
+      action: "branch.delete_future",
+      resourceKind: "branch",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_worktree_remove_future_deny_v1",
+      name: "Deny future worktree removal",
+      description: "Future worktree removal is denied; manual reconciliation only.",
+      effect: "deny",
+      action: "worktree.remove_future",
+      resourceKind: "workspace",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_pr_close_future_deny_v1",
+      name: "Deny future PR closure",
+      description: "Provider PR closure remains unimplemented and is denied by default.",
+      effect: "deny",
+      action: "pr.close_future",
+      resourceKind: "pull_request",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_compatibility_read_allow_mock_v1",
+      name: "Allow registry compatibility metadata reads",
+      description: "Skill/Harness Compatibility Matrix v1 may read advisory metadata without registry mutation.",
+      effect: "allow",
+      action: "registry.compatibility.read",
+      resourceKind: "registry_compatibility",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          registryMutationExecuted: false,
+          autoApplyEnabled: false,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_compatibility_evaluate_allow_mock_v1",
+      name: "Allow registry compatibility evaluation",
+      description: "Skill/Harness Compatibility Matrix v1 may evaluate metadata-only compatibility decisions; resolver gates remain authoritative.",
+      effect: "allow",
+      action: "registry.compatibility.evaluate",
+      resourceKind: "registry_compatibility",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          registryMutationExecuted: false,
+          autoApplyEnabled: false,
+          resolverGatesPreserved: true,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_compatibility_matrix_update_future_deny_v1",
+      name: "Deny future compatibility matrix updates",
+      description: "Updating compatibility profiles is future-only; it must not mutate active registry entries.",
+      effect: "deny",
+      action: "registry.compatibility.matrix.update_future",
+      resourceKind: "registry_compatibility",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_compatibility_override_future_deny_v1",
+      name: "Deny future compatibility overrides",
+      description: "Compatibility overrides remain future-only and must not bypass registry resolver gates.",
+      effect: "deny",
+      action: "registry.compatibility.override_future",
+      resourceKind: "registry_compatibility",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_drift_read_allow_mock_v1",
+      name: "Allow registry drift signal reads",
+      description: "Skill / Harness Drift Detection v1 may read drift signals/baselines/assessments/recommendations without registry mutation.",
+      effect: "allow",
+      action: "registry.drift.read",
+      resourceKind: "registry_drift",
+      conditions: {
+        subjectRolesAny: ["viewer", "developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          registryMutationExecuted: false,
+          autoApplyEnabled: false,
+          evalExecuted: false,
+          canaryExecuted: false,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_drift_assess_allow_mock_v1",
+      name: "Allow registry drift assessment",
+      description: "Skill / Harness Drift Detection v1 may compute deterministic drift assessments without registry mutation or eval/canary execution.",
+      effect: "allow",
+      action: "registry.drift.assess",
+      resourceKind: "registry_drift",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          registryMutationExecuted: false,
+          autoApplyEnabled: false,
+          evalExecuted: false,
+          canaryExecuted: false,
+          resolverGatesPreserved: true,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_drift_recommend_allow_mock_v1",
+      name: "Allow registry drift recommendation",
+      description: "Skill / Harness Drift Detection v1 may produce advisory governance follow-ups without applying changes.",
+      effect: "allow",
+      action: "registry.drift.recommend",
+      resourceKind: "registry_drift",
+      conditions: {
+        subjectRolesAny: ["reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          autoApplyEnabled: false,
+          evalExecuted: false,
+          canaryExecuted: false,
+          resolverGatesPreserved: true
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_drift_create_candidate_future_deny_v1",
+      name: "Deny future drift-driven improvement candidate creation",
+      description: "Drift-driven improvement candidate creation remains future-only and must not mutate registry entries.",
+      effect: "deny",
+      action: "registry.drift.create_candidate_future",
+      resourceKind: "registry_drift",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_drift_auto_apply_future_deny_v1",
+      name: "Deny future drift-driven auto-apply",
+      description: "Drift-driven auto-apply remains future-only; v1 must preserve draft-only governance and apply-gate blocked.",
+      effect: "deny",
+      action: "registry.drift.auto_apply_future",
+      resourceKind: "registry_drift",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_canary_plan_allow_mock_v1",
+      name: "Allow canary plan creation in mock context",
+      description: "Canary Execution Harness v1 may create canary plans in a mock metadata-only context without registry mutation or real provider calls.",
+      effect: "allow",
+      action: "registry.canary.plan",
+      resourceKind: "registry_canary",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          autoApplyEnabled: false,
+          activeRegistryMutationAllowed: false,
+          externalCanaryExecuted: false,
+          realProviderCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_canary_run_mock_allow_mock_v1",
+      name: "Allow mock canary run execution",
+      description: "Canary Execution Harness v1 may run deterministic mock canary executions without external provider calls or registry mutation.",
+      effect: "allow",
+      action: "registry.canary.run_mock",
+      resourceKind: "registry_canary",
+      conditions: {
+        subjectRolesAny: ["developer", "reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          autoApplyEnabled: false,
+          activeRegistryMutationAllowed: false,
+          externalCanaryExecuted: false,
+          realProviderCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_canary_run_external_future_deny_v1",
+      name: "Deny external canary execution",
+      description: "External/live canary execution remains future-only; v1 must not call providers, vendor CLIs, or remote services.",
+      effect: "deny",
+      action: "registry.canary.run_external_future",
+      resourceKind: "registry_canary",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_apply_workflow_create_allow_mock_v1",
+      name: "Allow apply workflow creation in mock context",
+      description: "Apply Workflow v1 may model metadata-only apply workflows without mutating active registry entries or enabling auto-apply.",
+      effect: "allow",
+      action: "registry.apply_workflow.create",
+      resourceKind: "registry_apply_workflow",
+      conditions: {
+        subjectRolesAny: ["reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          autoApplyEnabled: false,
+          activeRegistryMutationAllowed: false,
+          applyPerformed: false,
+          activeRegistryMutated: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_apply_gate_evaluate_allow_mock_v1",
+      name: "Allow apply gate evaluation in mock context",
+      description: "Apply Workflow v1 may evaluate apply gate readiness without mutating active registry entries.",
+      effect: "allow",
+      action: "registry.apply_gate.evaluate",
+      resourceKind: "registry_apply_workflow",
+      conditions: {
+        subjectRolesAny: ["reviewer", "security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          autoApplyEnabled: false,
+          activeRegistryMutationAllowed: false,
+          applyPerformed: false,
+          activeRegistryMutated: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_apply_metadata_record_allow_mock_v1",
+      name: "Allow metadata-only apply record in mock context",
+      description: "Apply Workflow v1 may record metadata-only apply decisions when all prerequisites are present, without mutating active registry entries or executing real apply.",
+      effect: "allow",
+      action: "registry.apply.metadata_record",
+      resourceKind: "registry_apply_workflow",
+      conditions: {
+        subjectRolesAny: ["security_admin", "platform_admin", "system_admin", "system"],
+        environmentEquals: {
+          metadataOnly: true,
+          autoApplyEnabled: false,
+          activeRegistryMutationAllowed: false,
+          applyPerformed: false,
+          activeRegistryMutated: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_apply_execute_future_deny_v1",
+      name: "Deny future apply execution",
+      description: "Real apply execution remains future-only; v1 must not mutate active Skill/Harness/Instruction/RegistryPackage entries via auto-improvement.",
+      effect: "deny",
+      action: "registry.apply.execute_future",
+      resourceKind: "registry_apply_workflow",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_apply_auto_apply_future_deny_v1",
+      name: "Deny future auto-apply",
+      description: "Auto-apply remains future-only; v1 must preserve manual_future/metadata_only apply modes and never enable automatic registry mutation.",
+      effect: "deny",
+      action: "registry.apply.auto_apply_future",
+      resourceKind: "registry_apply_workflow",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_scope_read_allow_mock_v1",
+      name: "Allow registry scope metadata reads",
+      description: "Registry Tenant Scope Enforcement v1 may read metadata-only scope summaries without registry mutation.",
+      effect: "allow",
+      action: "registry.scope.read",
+      resourceKind: "registry_scope",
+      conditions: {
+        subjectRolesAny: [
+          "viewer",
+          "developer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          productionEnforcement: false,
+          registryMutationExecuted: false,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_scope_evaluate_allow_mock_v1",
+      name: "Allow registry scope evaluation",
+      description: "Registry Tenant Scope Enforcement v1 may evaluate representative scope decisions while preserving resolver gates.",
+      effect: "allow",
+      action: "registry.scope.evaluate",
+      resourceKind: "registry_scope",
+      conditions: {
+        subjectRolesAny: [
+          "viewer",
+          "developer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          productionEnforcement: false,
+          resolverGatesPreserved: true,
+          registryMutationExecuted: false,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_mutation_scope_check_allow_mock_v1",
+      name: "Allow registry mutation scope checks",
+      description: "Registry mutations may run representative scope checks; lifecycle, approval, eval, checksum, and policy gates still win.",
+      effect: "allow",
+      action: "registry.mutation.scope_check",
+      resourceKind: "registry_scope",
+      conditions: {
+        subjectRolesAny: [
+          "developer",
+          "reviewer",
+          "platform_admin",
+          "system_admin",
+          "registry_editor",
+          "registry_admin",
+          "registry_reviewer",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          productionEnforcement: false,
+          resolverGatesPreserved: true,
+          activeRegistryMutationThroughAutoImprovement: false,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_audit_read_allow_mock_v1",
+      name: "Allow registry audit metadata read",
+      description: "Registry audit reads remain sanitized metadata-only and do not expose secrets or env values.",
+      effect: "allow",
+      action: "registry.audit.read",
+      resourceKind: "registry_item",
+      conditions: {
+        subjectRolesAny: [
+          "viewer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_approval_queue_read_allow_mock_v1",
+      name: "Allow registry approval queue read",
+      description: "Approval queue scope status is read-only metadata and does not mutate registry entries.",
+      effect: "allow",
+      action: "registry.approval_queue.read",
+      resourceKind: "registry_item",
+      conditions: {
+        subjectRolesAny: [
+          "viewer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          registryMutationExecuted: false,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_scope_enforce_future_deny_v1",
+      name: "Deny future registry scope enforcement",
+      description: "Production registry tenant enforcement remains future-only until production auth, durable grants, and repository filters exist.",
+      effect: "deny",
+      action: "registry.scope.enforce_future",
+      resourceKind: "registry_scope",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_artifact_trust_read_allow_mock_v1",
+      name: "Allow registry artifact trust reads",
+      description: "Registry Signed Package / Artifact Trust v1 may expose sanitized metadata-only trust policies and summaries.",
+      effect: "allow",
+      action: "registry.artifact_trust.read",
+      resourceKind: "registry_artifact_trust",
+      conditions: {
+        subjectRolesAny: [
+          "viewer",
+          "developer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          realSigningImplemented: false,
+          realVerificationImplemented: false,
+          externalRegistryCalls: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_artifact_trust_evaluate_allow_mock_v1",
+      name: "Allow registry artifact trust evaluation",
+      description: "Artifact trust may evaluate mock digest/signature/provenance metadata while preserving resolver gates.",
+      effect: "allow",
+      action: "registry.artifact_trust.evaluate",
+      resourceKind: "registry_artifact_trust",
+      conditions: {
+        subjectRolesAny: [
+          "viewer",
+          "developer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          resolverGatesPreserved: true,
+          registryMutationExecuted: false,
+          activeRegistryMutationThroughAutoImprovement: false,
+          realSigningImplemented: false,
+          realVerificationImplemented: false,
+          externalRegistryCalls: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_artifact_signature_attach_mock_allow_v1",
+      name: "Allow mock artifact signature metadata attachment",
+      description: "Controlled tests and local mock workflows may attach mock signature metadata without real signing or key material.",
+      effect: "allow",
+      action: "registry.artifact_signature.attach_mock",
+      resourceKind: "registry_artifact_trust",
+      conditions: {
+        subjectRolesAny: [
+          "developer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_editor",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          realSigningPerformed: false,
+          realSignatureVerificationPerformed: false,
+          signingKeyGenerated: false,
+          externalRegistryCalls: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_artifact_provenance_attach_mock_allow_v1",
+      name: "Allow mock artifact provenance metadata attachment",
+      description: "Controlled tests and local mock workflows may attach provenance metadata without external build or registry calls.",
+      effect: "allow",
+      action: "registry.artifact_provenance.attach",
+      resourceKind: "registry_artifact_trust",
+      conditions: {
+        subjectRolesAny: [
+          "developer",
+          "reviewer",
+          "security_admin",
+          "platform_admin",
+          "system_admin",
+          "registry_editor",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          realSigningPerformed: false,
+          realSignatureVerificationPerformed: false,
+          externalBuildSystemCalled: false,
+          externalRegistryCalls: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_artifact_signature_verify_future_deny_v1",
+      name: "Deny future artifact signature verification",
+      description: "Real artifact signature verification remains future-only and must not run in default runtime.",
+      effect: "deny",
+      action: "registry.artifact_signature.verify_future",
+      resourceKind: "registry_artifact_trust",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_artifact_sign_future_deny_v1",
+      name: "Deny future artifact signing",
+      description: "Real artifact signing, key generation, and key custody integrations remain future-only.",
+      effect: "deny",
+      action: "registry.artifact.sign_future",
+      resourceKind: "registry_artifact_trust",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_artifact_import_trusted_future_deny_v1",
+      name: "Deny future trusted artifact import",
+      description: "Trusted remote artifact import remains future-only; v1 import/export trust is local metadata only.",
+      effect: "deny",
+      action: "registry.artifact.import_trusted_future",
+      resourceKind: "registry_artifact_trust",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_registry_eval_suite_read_allow_mock_v1",
+      name: "Allow registry eval suite reads",
+      description: "Eval Suite Execution Harness v1 may expose sanitized mock suite/case/run/verdict metadata.",
+      effect: "allow",
+      action: "registry.eval_suite.read",
+      resourceKind: "registry_eval_suite",
+      conditions: {
+        subjectRolesAny: [
+          "viewer",
+          "developer",
+          "reviewer",
+          "platform_admin",
+          "system_admin",
+          "registry_viewer",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          externalEvalImplemented: false,
+          realProviderCalls: false,
+          llmCallsExecuted: false,
+          mcpCallsExecuted: false,
+          vendorCliExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_eval_suite_run_mock_allow_v1",
+      name: "Allow deterministic mock registry eval runs",
+      description: "Eval Suite Execution Harness v1 may execute only deterministic in-memory mock suites with no provider, MCP, vendor CLI, canary, auto-apply, or active registry mutation.",
+      effect: "allow",
+      action: "registry.eval_suite.run_mock",
+      resourceKind: "registry_eval_suite",
+      conditions: {
+        subjectRolesAny: [
+          "developer",
+          "reviewer",
+          "platform_admin",
+          "system_admin",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          mockExecutionOnly: true,
+          externalEvalImplemented: false,
+          realProviderCalls: false,
+          llmCallsExecuted: false,
+          mcpCallsExecuted: false,
+          vendorCliExecuted: false,
+          canaryExecuted: false,
+          autoApplyEnabled: false,
+          activeRegistryMutationExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_eval_suite_attach_result_allow_v1",
+      name: "Allow metadata-only registry eval result attachment",
+      description: "Eval Suite Execution Harness v1 may attach mock eval verdict metadata without mutating registry content or applying proposals.",
+      effect: "allow",
+      action: "registry.eval_suite.attach_result",
+      resourceKind: "registry_eval_suite",
+      conditions: {
+        subjectRolesAny: [
+          "developer",
+          "reviewer",
+          "platform_admin",
+          "system_admin",
+          "registry_editor",
+          "registry_reviewer",
+          "registry_admin",
+          "system",
+          "service_account_registry_governance"
+        ],
+        environmentEquals: {
+          metadataOnly: true,
+          mockExecutionOnly: true,
+          activeRegistryMutationExecuted: false,
+          autoApplyEnabled: false,
+          canaryExecuted: false,
+          externalCallExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_governance_eval_require_allow_v1",
+      name: "Allow governance eval requirement metadata",
+      description: "Governance can record eval requirement metadata without executing external suites or applying changes.",
+      effect: "allow",
+      action: "governance.eval.require",
+      resourceKind: "registry_eval_suite",
+      conditions: {
+        subjectRolesAny: ["reviewer", "platform_admin", "system_admin", "registry_reviewer", "registry_admin", "system", "service_account_registry_governance"],
+        environmentEquals: {
+          metadataOnly: true,
+          autoApplyEnabled: false,
+          canaryExecuted: false,
+          activeRegistryMutationExecuted: false
+        }
+      },
+      priority: 250,
+      enabled: true
+    },
+    {
+      id: "policy_registry_eval_suite_run_external_future_deny_v1",
+      name: "Deny future external eval suite runs",
+      description: "Provider-live and external eval suites remain future-only and must not run in default runtime.",
+      effect: "deny",
+      action: "registry.eval_suite.run_external_future",
+      resourceKind: "registry_eval_suite",
+      conditions: {},
+      priority: 1000,
+      enabled: true
+    },
+    {
+      id: "policy_governance_eval_override_future_deny_v1",
+      name: "Deny future governance eval override",
+      description: "Eval override remains future-only; policy deny and apply gates remain authoritative.",
+      effect: "deny",
+      action: "governance.eval.override_future",
+      resourceKind: "registry_eval_suite",
       conditions: {},
       priority: 1000,
       enabled: true

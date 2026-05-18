@@ -35,6 +35,12 @@ export {
   sanitizeWorkspaceLifecycleMetadata,
   sanitizeWorkspacePathForDto
 } from "./workspace-lifecycle.ts";
+export {
+  agentWorktreeAllocationRequestToDto,
+  agentWorktreeAllocationResultToDto,
+  agentWorktreeAllocationSummaryToDto,
+  agentWorktreeSafetyCheckToDto
+} from "./worktree-allocation.ts";
 import { sanitizeWorkspaceLifecycleMetadata, sanitizeWorkspacePathForDto } from "./workspace-lifecycle.ts";
 
 export function agentRunnerConfigToDto(config: AgentRunnerRuntimeConfig) {

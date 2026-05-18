@@ -29,6 +29,9 @@ import type {
   VaultIntegrationTestCase,
   VaultIntegrationTestProfile,
   VaultIntegrationTestSafetyCheck,
+  MergeQueueIntegrationTestCase,
+  MergeQueueIntegrationTestProfile,
+  MergeQueueIntegrationSafetyCheck,
   GitHubAppInstallation,
   GitHubAppPermissionMatrixEntry,
   GitHubAppProductionRisk,
@@ -7587,5 +7590,278 @@ export const defaultVaultIntegrationTestSafetyChecks: VaultIntegrationTestSafety
     remediation: "Expose booleans, counts, statuses, and sanitized identifiers only.",
     evidence: ["docs/features/dashboard/v0.md"],
     metadata: { vaultTokenExposed: false, vaultSecretValueExposed: false, envValuesExposed: false }
+  }
+];
+
+export const defaultMergeQueueIntegrationTestProfile: MergeQueueIntegrationTestProfile = {
+  id: "merge_queue_integration_test_profile_v1",
+  name: "Merge Queue live integration-test profile v1",
+  status: "disabled",
+  requiredEnvVars: [
+    "AICHESTRA_MERGE_QUEUE_INTEGRATION_TESTS",
+    "AICHESTRA_ENABLE_REMOTE_GIT",
+    "AICHESTRA_GIT_PROVIDER",
+    "AICHESTRA_GIT_ALLOWED_REPOS",
+    "AICHESTRA_GIT_ALLOWED_BRANCH_PREFIX",
+    "AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY",
+    "AICHESTRA_TEST_MERGE_QUEUE_REPO",
+    "AICHESTRA_TEST_MERGE_QUEUE_BASE_BRANCH",
+    "AICHESTRA_TEST_MERGE_QUEUE_SOURCE_BRANCHES"
+  ],
+  requiredRepoAllowlist: ["AICHESTRA_TEST_MERGE_QUEUE_REPO must be listed in AICHESTRA_GIT_ALLOWED_REPOS"],
+  requiredBranchPrefix: "aichestra/test/",
+  allowedOperations: [
+    "config_validation",
+    "queue_readiness_metadata_evaluation",
+    "local_dry_run_merge_simulation_only",
+    "branch_lease_metadata_check",
+    "conflict_risk_metadata_check",
+    "policy_decision_metadata_check",
+    "cleanup_metadata_check"
+  ],
+  forbiddenOperations: [
+    "real_merge_execution",
+    "auto_merge",
+    "remote_merge_api_call",
+    "remote_rebase",
+    "remote_force_push",
+    "remote_branch_delete",
+    "remote_pr_update",
+    "fetch",
+    "push",
+    "git_checkout",
+    "git_switch",
+    "vendor_cli_execution",
+    "llm_call",
+    "workspace_mutation",
+    "env_value_return",
+    "credential_cache_read"
+  ],
+  cleanupPolicy: "manual_mark_only",
+  metadata: {
+    docs: "docs/features/merge-queue-live-integration-test-profile/v1.md",
+    planDocs: "docs/features/merge-queue-live-integration-test-profile/v1-plan.md",
+    liveTestsEnabledByDefault: false,
+    noAutoMerge: true,
+    noForcePush: true,
+    noBranchDelete: true,
+    noRemoteMerge: true,
+    noRemoteRebase: true,
+    dryRunOnly: true,
+    realMergeExecuted: false,
+    remoteGitCallsInDefaultTests: false,
+    envValuesReturned: false,
+    repoUrlsReturned: false,
+    branchNamesReturned: false
+  }
+};
+
+export const defaultMergeQueueIntegrationTestCases: MergeQueueIntegrationTestCase[] = [
+  {
+    id: "mq_it_config_validation",
+    profileId: "merge_queue_integration_test_profile_v1",
+    name: "Validate merge queue integration-test gates",
+    category: "config_validation",
+    enabledByDefault: true,
+    requiresLiveGit: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["none"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { validatesBooleansAndCountsOnly: true, envValuesReturned: false }
+  },
+  {
+    id: "mq_it_queue_readiness",
+    profileId: "merge_queue_integration_test_profile_v1",
+    name: "Evaluate merge queue readiness against test-only branch metadata",
+    category: "queue_readiness",
+    enabledByDefault: true,
+    requiresLiveGit: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["readiness_metadata_only"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { mergeExecuted: false, autoMergeEnabled: false }
+  },
+  {
+    id: "mq_it_dry_run_merge_local",
+    profileId: "merge_queue_integration_test_profile_v1",
+    name: "Run local dry-run merge simulation against test fixtures",
+    category: "dry_run_merge",
+    enabledByDefault: true,
+    requiresLiveGit: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["local_dry_run_metadata"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { fetchOrPush: false, providerCall: false }
+  },
+  {
+    id: "mq_it_branch_lease_check",
+    profileId: "merge_queue_integration_test_profile_v1",
+    name: "Validate branch lease metadata for the test fixtures",
+    category: "branch_lease_check",
+    enabledByDefault: true,
+    requiresLiveGit: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["lease_metadata_only"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { leaseMetadataOnly: true }
+  },
+  {
+    id: "mq_it_conflict_risk_check",
+    profileId: "merge_queue_integration_test_profile_v1",
+    name: "Validate conflict risk scoring metadata for the test fixtures",
+    category: "conflict_risk_check",
+    enabledByDefault: true,
+    requiresLiveGit: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["risk_metadata_only"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { riskMetadataOnly: true }
+  },
+  {
+    id: "mq_it_policy_decision_check",
+    profileId: "merge_queue_integration_test_profile_v1",
+    name: "Validate Merge Queue Policy v2 decision metadata under the live profile",
+    category: "policy_decision_check",
+    enabledByDefault: true,
+    requiresLiveGit: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["policy_metadata_only"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { mergeExecuteFutureDenied: true }
+  },
+  {
+    id: "mq_it_cleanup_check",
+    profileId: "merge_queue_integration_test_profile_v1",
+    name: "Confirm cleanup is manual mark-only and branch deletion is forbidden",
+    category: "cleanup_check",
+    enabledByDefault: true,
+    requiresLiveGit: false,
+    requiredEnvVars: [],
+    expectedSideEffects: ["none"],
+    cleanupRequired: false,
+    status: "active_mock",
+    metadata: { branchDeletionAllowed: false, manualMarkOnly: true }
+  },
+  {
+    id: "mq_it_live_dry_run_evaluation_gated",
+    profileId: "merge_queue_integration_test_profile_v1",
+    name: "Evaluate merge queue against configured test branches only when every gate is configured",
+    category: "queue_readiness",
+    enabledByDefault: false,
+    requiresLiveGit: true,
+    requiredEnvVars: [
+      "AICHESTRA_MERGE_QUEUE_INTEGRATION_TESTS",
+      "AICHESTRA_ENABLE_REMOTE_GIT",
+      "AICHESTRA_GIT_PROVIDER",
+      "AICHESTRA_GIT_ALLOWED_REPOS",
+      "AICHESTRA_GIT_ALLOWED_BRANCH_PREFIX",
+      "AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY",
+      "AICHESTRA_TEST_MERGE_QUEUE_REPO",
+      "AICHESTRA_TEST_MERGE_QUEUE_BASE_BRANCH",
+      "AICHESTRA_TEST_MERGE_QUEUE_SOURCE_BRANCHES"
+    ],
+    expectedSideEffects: ["readiness_metadata_only"],
+    cleanupRequired: false,
+    status: "gated_live",
+    metadata: { liveMergeExecuted: false, providerMergeCallEnabled: false }
+  }
+];
+
+export const defaultMergeQueueIntegrationSafetyChecks: MergeQueueIntegrationSafetyCheck[] = [
+  {
+    id: "mq_it_env_gates_missing_skip",
+    category: "env_gates",
+    status: "warning",
+    severity: "high",
+    description: "Live merge queue integration tests must skip unless every required gate is configured.",
+    remediation: "Set every documented merge queue integration gate only in a reviewed non-production profile.",
+    evidence: ["docs/features/merge-queue-live-integration-test-profile/v1.md"],
+    metadata: { missingGatesSkipNotFail: true }
+  },
+  {
+    id: "mq_it_repo_allowlist_required",
+    category: "repo_allowlist",
+    status: "warning",
+    severity: "critical",
+    description: "The configured test repo must appear in the allowlist; arbitrary repos are forbidden.",
+    remediation: "Set AICHESTRA_GIT_ALLOWED_REPOS and AICHESTRA_TEST_MERGE_QUEUE_REPO to a non-production fixture repo.",
+    evidence: ["docs/features/merge-queue-live-integration-test-profile/v1.md"],
+    metadata: { repoValuesReturned: false }
+  },
+  {
+    id: "mq_it_branch_prefix_required",
+    category: "branch_prefix",
+    status: "warning",
+    severity: "critical",
+    description: "All test branches must use the aichestra/test/ prefix; other prefixes are unsafe.",
+    remediation: "Configure AICHESTRA_GIT_ALLOWED_BRANCH_PREFIX=aichestra/test/ and ensure base/source branches comply.",
+    evidence: ["docs/features/merge-queue-live-integration-test-profile/v1.md"],
+    metadata: { branchValuesReturned: false }
+  },
+  {
+    id: "mq_it_no_auto_merge",
+    category: "no_auto_merge",
+    status: "pass",
+    severity: "critical",
+    description: "The profile must not enable auto-merge or remote merge execution.",
+    remediation: "Keep AICHESTRA_ALLOW_REMOTE_MERGE=false and never call provider merge APIs from this profile.",
+    evidence: ["AGENTS.md", "docs/features/merge-queue-policy/v2.md"],
+    metadata: { autoMergeAllowed: false, remoteMergeAllowed: false }
+  },
+  {
+    id: "mq_it_no_force_push",
+    category: "no_force_push",
+    status: "pass",
+    severity: "critical",
+    description: "Force-push must remain forbidden.",
+    remediation: "Keep AICHESTRA_ALLOW_REMOTE_FORCE_PUSH=false.",
+    evidence: ["docs/features/real-git-adapter/v2.md"],
+    metadata: { forcePushAllowed: false }
+  },
+  {
+    id: "mq_it_no_branch_delete",
+    category: "no_branch_delete",
+    status: "pass",
+    severity: "critical",
+    description: "Branch deletion must remain forbidden, including for cleanup.",
+    remediation: "Keep AICHESTRA_ALLOW_REMOTE_BRANCH_DELETE=false.",
+    evidence: ["docs/features/real-git-adapter/v2.md"],
+    metadata: { branchDeletionAllowed: false }
+  },
+  {
+    id: "mq_it_dry_run_only",
+    category: "dry_run_only",
+    status: "warning",
+    severity: "critical",
+    description: "Live validation must remain dry-run-only.",
+    remediation: "Keep AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY=true and only run the existing safe local/mock dry-run path.",
+    evidence: ["docs/features/merge-queue-policy/v2.md"],
+    metadata: { realMergeExecuted: false }
+  },
+  {
+    id: "mq_it_cleanup_manual",
+    category: "cleanup",
+    status: "pass",
+    severity: "high",
+    description: "Cleanup must remain manual mark-only.",
+    remediation: "Do not delete branches, close PRs, or call provider mutation APIs from this profile.",
+    evidence: ["docs/features/merge-queue-live-integration-test-profile/v1.md"],
+    metadata: { manualMarkOnly: true, branchDeletionAllowed: false }
+  },
+  {
+    id: "mq_it_audit_sanitized",
+    category: "audit",
+    status: "pass",
+    severity: "high",
+    description: "Audit and dashboard entries must record sanitized metadata only, with no env values, repo URLs, branch names, or remote merge calls.",
+    remediation: "Keep redaction in dashboard sanitization and never log env values.",
+    evidence: ["docs/foundations/observability-audit-retention/v0.md"],
+    metadata: { envValuesStored: false, repoUrlsStored: false, branchNamesStored: false }
   }
 ];

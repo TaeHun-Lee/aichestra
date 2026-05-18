@@ -32,6 +32,9 @@ import {
   defaultVaultIntegrationTestCases,
   defaultVaultIntegrationTestProfile,
   defaultVaultIntegrationTestSafetyChecks,
+  defaultMergeQueueIntegrationTestCases,
+  defaultMergeQueueIntegrationTestProfile,
+  defaultMergeQueueIntegrationSafetyChecks,
   defaultGitHubAppInstallations,
   defaultGitHubAppPermissionMatrix,
   defaultGitHubAppProductionRisks,
@@ -141,6 +144,12 @@ import type {
   VaultIntegrationTestReadinessSummary,
   VaultIntegrationTestSafetyCategory,
   VaultIntegrationTestSafetyCheck,
+  MergeQueueIntegrationTestCase,
+  MergeQueueIntegrationTestProfile,
+  MergeQueueIntegrationTestProfileStatus,
+  MergeQueueIntegrationTestReadinessSummary,
+  MergeQueueIntegrationSafetyCategory,
+  MergeQueueIntegrationSafetyCheck,
   GitHubAppInstallation,
   GitHubAppPermissionMatrixEntry,
   GitHubAppProductionRisk,
@@ -355,6 +364,9 @@ export type DeploymentReadinessServiceInput = {
   vaultIntegrationTestProfile?: VaultIntegrationTestProfile;
   vaultIntegrationTestCases?: VaultIntegrationTestCase[];
   vaultIntegrationTestSafetyChecks?: VaultIntegrationTestSafetyCheck[];
+  mergeQueueIntegrationTestProfile?: MergeQueueIntegrationTestProfile;
+  mergeQueueIntegrationTestCases?: MergeQueueIntegrationTestCase[];
+  mergeQueueIntegrationSafetyChecks?: MergeQueueIntegrationSafetyCheck[];
   staticPolicyRuleCount?: number;
   repoRoot?: string;
   migrationsDir?: string;
@@ -621,6 +633,9 @@ export class DeploymentReadinessService {
   private readonly vaultIntegrationTestProfile: VaultIntegrationTestProfile;
   private readonly vaultIntegrationTestCases: VaultIntegrationTestCase[];
   private readonly vaultIntegrationTestSafetyChecks: VaultIntegrationTestSafetyCheck[];
+  private readonly mergeQueueIntegrationTestProfile: MergeQueueIntegrationTestProfile;
+  private readonly mergeQueueIntegrationTestCases: MergeQueueIntegrationTestCase[];
+  private readonly mergeQueueIntegrationSafetyChecks: MergeQueueIntegrationSafetyCheck[];
   private readonly staticPolicyRuleCount: number;
   private readonly repoRoot: string;
   private readonly migrationsDir: string;
@@ -719,6 +734,9 @@ export class DeploymentReadinessService {
     this.vaultIntegrationTestProfile = clone(input.vaultIntegrationTestProfile ?? defaultVaultIntegrationTestProfile);
     this.vaultIntegrationTestCases = clone(input.vaultIntegrationTestCases ?? defaultVaultIntegrationTestCases);
     this.vaultIntegrationTestSafetyChecks = clone(input.vaultIntegrationTestSafetyChecks ?? defaultVaultIntegrationTestSafetyChecks);
+    this.mergeQueueIntegrationTestProfile = clone(input.mergeQueueIntegrationTestProfile ?? defaultMergeQueueIntegrationTestProfile);
+    this.mergeQueueIntegrationTestCases = clone(input.mergeQueueIntegrationTestCases ?? defaultMergeQueueIntegrationTestCases);
+    this.mergeQueueIntegrationSafetyChecks = clone(input.mergeQueueIntegrationSafetyChecks ?? defaultMergeQueueIntegrationSafetyChecks);
     this.staticPolicyRuleCount = input.staticPolicyRuleCount ?? 0;
     this.repoRoot = input.repoRoot ?? process.cwd();
     this.migrationsDir = input.migrationsDir ?? path.join(this.repoRoot, "infra", "migrations");
@@ -4088,6 +4106,251 @@ export class DeploymentReadinessService {
     };
   }
 
+  getMergeQueueIntegrationTestProfile(): MergeQueueIntegrationTestProfile {
+    const summary = this.getMergeQueueIntegrationTestReadinessSummary();
+    return clone({
+      ...this.mergeQueueIntegrationTestProfile,
+      status: summary.profileStatus,
+      requiredRepoAllowlist: summary.allowedRepoCount > 0
+        ? ["configured_repo_allowlist_redacted"]
+        : this.mergeQueueIntegrationTestProfile.requiredRepoAllowlist,
+      metadata: {
+        ...this.mergeQueueIntegrationTestProfile.metadata,
+        liveTestsEnabled: summary.liveTestsEnabled,
+        canRunLiveTests: summary.canRunLiveTests,
+        missingGateCount: summary.missingGateCount,
+        unsafeGateCount: summary.unsafeGateCount,
+        allowedRepoCount: summary.allowedRepoCount,
+        branchPrefixMatchesRequired: summary.branchPrefixMatchesRequired,
+        dryRunOnly: summary.dryRunOnly,
+        envValuesReturned: false,
+        repoUrlsReturned: false,
+        branchNamesReturned: false
+      }
+    });
+  }
+
+  listMergeQueueIntegrationTestCases(): MergeQueueIntegrationTestCase[] {
+    return clone(this.mergeQueueIntegrationTestCases);
+  }
+
+  listMergeQueueIntegrationSafetyChecks(filter: { category?: MergeQueueIntegrationSafetyCategory } = {}): MergeQueueIntegrationSafetyCheck[] {
+    const summary = this.getMergeQueueIntegrationTestReadinessSummary();
+    const unsafe = (warning: string): boolean => summary.unsafeGateWarnings.includes(warning);
+    const checks = this.mergeQueueIntegrationSafetyChecks.map((check) => {
+      if (check.category === "env_gates") {
+        return {
+          ...check,
+          status: summary.unsafeGateCount > 0 ? "fail" as const : summary.canRunLiveTests ? "pass" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            liveTestsEnabled: summary.liveTestsEnabled,
+            missingGateCount: summary.missingGateCount,
+            missingRequiredEnvVars: summary.missingRequiredEnvVars,
+            unsafeGateCount: summary.unsafeGateCount,
+            skipReason: summary.canRunLiveTests ? undefined : summary.reason,
+            envValuesReturned: false
+          }
+        };
+      }
+      if (check.category === "repo_allowlist") {
+        const unsafeRepo = unsafe("test_repo_not_allowlisted");
+        return {
+          ...check,
+          status: unsafeRepo ? "fail" as const : summary.allowedRepoCount > 0 && summary.testRepoConfigured && summary.testRepoAllowlisted ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            allowedRepoCount: summary.allowedRepoCount,
+            testRepoConfigured: summary.testRepoConfigured,
+            testRepoAllowlisted: summary.testRepoAllowlisted,
+            repoValuesReturned: false
+          }
+        };
+      }
+      if (check.category === "branch_prefix") {
+        const unsafeBranch = unsafe("branch_prefix_mismatch") || unsafe("test_source_branches_outside_prefix");
+        return {
+          ...check,
+          status: unsafeBranch ? "fail" as const : summary.branchPrefixMatchesRequired && summary.testSourceBranchesMatchPrefix ? "pass" as const : summary.liveTestsEnabled ? "fail" as const : "warning" as const,
+          metadata: {
+            ...check.metadata,
+            requiredBranchPrefix: summary.requiredBranchPrefix,
+            branchPrefixConfigured: summary.branchPrefixConfigured,
+            branchPrefixMatchesRequired: summary.branchPrefixMatchesRequired,
+            testSourceBranchesMatchPrefix: summary.testSourceBranchesMatchPrefix,
+            branchValuesReturned: false
+          }
+        };
+      }
+      if (check.category === "no_auto_merge") {
+        return {
+          ...check,
+          status: unsafe("remote_merge_enabled") || unsafe("remote_rebase_enabled") ? "fail" as const : "pass" as const,
+          metadata: {
+            ...check.metadata,
+            remoteMergeEnabled: !summary.remoteMergeForbidden,
+            remoteRebaseEnabled: !summary.remoteRebaseForbidden
+          }
+        };
+      }
+      if (check.category === "no_force_push") {
+        return {
+          ...check,
+          status: unsafe("remote_force_push_enabled") ? "fail" as const : "pass" as const,
+          metadata: { ...check.metadata, forcePushEnabled: !summary.remoteForcePushForbidden }
+        };
+      }
+      if (check.category === "no_branch_delete") {
+        return {
+          ...check,
+          status: unsafe("remote_branch_delete_enabled") ? "fail" as const : "pass" as const,
+          metadata: { ...check.metadata, branchDeletionAllowed: !summary.remoteBranchDeleteForbidden }
+        };
+      }
+      if (check.category === "dry_run_only") {
+        return {
+          ...check,
+          status: unsafe("dry_run_only_disabled") ? "fail" as const : summary.dryRunOnly ? "pass" as const : "warning" as const,
+          metadata: { ...check.metadata, dryRunOnly: summary.dryRunOnly }
+        };
+      }
+      if (check.category === "cleanup") {
+        return {
+          ...check,
+          status: summary.branchDeletionAllowed ? "fail" as const : "pass" as const,
+          metadata: { ...check.metadata, cleanupPolicy: summary.cleanupPolicy, branchDeletionAllowed: summary.branchDeletionAllowed }
+        };
+      }
+      if (check.category === "audit") {
+        return {
+          ...check,
+          status: summary.noSecretsExposed && !summary.envValuesExposed && !summary.repoUrlsExposed && !summary.branchNamesExposed ? "pass" as const : "fail" as const,
+          metadata: {
+            ...check.metadata,
+            envValuesExposed: summary.envValuesExposed,
+            repoUrlsExposed: summary.repoUrlsExposed,
+            branchNamesExposed: summary.branchNamesExposed
+          }
+        };
+      }
+      return check;
+    });
+    return clone(checks.filter((check) => filter.category === undefined || check.category === filter.category));
+  }
+
+  canRunMergeQueueIntegrationLiveTests(): boolean {
+    return this.getMergeQueueIntegrationTestReadinessSummary().canRunLiveTests;
+  }
+
+  getMergeQueueIntegrationTestReadinessSummary(): MergeQueueIntegrationTestReadinessSummary {
+    const missingRequiredEnvVars = this.mergeQueueIntegrationMissingRequiredEnvVars();
+    const unsafeGateWarnings = this.mergeQueueIntegrationUnsafeGateWarnings();
+    const liveTestsEnabled = flag(this.env.AICHESTRA_MERGE_QUEUE_INTEGRATION_TESTS);
+    const gitProviderConfigured = stringConfigured(this.env.AICHESTRA_GIT_PROVIDER);
+    const gitProviderAllowed = this.env.AICHESTRA_GIT_PROVIDER === "github";
+    const remoteGitEnabled = flag(this.env.AICHESTRA_ENABLE_REMOTE_GIT);
+    const githubIntegrationProfileEnabled = flag(this.env.AICHESTRA_GITHUB_INTEGRATION_TESTS) ||
+      flag(this.env.AICHESTRA_GITHUB_APP_INTEGRATION_TESTS);
+    const allowedRepos = csvValues(this.env.AICHESTRA_GIT_ALLOWED_REPOS);
+    const requiredBranchPrefix = "aichestra/test/" as const;
+    const configuredBranchPrefix = this.env.AICHESTRA_GIT_ALLOWED_BRANCH_PREFIX?.trim() ?? "";
+    const branchPrefixConfigured = configuredBranchPrefix.length > 0;
+    const branchPrefixMatchesRequired = configuredBranchPrefix === requiredBranchPrefix;
+    const testRepo = this.env.AICHESTRA_TEST_MERGE_QUEUE_REPO?.trim() ?? "";
+    const testRepoConfigured = testRepo.length > 0;
+    const testRepoAllowlisted = testRepoConfigured && allowedRepos.includes(testRepo);
+    const testBaseBranch = this.env.AICHESTRA_TEST_MERGE_QUEUE_BASE_BRANCH?.trim() ?? "";
+    const testBaseBranchConfigured = testBaseBranch.length > 0;
+    const testSourceBranches = csvValues(this.env.AICHESTRA_TEST_MERGE_QUEUE_SOURCE_BRANCHES);
+    const testSourceBranchCount = testSourceBranches.length;
+    const testSourceBranchesMatchPrefix = testSourceBranchCount > 0 &&
+      testSourceBranches.every((branch) => branch.startsWith(requiredBranchPrefix));
+    const baseBranchDistinctFromSources = testBaseBranchConfigured &&
+      !testSourceBranches.includes(testBaseBranch);
+    const dryRunOnly = flag(this.env.AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY);
+    const remoteMergeForbidden = !this.remoteMergeEnabled();
+    const remoteRebaseForbidden = !flag(this.env.AICHESTRA_ALLOW_REMOTE_REBASE);
+    const remoteForcePushForbidden = !this.remoteForcePushEnabled();
+    const remoteBranchDeleteForbidden = !this.remoteBranchDeletionEnabled();
+    const canRunLiveTests = liveTestsEnabled &&
+      missingRequiredEnvVars.length === 0 &&
+      unsafeGateWarnings.length === 0;
+    const profileStatus: MergeQueueIntegrationTestProfileStatus = unsafeGateWarnings.length > 0
+      ? "blocked"
+      : liveTestsEnabled
+        ? "ready_if_configured"
+        : "disabled";
+    const reason = canRunLiveTests
+      ? "all_merge_queue_integration_gates_configured"
+      : unsafeGateWarnings.length > 0
+        ? "unsafe_merge_queue_integration_gate_detected"
+        : "live_merge_queue_tests_skip_until_all_gates_configured";
+    return {
+      generatedAt: this.now(),
+      id: "merge_queue_integration_test_summary_v1",
+      status: "v1_implemented",
+      planningOnly: true,
+      productionReady: false,
+      profileStatus,
+      liveTestsEnabled,
+      canRunLiveTests,
+      defaultLiveTestsSkipped: true,
+      requiredGateCount: this.mergeQueueIntegrationTestProfile.requiredEnvVars.length,
+      configuredGateCount: this.mergeQueueIntegrationTestProfile.requiredEnvVars.length - missingRequiredEnvVars.length,
+      missingGateCount: missingRequiredEnvVars.length,
+      unsafeGateCount: unsafeGateWarnings.length,
+      missingRequiredEnvVars,
+      unsafeGateWarnings,
+      reason,
+      gitProviderConfigured,
+      gitProviderAllowed,
+      remoteGitEnabled,
+      githubIntegrationProfileEnabled,
+      allowedRepoCount: allowedRepos.length,
+      requiredBranchPrefix,
+      branchPrefixConfigured,
+      branchPrefixMatchesRequired,
+      testRepoConfigured,
+      testRepoAllowlisted,
+      testBaseBranchConfigured,
+      testSourceBranchCount,
+      testSourceBranchesMatchPrefix,
+      baseBranchDistinctFromSources,
+      dryRunOnly,
+      autoMergeForbidden: true,
+      remoteMergeForbidden,
+      remoteRebaseForbidden,
+      remoteForcePushForbidden,
+      remoteBranchDeleteForbidden,
+      cleanupPolicy: "manual_mark_only",
+      branchDeletionAllowed: false,
+      testCaseCount: this.mergeQueueIntegrationTestCases.length,
+      gatedLiveTestCaseCount: this.mergeQueueIntegrationTestCases.filter((testCase) => testCase.requiresLiveGit).length,
+      activeMockTestCaseCount: this.mergeQueueIntegrationTestCases.filter((testCase) => !testCase.requiresLiveGit).length,
+      noAutoMerge: true,
+      noForcePush: true,
+      noBranchDelete: true,
+      noSecretsExposed: true,
+      envValuesExposed: false,
+      repoUrlsExposed: false,
+      branchNamesExposed: false,
+      remoteGitCallsInDefaultTests: false,
+      realMergeExecuted: false,
+      metadata: {
+        docs: "docs/features/merge-queue-live-integration-test-profile/v1.md",
+        planDocs: "docs/features/merge-queue-live-integration-test-profile/v1-plan.md",
+        mergeQueuePolicyDocs: "docs/features/merge-queue-policy/v2.md",
+        realGitAdapterDocs: "docs/features/real-git-adapter/v2.md",
+        liveTestsSkipWhenGatesMissing: true,
+        defaultTestsCallRemoteGit: false,
+        defaultTestsExecuteMerges: false,
+        envValuesReturned: false,
+        repoUrlsReturned: false,
+        branchNamesReturned: false
+      }
+    };
+  }
+
   getAuthRbacProductionSummary(): AuthRbacProductionSummary {
     const currentProfileId = profileFromEnv(this.env.AICHESTRA_DEPLOYMENT_PROFILE);
     const criticalBlockers = this.authRbacReadinessChecks.filter((check) => check.status === "fail" && check.severity === "critical");
@@ -5098,6 +5361,55 @@ export class DeploymentReadinessService {
   private llmIntegrationRoutingModeAllowed(): boolean {
     return this.env.AICHESTRA_LLM_ROUTING_MODE === "single_provider" ||
       this.env.AICHESTRA_LLM_ROUTING_MODE === "multi_provider";
+  }
+
+  private mergeQueueIntegrationMissingRequiredEnvVars(): string[] {
+    return this.mergeQueueIntegrationTestProfile.requiredEnvVars.filter((name) => {
+      if (name === "AICHESTRA_MERGE_QUEUE_INTEGRATION_TESTS") return !flag(this.env.AICHESTRA_MERGE_QUEUE_INTEGRATION_TESTS);
+      if (name === "AICHESTRA_ENABLE_REMOTE_GIT") return !flag(this.env.AICHESTRA_ENABLE_REMOTE_GIT);
+      if (name === "AICHESTRA_GIT_PROVIDER") return this.env.AICHESTRA_GIT_PROVIDER !== "github";
+      if (name === "AICHESTRA_GIT_ALLOWED_BRANCH_PREFIX") return this.env.AICHESTRA_GIT_ALLOWED_BRANCH_PREFIX !== "aichestra/test/";
+      if (name === "AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY") return !flag(this.env.AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY);
+      if (name === "AICHESTRA_GIT_ALLOWED_REPOS") {
+        return csvValues(this.env.AICHESTRA_GIT_ALLOWED_REPOS).length === 0;
+      }
+      if (name === "AICHESTRA_TEST_MERGE_QUEUE_SOURCE_BRANCHES") {
+        return csvValues(this.env.AICHESTRA_TEST_MERGE_QUEUE_SOURCE_BRANCHES).length === 0;
+      }
+      return !stringConfigured(this.env[name]);
+    });
+  }
+
+  private mergeQueueIntegrationUnsafeGateWarnings(): string[] {
+    const warnings: string[] = [];
+    if (this.remoteMergeEnabled()) warnings.push("remote_merge_enabled");
+    if (flag(this.env.AICHESTRA_ALLOW_REMOTE_REBASE)) warnings.push("remote_rebase_enabled");
+    if (this.remoteForcePushEnabled()) warnings.push("remote_force_push_enabled");
+    if (this.remoteBranchDeletionEnabled()) warnings.push("remote_branch_delete_enabled");
+    if (stringConfigured(this.env.AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY) && !flag(this.env.AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY)) {
+      warnings.push("dry_run_only_disabled");
+    }
+    if (flag(this.env.AICHESTRA_ENABLE_AUTO_MERGE)) warnings.push("auto_merge_enabled");
+    const provider = this.env.AICHESTRA_GIT_PROVIDER?.trim();
+    if (provider && provider !== "github") warnings.push("git_provider_not_github");
+    const configuredBranchPrefix = this.env.AICHESTRA_GIT_ALLOWED_BRANCH_PREFIX?.trim();
+    if (configuredBranchPrefix && configuredBranchPrefix !== "aichestra/test/") {
+      warnings.push("branch_prefix_mismatch");
+    }
+    const allowedRepos = csvValues(this.env.AICHESTRA_GIT_ALLOWED_REPOS);
+    const testRepo = this.env.AICHESTRA_TEST_MERGE_QUEUE_REPO?.trim();
+    if (testRepo && allowedRepos.length > 0 && !allowedRepos.includes(testRepo)) {
+      warnings.push("test_repo_not_allowlisted");
+    }
+    const testSourceBranches = csvValues(this.env.AICHESTRA_TEST_MERGE_QUEUE_SOURCE_BRANCHES);
+    if (testSourceBranches.length > 0 && !testSourceBranches.every((branch) => branch.startsWith("aichestra/test/"))) {
+      warnings.push("test_source_branches_outside_prefix");
+    }
+    const testBaseBranch = this.env.AICHESTRA_TEST_MERGE_QUEUE_BASE_BRANCH?.trim();
+    if (testBaseBranch && testSourceBranches.includes(testBaseBranch)) {
+      warnings.push("test_base_branch_overlaps_source_branches");
+    }
+    return [...new Set(warnings)];
   }
 }
 

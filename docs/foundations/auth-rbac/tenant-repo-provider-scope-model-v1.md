@@ -12,6 +12,7 @@ Status:
 - Dashboard/Readiness Tenant Scope Planning: `v1_implemented`
 - Dashboard/Readiness Tenant Scope Implementation: `v1_implemented`
 - Tenant Scope Enforcement: `v1_implemented_partial`
+- Registry Tenant Scope Enforcement: `v1_implemented_partial`
 - Production Auth Provider Skeleton: `v1_implemented`
 - Production tenant enforcement: not implemented
 - Production Auth/RBAC: not implemented
@@ -29,6 +30,8 @@ Status:
 - Dashboard/Readiness Tenant Scope Planning v1 inventory and read-only planning surfaces for future dashboard/readiness filtering.
 - Dashboard/Readiness Tenant Scope Implementation v1 safe read-model metadata: `ScopedReadModelMetadata`, `DashboardPanelScopeSummary`, `ReadinessEndpointScopeSummary`, missing-scope warnings, role hints, and redaction labels.
 - Tenant Scope Enforcement v1 partial helper metadata: `TenantScopeEnforcementDecision`, `TenantScopeEnforcementMode`, `TenantScopeMismatch`, and `TenantScopeEnforcementService` for deterministic scope comparison and representative dashboard/readiness warnings.
+- Registry Tenant Scope Enforcement v1 representative registry scope decisions for skills, harnesses, instructions, packages, resolver results, approval queues, audit/readiness, and mutation scope checks.
+- Registry Signed Package / Artifact Trust v1 uses the same request/resource scope vocabulary for attribution metadata on trust decisions, but it does not enforce production tenant isolation or real artifact signing.
 - Policy Bundle Runtime PoC Planning v0 input contract and domain mappings consume this scope vocabulary as future policy input metadata only. Policy Runtime Shadow Evaluation Planning v1 keeps those scope fields in the future candidate comparison plan while leaving production tenant enforcement unimplemented.
 
 ## What v1 Does Not Implement
@@ -125,6 +128,7 @@ Tenant Scope Enforcement v1 can attach safe scope-decision summaries to `PolicyS
 - MCP invocation audit and results include tool scope metadata where migrated.
 - Security credential resolution includes SecretRef scope binding metadata where migrated.
 - Registry/Governance mutation and apply-gate audit metadata can include registry package scope metadata.
+- Registry Tenant Scope Enforcement v1 attaches `RegistryScopeDecision` and summary metadata to registry resolver/readiness/dashboard surfaces while preserving lifecycle, approval, eval, checksum, semver, policy, and governance gates.
 - Observability normalized envelopes preserve scope metadata from source events.
 - Dashboard and readiness expose safe scope summaries without filtering production data.
 
@@ -180,7 +184,7 @@ The planning, implementation, and partial enforcement summaries explicitly repor
 - No production dashboard/readiness/audit filtering.
 - No production provider/model budget enforcement by tenant.
 - No production SecretRef tenant isolation.
-- No artifact registry package scope enforcement or signing.
+- No production artifact registry package scope enforcement, real signing, or real signature verification.
 - No real service-account credential issuance.
 - No production-grade tenant scope enforcement; v1 is partial representative scaffolding only.
 

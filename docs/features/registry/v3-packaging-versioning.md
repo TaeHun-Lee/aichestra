@@ -14,7 +14,7 @@ Phase 3 v3 adds local-only registry packaging and versioning:
 - Structural package diff summaries.
 - API and dashboard visibility for package manifests, version resolution, and diffs.
 
-This is still mock-first. It does not add a real artifact registry, signed artifacts, hosted package publishing, or external network calls.
+This is still mock-first. Registry Signed Package / Artifact Trust v1 now adds digest/mock-signature/provenance metadata, but v3 packaging still does not add real cryptographic signing, real signature verification, a real artifact registry, hosted package publishing, or external network calls.
 
 Registry/Governance RequestContext Migration v1 later adds optional RequestContext/AuthContext attribution to migrated registry mutation, package, resolver, audit, revision, and eval-result paths without changing package safety gates.
 
@@ -61,6 +61,7 @@ Import behavior:
 
 - Accepts local JSON payloads only.
 - Validates manifest shape, entries, checksums, and supported kinds.
+- Evaluates local artifact trust metadata when Registry Artifact Trust v1 is wired, without real signing, verification, or remote registry calls.
 - Detects duplicate name/version conflicts.
 - Supports `create_only` import mode.
 - Supports `replace_draft_only` import mode for draft registry entries.
@@ -186,9 +187,9 @@ v3 tests cover:
 
 ## Known Limitations
 
-- No signed artifacts.
+- No real signed artifact verification or full package signing.
 - No real artifact registry integration.
-- No artifact provenance or SBOM.
+- No production artifact provenance attestation or SBOM.
 - No package publishing workflow.
 - No full dependency solver.
 - No semver prerelease/build metadata support.
@@ -200,4 +201,4 @@ v3 tests cover:
 
 ## Next Recommended Task
 
-Recommended next task: OIDC Provider Skeleton Hardening v1, or Policy Runtime Shadow Evaluator Skeleton v1.
+Recommended next task: OIDC Provider Skeleton Hardening v1, Policy Runtime Shadow Evaluator Skeleton v1, or Eval Suite Execution Harness v1. Skill / Harness Compatibility Matrix v1 and Registry Signed Package / Artifact Trust v1 are now implemented as registry metadata layers that preserve the resolver lifecycle/approval/eval/checksum/semver/policy gates; see [docs/features/registry-compatibility-matrix/v1.md](../registry-compatibility-matrix/v1.md) and [docs/features/registry-artifact-trust/v1.md](../registry-artifact-trust/v1.md).
