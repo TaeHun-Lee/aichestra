@@ -1,4 +1,5 @@
 export * from "./conflicts/interfaces.ts";
+export * from "./conflicts/merge-queue-policy.ts";
 export * from "./conflicts/scoring.ts";
 export * from "./domain/errors.ts";
 export * from "./domain/events.ts";

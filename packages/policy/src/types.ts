@@ -34,6 +34,7 @@ export type PolicyResourceKind =
   | "repo"
   | "branch"
   | "pull_request"
+  | "merge_queue"
   | "git_operation"
   | "github_app"
   | "github_app_installation"
@@ -122,6 +123,11 @@ export type PolicyAction =
   | "git.merge"
   | "git.rebase"
   | "git.branch.delete"
+  | "merge_queue.read"
+  | "merge_queue.evaluate"
+  | "merge_queue.hold"
+  | "merge_queue.release_hold"
+  | "merge_queue.merge_execute_future"
   | "github_app.configure"
   | "github_app.installation.use"
   | "github_app.repo_grant.use"
@@ -163,11 +169,15 @@ export type PolicyAction =
   | "local_agent.session.approve"
   | "local_agent.session.expire"
   | "local_cli.invoke"
+  | "local_cli.template.read"
   | "local_cli.template.use"
+  | "local_cli.execute"
   | "local_cli.file_write"
   | "local_cli.shell_execution"
   | "local_cli.network_access"
   | "local_cli.danger_full_access"
+  | "local_cli.credential_cache.read"
+  | "local_cli.secret.forward"
   | "credential.cache.read"
   | "credential.cache.upload"
   | "secret.metadata.read"
@@ -333,6 +343,11 @@ const policyActions = new Set<PolicyAction>([
   "git.merge",
   "git.rebase",
   "git.branch.delete",
+  "merge_queue.read",
+  "merge_queue.evaluate",
+  "merge_queue.hold",
+  "merge_queue.release_hold",
+  "merge_queue.merge_execute_future",
   "github_app.configure",
   "github_app.installation.use",
   "github_app.repo_grant.use",
@@ -374,11 +389,15 @@ const policyActions = new Set<PolicyAction>([
   "local_agent.session.approve",
   "local_agent.session.expire",
   "local_cli.invoke",
+  "local_cli.template.read",
   "local_cli.template.use",
+  "local_cli.execute",
   "local_cli.file_write",
   "local_cli.shell_execution",
   "local_cli.network_access",
   "local_cli.danger_full_access",
+  "local_cli.credential_cache.read",
+  "local_cli.secret.forward",
   "credential.cache.read",
   "credential.cache.upload",
   "secret.metadata.read",
@@ -415,6 +434,7 @@ const policyResourceKinds = new Set<PolicyResourceKind>([
   "repo",
   "branch",
   "pull_request",
+  "merge_queue",
   "git_operation",
   "github_app",
   "github_app_installation",

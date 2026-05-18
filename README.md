@@ -25,23 +25,31 @@ Policy Runtime Shadow Evaluation Planning v1 is implemented as planning/readines
 
 Production Auth Provider Skeleton v1 is implemented as disabled/readiness-only provider boundary metadata. It keeps `MockAuthProvider` as the active default, adds disabled future OIDC/SAML/SCIM/vendor/custom provider skeletons, provider selection status, future session/token and identity-mapping plans, `/readiness/auth-providers/*`, `/dashboard/auth-providers`, and safe `/health` metadata. It does not validate tokens, parse cookies or Authorization headers as auth, issue sessions/JWTs/API keys/service-account credentials, sync SCIM users, call external identity providers, or expose secrets/env values.
 
+Agent Workspace Lifecycle v2 is implemented as mock-first per-agent-run workspace metadata. It adds workspace leases, lifecycle events, cleanup decisions, branch lease linkage, API/dashboard visibility, path redaction, and explicit future Git worktree modeling. It does not run `git worktree`, switch branches, delete user workspaces, perform remote Git operations, execute vendor CLIs, call LLM providers, or implement production workspace cleanup.
+
+Multi-user / Multi-session Branch Orchestrator v2 is implemented as mock-first branch allocation and ownership metadata. It adds deterministic safe `aichestra/` branch names, branch ownership records, BranchLease and optional WorkspaceLease linkage, branch collision detection, base branch drift metadata, API/dashboard visibility, and no-destructive-Git status. It does not create real branches, switch branches, mutate workspaces, run fetch/push/merge/rebase, call providers, execute agents, or expose secrets/env values.
+
+Cross-session File Lease / Edit Intent Graph v1 is implemented as metadata-only concurrency modeling. It adds file leases, edit intents, graph nodes/edges, overlap assessments, API/dashboard visibility, path/secret redaction, and explicit no-file-lock/no-source-mutation status. Merge Queue Policy v2 consumes edit overlap summaries as readiness evidence. Cross-session File Lease / Edit Intent Graph v1 does not lock real files, modify source files, create branches or worktrees, run Git, execute vendor CLIs, call LLM providers, or execute merge policy.
+
+Merge Queue Policy v2 is implemented as a mock-first readiness layer. It evaluates merge queue entries using branch lease, workspace lifecycle, coordination/edit-intent overlap, conflict risk, dry-run, validation, approval, and Policy-as-code evidence; records readiness decisions and holds; ranks queue entries; and exposes API/dashboard visibility. It does not execute merges, auto-merge, fetch, push, rebase, force-push, delete branches, update remote PRs, call providers, call LLMs, run vendor CLIs, mutate user workspaces, or expose secrets/env values.
+
 Design and work-order source documents live under `docs/briefs/`; the canonical bootstrap document is `docs/briefs/AICHESTRA_BOOTSTRAP.md`. See `docs/README.md` for the full documentation layout.
 
 ## Architecture
 
-- `packages/core`: domain models, status transitions, validation schemas, seed data, instruction resolution, Conflict Manager scoring, and merge simulation interfaces.
-- `packages/git-adapter`: Git provider behavior, mock branch/PR creation, conflict risk, local-only dry-run merge simulation, gated GitHub operations, disabled-by-default webhook receive, PR/branch sync read models, and GitHub App Controlled Implementation v1 runtime/status boundaries.
+- `packages/core`: domain models, status transitions, validation schemas, seed data, instruction resolution, Conflict Manager scoring, merge simulation interfaces, and Merge Queue Policy v2 decision/hold/ranking service.
+- `packages/git-adapter`: Git provider behavior, mock branch/PR creation, conflict risk, local-only dry-run merge simulation, gated GitHub operations, disabled-by-default webhook receive, PR/branch sync read models, GitHub App Controlled Implementation v1 runtime/status boundaries, and Multi-user / Multi-session Branch Orchestrator v2 metadata-only branch allocation and ownership services.
 - `packages/improvement`: Phase 4 Preparation, Auto-improvement v0, and Governance v1 models, repository interfaces, in-memory repositories, DTOs, deterministic clustering, candidates, draft proposals, draft registry changes, readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, and auto-improvement safety policies.
 - `packages/llm-gateway`: provider-neutral LLM interfaces, mock model provider behavior, gated OpenAI-compatible HTTP provider path, LLM Gateway v2 route/fallback/routing-decision read models, disabled provider skeletons, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 catalog/auth/credential/token/adapter/local-agent boundary skeletons, and Local Agent Protocol v1 mock channels/fixture daemon/compatibility/streaming models.
 - `packages/mcp-gateway`: MCP Gateway v0 server/tool catalog models, deterministic `MockMCPGateway`, disabled real MCP transport skeleton, invocation/audit repositories, DTOs, and Auth/RBAC, Policy, Security redaction, and Secrets/Sandbox integration.
 - `packages/deployment-readiness`: Production Deployment Readiness Planning v0 read-only deployment profiles, readiness checks, production risks, GitHub App / Production Webhook Hardening Planning v0 models, Persistent DB Production Operations v1 readiness models, Secret Backend Migration Planning v0 readiness models, Production Secret Backend Implementation Option Decision v0 readiness/decision models, Production Auth/RBAC v1 planning readiness models, Production Auth Provider Skeleton v1 provider/readiness/session-token/identity-mapping summary models, Policy Bundle / OPA-Cedar Planning v0 readiness models, Policy Runtime Shadow Evaluation Planning v1 readiness models, Staging Deployment Profile v0 readiness models, Staging Deployment Dry-run Profile v0 readiness aggregation models, Staging Release Candidate Checklist v0 readiness models, Staging Deployment Execution Plan v0 and Human Signoff Pack v0 readiness models, Staging CI/CD Pipeline Planning v0 readiness models, GitHub App integration-test profile v1 readiness models, LLM Gateway integration-test profile v1 readiness models, Vault Integration-Test Profile v1 readiness models, Dashboard/Readiness Tenant Scope Planning v1 and Implementation v1 models, DTOs, scope summaries, and seeded planning summary models.
-- `packages/policy`: provider-neutral Policy-as-code Skeleton v0 models, static/mock policy engine, default restrictive rules, RequestContext-enriched policy subjects, `PolicyResourceScope` helpers, decision audit, DTOs, and policy service boundaries.
+- `packages/policy`: provider-neutral Policy-as-code Skeleton v0 models, static/mock policy engine, default restrictive rules, merge queue read/evaluate/hold/release/future-execution gates, RequestContext-enriched policy subjects, `PolicyResourceScope` helpers, decision audit, DTOs, and policy service boundaries.
 - `packages/auth`: Production Auth/RBAC Planning v0 provider-neutral identity/RBAC models, deterministic MockAuthProvider, Production Auth Provider Skeleton v1 disabled future provider classes and provider registry, AuthorizationService, RequestContext Propagation v1 request/correlation helpers, Service Account Actor Boundary v1 mock catalog/context factory, Tenant/Repo/Provider Scope Model v1 mock scope catalog and `ScopeContextFactory`, Tenant Scope Enforcement v1 decision/mode/mismatch models and helper service, and sanitized auth audit events.
 - `packages/deployment-readiness`: Production Deployment Readiness Planning v0 read-only deployment profiles, readiness checks, production risks, GitHub App / Production Webhook Hardening Planning v0 models, Persistent DB Production Operations v1 readiness models, Secret Backend Migration Planning v0 readiness models, Production Secret Backend Implementation Option Decision v0 readiness/decision models, Production Auth/RBAC v1 planning readiness models, Policy Bundle / OPA-Cedar Planning v0 readiness models, Policy Bundle Runtime PoC Planning v0 readiness models, Policy Runtime Shadow Evaluation Planning v1 readiness models, Staging Deployment Profile v0 readiness models, Staging Deployment Dry-run Profile v0 readiness aggregation models, Staging Release Candidate Checklist v0 readiness models, Staging Deployment Execution Plan v0 and Human Signoff Pack v0 readiness models, Staging CI/CD Pipeline Planning v0 readiness models, GitHub App integration-test profile v1 readiness models, LLM Gateway integration-test profile v1 readiness models, Vault Integration-Test Profile v1 readiness models, DTOs, and seeded planning summary models.
 - `packages/policy`: provider-neutral Policy-as-code Skeleton v0 models, static/mock policy engine, default restrictive rules, RequestContext-enriched policy subjects, `PolicyResourceScope` helpers, Policy Runtime PoC Golden Test Harness v1 fixtures/harness, decision audit, DTOs, and policy service boundaries. Policy Runtime Shadow Evaluation Planning v1 remains in deployment-readiness/read-model metadata only; no shadow evaluator or candidate runtime is implemented.
 - `packages/auth`: Production Auth/RBAC Planning v0 provider-neutral identity/RBAC models, deterministic MockAuthProvider, disabled future auth provider placeholders, AuthorizationService, RequestContext Propagation v1 request/correlation helpers, Service Account Actor Boundary v1 mock catalog/context factory, Tenant/Repo/Provider Scope Model v1 mock scope catalog and `ScopeContextFactory`, and sanitized auth audit events.
 - `packages/registry`: Skill, Harness, and Instruction registry interfaces, repository boundaries, DTO mappers, audit logs, history, rollback, approval queue read models, local eval result attachment, checksum verification, mock RBAC, local package manifests, import/export, semver range resolution v0, package diffs, validation helpers, and deterministic resolver.
-- `packages/runner`: provider-neutral agent runner contracts, deterministic MockAgentRunner, disabled-by-default LocalAgentRunner, harness execution policy, instruction assembly, in-memory runner repositories, runner DTOs/services, and mock test runner contracts.
+- `packages/runner`: provider-neutral agent runner contracts, deterministic MockAgentRunner, disabled-by-default LocalAgentRunner, harness execution policy, instruction assembly, in-memory runner repositories, Agent Workspace Lifecycle v2 workspace leases/events/cleanup decisions, Multi-session Agent Run Coordination v1 session/group/overlap/concurrency policy metadata, Cross-session File Lease / Edit Intent Graph v1 file leases/edit intents/graph/overlap metadata, runner DTOs/services, and mock test runner contracts.
 - `packages/security`: Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, SecretRef-backed Provider Credentials v1 env provider, Vault-backed Secret Backend v1 gated provider/client boundary, credential manager/handles/resolution audit, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, DTOs, and in-memory repositories.
 - `packages/observability`: Observability / Audit Retention v0 common audit envelope, retention/redaction classes, audit sanitizer, source normalization, read-only retention policies, metric snapshots, trace skeletons, and no-external-export observability read models.
 - `packages/adapters`: compatibility aggregate for shared adapter contracts and mocks.
@@ -175,6 +183,10 @@ curl http://localhost:3000/providers
 curl http://localhost:3000/providers/claude-code-local
 curl http://localhost:3000/providers/auth-types
 curl http://localhost:3000/providers/local-cli/templates
+curl http://localhost:3000/providers/local-cli/templates/codex-cli-template-v1
+curl http://localhost:3000/providers/local-cli/compatibility
+curl http://localhost:3000/providers/local-cli/security-constraints
+curl http://localhost:3000/providers/local-cli/readiness
 curl -X POST http://localhost:3000/providers/validate \
   -H "Content-Type: application/json" \
   -d '{ "providerId": "claude-code-local" }'
@@ -185,6 +197,8 @@ curl http://localhost:3000/providers/audit
 ```
 
 Local CLI provider entries require Local Agent Protocol coordination and use `external_cli_session` with `credentialAccess = never_read_tokens`. Aichestra does not read or upload vendor credential caches such as `~/.codex/auth.json`, `~/.claude`, or Google credential caches.
+
+Local CLI Provider Templates v1 is implemented as metadata only. It adds template/readiness coverage for Claude Code, OpenAI Codex CLI, Gemini CLI, Aider, and a custom local CLI provider, plus compatibility rules, parser profiles, security constraints, and dashboard visibility. All templates remain `template_only`, Local Agent required, direct execution disabled, PTY unsupported, credential-cache reads denied, and secret forwarding denied. This does not implement vendor CLI execution or a production Local Agent daemon.
 
 Local Agent Protocol v1 adds mock-first coordination for future user-machine Local Agents. It registers agent metadata, models mock signed channels, fixture daemon simulation, capability advertisements, compatibility checks, consent and invocation envelopes, records normalized redacted stream events, and uses only in-memory mock transport:
 
@@ -639,6 +653,48 @@ AICHESTRA_AGENT_MAX_STDOUT_BYTES=4096
 AICHESTRA_AGENT_MAX_STDERR_BYTES=4096
 ```
 
+Multi-session Agent Run Coordination v1 is metadata-only and mock-first. It coordinates concurrent agent sessions by repo/base branch/task/user/source scope, detects same workspace, same branch, same file, same directory, missing target-file, and base-branch drift overlap, and reports safe recommendations without executing agents, creating branches/worktrees, switching branches, calling providers, or reading secrets:
+
+Cross-session File Lease / Edit Intent Graph v1 adds metadata-only file leases and edit intents for earlier concurrency visibility:
+
+```bash
+curl http://localhost:3000/agents/edit-intent-summary
+curl http://localhost:3000/agents/edit-intent-graph?repoId=repo_demo_backend
+curl http://localhost:3000/agents/edit-overlaps?repoId=repo_demo_backend
+curl http://localhost:3000/agents/file-leases?repoId=repo_demo_backend
+```
+
+The endpoints never lock files, mutate source files, run Git, call providers, or expose secrets/env values.
+
+```bash
+curl -X POST http://localhost:3000/agents/sessions \
+  -H "Content-Type: application/json" \
+  -d '{ "userId": "user_demo_admin", "agentRunId": "agentrun_demo_a", "repoId": "repo_demo_backend", "baseBranch": "main", "branchName": "codex/demo-a", "targetFiles": ["src/auth/session.ts"] }'
+curl http://localhost:3000/agents/sessions
+curl -X POST http://localhost:3000/agents/sessions/<session_id>/target-files \
+  -H "Content-Type: application/json" \
+  -d '{ "files": ["src/auth/session.ts"] }'
+curl -X POST http://localhost:3000/agents/sessions/<session_id>/ready-for-review
+curl -X POST http://localhost:3000/agents/sessions/<session_id>/ready-for-merge
+curl http://localhost:3000/agents/coordination/groups
+curl http://localhost:3000/agents/coordination/overlaps
+curl http://localhost:3000/agents/coordination/summary
+curl http://localhost:3000/agents/coordination/policies
+```
+
+Multi-user / Multi-session Branch Orchestrator v2 allocates safe branch ownership metadata for concurrent users/sessions. It requires safe branch prefixes, blocks active branch collisions and shared workspace leases, links `BranchLease` and optional `WorkspaceLease` metadata, models base branch drift, and never creates real Git branches or mutates workspaces:
+
+```bash
+curl -X POST http://localhost:3000/git/branches/orchestrate \
+  -H "Content-Type: application/json" \
+  -d '{ "userId": "user_demo_admin", "agentRunId": "agentrun_demo_a", "taskId": "task_demo", "taskRunId": "taskrun_demo", "sessionId": "session_demo_a", "repoId": "repo_demo_backend", "baseBranch": "main", "targetFiles": ["src/auth/session.ts"] }'
+curl http://localhost:3000/git/branches/orchestration
+curl http://localhost:3000/git/branches/orchestration/summary
+curl http://localhost:3000/git/branches/orchestration/policies
+curl http://localhost:3000/git/branches/ownership
+curl http://localhost:3000/git/branches/drift
+```
+
 Create a task:
 
 ```bash
@@ -692,6 +748,25 @@ curl -X POST http://localhost:3000/merge-simulations \
   }'
 curl -X POST http://localhost:3000/merge-queue/<entry_id>/mark-merged
 ```
+
+`mark-merged` updates mock queue state only. It does not run Git merge, update a provider PR, push, rebase, or delete branches.
+
+Inspect Merge Queue Policy v2 readiness metadata:
+
+```bash
+curl http://localhost:3000/git/merge-queue/policy
+curl http://localhost:3000/git/merge-queue/summary
+curl http://localhost:3000/git/merge-queue/decisions
+curl http://localhost:3000/git/merge-queue/holds
+curl -X POST http://localhost:3000/git/merge-queue/<entry_id>/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{ "validationStatus": "passed", "approvalStatus": "approved" }'
+curl -X POST http://localhost:3000/git/merge-queue/<entry_id>/hold \
+  -H "Content-Type: application/json" \
+  -d '{ "holdKind": "human_review_required", "severity": "warning", "reason": "Reviewer requested release sequencing check." }'
+```
+
+These policy routes are metadata-only. They record decisions, holds, warnings, required actions, and priority order while keeping merge execution and auto-merge disabled.
 
 Inspect Registry v3 state:
 
@@ -897,8 +972,9 @@ pnpm build
 
 Optional Postgres repository contract tests are skipped unless `AICHESTRA_TEST_DATABASE_URL` is set.
 
-Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v1/v2 provider/catalog/routing/fallback/virtual-key/budget/usage/API/OpenAI-compatible mocked HTTP behavior, MCP Gateway v0 catalog/invocation/policy/auth/API/health/dashboard/no-secret behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, API AuthContext Middleware Skeleton v1 ingress/source-mode/safe-summary/no-token behavior, Service Account Actor Boundary v1 catalog/context-factory/policy/audit/no-credential behavior, Registry/Governance RequestContext Migration v1 registry/governance API/service/audit/apply-gate/no-secret behavior, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Policy Bundle / OPA-Cedar Planning v0 readiness models/API/health/dashboard/no-dynamic-execution/no-secret behavior, Policy Runtime Shadow Evaluation Planning v1 models/API/health/dashboard/no-candidate-runtime/no-enforcement-change/no-dynamic-execution/no-secret/no-env behavior, Production Auth/RBAC Planning v0 domain/provider/authorization/API/health/dashboard/no-secret behavior, Production Auth/RBAC v1 Planning readiness models/API/health/dashboard/no-token/no-session behavior, Production Auth Provider Skeleton v1 provider registry/disabled-provider/API/health/dashboard/no-token/no-session/no-cookie/no-env behavior, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, Vault-backed Secret Backend v1 config/SecretRef validation/mock client... [truncated]
-Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v1/v2 provider/catalog/routing/fallback/virtual-key/budget/usage/API/OpenAI-compatible mocked HTTP behavior, MCP Gateway v0 catalog/invocation/policy/auth/API/health/dashboard/no-secret behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, API health, API task execution, API AuthContext Middleware Skeleton v1 ingress/source-mode/safe-summary/no-token behavior, Service Account Actor Boundary v1 catalog/context-factory/policy/audit/no-credential behavior, Registry/Governance RequestContext Migration v1 registry/governance API/service/audit/apply-gate/no-secret behavior, Local Agent Runner v1 mock/local safety behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Policy Bundle / OPA-Cedar Planning v0 readiness models/API/health/dashboard/no-dynamic-execution/no-secret behavior, Policy Bundle Runtime PoC Planning v0 options/input-contract/domain-mapping/golden-case/readiness/API/health/dashboard/no-runtime-execution/no-secret behavior, Policy Runtime PoC Golden Test Harness v1 fixture validation/StaticPolicyEngine matching/API/dashboard/no-dynamic-execution/no-secret behavior, Policy Runtime Shadow Evaluation Planning v1 plan/comparison/mismatch/API/dashboard/no-enforcement-change/no-dynamic-execution/no-secret behavior, Production Auth/RBAC Planning v0 domain/provider/authorization/API/health/dashboard/no-secret behavior, Production Auth/RBAC v1 Planning readiness models/API/health/dashboard/no-token/no-session behavior, Secr... [truncated]
+Validation covers lint, TypeScript checking, tests, and a scaffold build smoke check. Tests cover task status transitions, repeated run conflict behavior, instruction precedence, mock LLM usage metadata, LLM Gateway v1/v2 provider/catalog/routing/fallback/virtual-key/budget/usage/API/OpenAI-compatible mocked HTTP behavior, MCP Gateway v0 catalog/invocation/policy/auth/API/health/dashboard/no-secret behavior, Local Agent Protocol v0 and v1 registration/consent/invocation/mock transport/channel/fixture daemon/compatibility/stream/API/provider integration behavior, mock Git conflict risk, Conflict Manager scoring, merge simulation, Merge Queue Policy v2 readiness/hold/ranking/API/dashboard/no-merge-execution behavior, API health, API task execution, API AuthContext Middleware Skeleton v1 ingress/source-mode/safe-summary/no-token behavior, Service Account Actor Boundary v1 catalog/context-factory/policy/audit/no-credential behavior, Registry/Governance RequestContext Migration v1 registry/governance API/service/audit/apply-gate/no-secret behavior, Local Agent Runner v1 mock/local safety behavior, Agent Workspace Lifecycle v2 lease/cleanup metadata, Multi-session Agent Run Coordination v1 session registration/grouping/overlap detection/API/dashboard/no-execution behavior, Multi-user / Multi-session Branch Orchestrator v2 branch naming/ownership/collision/drift/API/dashboard/no-destructive-Git behavior, Cross-session File Lease / Edit Intent Graph v1 intent/lease/graph/overlap/API/dashboard/no-lock/no-source-mutation behavior, command executor blocking and fixture execution, workspace validation/cleanup, harness policy, instruction assembly, runner API behavior, Policy-as-code v0 static rules/audit/API/service integrations, Policy Bundle / OPA-Cedar Planning v0 readiness models/API/health/dashboard/no-dynamic-execution/no-secret behavior, Policy Runtime Shadow Evaluation Planning v1 models/API/health/dashboard/no-candidate-runtime/no-enforcement-change/no-dynamic-execution/no-secret/no-env behavior, Production Auth/RBAC Planning v0 domain/provider/authorization/API/health/dashboard/no-secret behavior, Production Auth/RBAC v1 Planning readiness models/API/health/dashboard/no-token/no-session behavior, Production Auth Provider Skeleton v1 provider registry/disabled-provider/API/health/dashboard/no-token/no-session/no-cookie/no-env behavior, Secrets and Sandbox v0 secret/sandbox/network/redaction/API/dashboard behavior, Vault-backed Secret Backend v1 config/SecretRef validation/mock client/provider/CredentialManager/API/health/dashboard/no-token/skipped-live-test behavior, Production Secret Backend Implementation Option Decision v0 decision/criteria/score/scope/provider-mapping/risk/API/health/dashboard/no-backend-call/no-secret/no-env behavior, Observability / Audit Retention v0 envelope/sanitizer/source-normalization/retention/API/dashboard/metric/trace/no-secret behavior, GitHub App / Production Webhook Hardening Planning v0 permission/event/replay/dead-letter/API/dashboard/no-secret behavior, GitHub App Controlled Implementation v1 config/token-provider/SecretRef/Auth/RBAC/Policy/API/health/dashboard/no-secret behavior, GitHub App integration-test profile v1 readiness models/API/health/dashboard/skipped-live-test/no-secret/no-env/no-destructive-git behavior, Persistent DB Production Operations v1 migration/index/retention/webhook/API/health/dashboard/no-DB-url behavior, Staging Deployment Profile v0 profile/gates/checks/promotion/rollback/API/health/dashboard/no-secret/no-env behavior, Staging Deployment Dry-run Profile v0 models/aggregation/API/health/dashboard/no-deployment/no-external-call/no-secret/no-env behavior, Staging Release Candidate Checklist v0 checklist/gate/blocker/signoff/release-note/rollback/report/API/health/dashboard/no-release/no-deployment/no-external-call/no-secret/no-env behavior, Staging Deployment Execution Plan v0 and Human Signoff Pack v0 plan/step/gate/go-no-go/rollback/signoff-pack/API/health/dashboard/no-release/no-deployment/no-external-call/no-secret/no-env behavior, Staging CI/CD Pipeline Planning v0 profiles/jobs/integration-gates/checks/risks/API/health/dashboard/no-secret/no-env behavior, Dashboard API-backed Read Model v0 endpoints/provider/fallback/no-secret behavior, registry APIs, registry DTOs, repository boundaries, mutation audit logs, approval/eval gates, checksum verification, registry history, rollback, approval queue read models, local eval result attachment, mock RBAC, registry package manifests, local import/export, dry-run import, semver range resolution v0, dependency warnings/errors, package diffs, registry resolver behavior, Phase 4 Preparation signals/clusters/candidates/proposals/eval requirements/canary plans/safety policy APIs, Phase 4 Auto-improvement v0 analyses/draft changes/readiness checks, Phase 4 Governance v1 review queues/decisions/eval runs/canary readiness/apply gates/audit events, storage provider repository contracts, optional Postgres repository contracts, Real Git Adapter v0/v1/v2 provider/service/API/webhook/sync behavior, mock workflow success, policy denial, usage attribution, dashboard assumptions, and Skill/Harness/Instruction separation.
+
+Validation also covers Policy Bundle Runtime PoC Planning v0, Policy Runtime PoC Golden Test Harness v1, and OIDC Provider Skeleton Hardening v1 as readiness-only/offline safety surfaces without dynamic policy runtime execution or real identity-provider calls.
 
 ## First Vertical Slice
 
@@ -912,10 +988,14 @@ User creates a task
 -> mock branch is prepared
 -> mock agent generates changed files and diff summary
 -> Local Agent Runner v1 can separately record mock runner metadata, instruction assembly, controlled fixture command results, workspace status, and LLM usage linkage
+-> Multi-session Agent Run Coordination v1 can separately record session/branch/workspace/file overlap metadata before future execution
+-> Multi-user / Multi-session Branch Orchestrator v2 can separately allocate safe branch ownership metadata before future Git execution
+-> Cross-session File Lease / Edit Intent Graph v1 can separately record file lease/edit intent graph metadata before future execution
 -> mock tests pass
 -> mock dry-run merge simulation records clean/conflict evidence
 -> mock PR is created
 -> merge queue entry is created from active lease conflict risk and simulation status
+-> Merge Queue Policy v2 records readiness decision, holds, ranking metadata, and disabled merge execution status
 -> usage ledger records mock tokens/cost
 -> task reaches completed
 -> web dashboard consumes read models and shows status, mock PR, diff summary, dry-run status, and mock cost
@@ -928,6 +1008,7 @@ Included:
 - Task creation and state tracking.
 - Mock Git branch/PR management.
 - Conflict Manager v1 active leases, file-overlap risk scoring, local/mock dry-run merge simulation, and mock merge queue.
+- Merge Queue Policy v2 metadata-only policy models, readiness decisions, holds, deterministic ranking, API/dashboard visibility, Policy-as-code gates, and explicit disabled merge execution/auto-merge status.
 - Mock LLM usage tracking.
 - Skill, Harness, and Instruction Registry Packaging & Versioning v3 with exact refs, semver range resolution v0, package manifests, local import/export, package diffs, repository boundaries, in-memory and file-backed local storage, stable DTOs, audit logs, append-only history, rollback, approval/eval gates, approval queue read models, local eval result attachment, mock mutation RBAC, local checksum verification, APIs, resolver-backed task selection, TaskRun registry refs, and dashboard visibility.
 - Phase 4 Preparation foundations, Auto-improvement v0, and Governance v1 for failure signals, deterministic clusters, improvement candidates, draft proposal metadata, draft registry changes, readiness blockers, proposal review queues, governance decisions, proposal eval run metadata, canary readiness, apply gates, governance audit events, eval requirements, canary rollout plan metadata, safety policy guardrails, APIs, tests, and dashboard visibility.
@@ -949,10 +1030,11 @@ Included:
 - Persistent DB v1 opt-in Postgres storage for Task, TaskRun, UsageLedger, BranchLease, MergeSimulationResult, MergeQueueEntry, Skill, Harness, Instruction, registry audit/history, registry packages, and registry eval results.
 - Real Integration Foundation v0 storage provider abstraction, repository inventory, Postgres schema design, migration skeleton, auth/RBAC readiness, Real Git Adapter readiness, dashboard read model plan, and repository contract tests.
 - Real Git Adapter v2 provider boundary, deterministic MockGitProvider default, LocalGitProvider fixture-safe changed-file inspection, gated GitHubGitProvider, GitHubClient boundary, controlled GitHub branch/PR/changed-file operations, disabled-by-default GitHub webhook receiver, verifier interface, PR/branch sync read models, GitIntegrationService, `/git/*` API visibility, health metadata, Git/webhook audit events, and dashboard visibility.
+- Multi-user / Multi-session Branch Orchestrator v2 metadata-only branch allocation and ownership models, deterministic safe `aichestra/` branch naming policy, branch collision detection, same-workspace blockers, BranchLease and optional WorkspaceLease linkage, base drift metadata, `/git/branches/orchestrate`, `/git/branches/orchestration*`, `/git/branches/ownership`, `/git/branches/drift`, dashboard visibility, and tests without real branch creation, Git mutation, provider calls, or secret/env exposure.
 - LLM Gateway v2 provider boundary, deterministic MockLLMProvider default, gated OpenAI-compatible HTTP provider path, route/fallback/routing-decision repositories, provider health read models, disabled provider skeletons, model catalog, virtual model keys, budget checks, usage ledger integration, `/llm/*` API visibility, health metadata, LLM audit events, and dashboard visibility.
 - SecretRef-backed Provider Credentials v1 metadata-only SecretRef credential model, explicit env secret provider, Auth/RBAC and Policy-backed credential manager/handle/resolution results, GitHub token/webhook and LLM credential integration, `/security/credentials/*` API visibility, health/dashboard status, credential audit, and redaction tests.
 - Vault-backed Secret Backend v1 gated `provider: vault` SecretRef support, disabled/mock/gated HTTP Vault client boundary, KV v2 metadata mapping, Auth/RBAC and Policy checks before Vault reads, path allowlist checks, metadata-only leases/handles/audit, `/readiness/secrets/vault/*`, `/security/secrets/vault/*`, `/dashboard/vault-secret-backend`, safe health metadata, deterministic mock tests, and skipped-by-default live Vault test skeleton without making Vault default or production-ready.
-- Local Agent Runner v1 provider boundary, deterministic MockAgentRunner default, disabled-by-default LocalAgentRunner, controlled fixture command execution boundary, workspace validation, harness policy gates, instruction assembly, `/agents/*` API visibility, health metadata, command result/workspace read models, runner audit events, and dashboard visibility.
+- Local Agent Runner v1 provider boundary, deterministic MockAgentRunner default, disabled-by-default LocalAgentRunner, controlled fixture command execution boundary, workspace validation, Agent Workspace Lifecycle v2 lease/cleanup metadata, Multi-session Agent Run Coordination v1 session/group/overlap/concurrency policy metadata, Cross-session File Lease / Edit Intent Graph v1 file lease/edit intent graph metadata, harness policy gates, instruction assembly, `/agents/*` API visibility, health metadata, command result/workspace/coordination/edit-intent read models, runner audit events, and dashboard visibility.
 - Policy-as-code Skeleton v0 static policy engine, provider-neutral policy models, restrictive default rules, policy audit read model, `/policy/*` API visibility, health metadata, dashboard visibility, and Git/LLM/Runner/Registry service-boundary checks.
 - Policy Bundle / OPA-Cedar Planning v0 engine comparison, bundle schema, policy domain mapping, review workflow, test strategy, rollout/rollback, break-glass plan, `/readiness/policy-bundles/*`, `/dashboard/policy-bundles`, safe health metadata, and tests without OPA/Cedar/runtime bundle execution, external policy service calls, dynamic policy execution, or secrets.
 - Policy Runtime Shadow Evaluation Planning v1 architecture, candidate-runtime interface expectations, comparison rules, mismatch taxonomy, planning reports, readiness checks, rollout/rollback plan, `/readiness/policy-shadow/*`, `/dashboard/policy-shadow`, safe health metadata, and tests without shadow evaluator execution, candidate runtime execution, OPA/Cedar runtime, signed bundle verification runtime, external policy service calls, dynamic policy execution, enforcement changes, secrets, or env values.
@@ -966,6 +1048,7 @@ Included:
 - Staging Deployment Execution Plan v0 and Human Signoff Pack v0 read-only staging execution sequence, pre-deploy gate, optional integration decision, go/no-go, rollback, signoff pack, and summary models, `/readiness/staging-execution/*`, `/dashboard/staging-execution`, safe health metadata, and tests without release creation, Git tag creation, deployment, external provider calls, remote integration-test execution, secrets, env values, destructive Git, real MCP transport, vendor CLI execution, fake approval claims, staging-deployed claims, or production-ready claims.
 - Staging CI/CD Pipeline Planning v0 job matrix, optional integration-test gate policy, secret/env safety, artifact/report policy, staging promotion criteria, cleanup/rollback planning, read-only `/readiness/ci-cd/*`, `/dashboard/ci-cd`, safe health metadata, and tests without active workflows, deployment, default remote integrations, secrets, or env values.
 - Enterprise LLM Provider Abstraction v0 provider kind/auth models, provider catalog skeletons, CredentialManager/TokenResolver interfaces, blocked ProviderAdapter skeletons, Local CLI provider contract, Aichestra Local Agent boundary models, parser/redaction utilities, `/providers/*` API visibility, health metadata, provider audit events, dashboard visibility, and policy hooks.
+- Local CLI Provider Templates v1 metadata-only templates for Claude Code, OpenAI Codex CLI, Gemini CLI, Aider, and custom local CLI providers, with compatibility rules, parser profiles, security constraints, read-only API/dashboard readiness, and no vendor CLI execution.
 - Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, mock secret manager, sandbox profiles/sessions, network egress policy, redaction policy, security audit events, `/security/*` API visibility, health metadata, dashboard visibility, and runner sandbox-session policy hooks.
 - Aichestra Local Agent Protocol v1 registration/session/capability models, mock signed channel and handshake models, fixture daemon simulation, capability advertisements, CLI compatibility matrix, invocation envelopes, consent lifecycle, normalized stream event records, in-memory mock transport, `/local-agents/*` API visibility, health metadata, dashboard visibility, provider integration, protocol audit events, and redaction/policy/security gates.
 - MCP Gateway v0 mock server/tool catalog, deterministic `MockMCPGateway`, disabled real transport skeleton, `/mcp/*` API visibility, `/dashboard/mcp`, health metadata, MCP audit events, and Auth/RBAC, Policy, redaction, and no-secret gates.
@@ -979,7 +1062,7 @@ Deferred:
 - Local command execution outside controlled fixture/temp workspace mode.
 - BYOK, production provider API key storage, production credential issuance, real streaming, real billing, real non-OpenAI-compatible provider calls, and default remote LLM completions.
 - Real GitHub writes outside explicit gates, and all GitLab/Bitbucket writes.
-- Remote git fetch, push, provider merge, provider rebase, force push, branch deletion, public webhook exposure by default, production GitHub App rollout, GitHub App private key signing, real installation token exchange in default tests/runtime, or reviewer automation.
+- Remote git fetch, push, provider merge, provider rebase, force push, branch deletion, public webhook exposure by default, production GitHub App rollout, GitHub App private key signing, real installation token exchange in default tests/runtime, reviewer automation, distributed branch ownership locks, real branch orchestrator Git execution, or real merge queue execution.
 - Real Kubernetes, Temporal, MCP gateway, SSO, OAuth/OIDC/SAML login, SCIM, and billing.
 - Production-grade auth/RBAC implementation, real production auth providers, token validation, production sessions, API-key issuance, tenant isolation, and cloud secret storage.
 - Production OPA/Rego or Cedar integration, runtime policy bundle management, signed bundle verification runtime, shadow evaluator runtime, candidate runtime execution, policy rollout/rollback execution, production auth-backed policy subjects, and persistent policy audit repositories.
@@ -1003,10 +1086,11 @@ Deferred:
 
 1. Collect real human signoffs using Staging Human Signoff Pack v0, then run Staging Deployment Approval Audit v0 before any staging deployment execution.
 2. Production Auth Provider Skeleton v1 is implemented as disabled/readiness-only metadata; implement OIDC Provider Skeleton Hardening v1 or Policy Runtime Shadow Evaluator Skeleton v1 before any production login, policy runtime activation, or tenant enforcement expansion.
-2. Implement Policy Runtime Shadow Evaluator Skeleton v1 or Tenant Scope Enforcement v1, then harden production auth/RBAC with real IdP adapters, tenant scoping, durable auth repositories, and session/service-account design before any production login work.
-3. Harden audit retention/export with durable common audit storage, legal hold, tenant scoping, and secure export checkpoints before any production SIEM integration.
-4. Harden Local Agent Protocol persistence and consent UX before any real daemon or local CLI work.
-5. Harden LLM Gateway v2 with persistent route/model catalog/audit repositories and production secret backend planning before broader provider calls.
+3. Implement Policy Runtime Shadow Evaluator Skeleton v1 or Tenant Scope Enforcement v1, then harden production auth/RBAC with real IdP adapters, tenant scoping, durable auth repositories, and session/service-account design before any production login work.
+4. Harden audit retention/export with durable common audit storage, legal hold, tenant scoping, and secure export checkpoints before any production SIEM integration.
+5. Harden Local Agent Protocol persistence and consent UX before any real daemon or local CLI work.
+6. Harden LLM Gateway v2 with persistent route/model catalog/audit repositories and production secret backend planning before broader provider calls.
+7. Merge Queue Policy v2 is implemented as metadata-only readiness. Next, implement Conflict Resolution Assistant v1 or Merge Queue Live Integration-Test Profile v1 before any real merge execution work.
 
 ## OIDC Provider Skeleton Hardening
 

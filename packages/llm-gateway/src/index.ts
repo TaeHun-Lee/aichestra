@@ -9,4 +9,5 @@ export * from "./gateway.ts";
 export * from "./routing.ts";
 export * from "./dto.ts";
 export * from "./enterprise-providers.ts";
+export * from "./local-cli-provider-templates.ts";
 export * from "./local-agent-protocol.ts";

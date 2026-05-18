@@ -307,7 +307,7 @@ export type LocalAgentCapabilityAdvertisement = {
 export type LocalCliCompatibilityEntry = {
   id: string;
   vendor: "anthropic" | "openai" | "google" | "custom";
-  command: "claude" | "codex" | "gemini" | "custom";
+  command: "claude" | "codex" | "gemini" | "aider" | "custom";
   versionRange: string;
   providerTemplateId: string;
   parserMode: "raw" | "json" | "jsonl" | "ndjson";
@@ -2629,6 +2629,13 @@ export function seedLocalCliCompatibilityEntries(): LocalCliCompatibilityEntry[]
     entry({ id: "compat_codex_cli_headless", vendor: "openai", command: "codex", providerTemplateId: "codex-cli-headless", parserMode: "raw" }),
     entry({ id: "compat_codex_cli_jsonl", vendor: "openai", command: "codex", providerTemplateId: "codex-cli-jsonl", parserMode: "jsonl" }),
     entry({ id: "compat_gemini_cli_json", vendor: "google", command: "gemini", providerTemplateId: "gemini-cli-json", parserMode: "json" }),
+    entry({ id: "compat_aider_diff_summary", vendor: "custom", command: "aider", providerTemplateId: "aider-diff-summary", parserMode: "raw" }),
+    entry({ id: "compat_custom_local_cli_raw", vendor: "custom", command: "custom", providerTemplateId: "custom-local-cli-raw", parserMode: "raw" }),
+    entry({ id: "compat_v1_claude_code_template", vendor: "anthropic", command: "claude", providerTemplateId: "claude-code-template-v1", parserMode: "jsonl" }),
+    entry({ id: "compat_v1_codex_cli_template", vendor: "openai", command: "codex", providerTemplateId: "codex-cli-template-v1", parserMode: "jsonl" }),
+    entry({ id: "compat_v1_gemini_cli_template", vendor: "google", command: "gemini", providerTemplateId: "gemini-cli-template-v1", parserMode: "json" }),
+    entry({ id: "compat_v1_aider_template", vendor: "custom", command: "aider", providerTemplateId: "aider-template-v1", parserMode: "raw" }),
+    entry({ id: "compat_v1_custom_local_cli_template", vendor: "custom", command: "custom", providerTemplateId: "custom-local-cli-template-v1", parserMode: "raw" }),
     entry({
       id: "compat_pty_future_unstable",
       vendor: "custom",

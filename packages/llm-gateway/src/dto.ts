@@ -23,6 +23,13 @@ import type {
   TokenResolutionResult
 } from "./enterprise-providers.ts";
 import type {
+  LocalCliCompatibilityRule,
+  LocalCliParserProfile,
+  LocalCliProviderTemplate,
+  LocalCliProviderTemplateReadiness,
+  LocalCliSecurityConstraint
+} from "./local-cli-provider-templates.ts";
+import type {
   LocalAgentConsentDecision,
   LocalAgentConsentRequest,
   LocalAgentCapabilityAdvertisement,
@@ -189,6 +196,26 @@ export function localCliProviderConfigToDto(config: LocalCliProviderConfig) {
     ...config,
     auth: providerAuthToDto(config.auth)
   };
+}
+
+export function localCliProviderTemplateToDto(template: LocalCliProviderTemplate) {
+  return { ...template };
+}
+
+export function localCliCompatibilityRuleToDto(rule: LocalCliCompatibilityRule) {
+  return { ...rule };
+}
+
+export function localCliParserProfileToDto(profile: LocalCliParserProfile) {
+  return { ...profile };
+}
+
+export function localCliSecurityConstraintToDto(constraint: LocalCliSecurityConstraint) {
+  return { ...constraint };
+}
+
+export function localCliProviderTemplateReadinessToDto(readiness: LocalCliProviderTemplateReadiness) {
+  return { ...readiness };
 }
 
 export function localAgentDescriptorToDto(agent: LocalAgentDescriptor) {

@@ -169,6 +169,9 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       activeInstructions: numeric(sections.registry.summary.activeInstructions),
       gitRepos: sections.git.repos.length,
       gitPullRequests: sections.git.pullRequests.length,
+      branchOrchestratorOwnershipRecords: sections.git.branchOwnershipRecords.length,
+      branchOrchestratorBlockedCollisions: numeric(sections.git.branchOrchestratorSummary.blockedCollisions),
+      branchOrchestratorSameWorkspaceBlockers: numeric(sections.git.branchOrchestratorSummary.sameWorkspaceBlockers),
       githubAppReadinessBlockers: sections.githubApp.blockers.length,
       githubAppPermissions: sections.githubApp.permissionMatrix.length,
       githubWebhookAllowlistedEvents: sections.githubApp.webhookEventAllowlist.length,
@@ -181,6 +184,9 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
       llmIntegrationUnsafeGates: numeric(sections.llmIntegration.summary.unsafeGateCount),
       llmIntegrationTestCases: sections.llmIntegration.testCases.length,
       agentRuns: sections.agents.runs.length,
+      agentCoordinationSessions: sections.agents.coordinationSessions.length,
+      agentCoordinationOverlaps: sections.agents.sessionOverlaps.length,
+      agentCoordinationCriticalBlockers: numeric(sections.agents.coordinationSummary.criticalBlockers),
       policyRules: sections.policy.rules.length,
       policyBundleReadinessBlockers: sections.policyBundles.blockers.length,
       policyBundleDomainsMapped: sections.policyBundles.domainMappings.filter((mapping) => mapping.migrationStatus === "mapped").length,
@@ -255,14 +261,14 @@ function sourceOverview(source: DashboardReadModelSource, sections: DashboardRea
     }),
     sections: {
       tasks: { status: totalTasks > 0 ? "available" : "empty", count: totalTasks, notes: sections.tasks.warnings },
-      git: { status: "available", count: sections.git.repos.length, notes: ["Remote Git gates remain explicit and token-free."] },
+      git: { status: "available", count: sections.git.repos.length, notes: ["Remote Git gates remain explicit and token-free; branch orchestration is metadata-only."] },
       githubApp: { status: "available", count: sections.githubApp.blockers.length, notes: ["GitHub App and production webhook hardening are planning-only; no live App or token exchange is implemented."] },
       githubAppIntegration: { status: "available", count: sections.githubAppIntegration.testCases.length, notes: ["GitHub App integration-test profile v1 is skipped by default and never exposes private keys, installation tokens, or env values."] },
       conflicts: { status: sections.conflicts.branchLeases.length > 0 ? "available" : "empty", count: sections.conflicts.mergeQueue.length, notes: [] },
       registry: { status: "available", count: sections.registry.skills.length + sections.registry.harnesses.length + sections.registry.instructions.length, notes: [] },
       llm: { status: "available", count: sections.llm.models.length, notes: ["Remote LLM calls require explicit v1 gates and API key remains hidden."] },
       llmIntegration: { status: "available", count: sections.llmIntegration.testCases.length, notes: ["LLM Gateway integration-test profile v1 is skipped by default and never exposes API keys, env values, or raw provider responses."] },
-      agents: { status: "available", count: sections.agents.runs.length, notes: ["Runner command execution remains gated."] },
+      agents: { status: "available", count: sections.agents.runs.length, notes: ["Runner command execution remains gated; session coordination is metadata-only and mock-first."] },
       policy: { status: "available", count: sections.policy.rules.length, notes: [] },
       policyBundles: { status: "available", count: sections.policyBundles.blockers.length, notes: ["Policy Bundle / OPA-Cedar v0 is planning-only; StaticPolicyEngine remains the runtime and no external policy engine is enabled."] },
       policyRuntimePoc: { status: "available", count: sections.policyRuntimePoc.blockers.length, notes: ["Policy Bundle Runtime PoC Planning v0 and Shadow Evaluation Planning v1 are planning-only; StaticPolicyEngine remains source of truth and no runtime evaluator is implemented.", "Policy Runtime PoC Golden Test Harness v1 runs offline deterministic StaticPolicyEngine comparisons only."] },
@@ -358,6 +364,13 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     changedFiles: arrayValue(data.gitChangedFiles),
     changedFilesRefreshStatus: sanitizeDashboardObject({ lastResult: "none", refreshAuditEvents: 0 }),
     mergeQueueLinkage: arrayValue(data.gitMergeQueueLinkage),
+    branchOrchestrationRequests: arrayValue(data.branchOrchestrationRequests),
+    branchOrchestrationDecisions: arrayValue(data.branchOrchestrationDecisions),
+    branchOwnershipRecords: arrayValue(data.branchOwnershipRecords),
+    branchDriftStatuses: arrayValue(data.branchDriftStatuses),
+    branchNamingPolicies: arrayValue(data.branchNamingPolicies),
+    branchOrchestratorAuditEvents: arrayValue(data.branchOrchestratorAuditEvents),
+    branchOrchestratorSummary: sanitizeDashboardObject(data.branchOrchestratorSummary),
     auditEvents: arrayValue(data.gitAuditEvents),
     remoteAuditEvents: arrayValue(data.gitRemoteAuditEvents),
     blockedExamples: sanitizeDashboardArray([
@@ -368,6 +381,9 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     safety: sanitizeDashboardObject({
       ...objectValue(data.gitProviderConfig),
       remoteMergeEnabled: false,
+      branchOrchestratorStatus: objectValue(data.branchOrchestratorSummary).status ?? "v2_implemented",
+      branchOrchestratorRemoteGitOperation: false,
+      branchOrchestratorNoDestructiveGit: true,
       tokenExposed: false
     })
   };
@@ -709,11 +725,23 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     conflictRisks: arrayValue(data.conflictRisks),
     mergeQueue: arrayValue(data.mergeQueue),
     mergeSimulations: arrayValue(data.mergeSimulations),
+    mergeQueuePolicy: sanitizeDashboardObject(data.mergeQueuePolicy),
+    mergeReadinessDecisions: arrayValue(data.mergeReadinessDecisions),
+    mergeQueueHolds: arrayValue(data.mergeQueueHolds),
     summary: sanitizeDashboardObject({
       activeLeases: Array.isArray(data.activeLeases) ? data.activeLeases.length : 0,
       conflictRisks: Array.isArray(data.conflictRisks) ? data.conflictRisks.length : 0,
       mergeQueueEntries: Array.isArray(data.mergeQueue) ? data.mergeQueue.length : 0,
-      dryRunSimulations: Array.isArray(data.mergeSimulations) ? data.mergeSimulations.length : 0
+      dryRunSimulations: Array.isArray(data.mergeSimulations) ? data.mergeSimulations.length : 0,
+      mergeQueuePolicyStatus: typeof (data.mergeQueuePolicy as Record<string, unknown> | undefined)?.status === "string"
+        ? (data.mergeQueuePolicy as Record<string, unknown>).status
+        : "not_evaluated",
+      mergeQueuePolicyReady: Array.isArray(data.mergeReadinessDecisions)
+        ? data.mergeReadinessDecisions.filter((decision) => (decision as Record<string, unknown>).decision === "ready").length
+        : 0,
+      mergeQueuePolicyHolds: Array.isArray(data.mergeQueueHolds) ? data.mergeQueueHolds.length : 0,
+      mergeExecutionEnabled: false,
+      autoMergeEnabled: false
     })
   };
 
@@ -788,6 +816,32 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     instructionAssemblies: arrayValue(data.agentInstructionAssemblies),
     commandResults: arrayValue(data.agentCommandResults),
     workspaces: arrayValue(data.agentWorkspaces),
+    workspaceLeases: arrayValue(data.agentWorkspaceLeases),
+    workspaceEvents: arrayValue(data.agentWorkspaceLifecycleEvents),
+    cleanupDecisions: arrayValue(data.agentWorkspaceCleanupDecisions),
+    workspaceLifecycle: sanitizeDashboardObject({
+      status: "v2_implemented",
+      activeWorkspaceLeases: arrayValue(data.agentWorkspaceLeases).filter((lease) => lease.status === "active").length,
+      fixtureWorkspaceLeases: arrayValue(data.agentWorkspaceLeases).filter((lease) => lease.workspaceKind === "fixture").length,
+      futureGitWorktreeLeases: arrayValue(data.agentWorkspaceLeases).filter((lease) => lease.workspaceKind === "git_worktree_future").length,
+      sharedWorkspaceForbidden: arrayValue(data.agentWorkspaceLeases).some((lease) => lease.isolationStatus === "shared_forbidden"),
+      cleanupDecisionCount: arrayValue(data.agentWorkspaceCleanupDecisions).length,
+      destructiveCleanupEnabled: false,
+      realGitWorktreeExecutionEnabled: false,
+      fullWorkspacePathsExposed: false,
+      noSecretsExposed: true
+    }),
+    coordinationSessions: arrayValue(data.agentCoordinationSessions),
+    coordinationGroups: arrayValue(data.agentCoordinationGroups),
+    sessionOverlaps: arrayValue(data.agentSessionOverlaps),
+    concurrencyPolicies: arrayValue(data.agentConcurrencyPolicies),
+    coordinationAuditEvents: arrayValue(data.agentCoordinationAuditEvents),
+    coordinationSummary: objectValue(data.agentCoordinationSummary),
+    editIntents: arrayValue(data.agentEditIntents),
+    fileLeases: arrayValue(data.agentFileLeases),
+    editIntentGraph: objectValue(data.agentEditIntentGraph),
+    editOverlapAssessments: arrayValue(data.agentEditOverlapAssessments),
+    editIntentSummary: objectValue(data.agentEditIntentSummary),
     blockedExamples: sanitizeDashboardArray([data.blockedCommandExample, data.localRunnerBlockedExample])
   };
 
@@ -1362,12 +1416,18 @@ export function dashboardReadModelsFromLegacyData(data: Record<string, unknown>,
     catalog: arrayValue(data.providerCatalog),
     authTypes: Array.isArray(data.providerAuthTypes) ? data.providerAuthTypes.filter((item): item is string => typeof item === "string") : [],
     localCliTemplates: arrayValue(data.providerLocalCliTemplates),
+    localCliCompatibilityRules: arrayValue(data.providerLocalCliCompatibilityRules),
+    localCliParserProfiles: arrayValue(data.providerLocalCliParserProfiles),
+    localCliSecurityConstraints: arrayValue(data.providerLocalCliSecurityConstraints),
+    localCliReadiness: objectValue(data.providerLocalCliReadiness),
     localAgents: arrayValue(data.providerLocalAgents),
     auditEvents: arrayValue(data.providerAuditEvents),
     readiness: sanitizeDashboardObject({
       localCliProviderReadiness: (data.providerInvocation as Record<string, unknown> | undefined)?.status ?? "local_agent_required",
       credentialCacheAccess: "denied",
-      directLocalCliExecution: "blocked"
+      directLocalCliExecution: "blocked",
+      secretForwarding: "denied",
+      ptySupport: "unsupported"
     }),
     blockedExamples: sanitizeDashboardArray([data.providerInvocation])
   };
