@@ -63,6 +63,13 @@ import type {
   VirtualModelKey
 } from "./types.ts";
 
+/**
+ * Virtual key used for attribution and budget enforcement when a request does
+ * not specify one. Kept in one place so usage recording and budget aggregation
+ * resolve to the same key id.
+ */
+const DEFAULT_SYSTEM_VIRTUAL_KEY_ID = "vmk_system_mock";
+
 export type LLMAuditRepository = {
   appendAuditEvent(input: Omit<LLMAuditEvent, "id" | "createdAt">): LLMAuditEvent;
   listAuditEvents(): LLMAuditEvent[];
@@ -595,7 +602,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
     const inputTokens = Math.max(1, Math.ceil(`${request.systemInstructions ?? ""}\n${request.prompt}`.length / 4));
     const outputTokens = Math.min(request.maxTokens ?? 96, 96);
     const estimatedCostUsd = Number(((model.inputTokenCostUsd ?? 0.000001) * inputTokens + (model.outputTokenCostUsd ?? 0.000002) * outputTokens).toFixed(6));
-    const key = request.virtualKeyId ? this.virtualKeys.getVirtualKey(request.virtualKeyId) : this.virtualKeys.getVirtualKey("vmk_system_mock");
+    const key = this.virtualKeys.getVirtualKey(request.virtualKeyId ?? DEFAULT_SYSTEM_VIRTUAL_KEY_ID);
     if (!key) {
       return this.budgetDecision(request, model, estimatedCostUsd, false, "virtual_key_not_found");
     }
@@ -608,11 +615,52 @@ export class LLMGatewayService implements LegacyLlmGateway {
     if (!key.allowedModelIds.includes(model.id)) {
       return this.budgetDecision(request, model, estimatedCostUsd, false, "model_not_allowed");
     }
-    const limit = Math.min(...[request.budgetLimitUsd, key.perTaskBudgetUsd].filter((value): value is number => typeof value === "number"));
-    if (Number.isFinite(limit) && estimatedCostUsd > limit) {
-      return this.budgetDecision(request, model, estimatedCostUsd, false, "budget_exceeded", limit - estimatedCostUsd);
+    const perTaskLimit = Math.min(...[request.budgetLimitUsd, key.perTaskBudgetUsd].filter((value): value is number => typeof value === "number"));
+    if (Number.isFinite(perTaskLimit) && estimatedCostUsd > perTaskLimit) {
+      return this.budgetDecision(request, model, estimatedCostUsd, false, "budget_exceeded", perTaskLimit - estimatedCostUsd);
     }
-    return this.budgetDecision(request, model, estimatedCostUsd, true, "allowed", Number.isFinite(limit) ? limit - estimatedCostUsd : undefined);
+
+    // Cumulative monthly enforcement. The per-task limit above only inspects
+    // the cost of the current request, so without this a key could blow past
+    // its monthlyBudgetUsd across many small calls. Aggregate prior spend for
+    // the key (durable whenever the usage repository is Postgres-backed) and
+    // enforce the monthly cap so it survives process restarts.
+    let monthlyRemaining: number | undefined;
+    if (typeof key.monthlyBudgetUsd === "number" && Number.isFinite(key.monthlyBudgetUsd)) {
+      const spentThisMonth = this.cumulativeMonthlySpendForKey(key.id);
+      monthlyRemaining = Number((key.monthlyBudgetUsd - spentThisMonth).toFixed(6));
+      if (estimatedCostUsd > monthlyRemaining) {
+        return this.budgetDecision(request, model, estimatedCostUsd, false, "monthly_budget_exceeded", Math.max(0, monthlyRemaining));
+      }
+    }
+
+    const remainingAfterCall = [
+      Number.isFinite(perTaskLimit) ? perTaskLimit - estimatedCostUsd : undefined,
+      monthlyRemaining !== undefined ? monthlyRemaining - estimatedCostUsd : undefined
+    ].filter((value): value is number => typeof value === "number");
+    const budgetRemainingUsd = remainingAfterCall.length > 0
+      ? Number(Math.min(...remainingAfterCall).toFixed(6))
+      : undefined;
+    return this.budgetDecision(request, model, estimatedCostUsd, true, "allowed", budgetRemainingUsd);
+  }
+
+  /**
+   * Sum the LLM-gateway spend already attributed to a virtual key within the
+   * current UTC calendar month. Returns 0 when no usage repository is wired
+   * (cumulative tracking is unavailable) so the per-task limit still applies.
+   */
+  private cumulativeMonthlySpendForKey(virtualKeyId: string): number {
+    if (!this.usageRepository) return 0;
+    const now = new Date();
+    const monthStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    let total = 0;
+    for (const event of this.usageRepository.listUsageEvents()) {
+      if (event.metadata?.source !== "llm_gateway") continue;
+      if (event.metadata?.virtual_key_id !== virtualKeyId) continue;
+      if (event.createdAt.getTime() < monthStartMs) continue;
+      total += event.costUsd ?? 0;
+    }
+    return Number(total.toFixed(6));
   }
 
   async complete(input: LlmCallInput): Promise<LlmCallResult> {
@@ -1552,7 +1600,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
       metadata: {
         source: "llm_gateway",
         gateway_request_id: result.id,
-        virtual_key_id: request.virtualKeyId,
+        virtual_key_id: request.virtualKeyId ?? DEFAULT_SYSTEM_VIRTUAL_KEY_ID,
         provider_id: result.providerId ?? request.providerId,
         billing_mode: this.providerMetadataForRequest(request).billingMode,
         provider_kind: result.providerKind,

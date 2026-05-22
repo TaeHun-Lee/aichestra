@@ -54,7 +54,13 @@ export class EnvSecretProvider {
     if (!secretRef.envKey) {
       return { ok: false, status: "missing", reason: "secret_env_key_missing" };
     }
-    if (this.allowedEnvKeys.length > 0 && !this.allowedEnvKeys.includes(secretRef.envKey)) {
+    // Fail closed: an enabled provider with no allowlist would otherwise expose
+    // every process env var to SecretRef resolution. Require an explicit
+    // allowlist so only named keys are readable.
+    if (this.allowedEnvKeys.length === 0) {
+      return { ok: false, status: "denied", reason: "env_allowlist_empty" };
+    }
+    if (!this.allowedEnvKeys.includes(secretRef.envKey)) {
       return { ok: false, status: "denied", reason: "env_key_not_allowlisted" };
     }
     const value = this.env[secretRef.envKey];
