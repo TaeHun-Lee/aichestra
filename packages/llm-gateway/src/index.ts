@@ -6,6 +6,7 @@ export * from "./providers.ts";
 export * from "./catalog.ts";
 export * from "./virtual-keys.ts";
 export * from "./gateway.ts";
+export * from "./real-llm-enablement.ts";
 export * from "./routing.ts";
 export * from "./dto.ts";
 export * from "./enterprise-providers.ts";

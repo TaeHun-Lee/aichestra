@@ -62,6 +62,7 @@ import type {
   LLMUsageRepository,
   VirtualModelKey
 } from "./types.ts";
+import { evaluateRealLlmEnablement, type RealLlmEnablementReadiness } from "./real-llm-enablement.ts";
 
 /**
  * Virtual key used for attribution and budget enforcement when a request does
@@ -110,6 +111,13 @@ export type LLMGatewayServiceInput = {
   fallbackPolicyRepository?: LLMFallbackPolicyRepository;
   routingDecisionRepository?: LLMRoutingDecisionRepository;
   legacyCredentialFallbackAuditor?: (event: LlmLegacyCredentialFallbackAuditEvent) => void;
+  /**
+   * When true, the gateway refuses to issue real (non-mock) completions unless
+   * the consolidated real-LLM enablement preflight is ready (fail-closed).
+   * Defaults to false to preserve the granular routing gates. Production /
+   * pilot runtimes should enable this.
+   */
+  enforceRealLlmEnablement?: boolean;
 };
 
 export class LLMGatewayService implements LegacyLlmGateway {
@@ -128,6 +136,7 @@ export class LLMGatewayService implements LegacyLlmGateway {
   private readonly routeRepository: LLMRouteRepository;
   private readonly fallbackPolicyRepository: LLMFallbackPolicyRepository;
   private readonly routingDecisionRepository: LLMRoutingDecisionRepository;
+  private readonly enforceRealLlmEnablement: boolean;
   private readonly scopeContextFactory = new ScopeContextFactory();
 
   constructor(input: LLMGatewayServiceInput = {}) {
@@ -149,6 +158,20 @@ export class LLMGatewayService implements LegacyLlmGateway {
     this.routeRepository = input.routeRepository ?? new InMemoryLLMRouteRepository();
     this.fallbackPolicyRepository = input.fallbackPolicyRepository ?? new InMemoryLLMFallbackPolicyRepository();
     this.routingDecisionRepository = input.routingDecisionRepository ?? new InMemoryLLMRoutingDecisionRepository();
+    this.enforceRealLlmEnablement = input.enforceRealLlmEnablement ?? false;
+  }
+
+  /**
+   * Consolidated, fail-closed readiness for the real OpenAI-compatible LLM
+   * path. Returns metadata only (no secret values). Use this as the single
+   * "is it safe to issue real LLM calls?" check for ops / dashboards.
+   */
+  getRealLlmEnablementReadiness(): RealLlmEnablementReadiness {
+    const key = this.virtualKeys.getVirtualKey(DEFAULT_SYSTEM_VIRTUAL_KEY_ID);
+    return evaluateRealLlmEnablement({
+      config: this.getConfig(),
+      budgetVirtualKey: key ?? undefined
+    });
   }
 
   getConfig(): LLMProviderRuntimeConfig {
@@ -472,6 +495,29 @@ export class LLMGatewayService implements LegacyLlmGateway {
     }
 
     if (route.model.providerKind !== "mock") {
+      if (this.enforceRealLlmEnablement) {
+        const readiness = this.getRealLlmEnablementReadiness();
+        if (!readiness.ready) {
+          this.recordAuditEvent({
+            eventType: "llm_remote_completion_blocked",
+            taskId: request.taskId,
+            taskRunId: request.taskRunId,
+            actorId: request.actorId ?? this.actorId,
+            providerKind: route.model.providerKind,
+            providerId: request.providerId,
+            modelId: route.model.id,
+            result: "blocked",
+            reason: "real_llm_enablement_not_ready",
+            metadata: { source: "llm_gateway", blockers: readiness.blockers }
+          });
+          return {
+            ok: false,
+            reason: "real_llm_enablement_not_ready",
+            budgetDecision: route.budgetDecision,
+            routingDecision: route.routingDecision
+          };
+        }
+      }
       this.recordAuditEvent({
         eventType: "llm_remote_completion_requested",
         taskId: request.taskId,
