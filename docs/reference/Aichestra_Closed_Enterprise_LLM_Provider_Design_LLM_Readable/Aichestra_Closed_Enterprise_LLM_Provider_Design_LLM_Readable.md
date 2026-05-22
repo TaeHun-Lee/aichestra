@@ -6,8 +6,7 @@ document_type: machine_readable_design_spec
 canonical_formats:
 - markdown
 - json
-- yaml
-- llms.txt
+- schema.json
 ---
 
 # Aichestra 폐쇄 기업형 LLM Provider 통합 설계 - LLM 인식 가능 문서

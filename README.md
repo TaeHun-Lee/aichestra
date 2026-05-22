@@ -74,6 +74,13 @@ AICHESTRA_STORAGE_PROVIDER=postgres AICHESTRA_DATABASE_URL=postgres://... pnpm -
 AICHESTRA_DATABASE_URL=postgres://... pnpm db:migrate
 ```
 
+Production profile startup now fails closed unless Phase 1-3 foundation gates are present: static bearer auth by token hash, Vault-backed secret backend configuration, and Postgres storage. Inspect the result with:
+
+```bash
+curl http://localhost:3000/readiness/production-foundation
+pnpm prod:smoke
+```
+
 Real Git, LLM, MCP, Vault, GitHub App, and observability-export paths are all disabled by default. See [docs/reference/configuration.md](docs/reference/configuration.md) for the full set of env gates and readiness/dashboard endpoints.
 
 ## Test

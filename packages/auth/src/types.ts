@@ -25,7 +25,7 @@ export type IdentityProviderKind =
   | "github_enterprise_future"
   | "custom_future";
 export type IdentityProviderStatus = "active" | "disabled";
-export type AuthMode = "mock" | "mock_service_account" | "future_oidc" | "future_saml" | "future_service_account" | "system";
+export type AuthMode = "mock" | "mock_service_account" | "static_bearer" | "future_oidc" | "future_saml" | "future_service_account" | "system";
 export type ProductionAuthProviderKind =
   | "mock"
   | "oidc_future"
@@ -565,6 +565,7 @@ export type AuthAuditEvent = {
 export type AuthProviderResolveRequest = {
   requestId?: string;
   actorId?: string;
+  bearerTokenSha256?: string;
   correlationId?: string;
   source?: RequestSource;
   tenantScopes?: TenantScope[];

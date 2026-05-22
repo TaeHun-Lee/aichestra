@@ -160,6 +160,39 @@ curl http://localhost:3000/dashboard/readiness
 
 Production remains blocked until real auth, real secret backend, required Postgres operations, policy bundle management, durable observability backend, audit export/retention enforcement, backup/restore, tenant isolation, and production deployment controls are implemented. Readiness endpoints are read-only, local/seeded, and do not call external services or expose secrets.
 
+Production Foundation v1 adds a startup guard for the first production-capable baseline. Non-production profiles still use the mock-first defaults, but `AICHESTRA_RUNTIME_PROFILE=production` requires all three gates below before the API server can start:
+
+```bash
+AICHESTRA_RUNTIME_PROFILE=production
+AICHESTRA_AUTH_PROVIDER=static_bearer
+AICHESTRA_AUTH_BEARER_TOKEN_SHA256=<sha256-of-bearer-token>
+AICHESTRA_AUTH_STATIC_ACTOR_ID=mock-admin
+AICHESTRA_AUTH_STATIC_ALLOWED_ACTORS=mock-admin
+AICHESTRA_AUTH_OIDC_MIGRATION_PLAN_ACK=true
+AICHESTRA_SECRET_BACKEND_PROVIDER=vault
+AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER=true
+AICHESTRA_VAULT_ADDR=https://vault.example.internal
+AICHESTRA_VAULT_AUTH_METHOD=token
+AICHESTRA_VAULT_TOKEN=<vault-token-or-runtime-injected-secret>
+AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES=secret/data/aichestra/
+AICHESTRA_STORAGE_PROVIDER=postgres
+AICHESTRA_DATABASE_URL=postgres://...
+AICHESTRA_DATABASE_MIGRATIONS_APPLIED=true
+AICHESTRA_DATABASE_BACKUP_RESTORE_RUNBOOK_ACK=true
+AICHESTRA_AUDIT_DURABLE_STORAGE=postgres
+AICHESTRA_AUDIT_RETENTION_POLICY_ACK=true
+```
+
+`static_bearer` compares only the SHA-256 digest of the incoming `Authorization: Bearer ...` token and never stores or returns the raw token. The mapped actor must be explicitly configured and allowlisted. Vault and Postgres must be configured in production; in-memory storage, mock/env secret backends, missing Vault path prefixes, active env SecretRefs, and missing token validation are startup blockers. Operational checks also report migration confirmation, backup/restore acknowledgement, Vault SecretRef rollout, OIDC/IdP migration acknowledgement, and audit durability acknowledgement. The runtime status is visible through:
+
+```bash
+curl http://localhost:3000/readiness/production-foundation
+curl http://localhost:3000/health
+pnpm prod:smoke
+```
+
+This foundation does not implement OIDC/SAML/SCIM, tenant provisioning, row-level security, backup/restore, production audit retention/export, real Git merges, real MCP transport, or real LLM execution by itself. Those remain separately gated integrations.
+
 Staging Deployment Profile v0 adds a non-production staging profile contract, staging environment gate matrix, integration-test policy, risk register, read-only staging readiness APIs, safe `/health` staging metadata, and a dashboard panel. It does not deploy anything, add infrastructure manifests, enable production traffic, call providers, or mark staging as production-ready:
 
 ```bash

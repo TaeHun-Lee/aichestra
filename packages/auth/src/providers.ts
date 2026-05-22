@@ -212,6 +212,115 @@ export class MockAuthProvider implements AuthProvider {
   }
 }
 
+export class StaticBearerAuthProvider implements AuthProvider {
+  private readonly repository: AuthRepository;
+  private readonly expectedTokenSha256: string;
+  private readonly actorId: string;
+
+  constructor(input: { repository?: AuthRepository; expectedTokenSha256: string; actorId: string }) {
+    this.repository = input.repository ?? new InMemoryAuthRepository();
+    this.expectedTokenSha256 = input.expectedTokenSha256;
+    this.actorId = input.actorId;
+  }
+
+  getProviderKind(): AuthProviderKind {
+    return "static_bearer";
+  }
+
+  resolveAuthContext(request: AuthProviderResolveRequest = {}): AuthContext {
+    const requestId = request.requestId ?? createRequestId();
+    const tokenMatches = Boolean(request.bearerTokenSha256) && request.bearerTokenSha256 === this.expectedTokenSha256;
+    const actorId = tokenMatches ? this.actorId : "anonymous-mock";
+    const actor = this.repository.getActor(actorId);
+    const missing = actor === undefined;
+    const resolvedActor = actor ?? disabledActor(actorId, `principal_unknown_${actorId.replace(/[^a-zA-Z0-9_]/g, "_")}`);
+    const principal = this.repository.getPrincipal(resolvedActor.principalId) ?? disabledPrincipal(actorId);
+    const teams = resolvedActor.teams.map((teamId) => this.repository.getTeam(teamId)).filter((team): team is Team => Boolean(team));
+    const principalBindings = this.repository.listRoleBindings({ principalId: principal.id });
+    const teamBindings = teams.flatMap((team) => this.repository.listRoleBindings({ teamId: team.id }));
+    const roleBindings = uniqueBy([...principalBindings, ...teamBindings], (binding) => binding.id).filter((binding) => binding.status === "active");
+    const actorRoles = resolvedActor.roles.map((name) => this.repository.getRole(name)).filter((role): role is Role => Boolean(role));
+    const boundRoles = roleBindings.map((binding) => this.repository.getRole(binding.roleId)).filter((role): role is Role => Boolean(role));
+    const roles = uniqueBy([...actorRoles, ...boundRoles], (role) => role.id).filter((role) => role.status === "active");
+    const permissions = uniqueBy(
+      roles.flatMap((role) => role.permissions.map((permissionId) => this.repository.getPermission(permissionId)).filter((permission): permission is Permission => Boolean(permission))),
+      (permission) => permission.id
+    );
+    const authenticated = tokenMatches && !missing && resolvedActor.status === "active" && principal.status === "active";
+    const context: AuthContext = {
+      requestId,
+      actor: resolvedActor,
+      principal,
+      teams,
+      roles,
+      permissions,
+      roleBindings,
+      tenantScopes: request.tenantScopes ? structuredClone(request.tenantScopes) : undefined,
+      teamScopes: request.teamScopes ? structuredClone(request.teamScopes) : undefined,
+      projectScopes: request.projectScopes ? structuredClone(request.projectScopes) : undefined,
+      resourceScopes: request.resourceScopes ? structuredClone(request.resourceScopes) : undefined,
+      authMode: "static_bearer",
+      authenticated,
+      source: request.source ?? "api",
+      createdAt: new Date(),
+      metadata: {
+        ...request.metadata,
+        isMockActor: false,
+        authProviderKind: "static_bearer",
+        authProviderStatus: "active",
+        productionAuthEnabled: true,
+        tokenValidationEnabled: true,
+        tokenStored: false,
+        tokenEchoed: false,
+        tokenHashMatched: tokenMatches,
+        sessionBoundaryStatus: "bearer_token_hash",
+        identityMappingStatus: "static_actor_mapping",
+        correlationId: request.correlationId
+      }
+    };
+
+    this.repository.recordAuthAuditEvent({
+      eventType: tokenMatches && authenticated ? "auth_context_resolved" : "auth_context_missing",
+      actorId: resolvedActor.id,
+      principalId: principal.id,
+      result: tokenMatches && authenticated ? "resolved" : "denied",
+      reason: tokenMatches && authenticated ? "static_bearer_auth_context_resolved" : "static_bearer_token_missing_or_invalid",
+      requestId,
+      correlationId: request.correlationId,
+      source: context.source,
+      metadata: {
+        authMode: "static_bearer",
+        source: context.source,
+        correlationId: request.correlationId,
+        authenticated,
+        authProviderKind: "static_bearer",
+        authProviderStatus: "active",
+        productionAuthEnabled: true,
+        tokenValidationEnabled: true,
+        tokenStored: false,
+        tokenEchoed: false,
+        actorMapping: this.actorId
+      }
+    });
+    return context;
+  }
+
+  validateActor(actor: Actor) {
+    if (actor.status !== "active") return { ok: false, reason: "actor_disabled" };
+    const principal = this.repository.getPrincipal(actor.principalId);
+    if (!principal || principal.status !== "active") return { ok: false, reason: "principal_inactive_or_missing" };
+    return { ok: true };
+  }
+
+  listRoles(): Role[] {
+    return this.repository.listRoles();
+  }
+
+  listPermissions(): Permission[] {
+    return this.repository.listPermissions();
+  }
+}
+
 export class FutureAuthProviderPlaceholder implements AuthProvider {
   private readonly kind: Exclude<AuthProviderKind, "mock">;
   private readonly mode: AuthMode;

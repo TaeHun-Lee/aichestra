@@ -21,6 +21,7 @@ type RequestContextResolverOptions = {
   taskId?: string;
   taskRunId?: string;
   actorId?: string;
+  bearerTokenSha256?: string;
   roles?: string[];
   tenantId?: string;
   teamId?: string;
@@ -63,6 +64,7 @@ export class RequestContextResolver {
     return this.fromAuthContext(this.authorizationService.getAuthContext({
       requestId,
       actorId,
+      bearerTokenSha256: options.bearerTokenSha256,
       correlationId,
       source: "api",
       ...this.authScopeOptions(options),
@@ -261,8 +263,8 @@ export class RequestContextResolver {
         correlationId,
         authProviderKind: stringMetadata(authContext.metadata.authProviderKind) ?? "mock",
         authProviderStatus: stringMetadata(authContext.metadata.authProviderStatus) ?? "active_mock",
-        productionAuthEnabled: false,
-        tokenValidationEnabled: false,
+        productionAuthEnabled: authContext.metadata.productionAuthEnabled === true,
+        tokenValidationEnabled: authContext.metadata.tokenValidationEnabled === true,
         sessionBoundaryStatus: stringMetadata(authContext.metadata.sessionBoundaryStatus) ?? "disabled",
         identityMappingStatus: stringMetadata(authContext.metadata.identityMappingStatus) ?? "not_configured",
         mockContext: authContext.authMode === "mock" || authContext.authMode === "mock_service_account" || source === "system"

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { RequestContextResolver } from "@aichestra/auth";
 import type { RequestContext, RequestSource } from "@aichestra/auth";
@@ -20,10 +20,10 @@ export type SafeRequestContextSummary = {
   authModeCategory: "mock" | "system" | "future";
   actorKind: string;
   isMockActor: boolean;
-  productionAuthEnabled: false;
+  productionAuthEnabled: boolean;
   authProviderKind: string;
   authProviderStatus: string;
-  tokenValidationEnabled: false;
+  tokenValidationEnabled: boolean;
   sessionBoundaryStatus: string;
   identityMappingStatus: string;
 };
@@ -38,11 +38,13 @@ type SafeHeaders = {
   correlationId: string;
   actorId?: string;
   deliveryId?: string;
+  bearerTokenSha256?: string;
   requestIdHeaderAccepted: boolean;
   correlationIdHeaderAccepted: boolean;
   actorHeaderAccepted: boolean;
   actorHeaderIgnored: boolean;
   deliveryIdHeaderAccepted: boolean;
+  authorizationBearerPresented: boolean;
 };
 
 export class ApiRequestContextMiddleware {
@@ -76,7 +78,9 @@ export class ApiRequestContextMiddleware {
       correlationIdHeaderAccepted: headers.correlationIdHeaderAccepted,
       mockActorHeaderAccepted: headers.actorHeaderAccepted,
       mockActorHeaderIgnored: headers.actorHeaderIgnored,
-      deliveryIdHeaderAccepted: headers.deliveryIdHeaderAccepted
+      deliveryIdHeaderAccepted: headers.deliveryIdHeaderAccepted,
+      authorizationBearerPresented: headers.authorizationBearerPresented,
+      authorizationHeaderStored: false
     });
 
     const context = this.createContextForSource(request, source, headers, routeMetadata, metadata);
@@ -140,10 +144,10 @@ export class ApiRequestContextMiddleware {
       authModeCategory: authModeCategory(context),
       actorKind: context.authContext.actor.actorKind,
       isMockActor: context.authContext.metadata.isMockActor === true || context.metadata.mockContext === true,
-      productionAuthEnabled: false,
+      productionAuthEnabled: context.metadata.productionAuthEnabled === true || context.authContext.metadata.productionAuthEnabled === true,
       authProviderKind: stringMetadata(context.metadata.authProviderKind) ?? stringMetadata(context.authContext.metadata.authProviderKind) ?? "mock",
       authProviderStatus: stringMetadata(context.metadata.authProviderStatus) ?? stringMetadata(context.authContext.metadata.authProviderStatus) ?? "active_mock",
-      tokenValidationEnabled: false,
+      tokenValidationEnabled: context.metadata.tokenValidationEnabled === true || context.authContext.metadata.tokenValidationEnabled === true,
       sessionBoundaryStatus: stringMetadata(context.metadata.sessionBoundaryStatus) ?? stringMetadata(context.authContext.metadata.sessionBoundaryStatus) ?? "disabled",
       identityMappingStatus: stringMetadata(context.metadata.identityMappingStatus) ?? stringMetadata(context.authContext.metadata.identityMappingStatus) ?? "not_configured"
     };
@@ -188,6 +192,7 @@ export class ApiRequestContextMiddleware {
       requestId: headers.requestId,
       correlationId: headers.correlationId,
       actorId: headers.actorId ?? (headers.actorHeaderIgnored ? "mock-admin" : undefined),
+      bearerTokenSha256: headers.bearerTokenSha256,
       metadata
     });
   }
@@ -210,17 +215,20 @@ function safeHeadersFromRequest(request: IncomingMessage, idFactory: (prefix: st
   const actorHeader = safeHeaderId(request, "x-aichestra-actor-id");
   const rawActorHeader = rawStringHeader(request, "x-aichestra-actor-id");
   const deliveryIdHeader = safeHeaderId(request, "x-github-delivery");
+  const bearerToken = bearerTokenFromAuthorizationHeader(request);
   const requestId = requestIdHeader ?? idFactory("req");
   return {
     requestId,
     correlationId: correlationIdHeader ?? deliveryIdHeader ?? requestId,
     actorId: actorHeader,
     deliveryId: deliveryIdHeader,
+    bearerTokenSha256: bearerToken ? sha256Hex(bearerToken) : undefined,
     requestIdHeaderAccepted: requestIdHeader !== undefined,
     correlationIdHeaderAccepted: correlationIdHeader !== undefined,
     actorHeaderAccepted: actorHeader !== undefined,
     actorHeaderIgnored: rawActorHeader !== undefined && actorHeader === undefined,
-    deliveryIdHeaderAccepted: deliveryIdHeader !== undefined
+    deliveryIdHeaderAccepted: deliveryIdHeader !== undefined,
+    authorizationBearerPresented: bearerToken !== undefined
   };
 }
 
@@ -234,6 +242,19 @@ function safeHeaderId(request: IncomingMessage, name: string): string | undefine
   if (!value || value.length > 128) return undefined;
   if (/bearer|token|secret|cookie|session|password|api.?key/i.test(value)) return undefined;
   return /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value) ? value : undefined;
+}
+
+function bearerTokenFromAuthorizationHeader(request: IncomingMessage): string | undefined {
+  const value = rawStringHeader(request, "authorization")?.trim();
+  if (!value) return undefined;
+  const match = /^Bearer\s+(.+)$/i.exec(value);
+  const token = match?.[1]?.trim();
+  if (!token || token.length > 4096) return undefined;
+  return token;
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function authModeCategory(context: RequestContext): SafeRequestContextSummary["authModeCategory"] {

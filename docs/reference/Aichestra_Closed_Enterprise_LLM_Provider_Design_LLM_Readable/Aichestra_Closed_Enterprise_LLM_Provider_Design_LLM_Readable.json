@@ -13,8 +13,7 @@
     "canonical_formats": [
       "markdown",
       "json",
-      "yaml",
-      "llms.txt"
+      "schema.json"
     ],
     "scope": [
       "API Key 기반 폐쇄 기업형 LLM Provider",

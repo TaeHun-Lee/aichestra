@@ -89,6 +89,8 @@ export class SecurityControlService implements SecretManager {
     const envSecretProvider = this.envSecretProvider.getConfig();
     const vaultSecretProvider = this.vaultSecretProvider.getConfig();
     const activeSecretRefs = this.repositories.secretRefs.listSecretRefs().filter((item) => item.status === "active");
+    const activeVaultSecretRefs = activeSecretRefs.filter((item) => item.provider === "vault");
+    const activeEnvSecretRefs = activeSecretRefs.filter((item) => item.provider === "env");
     return {
       secretManagerKind: this.getManagerKind(),
       credentialManagerKind: vaultSecretProvider.selectedProvider === "vault" && vaultSecretProvider.vaultProviderEnabled ? "secretref_vault_v1" : "secretref_env_v1",
@@ -108,6 +110,8 @@ export class SecurityControlService implements SecretManager {
       productionSecretBackendImplemented: false,
       envFallbackProductionAllowed: false,
       activeSecretRefCount: activeSecretRefs.length,
+      activeVaultSecretRefCount: activeVaultSecretRefs.length,
+      activeEnvSecretRefCount: activeEnvSecretRefs.length,
       githubCredentialConfigured: this.credentialConfiguredFor("github_token"),
       githubAppPrivateKeyConfigured: this.credentialConfiguredFor("github_app_private_key"),
       githubWebhookSecretConfigured: this.credentialConfiguredFor("github_webhook_secret") || this.credentialConfiguredFor("webhook_secret"),

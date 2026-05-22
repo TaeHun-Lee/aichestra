@@ -70,7 +70,8 @@ export function authContextToDto(context: AuthContext) {
     source: context.source,
     createdAt: context.createdAt,
     metadata: context.metadata,
-    productionAuthEnabled: false,
+    productionAuthEnabled: context.metadata.productionAuthEnabled === true,
+    tokenValidationEnabled: context.metadata.tokenValidationEnabled === true,
     mockAuthWarning: context.authMode === "mock" || context.authMode === "mock_service_account" ? "Mock auth is not production authentication." : undefined
   });
 }

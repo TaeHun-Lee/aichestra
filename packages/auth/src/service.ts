@@ -63,24 +63,26 @@ export class AuthorizationService {
 
   getConfig() {
     const productionAuthProvider = this.productionAuthProviderRegistry.getSummary();
+    const providerKind = this.provider.getProviderKind();
+    const productionAuthEnabled = providerKind === "static_bearer";
     return {
-      providerKind: this.provider.getProviderKind(),
-      authMode: this.provider.getProviderKind() === "mock" ? "mock" : "future_provider_disabled",
-      productionAuthEnabled: false,
-      selectedAuthProviderKind: productionAuthProvider.selectedProviderKind,
-      activeAuthProviderKind: productionAuthProvider.activeProviderKind,
-      authProviderKind: productionAuthProvider.activeProviderKind,
-      authProviderStatus: productionAuthProvider.selectedProviderStatus,
-      productionAuthProviderStatus: productionAuthProvider.selectedProviderStatus,
+      providerKind,
+      authMode: providerKind === "mock" ? "mock" : providerKind,
+      productionAuthEnabled,
+      selectedAuthProviderKind: productionAuthEnabled ? providerKind : productionAuthProvider.selectedProviderKind,
+      activeAuthProviderKind: providerKind,
+      authProviderKind: providerKind,
+      authProviderStatus: productionAuthEnabled ? "active" : productionAuthProvider.selectedProviderStatus,
+      productionAuthProviderStatus: productionAuthEnabled ? "active" : productionAuthProvider.selectedProviderStatus,
       futureProviderSelected: productionAuthProvider.futureProviderSelected,
       futureProviderBlocked: productionAuthProvider.futureProviderBlocked,
-      requireAuthForApi: false,
-      tokenValidationEnabled: false,
-      sessionBoundaryStatus: productionAuthProvider.sessionBoundaryStatus,
-      sessionBoundaryEnabled: false,
-      identityMappingStatus: productionAuthProvider.identityMappingStatus,
+      requireAuthForApi: productionAuthEnabled,
+      tokenValidationEnabled: productionAuthEnabled,
+      sessionBoundaryStatus: productionAuthEnabled ? "bearer_token_hash" : productionAuthProvider.sessionBoundaryStatus,
+      sessionBoundaryEnabled: productionAuthEnabled,
+      identityMappingStatus: productionAuthEnabled ? "static_actor_mapping" : productionAuthProvider.identityMappingStatus,
       externalAuthCallsEnabled: false,
-      mockActorEnabled: this.provider.getProviderKind() === "mock",
+      mockActorEnabled: providerKind === "mock",
       defaultMockActorId: "mock-admin",
       roleCatalogCount: this.repository.listRoles().length,
       permissionCatalogCount: this.repository.listPermissions().length,
@@ -180,8 +182,8 @@ export class AuthorizationService {
         resourceScopes: authContext.resourceScopes,
         authProviderKind: stringMetadata(authContext.metadata.authProviderKind) ?? "mock",
         authProviderStatus: stringMetadata(authContext.metadata.authProviderStatus) ?? "active_mock",
-        productionAuthEnabled: false,
-        tokenValidationEnabled: false,
+        productionAuthEnabled: authContext.metadata.productionAuthEnabled === true,
+        tokenValidationEnabled: authContext.metadata.tokenValidationEnabled === true,
         sessionBoundaryStatus: stringMetadata(authContext.metadata.sessionBoundaryStatus) ?? "disabled",
         identityMappingStatus: stringMetadata(authContext.metadata.identityMappingStatus) ?? "not_configured"
       }
@@ -266,8 +268,8 @@ export class AuthorizationService {
             authenticated: authContext.authenticated,
             authProviderKind: stringMetadata(authContext.metadata.authProviderKind) ?? "mock",
             authProviderStatus: stringMetadata(authContext.metadata.authProviderStatus) ?? "active_mock",
-            productionAuthEnabled: false,
-            tokenValidationEnabled: false,
+            productionAuthEnabled: authContext.metadata.productionAuthEnabled === true,
+            tokenValidationEnabled: authContext.metadata.tokenValidationEnabled === true,
             sessionBoundaryStatus: stringMetadata(authContext.metadata.sessionBoundaryStatus) ?? "disabled",
             identityMappingStatus: stringMetadata(authContext.metadata.identityMappingStatus) ?? "not_configured"
           },
@@ -282,7 +284,7 @@ export class AuthorizationService {
             resourceScopes: authContext.resourceScopes,
             authProviderKind: stringMetadata(authContext.metadata.authProviderKind) ?? "mock",
             authProviderStatus: stringMetadata(authContext.metadata.authProviderStatus) ?? "active_mock",
-            productionAuthEnabled: false
+            productionAuthEnabled: authContext.metadata.productionAuthEnabled === true
           }
         })
       });

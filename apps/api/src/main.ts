@@ -1,10 +1,8 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { AichestraError, ConflictResolutionAssistantService, MergeQueuePolicyService, NotFoundError, PrOwnershipService, RealMergeExecutionPolicyService, isTaskStatus } from "@aichestra/core";
-import type { BranchLeaseStatus, ConflictResolutionRequestContext, MergeQueueHoldKind, MergeQueueHoldSeverity, MergeQueuePolicyAction, MergeQueuePolicyContext, MergeSimulationMode, MergeSimulationStatus, PrHandoffDecisionValue, PrHandoffKind, PrHandoffStatus, PrOwnerKind, PrOwnershipContext, PrOwnershipStatus, RealMergeEvidenceStatus, RealMergeExecutionContext, RegistryVersionRef, Task } from "@aichestra/core";
-import type { TaskStatus } from "@aichestra/core";
+import { AichestraError, ConflictResolutionAssistantService, MergeQueuePolicyService, NotFoundError, PrOwnershipService, RealMergeExecutionPolicyService } from "@aichestra/core";
+import type { ConflictResolutionRequestContext, MergeQueueHoldKind, MergeQueueHoldSeverity, MergeQueuePolicyAction, MergeQueuePolicyContext, PrHandoffDecisionValue, PrHandoffKind, PrHandoffStatus, PrOwnerKind, PrOwnershipContext, PrOwnershipStatus, RealMergeEvidenceStatus, RealMergeExecutionContext, RegistryVersionRef, Task } from "@aichestra/core";
 import {
   InMemoryAichestraStore,
   createInMemoryStorageProvider,
@@ -166,6 +164,7 @@ import {
   ProductionAuthProviderRegistry,
   RequestContextResolver,
   ServiceAccountContextFactory,
+  StaticBearerAuthProvider,
   actorToDto,
   authAuditEventToDto,
   authContextToDto,
@@ -190,7 +189,7 @@ import {
   tenantScopeMismatchToDto,
   teamToDto
 } from "@aichestra/auth";
-import type { AuthorizationResource, RequestSource, ResourceScope, TenantScopeEnforcementService } from "@aichestra/auth";
+import type { AuthProvider, AuthorizationResource, RequestSource, ResourceScope, TenantScopeEnforcementService } from "@aichestra/auth";
 import {
   BranchCleanupRecoveryService,
   BranchOrchestratorService,
@@ -199,8 +198,6 @@ import {
   GitWebhookReceiverService,
   InMemoryBranchCleanupRecoveryRepository,
   InMemoryBranchOrchestratorRepository,
-  LocalGitDryRunMergeSimulator,
-  MockMergeSimulator,
   baseBranchDriftStatusToDto,
   branchNamingPolicyToDto,
   branchOrchestrationDecisionToDto,
@@ -462,12 +459,18 @@ import {
   vaultSecretProviderConfigToDto
 } from "@aichestra/security";
 import type { SecretKind, SecretProviderKind, SecretRefStatus } from "@aichestra/security";
-import { runAgentTaskWorkflow } from "@aichestra/worker";
 import { buildDashboardReadModelSection } from "./dashboard-read-model.ts";
+import { assertProductionFoundationReady, evaluateProductionFoundation, runtimeProfileFromEnv } from "./production-foundation.ts";
+import type { ProductionFoundationSummary } from "./production-foundation.ts";
 import { ApiRequestContextMiddleware } from "./request-context-middleware.ts";
+import { handleCollaborationRoute } from "./routes/collaboration.ts";
+import { handleTasksRoute } from "./routes/tasks.ts";
 export { ApiRequestContextMiddleware } from "./request-context-middleware.ts";
+export { evaluateProductionFoundation, runtimeProfileFromEnv } from "./production-foundation.ts";
+export type { ProductionFoundationSummary } from "./production-foundation.ts";
 
 type RouteContext = {
+  env: Record<string, string | undefined>;
   store: InMemoryAichestraStore;
   storageProvider: StorageProvider;
   durableCollaborationRepositories: DurableCollaborationRepositories;
@@ -501,6 +504,7 @@ type RouteContext = {
   improvementServices: ImprovementServices;
   policyService: PolicyService;
   authorizationService: AuthorizationService;
+  productionFoundationSummary: ProductionFoundationSummary;
   requestContextResolver: RequestContextResolver;
   apiRequestContextMiddleware: ApiRequestContextMiddleware;
   providerAbstractionService: ProviderAbstractionService;
@@ -609,13 +613,6 @@ function htmlValue(value: unknown, fallback = ""): string {
 
 function notFound(resource: string, id: string): never {
   throw new NotFoundError(resource, id);
-}
-
-function taskView(task: Task): Record<string, unknown> {
-  return {
-    ...task,
-    state: task.status
-  };
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -980,10 +977,6 @@ function parsePositiveIntegerQuery(url: URL, name: string): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
-}
-
-function isMergeSimulationStatus(value: unknown): value is MergeSimulationStatus {
-  return value === "clean" || value === "text_conflict" || value === "failed" || value === "unavailable";
 }
 
 function isMergeQueueHoldKind(value: unknown): value is MergeQueueHoldKind {
@@ -1386,19 +1379,6 @@ function isEditOverlapKind(value: unknown): value is EditOverlapKind {
     value === "same_workspace" ||
     value === "same_symbol_future" ||
     value === "broad_unknown";
-}
-
-function allowedLocalRepoPrefixes(env: Record<string, string | undefined> = process.env): string[] {
-  return (env.AICHESTRA_ALLOWED_REPO_PATHS ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => path.resolve(entry));
-}
-
-function isRepoPathAllowlisted(repoPath: string, prefixes = allowedLocalRepoPrefixes()): boolean {
-  const resolved = path.resolve(repoPath);
-  return prefixes.some((prefix) => resolved === prefix || resolved.startsWith(`${prefix}${path.sep}`));
 }
 
 function isRegistryTargetKind(value: unknown): value is "skill" | "harness" | "instruction" {
@@ -2003,6 +1983,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
 
     if (method === "GET" && url.pathname === "/health") {
       const storage = await context.storageProvider.healthCheck();
+      const productionFoundation = evaluateProductionFoundation({
+        env: context.env,
+        storageKind: context.storageProvider.kind,
+        storageHealth: storage,
+        authConfig: context.authorizationService.getConfig(),
+        securityConfig: context.securityService.getConfig()
+      });
       const databaseOperations = context.deploymentReadinessService.getDatabaseOperationsSummary();
       const durableCollaborationStores = context.durableCollaborationRepositories.getSummary({
         optionalPostgresTestsConfigured: Boolean(process.env.AICHESTRA_TEST_DATABASE_URL)
@@ -2047,6 +2034,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
           message: storage.message,
           checkedAt: storage.checkedAt.toISOString()
         },
+        productionFoundation,
         databaseOperations: {
           status: databaseOperations.status,
           planningOnly: databaseOperations.planningOnly,
@@ -2780,25 +2768,28 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
             envValuesExposed: cleanupSummary.envValuesExposed
           };
         })(),
-        auth: {
-          providerKind: context.authorizationService.getConfig().providerKind,
-          authMode: context.authorizationService.getConfig().authMode,
-          productionAuthEnabled: false,
-          selectedProviderKind: context.authorizationService.getConfig().selectedAuthProviderKind,
-          selectedProviderStatus: context.authorizationService.getConfig().productionAuthProviderStatus,
-          tokenValidationEnabled: false,
-          sessionBoundaryStatus: context.authorizationService.getConfig().sessionBoundaryStatus,
-          identityMappingStatus: context.authorizationService.getConfig().identityMappingStatus,
-          mockActorEnabled: context.authorizationService.getConfig().mockActorEnabled,
-          roleCatalogCount: context.authorizationService.getConfig().roleCatalogCount,
-          permissionCatalogCount: context.authorizationService.getConfig().permissionCatalogCount,
-          authorizationHeadersStored: false,
-          cookiesStored: false,
-          sessionIdsExposed: false,
-          secretsExposed: false,
-          tokensExposed: false,
-          envValuesExposed: false
-        },
+        auth: (() => {
+          const authConfig = context.authorizationService.getConfig();
+          return {
+            providerKind: authConfig.providerKind,
+            authMode: authConfig.authMode,
+            productionAuthEnabled: authConfig.productionAuthEnabled,
+            selectedProviderKind: authConfig.selectedAuthProviderKind,
+            selectedProviderStatus: authConfig.productionAuthProviderStatus,
+            tokenValidationEnabled: authConfig.tokenValidationEnabled,
+            sessionBoundaryStatus: authConfig.sessionBoundaryStatus,
+            identityMappingStatus: authConfig.identityMappingStatus,
+            mockActorEnabled: authConfig.mockActorEnabled,
+            roleCatalogCount: authConfig.roleCatalogCount,
+            permissionCatalogCount: authConfig.permissionCatalogCount,
+            authorizationHeadersStored: authConfig.authorizationHeadersStored,
+            cookiesStored: authConfig.cookiesStored,
+            sessionIdsExposed: authConfig.sessionIdsExposed,
+            secretsExposed: authConfig.secretsExposed,
+            tokensExposed: authConfig.tokensExposed,
+            envValuesExposed: authConfig.envValuesExposed
+          };
+        })(),
         requestContext: context.apiRequestContextMiddleware.getSafeRequestContextSummary(apiRequestContext, { includeIds: false }) as unknown as JsonValue,
         authReadiness: {
           status: authRbacProduction.status,
@@ -3569,6 +3560,23 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         return;
       }
       sendJson(response, 404, { error: "collaboration_stores_readiness_route_not_found" });
+      return;
+    }
+
+    if (segments[0] === "readiness" && segments[1] === "production-foundation") {
+      if (method !== "GET") {
+        sendJson(response, 405, { error: "method_not_allowed", message: "Production foundation readiness endpoints are read-only metadata." });
+        return;
+      }
+      const storage = await context.storageProvider.healthCheck();
+      const summary = evaluateProductionFoundation({
+        env: context.env,
+        storageKind: context.storageProvider.kind,
+        storageHealth: storage,
+        authConfig: context.authorizationService.getConfig(),
+        securityConfig: context.securityService.getConfig()
+      });
+      sendJson(response, 200, readinessScopedPayload(context, "production_foundation", { summary }));
       return;
     }
 
@@ -4880,19 +4888,20 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
         }
 
         if (segments[1] === "config") {
+          const authConfig = authService.getConfig();
           const providerSummary = authService.getProductionAuthProviderSummary();
           sendJson(response, 200, {
-            config: authService.getConfig(),
+            config: authConfig,
             productionAuthProvider: providerSummary,
             identityProviders: authService.listIdentityProviders().map(identityProviderToDto),
-            productionAuthEnabled: false,
-            providerKind: providerSummary.activeProviderKind,
-            providerStatus: providerSummary.selectedProviderStatus,
-            selectedProviderKind: providerSummary.selectedProviderKind,
-            tokenValidationEnabled: false,
-            sessionBoundaryStatus: providerSummary.sessionBoundaryStatus,
-            identityMappingStatus: providerSummary.identityMappingStatus,
-            mockAuthWarning: "MockAuthProvider is default and is not production authentication."
+            productionAuthEnabled: authConfig.productionAuthEnabled,
+            providerKind: authConfig.providerKind,
+            providerStatus: authConfig.authProviderStatus,
+            selectedProviderKind: authConfig.selectedAuthProviderKind,
+            tokenValidationEnabled: authConfig.tokenValidationEnabled,
+            sessionBoundaryStatus: authConfig.sessionBoundaryStatus,
+            identityMappingStatus: authConfig.identityMappingStatus,
+            mockAuthWarning: authConfig.mockActorEnabled ? "MockAuthProvider is default and is not production authentication." : undefined
           });
           return;
         }
@@ -8254,257 +8263,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse,
       }
     }
 
-    if (segments[0] === "tasks") {
-      if (method === "POST" && segments.length === 1) {
-        sendJson(response, 201, taskView(store.createTask(await readJson(request))));
-        return;
-      }
-      if (method === "GET" && segments.length === 1) {
-        sendJson(response, 200, { tasks: store.listTasks().map(taskView) });
-        return;
-      }
-      const taskId = segments[1];
-      if (!taskId) notFound("task", "");
-      const task = store.getTask(taskId) ?? notFound("task", taskId);
-
-      if (method === "GET" && segments.length === 2) {
-        sendJson(response, 200, {
-          task: taskView(task),
-          taskRuns: store.listTaskRuns(task.id),
-          pullRequests: store.listPullRequests(task.id),
-          usageEvents: store.listUsageEvents().filter((event) => event.taskId === task.id)
-        });
-        return;
-      }
-      if (method === "POST" && segments[2] === "run") {
-        const result = await runAgentTaskWorkflow(task.id, { store });
-        const updatedTask = store.getTask(task.id) ?? task;
-        sendJson(response, 200, {
-          task: taskView(updatedTask),
-          result,
-          taskRuns: store.listTaskRuns(task.id),
-          pullRequests: store.listPullRequests(task.id),
-          usageEvents: store.listUsageEvents().filter((event) => event.taskId === task.id)
-        });
-        return;
-      }
-      if (method === "POST" && segments[2] === "run-agent") {
-        const requestContext = context.apiRequestContextMiddleware.requireApiContext(request);
-        const activeRun = store.listTaskRuns(task.id).find((run) => run.status === "queued" || run.status === "running");
-        if (activeRun) {
-          sendJson(response, 409, { error: "conflict", message: `Task ${task.id} already has active run ${activeRun.id}` });
-          return;
-        }
-        const agent = task.selectedAgent ?? "codex";
-        const registryResolution = registryService.resolveRegistryContextForTask({
-          task,
-          agent,
-          repo: store.getRepo(task.repoId),
-          requestContext
-        });
-        const selectedHarness = registryResolution.selectedHarness.id ? store.getHarness(registryResolution.selectedHarness.id) : undefined;
-        const taskRun = store.createTaskRun({
-          taskId: task.id,
-          attempt: store.listTaskRuns(task.id).length + 1,
-          status: "running",
-          agent,
-          model: task.selectedModel ?? "mock-coder@1.0",
-          modelProvider: "mock",
-          selectedHarnessId: selectedHarness?.id,
-          harnessVersion: `${registryResolution.selectedHarness.name}@${registryResolution.selectedHarness.version}`,
-          selectedSkillRefs: registryResolution.selectedSkills,
-          selectedHarnessRef: registryResolution.selectedHarness,
-          selectedInstructionRefs: registryResolution.selectedInstructions,
-          registryResolutionWarnings: registryResolution.warnings,
-          registryResolutionErrors: registryResolution.errors,
-          startedAt: new Date()
-        });
-        const agentRun = await context.agentRunnerService.runAgent({
-          taskId: task.id,
-          taskRunId: taskRun.id,
-          actorId: requestContext.authContext.actor.id,
-          repoRef: {
-            repoId: task.repoId,
-            provider: store.getRepo(task.repoId)?.provider,
-            localPath: undefined
-          },
-          branchRef: {
-            repoId: task.repoId,
-            branchName: task.branchName ?? `mock-agent/${task.id}`,
-            baseBranch: task.baseBranch
-          },
-          selectedModelRef: task.selectedModel ?? "mock-coder@1.0",
-          selectedSkillRefs: registryResolution.selectedSkills,
-          selectedHarnessRef: registryResolution.selectedHarness,
-          selectedInstructionRefs: registryResolution.selectedInstructions,
-          prompt: task.description ?? task.title,
-          allowedCommands: selectedHarness?.allowedTools ?? [],
-          testCommands: selectedHarness?.testCommands ?? ["pnpm test"],
-          maxRuntimeMs: context.agentRunnerConfig.maxRuntimeMs,
-          metadata: {
-            budgetLimitUsd: task.budgetLimitUsd,
-            gitProviderKind: context.gitProviderConfig.providerKind,
-            source: "task_run_agent_endpoint",
-            requestId: requestContext.requestId,
-            correlationId: requestContext.correlationId,
-            principalId: requestContext.authContext.principal.id,
-            authMode: requestContext.authContext.authMode,
-            taskRequesterUserId: task.requesterUserId
-          }
-        });
-        store.updateTaskRun(taskRun.id, {
-          status: agentRun.status === "completed" ? "succeeded" : "failed",
-          finishedAt: new Date(),
-          resultSummary: agentRun.status === "completed" ? "Agent runner completed." : `Agent runner ${agentRun.status}.`,
-          changedFiles: agentRun.changedFiles,
-          diffSummary: agentRun.diffSummary,
-          errorMessage: agentRun.status === "completed" ? undefined : String(agentRun.metadata.reason ?? agentRun.status)
-        });
-        sendJson(response, agentRun.status === "blocked" ? 409 : 201, {
-          task: taskView(store.getTask(task.id) ?? task),
-          taskRun: store.listTaskRuns(task.id).find((run) => run.id === taskRun.id),
-          agentRun: agentRunToDto(agentRun),
-          usageEvents: store.listUsageEvents().filter((event) => event.taskRunId === taskRun.id)
-        });
-        return;
-      }
-      if (method === "GET" && segments[2] === "runs") {
-        sendJson(response, 200, { taskRuns: store.listTaskRuns(task.id) });
-        return;
-      }
-      if (method === "GET" && segments[2] === "agent-runs") {
-        sendJson(response, 200, { agentRuns: context.agentRunnerService.listRuns({ taskId: task.id }).map(agentRunToDto) });
-        return;
-      }
-      if (method === "POST" && segments[2] === "plan") {
-        sendJson(response, 200, store.transitionTask(task.id, "planned") as unknown as JsonValue);
-        return;
-      }
-      if (method === "POST" && segments[2] === "start") {
-        if (task.status === "draft") {
-          store.transitionTask(task.id, "planned");
-        }
-        sendJson(response, 200, store.transitionTask(task.id, "queued") as unknown as JsonValue);
-        return;
-      }
-      if (method === "POST" && segments[2] === "cancel") {
-        sendJson(response, 200, store.transitionTask(task.id, "cancelled") as unknown as JsonValue);
-        return;
-      }
-      if (method === "POST" && segments[2] === "status") {
-        const body = await readJson(request) as { status?: string };
-        if (!body.status || !isTaskStatus(body.status)) {
-          sendJson(response, 400, { error: "Invalid status" });
-          return;
-        }
-        sendJson(response, 200, store.transitionTask(task.id, body.status as TaskStatus) as unknown as JsonValue);
-        return;
-      }
-    }
-
-    if (segments[0] === "branches" && segments[1] === "leases" && method === "GET") {
-      const repoId = url.searchParams.get("repoId") ?? undefined;
-      const status = url.searchParams.get("status") as BranchLeaseStatus | null;
-      sendJson(response, 200, {
-        branchLeases: store.listBranchLeases(repoId, status ?? undefined)
-      });
+    if (await handleTasksRoute({ method, segments, request, response, context })) {
       return;
     }
 
-    if (segments[0] === "conflicts" && segments[1] === "risks" && method === "GET") {
-      const repoId = url.searchParams.get("repoId") ?? undefined;
-      const taskRunId = url.searchParams.get("taskRunId") ?? undefined;
-      const conflictRisks = taskRunId
-        ? store.computeConflictRisksForTaskRun(taskRunId)
-        : repoId
-          ? store.computeRepoConflictRisks(repoId)
-          : store.listRepos().flatMap((repo) => store.computeRepoConflictRisks(repo.id));
-      sendJson(response, 200, { conflictRisks });
+    if (await handleCollaborationRoute({ method, segments, request, response, url, context })) {
       return;
-    }
-
-    if (segments[0] === "merge-simulations") {
-      if (method === "GET" && segments.length === 1) {
-        sendJson(response, 200, {
-          mergeSimulations: store.listMergeSimulations({
-            repoId: url.searchParams.get("repoId") ?? undefined,
-            taskRunId: url.searchParams.get("taskRunId") ?? undefined,
-            branchLeaseId: url.searchParams.get("branchLeaseId") ?? undefined
-          })
-        });
-        return;
-      }
-
-      if (method === "POST" && segments.length === 1) {
-        const body = await readJson(request) as Record<string, unknown>;
-        const branchLeaseId = stringValue(body.branchLeaseId);
-        const lease = branchLeaseId ? store.getBranchLease(branchLeaseId) ?? notFound("branch lease", branchLeaseId) : undefined;
-        const mode: MergeSimulationMode = body.mode === "local_git_merge_tree" ? "local_git_merge_tree" : "mock";
-        const repoId = stringValue(body.repoId) ?? lease?.repoId;
-        const baseRef = stringValue(body.baseRef) ?? lease?.baseBranch;
-        const sourceRef = stringValue(body.sourceRef) ?? lease?.branchName;
-        if (!repoId || !baseRef || !sourceRef) {
-          sendJson(response, 400, { error: "invalid_merge_simulation_request", message: "repoId, baseRef, and sourceRef are required unless branchLeaseId supplies them." });
-          return;
-        }
-
-        const simulator = mode === "local_git_merge_tree" ? new LocalGitDryRunMergeSimulator() : new MockMergeSimulator();
-        const repoPath = stringValue(body.repoPath);
-        if (mode === "local_git_merge_tree") {
-          if (!repoPath) {
-            sendJson(response, 400, { error: "repo_path_required", message: "local_git_merge_tree mode requires repoPath." });
-            return;
-          }
-          if (!isRepoPathAllowlisted(repoPath)) {
-            sendJson(response, 400, { error: "repo_path_not_allowlisted", message: "repoPath must be under AICHESTRA_ALLOWED_REPO_PATHS for local dry-run simulation." });
-            return;
-          }
-        }
-        const mergeSimulation = await simulator.simulate({
-          repoId,
-          repoPath,
-          baseRef,
-          sourceRef,
-          targetRef: stringValue(body.targetRef) ?? baseRef,
-          taskRunId: stringValue(body.taskRunId) ?? lease?.taskRunId,
-          branchLeaseId,
-          mode,
-          requestedStatus: isMergeSimulationStatus(body.requestedStatus)
-            ? body.requestedStatus
-            : isMergeSimulationStatus(body.status)
-              ? body.status
-              : undefined
-        });
-        store.recordMergeSimulation(mergeSimulation);
-        sendJson(response, 201, {
-          mergeSimulation,
-          mergeQueue: branchLeaseId
-            ? store.listMergeQueueEntries(repoId).filter((entry) => entry.branchLeaseId === branchLeaseId)
-            : []
-        });
-        return;
-      }
-    }
-
-    if (segments[0] === "merge-queue") {
-      if (method === "GET" && segments.length === 1) {
-        const repoId = url.searchParams.get("repoId") ?? undefined;
-        sendJson(response, 200, { mergeQueue: store.listMergeQueueEntries(repoId) });
-        return;
-      }
-      const entryId = segments[1];
-      if (!entryId) notFound("merge queue entry", "");
-      if (method === "POST" && segments[2] === "mark-merged") {
-        if (!store.getMergeQueueEntry(entryId)) notFound("merge queue entry", entryId);
-        sendJson(response, 200, { mergeQueueEntry: store.markMergeQueueEntryMerged(entryId) });
-        return;
-      }
-      if (method === "POST" && segments[2] === "cancel") {
-        if (!store.getMergeQueueEntry(entryId)) notFound("merge queue entry", entryId);
-        const body = await readJson(request) as { reason?: string };
-        sendJson(response, 200, { mergeQueueEntry: store.cancelMergeQueueEntry(entryId, body.reason) });
-        return;
-      }
     }
 
     if (segments[0] === "git") {
@@ -9917,27 +9681,46 @@ export function createApiServer(store: InMemoryAichestraStore = createSeededStor
 }
 
 export type ApiServerOverrides = {
+  env?: Record<string, string | undefined>;
   llmGatewayService?: LLMGatewayService;
 };
 
+function createAuthProviderForEnv(authRepository: InMemoryAuthRepository, env: Record<string, string | undefined>): AuthProvider {
+  const provider = env.AICHESTRA_AUTH_PROVIDER?.trim().toLowerCase();
+  if (provider === "static_bearer" || provider === "static-bearer") {
+    const expectedTokenSha256 = env.AICHESTRA_AUTH_BEARER_TOKEN_SHA256?.trim();
+    if (!expectedTokenSha256 || !/^[a-f0-9]{64}$/i.test(expectedTokenSha256)) {
+      throw new Error("AICHESTRA_AUTH_BEARER_TOKEN_SHA256 must be a 64-character SHA-256 hex digest when AICHESTRA_AUTH_PROVIDER=static_bearer.");
+    }
+    return new StaticBearerAuthProvider({
+      repository: authRepository,
+      expectedTokenSha256: expectedTokenSha256.toLowerCase(),
+      actorId: env.AICHESTRA_AUTH_STATIC_ACTOR_ID?.trim() || "mock-admin"
+    });
+  }
+  return new MockAuthProvider({ repository: authRepository });
+}
+
 export function createApiServerWithStorage(storage: StorageProvider, overrides: ApiServerOverrides = {}) {
+  const env = overrides.env ?? process.env;
   const store = storage.repositoryFactory.createDataStore();
   const policyService = new PolicyService();
   const authRepository = new InMemoryAuthRepository();
   const productionAuthProviderRegistry = new ProductionAuthProviderRegistry({
-    env: process.env,
+    env,
     repository: authRepository
   });
+  const authProvider = createAuthProviderForEnv(authRepository, env);
   const authorizationService = new AuthorizationService({
     repository: authRepository,
-    provider: new MockAuthProvider({ repository: authRepository }),
+    provider: authProvider,
     policyService,
     productionAuthProviderRegistry
   });
   const requestContextResolver = new RequestContextResolver(authorizationService);
   const apiRequestContextMiddleware = new ApiRequestContextMiddleware({ resolver: requestContextResolver });
   const serviceAccountContextFactory = new ServiceAccountContextFactory({ authorizationService });
-  const securityService = new SecurityControlService({ policyService, authorizationService, serviceAccountContextFactory });
+  const securityService = new SecurityControlService({ policyService, authorizationService, serviceAccountContextFactory, env });
   const localAgentProtocolService = new LocalAgentProtocolService({ policyService, securityService });
   const providerAbstractionService = new ProviderAbstractionService({ policyService, localAgentProtocolService });
   const tenantScopeEnforcementService = createTenantScopeEnforcementService();
@@ -11010,9 +10793,16 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
   const auditQueryScopeEnforcementService = createAuditQueryScopeEnforcementService();
   const externalObservabilityExportService = createExternalObservabilityExportReadinessService();
   const durableCollaborationRepositories = storage.repositoryFactory.createDurableCollaborationRepositories();
+  const productionFoundationSummary = assertProductionFoundationReady({
+    env,
+    storageKind: storage.kind,
+    authConfig: authorizationService.getConfig(),
+    securityConfig: securityService.getConfig()
+  });
   return createServer((request, response) => {
     void handleRequest(request, response, {
       store,
+      env,
       storageProvider: storage,
       durableCollaborationRepositories,
       gitIntegrationService,
@@ -11045,6 +10835,7 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
       improvementServices,
       policyService,
       authorizationService,
+      productionFoundationSummary,
       requestContextResolver,
       apiRequestContextMiddleware,
       providerAbstractionService,
@@ -11065,6 +10856,9 @@ export function createApiServerWithStorage(storage: StorageProvider, overrides: 
 export function createApiStorageProviderFromEnv(env: Record<string, string | undefined> = process.env): StorageProvider {
   if (env.AICHESTRA_STORAGE_PROVIDER === "postgres") {
     return createPostgresStorageProviderFromEnv(env);
+  }
+  if (runtimeProfileFromEnv(env) === "production") {
+    throw new Error("AICHESTRA_STORAGE_PROVIDER=postgres is required when AICHESTRA_RUNTIME_PROFILE=production.");
   }
   return createInMemoryStorageProvider({ repoRoot: process.cwd() });
 }

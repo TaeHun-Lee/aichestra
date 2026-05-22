@@ -1,193 +1,121 @@
 # Aichestra Docs
 
-이 디렉터리는 Aichestra의 모든 설계/구현/감사 문서를 보관합니다. 정리 원칙:
+이 디렉터리는 Aichestra의 설계, 구현 계획, 감사 기록을 보관합니다. 문서가 기능 설명을 반복해서 흩어지지 않도록, 현재 상태와 운영 경계는 `reference/`의 통합 문서를 우선 참조합니다.
 
-- **briefs/** — 변하지 않는 원본 브리프(부트스트랩, 기술 블루프린트, 코덱스 작업지시서). 변경 빈도 거의 0.
-- **foundations/** — 도메인 모델, MVP 정의, 보안 모델, 상태 머신 등 시스템 전반의 시간 불변(time-invariant) 개념.
-- **features/** — feature별로 v0/v1/plan/audit을 한 폴더에 묶음. 한 feature의 모든 히스토리를 한곳에서.
-- **roadmaps/** — 통합 로드맵 / 단계 계획서.
-- **audits/** — 시점이 중요한 감사 보고서. 파일명 앞에 `YYYY-MM-DD-` 접두사로 시계열화.
-- **reference/** — 외부 참조 자료(폐쇄 엔터프라이즈 LLM 프로바이더 설계 등).
-- **adr/** — Architecture Decision Records.
+## 먼저 볼 문서
 
----
+1. [briefs/AICHESTRA_BOOTSTRAP.md](briefs/AICHESTRA_BOOTSTRAP.md) - 원본 제품/아키텍처 부트스트랩.
+2. [reference/mvp-scope.md](reference/mvp-scope.md) - 현재 MVP에 포함된 것과 명시적으로 제외된 것.
+3. [reference/feature-status.md](reference/feature-status.md) - 구현된 slice별 상태와 mock-first/disabled-by-default 경계.
+4. [reference/configuration.md](reference/configuration.md) - 실제 통합을 막는 환경 변수 gate와 실행 예시.
+5. [reference/mock-skeleton-inventory.md](reference/mock-skeleton-inventory.md) - mock, metadata-only, readiness-only scaffold 분류.
 
-## briefs/
+## 디렉터리 역할
 
-원본 디자인 브리프. 신호로 사용 — 변경 거의 없음.
+| 경로 | 역할 | 정리 원칙 |
+| --- | --- | --- |
+| `briefs/` | 원본 브리프와 작업 지시서 | canonical 입력 문서로 유지하고 자주 수정하지 않음 |
+| `foundations/` | 도메인 모델, 보안, Auth/RBAC, 저장소, 관측성처럼 여러 기능이 공유하는 개념 | 기능별 진행 상황을 반복 설명하지 않고 불변 개념 위주로 유지 |
+| `features/` | 기능별 계획/완료 문서 | 한 기능은 `docs/features/<slug>/` 아래에 모으고, 완료 후 중복된 긴 설명은 `reference/feature-status.md`로 합침 |
+| `roadmaps/` | 단계별 추진 계획과 production/staging readiness 계획 | 미래 계획과 실행 순서만 남기고, 이미 구현된 상세 상태는 reference로 이동 |
+| `audits/` | 날짜가 중요한 감사/증거/검토 기록 | 삭제보다 시계열 보존을 기본으로 하되, 새 종합 감사가 생기면 README에는 최신/대표 감사만 링크 |
+| `reference/` | 현재 상태, 설정, matrix, inventory, 외부 설계 자료 | 중복 설명을 흡수하는 통합 색인. 주요 문서는 아래 Reference 섹션 참조 |
+| `runbooks/` | 사람이 직접 실행하는 검증/운영 절차 | 명령, 기대 결과, 실패 시 조치만 짧게 기록하고 설계 설명은 reference/roadmaps에 둠 |
+| `adr/` | Architecture Decision Records | 결정 배경과 결과만 짧게 기록 |
 
-- [AICHESTRA_BOOTSTRAP.md](briefs/AICHESTRA_BOOTSTRAP.md)
-- [AICHESTRA_TECH_STACK_BLUEPRINT.md](briefs/AICHESTRA_TECH_STACK_BLUEPRINT.md) (+ `.pdf`)
-- [AICHESTRA_CODEX_NEXT_STEPS.md](briefs/AICHESTRA_CODEX_NEXT_STEPS.md)
-- [AICHESTRA_CODEX_CONFLICT_MANAGER_V0.md](briefs/AICHESTRA_CODEX_CONFLICT_MANAGER_V0.md)
-- [AICHESTRA_CODEX_PHASE3_TO_PHASE4_WORK_ORDERS.md](briefs/AICHESTRA_CODEX_PHASE3_TO_PHASE4_WORK_ORDERS.md)
+## 대표 기능 문서
 
-## foundations/
+기능별 최신 문서는 각 feature 폴더의 완료 문서(`v0.md`, `v1.md`, `v2.md`, `v3.md`)를 기준으로 봅니다. 전체 상태 요약은 [reference/feature-status.md](reference/feature-status.md)가 우선입니다.
 
-시스템 전반의 개념 모델 (timeless).
+- [features/conflict-manager/](features/conflict-manager/)
+- [features/merge-queue-policy/](features/merge-queue-policy/)
+- [features/conflict-resolution-assistant/](features/conflict-resolution-assistant/)
+- [features/pr-ownership-handoff/](features/pr-ownership-handoff/)
+- [features/real-merge-execution-policy/](features/real-merge-execution-policy/)
+- [features/real-git-adapter/](features/real-git-adapter/)
+- [features/llm-gateway/](features/llm-gateway/)
+- [features/local-agent-runner/](features/local-agent-runner/)
+- [features/registry/](features/registry/)
+- [features/dashboard/](features/dashboard/)
 
-- [architecture.md](foundations/architecture.md)
-- [mvp.md](foundations/mvp.md) · [mvp-scope.md](foundations/mvp-scope.md)
-- [domain-model.md](foundations/domain-model.md)
-- [task-state-machine.md](foundations/task-state-machine.md)
-- [instruction-layer.md](foundations/instruction-layer.md)
-- [security-model.md](foundations/security-model.md)
-- [auth-rbac-readiness.md](foundations/auth-rbac-readiness.md)
-- [auth-rbac/v0-plan.md](foundations/auth-rbac/v0-plan.md)
-- [auth-rbac/v0.md](foundations/auth-rbac/v0.md)
-- [auth-rbac/v1-plan.md](foundations/auth-rbac/v1-plan.md)
-- [auth-rbac/request-context-propagation-v1-plan.md](foundations/auth-rbac/request-context-propagation-v1-plan.md)
-- [auth-rbac/request-context-propagation-v1.md](foundations/auth-rbac/request-context-propagation-v1.md)
-- [auth-rbac/api-authcontext-middleware-v1-plan.md](foundations/auth-rbac/api-authcontext-middleware-v1-plan.md)
-- [auth-rbac/api-authcontext-middleware-v1.md](foundations/auth-rbac/api-authcontext-middleware-v1.md)
-- [auth-rbac/service-account-actor-boundary-v1-plan.md](foundations/auth-rbac/service-account-actor-boundary-v1-plan.md)
-- [auth-rbac/service-account-actor-boundary-v1.md](foundations/auth-rbac/service-account-actor-boundary-v1.md)
-- [auth-rbac/registry-governance-request-context-migration-v1-plan.md](foundations/auth-rbac/registry-governance-request-context-migration-v1-plan.md)
-- [auth-rbac/registry-governance-request-context-migration-v1.md](foundations/auth-rbac/registry-governance-request-context-migration-v1.md)
-- [auth-rbac/tenant-repo-provider-scope-model-v1-plan.md](foundations/auth-rbac/tenant-repo-provider-scope-model-v1-plan.md)
-- [auth-rbac/tenant-repo-provider-scope-model-v1.md](foundations/auth-rbac/tenant-repo-provider-scope-model-v1.md)
-- [auth-rbac/tenant-scope-enforcement-v1-plan.md](foundations/auth-rbac/tenant-scope-enforcement-v1-plan.md)
-- [auth-rbac/tenant-scope-enforcement-v1.md](foundations/auth-rbac/tenant-scope-enforcement-v1.md)
-- [auth-rbac/production-auth-provider-skeleton-v1-plan.md](foundations/auth-rbac/production-auth-provider-skeleton-v1-plan.md)
-- [auth-rbac/production-auth-provider-skeleton-v1.md](foundations/auth-rbac/production-auth-provider-skeleton-v1.md)
-- [secretref-provider-credentials/v1.md](foundations/secretref-provider-credentials/v1.md) (+ plan; Auth/RBAC + Policy-backed credential checks)
-- [vault-secret-backend/v1.md](foundations/vault-secret-backend/v1.md) (+ plan; gated non-default Vault SecretRef provider boundary)
-- [vault-secret-backend/live-integration-enablement-v1.md](foundations/vault-secret-backend/live-integration-enablement-v1.md) (+ plan; skipped-by-default manual live Vault validation readiness)
-- [observability-audit-retention/v0.md](foundations/observability-audit-retention/v0.md) (+ plan; common audit envelope, retention/redaction classes, metric/trace skeletons)
-- [persistent-storage-schema-v0.md](foundations/persistent-storage-schema-v0.md)
-- [repository-inventory.md](foundations/repository-inventory.md)
+나머지 feature 폴더도 같은 규칙을 따릅니다. 새 기능을 추가할 때는 `docs/features/<slug>/v0-plan.md`로 시작하고, 구현 완료 후 `v0.md` 또는 다음 버전 문서로 닫습니다.
 
-## features/
+## 대표 로드맵
 
-feature별 폴더. 각 폴더는 `v0.md`, `v0-plan.md`, ... 형식. 일부는 `audits/` 하위폴더로 feature 단위 감사 보고서를 가짐.
+- [roadmaps/real-integration-roadmap.md](roadmaps/real-integration-roadmap.md)
+- [roadmaps/real-integration-foundation-v0-plan.md](roadmaps/real-integration-foundation-v0-plan.md)
+- [roadmaps/production-deployment-readiness/](roadmaps/production-deployment-readiness/)
+- [roadmaps/auth-rbac-production/](roadmaps/auth-rbac-production/)
+- [roadmaps/secret-backend-migration/](roadmaps/secret-backend-migration/)
+- [roadmaps/policy-bundle-runtime-poc/](roadmaps/policy-bundle-runtime-poc/)
+- [roadmaps/staging-deployment-profile/](roadmaps/staging-deployment-profile/)
+- [roadmaps/staging-release-candidate/](roadmaps/staging-release-candidate/)
+- [roadmaps/staging-deployment-execution/](roadmaps/staging-deployment-execution/)
 
-| Feature | 위치 | 보유 버전 |
-|---|---|---|
-| Conflict Manager | [features/conflict-manager/](features/conflict-manager/) | v0, v1 |
-| Conflict Resolution Assistant | [features/conflict-resolution-assistant/](features/conflict-resolution-assistant/) | v1 (+ plan) |
-| PR Ownership / Handoff | [features/pr-ownership-handoff/](features/pr-ownership-handoff/) | v1 (+ plan) |
-| Real Merge Execution Policy | [features/real-merge-execution-policy/](features/real-merge-execution-policy/) | v1 (+ plan) |
-| Merge Queue Policy | [features/merge-queue-policy/](features/merge-queue-policy/) | v2 (+ plan) |
-| Merge Queue Live Integration-Test Profile | [features/merge-queue-live-integration-test-profile/](features/merge-queue-live-integration-test-profile/) | v1 (+ plan) |
-| Branch Cleanup / Orphan Lease Recovery | [features/branch-cleanup-orphan-lease-recovery/](features/branch-cleanup-orphan-lease-recovery/) | v1 (+ plan) |
-| Persistent DB | [features/persistent-db/](features/persistent-db/) | v1 (+ plan) |
-| Durable Collaboration Stores | [features/durable-collaboration-stores/](features/durable-collaboration-stores/) | v1 (+ plan) |
-| Real Git Adapter | [features/real-git-adapter/](features/real-git-adapter/) | v0, v1, v2, github-app-controlled-v1 (+ plans, audits/v0-readiness) |
-| LLM Gateway | [features/llm-gateway/](features/llm-gateway/) | v0, v1, v2 (+ plans) |
-| MCP Gateway | [features/mcp-gateway/](features/mcp-gateway/) | v0 (+ plan) |
-| Local Agent Runner | [features/local-agent-runner/](features/local-agent-runner/) | v0, v1 (+ plans) |
-| Agent Workspace Lifecycle | [features/agent-workspace-lifecycle/](features/agent-workspace-lifecycle/) | v2 (+ plan) |
-| Agent Worktree Allocation | [features/agent-worktree-allocation/](features/agent-worktree-allocation/) | v1 (+ plan) |
-| Multi-session Agent Run Coordination | [features/multi-session-agent-run-coordination/](features/multi-session-agent-run-coordination/) | v1 (+ plan) |
-| Multi-user / Multi-session Branch Orchestrator | [features/multi-user-branch-orchestrator/](features/multi-user-branch-orchestrator/) | v2 (+ plan) |
-| Cross-session File Lease / Edit Intent Graph | [features/cross-session-file-lease-edit-intent/](features/cross-session-file-lease-edit-intent/) | v1 (+ plan) |
-| Local Agent Protocol | [features/local-agent-protocol/](features/local-agent-protocol/) | v0, v1 (+ plans) |
-| Local CLI Provider Templates | [features/local-cli-provider-templates/](features/local-cli-provider-templates/) | v1 (+ plan) |
-| Enterprise LLM Provider | [features/enterprise-llm-provider/](features/enterprise-llm-provider/) | v0 (+ plan) |
-| Secrets / Sandbox | [features/secrets-sandbox/](features/secrets-sandbox/) | v0 (+ plan) |
-| Policy-as-Code | [features/policy-as-code/](features/policy-as-code/) | v0 (+ plan) |
-| Governance (Phase 4) | [features/governance/](features/governance/) | v1 (+ plan) |
-| Auto-Improvement (Phase 4) | [features/auto-improvement/](features/auto-improvement/) | v0 (+ plan, preparation\*, v0-blocked) |
-| Registry (Phase 3) | [features/registry/](features/registry/) | v0, v1-hardening, v2-operational-hardening, v3-packaging-versioning, + concept (skill/harness-design) |
-| Skill / Harness Compatibility Matrix | [features/registry-compatibility-matrix/](features/registry-compatibility-matrix/) | v1 (+ plan) |
-| Skill / Harness Drift Detection | [features/skill-harness-drift-detection/](features/skill-harness-drift-detection/) | v1 (+ plan) |
-| Canary Execution Harness + Apply Workflow | [features/canary-execution-apply-workflow/](features/canary-execution-apply-workflow/) | v1 (+ plan) |
-| Dashboard Scope Filtering | [features/dashboard-scope-filtering/](features/dashboard-scope-filtering/) | v1 (+ plan) |
-| Audit Query Scope Enforcement | [features/audit-query-scope-enforcement/](features/audit-query-scope-enforcement/) | v1 partial (+ plan) |
-| External Observability Export | [features/external-observability-export/](features/external-observability-export/) | v1 skeleton (+ plan) |
-| Registry Tenant Scope Enforcement | [features/registry-tenant-scope-enforcement/](features/registry-tenant-scope-enforcement/) | v1 partial (+ plan) |
-| Registry Signed Package / Artifact Trust | [features/registry-artifact-trust/](features/registry-artifact-trust/) | v1 (+ plan) |
-| Eval Suite Execution Harness | [features/eval-suite-execution-harness/](features/eval-suite-execution-harness/) | v1 (+ plan) |
-| Dashboard | [features/dashboard/](features/dashboard/) | read-model-plan, v0-plan, v0 |
+## 대표 Runbook
 
-## roadmaps/
+- [runbooks/production-foundation-smoke.md](runbooks/production-foundation-smoke.md)
 
-- [real-integration-roadmap.md](roadmaps/real-integration-roadmap.md) — Real Integration 항목별 v0~vN 추진 로드맵.
-- [real-integration-foundation-v0-plan.md](roadmaps/real-integration-foundation-v0-plan.md) — Foundation v0 통합 계획.
-- [production-deployment-readiness/](roadmaps/production-deployment-readiness/) — Production Deployment Readiness Planning v0: topology, checklist, DB/secret/auth/policy/observability/CI plans.
-- [github-app-production-webhook-hardening/](roadmaps/github-app-production-webhook-hardening/) — GitHub App / Production Webhook Hardening Planning v0: permission matrix, webhook allowlist, replay protection, dead-letter, credentials, and production endpoint planning.
+## Reference
 
-- [persistent-db-production-operations/](roadmaps/persistent-db-production-operations/) - Persistent DB Production Operations v1: DB operations runbook, migration readiness, index review, retention/audit growth, webhook persistence, backup/restore, and pooling planning.
-- [secret-backend-migration/](roadmaps/secret-backend-migration/) - Secret Backend Migration Planning v0: backend options, SecretRef provider migration, credential kind migration, lease/rotation, env fallback deprecation, readiness APIs, health, and dashboard planning.
-- [production-secret-backend-option-decision/](roadmaps/production-secret-backend-option-decision/) - Production Secret Backend Implementation Option Decision v0: decision criteria, backend evaluation, Vault-first recommendation, SecretRef provider mapping, v1 implementation scope, env migration plan, test strategy, risk register, readiness APIs, health, and dashboard planning. Vault-backed Secret Backend v1 now implements the selected gated `vault` provider boundary under foundations.
-- [auth-rbac-production/](roadmaps/auth-rbac-production/) - Production Auth/RBAC v1 Planning, Implementation Plan v1, and Production Auth Provider Skeleton v1: IdP options, disabled future provider skeletons, provider selection, role/permission matrix, tenant/scope model, service accounts/system actors, session/token boundary, request context propagation, API AuthContext middleware skeleton, service-account actor boundary, registry/governance request-context migration, tenant/repo/provider scope model, mock actor deprecation, security/audit requirements, implementation phases, blockers/risks, readiness APIs, health, and dashboard planning.
-- [policy-bundle-opa-cedar/](roadmaps/policy-bundle-opa-cedar/) - Policy Bundle / OPA-Cedar Planning v0: engine comparison, bundle schema, domain mapping, review workflow, tests, rollout/rollback, break-glass, readiness APIs, health, and dashboard planning.
-- [policy-bundle-runtime-poc/](roadmaps/policy-bundle-runtime-poc/) - Policy Bundle Runtime PoC and Policy Runtime Shadow Evaluation Planning/Skeleton v1: StaticPolicyEngine source-of-truth planning, golden harness linkage, disabled/mock shadow evaluator skeleton, candidate runtime interface expectations, comparison rules, mismatch taxonomy, reporting, rollout/rollback, readiness APIs, health, and dashboard planning without a live shadow evaluator or candidate runtime execution.
-- [policy-bundle-runtime-poc/](roadmaps/policy-bundle-runtime-poc/) - Policy Bundle Runtime PoC Planning v0 plus Policy Runtime PoC Golden Test Harness v1, Policy Runtime Shadow Evaluation Planning v1, and Policy Runtime Shadow Evaluator Skeleton v1: runtime PoC goals, OPA/Rego/Cedar/signed JSON-YAML/custom option comparison, normalized policy input/output contract, PoC domain mapping, golden decision tests, offline StaticPolicyEngine golden harness, future shadow architecture, disabled/mock evaluator interfaces, comparison rules, mismatch taxonomy, reporting, rollout/rollback, readiness APIs, health, and dashboard metadata. `StaticPolicyEngine` remains the only runtime.
-- [staging-deployment-profile/](roadmaps/staging-deployment-profile/) - Staging Deployment Profile v0: non-production profile contract, staging gate matrix, integration-test policy, promotion/rollback criteria, risk register, readiness APIs, health, and dashboard planning.
-- [staging-deployment-dry-run/](roadmaps/staging-deployment-dry-run/) - Staging Deployment Dry-run Profile v0: read-only readiness aggregation, blocker taxonomy, report format, staging dry-run APIs, health metadata, and dashboard planning.
-- [staging-release-candidate/](roadmaps/staging-release-candidate/) - Staging Release Candidate Checklist v0 and Evidence Pack v0: read-only RC criteria, validation gates, optional skipped integration policy, signoff/release-note/rollback models, evidence pack plan, release-note draft, rollback evidence, signoff readiness, staging RC APIs, health metadata, and dashboard planning.
-- [staging-deployment-execution/](roadmaps/staging-deployment-execution/) - Staging Deployment Execution Plan v0 and Staging Human Signoff Pack v0: read-only execution sequence, pre-deploy gates, optional live integration decisions, post-deployment smoke placeholders, rollback plan, go/no-go model, human signoff collection pack, evidence checklist, decision policy, scope separation policy, staging execution APIs, health metadata, and dashboard planning.
-- [staging-ci-cd-pipeline/](roadmaps/staging-ci-cd-pipeline/) - Staging CI/CD Pipeline Planning v0: CI job matrix, optional integration-test gates, secret/env safety, artifacts/reports, staging promotion, cleanup/rollback, readiness APIs, health, and dashboard planning.
-- [github-app-integration-test-profile/](roadmaps/github-app-integration-test-profile/) - GitHub App integration-test profile v1: skipped-by-default live-test profile, required gates, safety checks, cleanup policy, readiness APIs, health, and dashboard planning.
-- [llm-gateway-integration-test-profile/](roadmaps/llm-gateway-integration-test-profile/) - LLM Gateway integration-test profile v1: skipped-by-default OpenAI-compatible live-test profile, model allowlist, budget cap, SecretRef preference, readiness APIs, health, and dashboard planning.
-- [vault-integration-test-profile/](roadmaps/vault-integration-test-profile/) - Vault Integration-Test Profile v1: skipped-by-default Vault KV v2 test profile, required gates, test-only path and allowlist policy, safety checks, readiness APIs, health, and dashboard planning. Vault Live Integration Enablement v1 adds `/readiness/secrets/vault/live-*` readiness/check/runbook/summary metadata without enabling Vault by default.
-- [dashboard-readiness-tenant-scope/](roadmaps/dashboard-readiness-tenant-scope/) - Dashboard/Readiness Tenant Scope Planning and Implementation v1: dashboard/readiness inventories, role visibility matrices, fallback behavior, future filtering architecture, safe scope metadata, missing-scope warnings, redaction labels, read-only planning APIs, health metadata, and dashboard panel. Tenant Scope Enforcement v1 is documented under foundations as partial representative helper metadata, and Audit Query Scope Enforcement v1 is documented under features as partial representative observability query scoping. Neither implements production tenant enforcement.
-- [features/external-observability-export/](features/external-observability-export/) - External Observability Export v1: disabled-by-default exporter skeleton, safe export envelope schema, safety checks, mock metadata-only exporter for tests, future backend metadata, `/observability/export/*`, `/dashboard/observability`, and no-external-export/no-raw-payload/no-secret guarantees.
-- [features/durable-collaboration-stores/](features/durable-collaboration-stores/) - Durable Collaboration Stores v1: durable collaboration record inventory, provider-neutral repository boundary, in-memory default repositories, optional Postgres schema/repositories behind existing storage gates, `/readiness/collaboration-stores/*`, `/dashboard/collaboration-stores`, and no-secret/no-env/no-DB-url guarantees.
-- [features/real-merge-execution-policy/](features/real-merge-execution-policy/) - Real Merge Execution Policy v1: disabled-by-default merge execution policy/readiness boundary, preconditions, forbidden operations, post-execution evidence template, policy gates, API/dashboard/readiness metadata, and no-real-merge/no-auto-merge guarantees.
+통합 상태 문서:
 
-## audits/
+- [reference/mvp-scope.md](reference/mvp-scope.md) - MVP 포함/제외 범위.
+- [reference/feature-status.md](reference/feature-status.md) - 구현 slice별 상태와 mock-first/disabled-by-default 경계.
+- [reference/configuration.md](reference/configuration.md) - 환경 변수, integration gate, 실행 예시.
+- [reference/mock-skeleton-inventory.md](reference/mock-skeleton-inventory.md) - mock/metadata/readiness-only maturity 분류.
 
-시점이 중요한 감사 보고서. 파일명 앞 `YYYY-MM-DD-` 접두사로 시계열화. 가장 최신부터 보면 됨.
+Inventory / matrix:
 
-- Evidence Pack v0 — [staging-rc-evidence-pack-v0.md](audits/staging-rc-evidence-pack-v0.md) — Staging RC validation, skipped-test, release-note, rollback, and signoff readiness evidence for a future audit; this is not a release, tag, deployment, or production-ready claim.
-- 2026-05-14 — [staging-go-no-go-audit-v0.md](audits/2026-05-14-staging-go-no-go-audit-v0.md) — Staging Go/No-Go Audit v0; decision `go_with_warnings`, validation green, no critical blockers, staging not deployed, production not ready, and real human signoffs pending. Follow-up signoff collection docs live under [staging-deployment-execution/](roadmaps/staging-deployment-execution/).
-- 2026-05-14 — [staging-release-candidate-audit-v0.md](audits/2026-05-14-staging-release-candidate-audit-v0.md) — Staging Release Candidate Audit v0; decision `staging_rc_not_ready` because signoffs, release notes, and validation evidence needed follow-up evidence.
-- 2026-05-12 — [secretref-provider-credentials-v1-audit.claude.md](audits/2026-05-12-secretref-provider-credentials-v1-audit.claude.md) — SecretRef Credentials v1 보안 감사 (이슈 #SR1~#SR8)
-- 2026-05-12 — [ai-behavior-audit.claude.md](audits/2026-05-12-ai-behavior-audit.claude.md) — AI 동작/지침 일관성 관점 감사 (신규 이슈 #N1~#N7)
-- 2026-05-12 — [audit_claude_01.html](audits/2026-05-12-audit_claude_01.html) — 5개 영역 통합 감사 (이슈 24건)
-- 2026-05-12 — [audit-remediation.codex.md](audits/2026-05-12-audit-remediation.codex.md) — 위 감사 항목 현재성 판단 및 적용 내역.
-- 2026-05-12 — [design-conformance-audit.claude.md](audits/2026-05-12-design-conformance-audit.claude.md)
-- 2026-05-12 — [final-audit-synthesis.md](audits/2026-05-12-final-audit-synthesis.md)
-- 2026-05-12 — [final-completion-audit.codex.md](audits/2026-05-12-final-completion-audit.codex.md)
-- 2026-05-12 — [validation-baseline-repair.md](audits/2026-05-12-validation-baseline-repair.md)
-- 2026-05-11 — [final-completion-audit.claude.md](audits/2026-05-11-final-completion-audit.claude.md)
-- 2026-05-11 — [phase-progress-audit.md](audits/2026-05-11-phase-progress-audit.md)
-- 2026-05-11 — [phase-1-2-completion-audit.md](audits/2026-05-11-phase-1-2-completion-audit.md)
-- 2026-05-11 — [phase-2-completion-gap.md](audits/2026-05-11-phase-2-completion-gap.md)
-- 2026-05-11 — [phase-3-completion-gap.md](audits/2026-05-11-phase-3-completion-gap.md)
-- 2026-05-11 — [vertical-slice-review.md](audits/2026-05-11-vertical-slice-review.md)
-- 2026-05-11 — [bootstrap-gap-report.md](audits/2026-05-11-bootstrap-gap-report.md)
+- [reference/runtime-component-inventory.md](reference/runtime-component-inventory.md)
+- [reference/environment-gate-matrix.md](reference/environment-gate-matrix.md)
+- [reference/dashboard-read-model-inventory.md](reference/dashboard-read-model-inventory.md)
+- [reference/audit-source-inventory.md](reference/audit-source-inventory.md)
+- [reference/durable-collaboration-store-inventory.md](reference/durable-collaboration-store-inventory.md)
+- [reference/production-rbac-permission-matrix.md](reference/production-rbac-permission-matrix.md)
+- [reference/github-app-permission-matrix.md](reference/github-app-permission-matrix.md)
+- [reference/github-webhook-event-allowlist.md](reference/github-webhook-event-allowlist.md)
+- [reference/policy-domain-mapping.md](reference/policy-domain-mapping.md)
+- [reference/staging-environment-gate-matrix.md](reference/staging-environment-gate-matrix.md)
 
-## reference/
+Scope / auth / readiness:
 
-- [dashboard-read-model-inventory.md](reference/dashboard-read-model-inventory.md)
-- [audit-source-inventory.md](reference/audit-source-inventory.md)
-- [request-context-propagation-inventory.md](reference/request-context-propagation-inventory.md)
-- [api-authcontext-middleware-inventory.md](reference/api-authcontext-middleware-inventory.md)
-- [service-account-actor-boundary-inventory.md](reference/service-account-actor-boundary-inventory.md)
-- [registry-governance-request-context-inventory.md](reference/registry-governance-request-context-inventory.md)
-- [tenant-repo-provider-scope-inventory.md](reference/tenant-repo-provider-scope-inventory.md)
-- [tenant-scope-enforcement-inventory.md](reference/tenant-scope-enforcement-inventory.md)
-- [dashboard-tenant-scope-inventory.md](reference/dashboard-tenant-scope-inventory.md)
-- [readiness-tenant-scope-inventory.md](reference/readiness-tenant-scope-inventory.md)
-- [dashboard-role-visibility-matrix.md](reference/dashboard-role-visibility-matrix.md)
-- [readiness-role-visibility-matrix.md](reference/readiness-role-visibility-matrix.md)
-- [github-app-permission-matrix.md](reference/github-app-permission-matrix.md)
-- [github-webhook-event-allowlist.md](reference/github-webhook-event-allowlist.md)
-- [production-rbac-permission-matrix.md](reference/production-rbac-permission-matrix.md)
-- [staging-environment-gate-matrix.md](reference/staging-environment-gate-matrix.md)
-- [runtime-component-inventory.md](reference/runtime-component-inventory.md)
-- [environment-gate-matrix.md](reference/environment-gate-matrix.md)
-- [durable-collaboration-store-inventory.md](reference/durable-collaboration-store-inventory.md)
-- [Aichestra_Closed_Enterprise_LLM_Provider_Design](reference/) — `.docx`, `.pdf`, `_LLM_Readable/` (json/md/txt 변환본).
+- [reference/request-context-propagation-inventory.md](reference/request-context-propagation-inventory.md)
+- [reference/api-authcontext-middleware-inventory.md](reference/api-authcontext-middleware-inventory.md)
+- [reference/service-account-actor-boundary-inventory.md](reference/service-account-actor-boundary-inventory.md)
+- [reference/registry-governance-request-context-inventory.md](reference/registry-governance-request-context-inventory.md)
+- [reference/tenant-repo-provider-scope-inventory.md](reference/tenant-repo-provider-scope-inventory.md)
+- [reference/tenant-scope-enforcement-inventory.md](reference/tenant-scope-enforcement-inventory.md)
+- [reference/dashboard-tenant-scope-inventory.md](reference/dashboard-tenant-scope-inventory.md)
+- [reference/readiness-tenant-scope-inventory.md](reference/readiness-tenant-scope-inventory.md)
+- [reference/dashboard-role-visibility-matrix.md](reference/dashboard-role-visibility-matrix.md)
+- [reference/readiness-role-visibility-matrix.md](reference/readiness-role-visibility-matrix.md)
 
-## adr/
+외부 원본/변환 자료:
 
-Architecture Decision Records.
+- `reference/Aichestra_Closed_Enterprise_LLM_Provider_Design.docx`
+- `reference/Aichestra_Closed_Enterprise_LLM_Provider_Design.pdf`
+- `reference/Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable/Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable.md`
+- `reference/Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable/Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable.json`
+- `reference/Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable/Aichestra_Closed_Enterprise_LLM_Provider_Design_LLM_Readable.schema.json`
 
----
+## 감사/증거 기록
 
-## Conventions
+감사 문서는 구현 당시의 판단과 근거를 보존하는 기록입니다. 최신 상태 판단은 감사 문서 하나만 보지 말고 [reference/feature-status.md](reference/feature-status.md), [reference/mvp-scope.md](reference/mvp-scope.md), 최신 감사 문서를 함께 확인합니다.
 
-- **파일명 규칙**
-  - feature 폴더 안: `v0.md`, `v0-plan.md`, `v1.md`, `v1-plan.md`. 특별한 파생 문서는 `<modifier>.md` (예: `preparation.md`, `v1-hardening.md`).
-  - audits/: `YYYY-MM-DD-<slug>.md`. 작성자 표기는 `.claude.md` / `.codex.md` 접미.
-  - briefs/: 원본 그대로 유지(대문자 + 밑줄). 변경 거의 없으므로 정규화하지 않음.
-- **cross-reference**: 다른 문서 참조 시 풀 경로(`docs/features/.../v0.md`)로 작성. 코드 내 import는 영향 없음(이 reorg는 docs/만 변경).
-- **새 feature 추가**: `docs/features/<slug>/` 폴더 생성, `v0-plan.md`로 시작, 구현 완료 후 `v0.md`로 마무리. feature 단위 audit은 `<slug>/audits/`로.
-- **새 audit 작성**: `docs/audits/YYYY-MM-DD-<topic>.md` 형식. cross-cutting이면 audits/, 단일 feature면 features/<feature>/audits/.
+대표 감사:
 
-- `foundations/auth-rbac/oidc-provider-skeleton-hardening-v1.md` — OIDC future-provider hardening status `v1_implemented`; disabled verifier, config/discovery/JWKS/claims/token-boundary readiness, safe readiness APIs, and no-token/no-session/no-secret guarantees.
-- `foundations/auth-rbac/oidc-provider-skeleton-hardening-v1-plan.md` — pre-implementation plan for the OIDC skeleton hardening task.
+- [audits/2026-05-14-staging-go-no-go-audit-v0.md](audits/2026-05-14-staging-go-no-go-audit-v0.md)
+- [audits/2026-05-14-staging-release-candidate-audit-v0.md](audits/2026-05-14-staging-release-candidate-audit-v0.md)
+- [audits/2026-05-12-final-audit-synthesis.md](audits/2026-05-12-final-audit-synthesis.md)
+- [audits/2026-05-12-audit-remediation.codex.md](audits/2026-05-12-audit-remediation.codex.md)
+- [audits/current-state-design-conformance-audit.md](audits/current-state-design-conformance-audit.md)
+
+## 작성 규칙
+
+- 기능 설명은 feature 문서에 쓰고, 여러 기능을 가로지르는 현재 상태 요약은 `reference/feature-status.md`에 합칩니다.
+- 환경 변수, integration gate, 실행 예시는 `reference/configuration.md`에 합칩니다.
+- MVP 포함/제외 목록은 `reference/mvp-scope.md`에 합칩니다.
+- 새 감사는 `docs/audits/YYYY-MM-DD-<topic>.md` 형식을 사용합니다.
+- 단일 기능 감사는 `docs/features/<slug>/audits/`에 둘 수 있습니다.
+- 외부 원본 자료는 원본과 최소 canonical 변환본만 보관합니다. 같은 내용의 `txt/jsonl/yaml/llms.txt` 같은 중복 변환본은 추가하지 않습니다.
