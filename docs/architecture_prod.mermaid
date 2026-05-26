@@ -1,0 +1,312 @@
+flowchart TB
+
+  %% =========================================================
+  %% USERS / LLM SESSIONS
+  %% =========================================================
+  subgraph USERS["사용자 / LLM 세션 계층"]
+    U1["User A"]
+    U2["User B"]
+
+    S1["LLM Session A-1<br/>목표 1개<br/>예: Claude Code"]
+    S2["LLM Session A-2<br/>목표 1개<br/>예: Codex / Cursor"]
+    S3["LLM Session B-1<br/>목표 1개<br/>예: Gemini / Local LLM"]
+  end
+
+  %% =========================================================
+  %% LOCAL MACHINE
+  %% =========================================================
+  subgraph LOCAL["개발자 로컬 머신 — Locally Autonomous Execution Plane"]
+    DESKTOP["Aichestra Desktop<br/>Tauri + React + TypeScript"]
+    CLI["Aichestra CLI<br/>Rust + clap + tokio"]
+
+    AGENT["Aichestra Local Agent Daemon<br/>Rust + Tokio<br/>gRPC / WebSocket client"]
+
+    WT["Worktree Manager<br/>gitoxide / libgit2<br/>git worktree / branch / rebase"]
+    WATCH["File & Git Watcher<br/>notify-rs + git2<br/>file event / diff / git status"]
+    CHECKLOCAL["Local Check Runner<br/>Docker / Podman<br/>npm / pnpm / pytest / cargo / go test"]
+
+    COMPLETE["Completion Candidate Builder<br/>완료 선언 + 로컬 체크 + context hash<br/>dirty tree / forbidden path / artifact 검증"]
+
+    CTXRT["Context Runtime<br/>applier / validator<br/>shared Rust core<br/>CLAUDE.md / AGENTS.md / rules 적용"]
+    CTXCACHE["Context Bundle Cache<br/>Last-Known-Good Bundle<br/>SQLite / file cache<br/>bundle hash / policy version / TTL<br/>offline fallback / online reconcile"]
+
+    LSP["Local Code Intelligence<br/>LSP / tree-sitter / ripgrep<br/>세션 중 라이브 코드 이해"]
+    LLMADAPT["LLM Adapter Hub<br/>Claude Code / Codex / Cursor / Gemini / Local<br/>TypeScript + Rust PTY<br/>token / cost 계측"]
+
+    SANDBOX["Local Sandbox Guard<br/>worktree root jail<br/>shell allowlist<br/>secret path denylist<br/>env redaction / network policy"]
+
+    MCPLOCAL["Local MCP Broker<br/>local fs / shell / no-secret tools<br/>MCP SDK + stdio supervisor"]
+    SKILLLOCAL["Local Skill Runtime<br/>OCI / zip cache<br/>Docker sandbox"]
+    TRACE["Agent Trace Store<br/>full trace local<br/>server에는 metadata / selected artifact 전송"]
+    LOCALDB["Local Metadata Store<br/>SQLite + FTS5<br/>encrypted keyring"]
+
+    REPO["Target Repo Clone"]
+    W1["worktree<br/>aich/user-a/session-1/task-x"]
+    W2["worktree<br/>aich/user-a/session-2/task-y"]
+    W3["worktree<br/>aich/user-b/session-1/task-z"]
+
+    RULEFILES["Repo Context Files<br/>CLAUDE.md<br/>AGENTS.md<br/>.claude/rules/*.md<br/>.agents/skills/*/SKILL.md<br/>.aichestra/*.yaml"]
+  end
+
+  %% =========================================================
+  %% AICHESTRA CONTROL PLANE
+  %% =========================================================
+  subgraph SERVER["Aichestra Control Plane — Team / Org / Tenant Aware"]
+    API["API Gateway<br/>Go + ConnectRPC / REST<br/>GraphQL for UI"]
+    AUTH["Auth / Permission<br/>OIDC / GitHub App / GitLab App<br/>RBAC / ABAC / policy hooks"]
+    SESSION["Session & Task Registry<br/>PostgreSQL + Redis<br/>session / task / branch / worktree metadata"]
+
+    COORD["Work Coordination / Lease Service<br/>module / path 단위 soft-lease<br/>TTL / heartbeat / stale / override<br/>공사중 팻말 역할"]
+    PRESENCE["Presence Service<br/>Go WebSocket / SSE<br/>Redis pub/sub"]
+
+    EVENT["Event Bus<br/>NATS JetStream<br/>session / context / merge / cost events"]
+    COST["Usage & Cost Governance<br/>token / cost aggregation<br/>budget / rate limit / model routing"]
+    AUDIT["Audit / Compliance Log<br/>ClickHouse / OpenSearch / OpenTelemetry<br/>append-only event history"]
+
+    INGEST["Source / Artifact Ingest + Object Storage<br/>기본 활성화<br/>source snapshot / patch / test artifact / metadata<br/>S3 / MinIO"]
+
+    %% -------------------------------------------------------
+    %% CONTEXT GOVERNANCE
+    %% -------------------------------------------------------
+    subgraph CONTEXT["Agent Context Governance Plane"]
+      CTXREG["Context Registry<br/>규약 파일 메타데이터<br/>PostgreSQL"]
+      CTXCOMP["Context Compiler<br/>authoritative bundle compiler<br/>shared Rust core<br/>Markdown AST + YAML parser"]
+      CONFLICT["Rule Conflict Detector<br/>conflicting rules / risky commands<br/>OPA/Rego hooks + Semgrep + gitleaks"]
+      CTXBUNDLE["Session Context Bundle Builder<br/>provider별 context package 생성<br/>Claude / Codex / Cursor / generic"]
+
+      MCPREG["MCP Registry<br/>server / tool / resource / prompt catalog<br/>PostgreSQL + Redis"]
+      MCPGW["MCP Gateway<br/>short-lived scoped token<br/>secret-required tool call 전담<br/>MCP SDK / Streamable HTTP / stdio bridge"]
+      SKILLREG["Skill Registry<br/>version / signature / dependency<br/>PostgreSQL + S3 / OCI Registry<br/>Sigstore / cosign"]
+      SECRET["Secret & Credential Broker<br/>Vault / KMS / OAuth<br/>server-side credential boundary"]
+    end
+
+    %% -------------------------------------------------------
+    %% REPO INTELLIGENCE
+    %% -------------------------------------------------------
+    subgraph INTEL["Repo Intelligence Plane"]
+      SCANNER["Repo Scanner<br/>SCIP / LSIF / tree-sitter / ripgrep<br/>language / package / module detection"]
+      PARSER["AST / Symbol Analyzer<br/>LSP + Python/Rust workers<br/>symbol / import / call graph"]
+      GRAPH["Dependency Graph DB<br/>Neo4j / Memgraph<br/>file-module-system graph"]
+      SEARCH["Code Search / Vector Index<br/>OpenSearch + pgvector / Qdrant<br/>semantic + lexical search"]
+      IMPACT["Impact Analyzer<br/>NetworkX + static analysis<br/>changed file / API / module / system impact"]
+    end
+
+    %% -------------------------------------------------------
+    %% MERGE / REVIEW
+    %% -------------------------------------------------------
+    subgraph MERGE["Merge & Review Plane"]
+      ORCH["Merge Orchestrator<br/>Temporal + Go workers<br/>PR/MR 생성 / rebase / rollback PR"]
+      DIFF["Diff / Conflict Analyzer<br/>git merge-tree<br/>tree-sitter semantic diff<br/>text + structural conflict"]
+      QGATE["Quality Gate<br/>GitHub Actions / GitLab CI<br/>Docker runners / Bazel / Turborepo"]
+      REVIEW["Pre-flight Review Surface<br/>비구속<br/>diff + impact + context diff + trace summary 표시"]
+      MQUEUE["Merge Driver<br/>Git host merge queue 위임<br/>Aichestra는 조정 / 표시 / 요청 역할"]
+    end
+  end
+
+  %% =========================================================
+  %% GIT REMOTE / CI
+  %% =========================================================
+  subgraph REMOTE["Git Remote / CI — Binding Merge Authority"]
+    GIT["GitHub Enterprise / GitLab<br/>protected main<br/>CODEOWNERS<br/>branch protection<br/>merge queue"]
+    TASKBR["task branches<br/>aich/user/session/task"]
+    PR["Pull Request / Merge Request"]
+    MAIN["main branch"]
+  end
+
+  %% =========================================================
+  %% MCP SERVERS / EXTERNAL TOOLS
+  %% =========================================================
+  subgraph MCPEXTERNAL["MCP Servers / External Tooling"]
+    GITHUBMCP["GitHub / GitLab MCP Server"]
+    DBMCP["Database MCP Server<br/>read-only / write-gated"]
+    DOCSMCP["Docs / Search MCP Server"]
+    FIGMAMCP["Figma / Design MCP Server"]
+    CUSTOMMCP["Internal Company MCP Server"]
+    LOCALTOOLS["Local fs / shell tools<br/>sandboxed"]
+  end
+
+  %% =========================================================
+  %% WEB UI
+  %% =========================================================
+  subgraph UI["Aichestra Web UI"]
+    DASH["Session Dashboard<br/>Next.js + TypeScript"]
+    LIVE["Live Collaboration Overlay<br/>누가 어떤 repo / file / module / lease를 쓰는지"]
+    CTXVIEW["Context Inspector<br/>적용된 CLAUDE.md / AGENTS.md / Skill / MCP 표시"]
+    MRUI["Merge Review UI<br/>diff + impact + context diff + approval"]
+    MAP["Repo / Module / System Map<br/>React Flow / Cytoscape / D3"]
+    SKILLUI["Skill & MCP Admin Console<br/>승인 / 버전 / 권한 / 감사"]
+    COSTUI["Usage / Cost Dashboard<br/>token / model / session / user 비용"]
+  end
+
+  %% =========================================================
+  %% EDGES — users
+  %% =========================================================
+  U1 --> S1
+  U1 --> S2
+  U2 --> S3
+
+  S1 --> LLMADAPT
+  S2 --> LLMADAPT
+  S3 --> LLMADAPT
+
+  %% =========================================================
+  %% EDGES — local internal
+  %% =========================================================
+  DESKTOP --> AGENT
+  CLI --> AGENT
+
+  AGENT --> WT
+  AGENT --> WATCH
+  AGENT --> CHECKLOCAL
+  AGENT --> COMPLETE
+  AGENT --> CTXRT
+  AGENT --> CTXCACHE
+  AGENT --> LSP
+  AGENT --> LLMADAPT
+  AGENT --> SANDBOX
+  AGENT --> MCPLOCAL
+  AGENT --> SKILLLOCAL
+  AGENT --> TRACE
+  AGENT --> LOCALDB
+
+  WT --> REPO
+  WT --> W1
+  WT --> W2
+  WT --> W3
+
+  REPO --> RULEFILES
+  RULEFILES --> CTXRT
+  RULEFILES --> LSP
+
+  CTXRT <--> CTXCACHE
+  CTXCACHE -->|"offline fallback bundle"| CTXRT
+  CTXRT -->|"provider instructions"| LLMADAPT
+  CTXRT -->|"tool / file / command policy"| SANDBOX
+  CTXRT -->|"allowed MCP config"| MCPLOCAL
+  CTXRT -->|"allowed skills"| SKILLLOCAL
+  CTXRT --> COMPLETE
+
+  SANDBOX --> CHECKLOCAL
+  SANDBOX --> MCPLOCAL
+  MCPLOCAL --> LOCALTOOLS
+
+  WATCH --> COMPLETE
+  CHECKLOCAL --> COMPLETE
+  LLMADAPT --> COMPLETE
+  LLMADAPT --> TRACE
+  LSP --> LLMADAPT
+
+  %% =========================================================
+  %% EDGES — local <-> control plane
+  %% =========================================================
+  AGENT <-->|"version / capability handshake<br/>online sync / offline reconcile"| API
+  CTXBUNDLE -->|"online signed context bundle"| CTXRT
+  CTXBUNDLE -->|"cache refresh"| CTXCACHE
+
+  COMPLETE -->|"source snapshot / patch / test artifact / metadata upload"| INGEST
+  TRACE -->|"trace metadata / selected artifacts"| API
+  LLMADAPT -->|"token / cost events"| EVENT
+  AGENT -->|"module / path soft-lease request"| COORD
+
+  %% =========================================================
+  %% EDGES — server core
+  %% =========================================================
+  API --> AUTH
+  API --> SESSION
+  API --> COORD
+  API --> PRESENCE
+  API --> EVENT
+  API --> COST
+  API --> AUDIT
+  API --> INGEST
+
+  EVENT --> AUDIT
+  EVENT --> COST
+  COORD --> SESSION
+  COORD --> PRESENCE
+  COORD --> DIFF
+
+  %% =========================================================
+  %% EDGES — context governance
+  %% =========================================================
+  API --> CTXREG
+  API --> CTXBUNDLE
+
+  CTXREG --> CTXCOMP
+  CTXCOMP --> CONFLICT
+  CTXCOMP --> CTXBUNDLE
+  CONFLICT --> CTXBUNDLE
+
+  MCPREG --> MCPGW
+  SECRET --> MCPGW
+  MCPGW --> CTXBUNDLE
+  SKILLREG --> CTXBUNDLE
+
+  MCPGW --> GITHUBMCP
+  MCPGW --> DBMCP
+  MCPGW --> DOCSMCP
+  MCPGW --> FIGMAMCP
+  MCPGW --> CUSTOMMCP
+
+  %% =========================================================
+  %% EDGES — repo intelligence
+  %% =========================================================
+  INGEST --> SCANNER
+  SCANNER --> PARSER
+  PARSER --> GRAPH
+  PARSER --> SEARCH
+  GRAPH --> IMPACT
+  SEARCH --> IMPACT
+
+  %% =========================================================
+  %% EDGES — merge / review
+  %% =========================================================
+  API --> ORCH
+  INGEST --> ORCH
+  INGEST --> DIFF
+
+  ORCH --> DIFF
+  ORCH --> QGATE
+  DIFF --> IMPACT
+  QGATE --> REVIEW
+  IMPACT --> REVIEW
+  CTXBUNDLE --> REVIEW
+  REVIEW --> MQUEUE
+
+  %% =========================================================
+  %% EDGES — Git remote / CI
+  %% =========================================================
+  WT <-->|"push / pull"| GIT
+  ORCH -->|"PR / MR 생성<br/>merge queue 요청"| GIT
+
+  GIT --> TASKBR
+  TASKBR --> PR
+  PR -->|"CODEOWNERS / CI / branch protection"| GIT
+  MQUEUE -->|"host merge queue 위임"| GIT
+  GIT --> MAIN
+
+  GIT -->|"post-merge failure signal"| ORCH
+  ORCH -->|"automatic revert PR 생성"| GIT
+
+  %% =========================================================
+  %% EDGES — UI
+  %% =========================================================
+  API <--> DASH
+  PRESENCE --> LIVE
+  COORD --> LIVE
+
+  CTXBUNDLE --> CTXVIEW
+  CTXREG --> CTXVIEW
+  MCPREG --> SKILLUI
+  SKILLREG --> SKILLUI
+
+  REVIEW --> MRUI
+  DIFF --> MRUI
+  IMPACT --> MRUI
+  PR --> MRUI
+
+  GRAPH --> MAP
+  SEARCH --> MAP
+
+  COST --> COSTUI
+  AUDIT --> DASH

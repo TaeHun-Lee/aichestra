@@ -1,0 +1,52 @@
+# Informal YAML schema for Aichestra MVP Change Manifest.
+# Use this to guide validation before a formal JSON Schema is implemented.
+
+change_manifest:
+  session_id: string_required
+  goal: string_required
+  provider: string_optional
+  branch: string_required
+  worktree_path: string_optional
+  base_commit: git_sha_required
+  head_commit: git_sha_or_null
+  patch_id: string_optional
+
+  intent:
+    summary: string_required
+    reason: string_required
+    expected_behavior:
+      - string
+    non_goals:
+      - string
+
+  changed_areas:
+    - file: path_required
+      change_type: enum(modified, created, deleted, renamed, moved, generated)
+      symbols:
+        - string
+      purpose: string_required
+      semantic_impact: string_optional
+      before: string_optional
+      after: string_optional
+
+  compatibility_notes:
+    breaking_change: boolean_required
+    migration_required:
+      - string
+    backward_compatibility: string_optional
+
+  tests:
+    added:
+      - path
+    executed:
+      - command: string
+        result: enum(passed, failed, skipped, unknown)
+        output_artifact: path_optional
+
+  risks:
+    level: enum(low, medium, high, unknown)
+    items:
+      - string
+
+  uncertainty:
+    - string

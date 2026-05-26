@@ -1,0 +1,5 @@
+# Optional Codex config example.
+# Copy into your Codex home or use CODEX_HOME if you want project-specific settings.
+
+project_doc_max_bytes = 65536
+project_doc_fallback_filenames = ["AGENTS.md", "CLAUDE.md"]

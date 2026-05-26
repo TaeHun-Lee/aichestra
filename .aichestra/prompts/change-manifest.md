@@ -1,0 +1,61 @@
+# Change Manifest Prompt
+
+You are documenting the result of one isolated LLM coding session for Aichestra.
+
+Create a structured Change Manifest in YAML. Be precise and honest. Do not claim that a change is safe unless you have evidence.
+
+You must describe:
+
+1. What files changed.
+2. What symbols, functions, classes, types, APIs, commands, or config entries changed.
+3. Why each important change was made.
+4. Whether any public API, function signature, config behavior, file format, database migration, or test behavior changed.
+5. What assumptions your implementation makes.
+6. Which tests were added or run.
+7. What risks or uncertainties remain.
+
+Use this shape:
+
+```yaml
+change_manifest:
+  session_id: ""
+  goal: ""
+  provider: ""
+  branch: ""
+  base_commit: ""
+  head_commit: ""
+  intent:
+    summary: ""
+    reason: ""
+    expected_behavior: []
+    non_goals: []
+  changed_areas:
+    - file: ""
+      change_type: "modified | created | deleted | renamed | moved | generated"
+      symbols: []
+      purpose: ""
+      semantic_impact: ""
+      before: ""
+      after: ""
+  compatibility_notes:
+    breaking_change: false
+    migration_required: []
+    backward_compatibility: ""
+  tests:
+    added: []
+    executed:
+      - command: ""
+        result: "passed | failed | skipped | unknown"
+        output_artifact: ""
+  risks:
+    level: "low | medium | high | unknown"
+    items: []
+  uncertainty: []
+```
+
+Rules:
+
+- If you changed a function signature, mark `breaking_change: true` unless there is an adapter preserving compatibility.
+- If you changed exported types, public modules, config, build scripts, or CLI behavior, call it out.
+- If you did not run tests, say so.
+- If you are unsure, put it in `uncertainty`.

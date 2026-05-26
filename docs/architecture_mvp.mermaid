@@ -1,0 +1,119 @@
+flowchart TB
+
+  %% =========================================================
+  %% USER / WORKER LLM SESSIONS
+  %% =========================================================
+  subgraph USER["개인 개발자"]
+    DEV["Developer"]
+    GOAL1["작업 목표 1<br/>예: auth.ts 버그 수정"]
+    GOAL2["작업 목표 2<br/>예: auth.ts 리팩터링"]
+    GOAL3["작업 목표 3<br/>예: 테스트 보강"]
+
+    LLM1["Worker LLM Session 1<br/>Codex / Claude Code / Cursor CLI"]
+    LLM2["Worker LLM Session 2<br/>Codex / Claude Code / Cursor CLI"]
+    LLM3["Worker LLM Session 3<br/>Codex / Claude Code / Cursor CLI"]
+  end
+
+  DEV --> GOAL1 --> LLM1
+  DEV --> GOAL2 --> LLM2
+  DEV --> GOAL3 --> LLM3
+
+  %% =========================================================
+  %% LOCAL MVP
+  %% =========================================================
+  subgraph LOCAL["개발자 로컬 PC — Aichestra Local MVP"]
+
+    CLI["Aichestra CLI<br/>init / session start / complete<br/>preflight / review / approve / apply"]
+
+    ORCH["Local Orchestrator<br/>단일 사용자 로컬 프로세스<br/>Rust + Tokio 권장"]
+
+    DB["SQLite Ledger<br/>sessions / patchsets / manifests<br/>merge_attempts / approvals / events"]
+
+    ART["Local Artifact Store<br/>.aichestra/artifacts<br/>diff / logs / manifests / reports"]
+
+    CTX["Context Snapshot Collector<br/>AGENTS.md / CLAUDE.md<br/>.aichestra/*.yaml hash 기록"]
+
+    WT["Git Worktree Manager<br/>세션별 branch + worktree 생성"]
+
+    WATCH["File & Git Watcher<br/>changed files / diff / dirty state"]
+
+    ADAPTER["LLM Adapter Wrapper<br/>PTY / shell wrapper<br/>LLM cwd를 session worktree로 고정"]
+
+    MANIFEST["Change Manifest Builder<br/>무엇을 / 왜 / 어디를 변경했는지 기록"]
+
+    MANIFEST_VALIDATOR["Manifest Validator<br/>manifest와 실제 diff 대조<br/>불일치 / 위험 변경 표시"]
+
+    QUEUE["Local Merge Queue<br/>순차 처리<br/>동시 main 반영 금지"]
+
+    SANDBOX["Integration Sandbox<br/>최신 main에서 만든 임시 worktree<br/>persistent integration branch 아님"]
+
+    MECH["Mechanical Merge Simulation<br/>Git text conflict 검사<br/>apply와 동일 전략 사용"]
+
+    SEMLLM["Semantic Merge LLM Session<br/>병합용 LLM<br/>Change Manifest + diff 기반 의미 충돌 분석"]
+
+    SEMREPORT["Semantic Merge Report<br/>semantic risk / blocker / stale assumption<br/>수정 후보 / 추가 테스트 제안"]
+
+    CHECK["Local Check Runner<br/>sandbox 안에서 test / typecheck / lint 실행"]
+
+    REVIEW["Human Review Gate<br/>diff + manifest + semantic report<br/>test 결과 확인 후 승인"]
+
+    APPLY["Apply Verified Candidate<br/>preflight에서 검증한 동일 tree/commit만 main 반영"]
+
+    REPO["Target Repo"]
+    MAIN["main worktree<br/>LLM 직접 작업 금지"]
+
+    W1["session-1 worktree<br/>branch: aich/session-1/task"]
+    W2["session-2 worktree<br/>branch: aich/session-2/task"]
+    W3["session-3 worktree<br/>branch: aich/session-3/task"]
+  end
+
+  %% =========================================================
+  %% LOCAL CONTROL FLOW
+  %% =========================================================
+  DEV --> CLI
+  CLI --> ORCH
+
+  ORCH --> DB
+  ORCH --> ART
+  ORCH --> CTX
+  ORCH --> WT
+  ORCH --> WATCH
+  ORCH --> ADAPTER
+  ORCH --> MANIFEST
+  ORCH --> QUEUE
+
+  WT --> REPO
+  REPO --> MAIN
+  WT --> W1
+  WT --> W2
+  WT --> W3
+
+  LLM1 --> ADAPTER --> W1
+  LLM2 --> ADAPTER --> W2
+  LLM3 --> ADAPTER --> W3
+
+  W1 --> WATCH
+  W2 --> WATCH
+  W3 --> WATCH
+
+  WATCH --> DB
+  WATCH --> MANIFEST
+  CTX --> DB
+
+  MANIFEST --> MANIFEST_VALIDATOR
+  MANIFEST_VALIDATOR --> DB
+  MANIFEST_VALIDATOR --> ART
+  MANIFEST_VALIDATOR --> QUEUE
+
+  QUEUE --> SANDBOX
+  SANDBOX --> MECH
+  MECH --> SEMLLM
+  MANIFEST_VALIDATOR --> SEMLLM
+  DB --> SEMLLM
+
+  SEMLLM --> SEMREPORT
+  SEMREPORT --> ART
+  SEMREPORT --> CHECK
+  CHECK --> REVIEW
+  REVIEW --> APPLY
+  APPLY --> MAIN

@@ -1,0 +1,45 @@
+change_manifest:
+  session_id: ""
+  goal: ""
+  provider: "codex"
+  branch: ""
+  worktree_path: ""
+  base_commit: ""
+  head_commit: ""
+  patch_id: ""
+
+  intent:
+    summary: ""
+    reason: ""
+    expected_behavior:
+      - ""
+    non_goals:
+      - ""
+
+  changed_areas:
+    - file: ""
+      change_type: "modified"
+      symbols:
+        - ""
+      purpose: ""
+      semantic_impact: ""
+      before: ""
+      after: ""
+
+  compatibility_notes:
+    breaking_change: false
+    migration_required: []
+    backward_compatibility: ""
+
+  tests:
+    added: []
+    executed:
+      - command: ""
+        result: "unknown"
+        output_artifact: ""
+
+  risks:
+    level: "unknown"
+    items: []
+
+  uncertainty: []

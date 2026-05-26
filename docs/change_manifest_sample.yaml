@@ -1,0 +1,48 @@
+change_manifest:
+  session_id: session-001
+  goal: "로그인 함수에 권한 검증 추가"
+  provider: codex
+  branch: aich/session-001/auth-permission
+  base_commit: abc123
+  head_commit: def456
+
+  intent:
+    summary: "login 함수가 userId 문자열 대신 User 객체를 받아 권한 검증을 수행하도록 변경"
+    reason: "권한 체크에 role, department 정보가 필요하기 때문"
+    expected_behavior:
+      - "로그인 시 사용자의 role을 확인한다"
+      - "비활성 사용자는 로그인할 수 없다"
+    non_goals:
+      - "세션 저장 방식은 변경하지 않는다"
+
+  changed_areas:
+    - file: src/auth/login.ts
+      change_type: modified
+      symbols:
+        - login
+      purpose: "권한 검증을 위해 login 입력 타입 변경"
+      semantic_impact: "모든 login 호출부 수정 필요"
+      before: "login(userId: string)"
+      after: "login(user: User)"
+
+  compatibility_notes:
+    breaking_change: true
+    migration_required:
+      - "login(userId) 호출부를 login(user) 호출로 변경해야 함"
+    backward_compatibility: "기존 호출부 호환 어댑터 없음"
+
+  tests:
+    added:
+      - test/auth/login.permission.spec.ts
+    executed:
+      - command: "pnpm test auth"
+        result: passed
+
+  risks:
+    level: high
+    items:
+      - "public function signature changed"
+      - "다른 세션이 기존 login(userId) 호출을 추가했을 수 있음"
+
+  uncertainty:
+    - "전체 호출부 검사는 아직 정적 분석으로 검증하지 못함"

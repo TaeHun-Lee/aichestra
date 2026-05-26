@@ -1,185 +1,418 @@
-# AGENTS.md
+# AGENTS.md — Aichestra Local MVP
 
-## Project
+## Project identity
 
-Aichestra is an LLM/agent orchestration control plane for collaborative AI-assisted software development.
+Aichestra Local MVP is a local-first tool for a single developer running multiple AI coding sessions against one repository or even one source file in parallel. The product is best understood as a **local merge queue for parallel LLM coding sessions**, with extra semantic review based on each session's recorded change intent.
 
-Design and work-order source documents live under `docs/briefs/`. The canonical bootstrap document is `docs/briefs/AICHESTRA_BOOTSTRAP.md`. See `docs/README.md` for the full layout.
+The MVP must prove this core claim:
 
-## Core principle
+> A developer can run multiple LLM coding sessions in parallel, each in its own Git worktree and branch, and Aichestra will prevent structural breakage by validating each result against the latest main in a sandbox before it can be applied.
 
-Do not implement real external API calls in the default MVP scaffold. Use explicit interfaces and mock adapters first. Real Git Adapter v2 and LLM Gateway v2 are controlled exceptions only when every explicit integration gate and allowlist is configured.
+Do not overstate the guarantee. The MVP does **not** prove that every change is logically correct. It prevents workspace overwrite, stale-base merge mistakes, untested candidate merges, and unreviewed main updates. Semantic conflicts are reduced through manifest-based LLM review, tests, type checks, and human approval.
 
-## Setup
+## Non-negotiable invariants
 
-- Install dependencies: `pnpm install`
-- Run lint: `pnpm lint`
-- Run typecheck: `pnpm typecheck`
-- Run tests: `pnpm test`
-- Run build: `pnpm build`
-- Optional Postgres migration: `AICHESTRA_DATABASE_URL=postgres://... pnpm db:migrate`
-- Optional Postgres repository contracts: set `AICHESTRA_TEST_DATABASE_URL` before `pnpm test`
+1. **Never run an LLM coding session in the main worktree.**
+   - Every LLM session must get a dedicated branch and dedicated worktree.
+   - The process `cwd` for an LLM session must be the session worktree.
 
-## Architecture boundaries
+2. **Never let two sessions share one working directory.**
+   - Same target file is allowed.
+   - Same physical file path is not allowed.
 
-- `packages/core` owns domain models and pure business logic, including Merge Queue Policy v2 policy/decision/hold/ranking models and service, Conflict Resolution Assistant v1 request/summary/plan/recommendation models and deterministic metadata-only service, PR Ownership / Handoff Model v1 ownership/handoff/decision/audit/readiness metadata service, and Real Merge Execution Policy v1 request/decision/precondition/forbidden-operation/post-evidence-template metadata service.
-- Conflict Manager concepts (`BranchLease`, `ConflictRisk`, `MergeQueueEntry`, `MergeSimulationResult`) stay as separate domain concepts; Merge Queue Policy v2 (`MergeQueuePolicy`, `MergeReadinessDecision`, `MergeQueuePriorityRule`, `MergeQueueHold`) stays metadata-only and separate from merge execution.
-- `apps/api` exposes HTTP APIs, owns API AuthContext Middleware Skeleton v1 ingress helpers, and does not contain orchestration logic.
-- `apps/worker` owns workflow execution.
-- `packages/git-adapter` abstracts Git provider behavior, safe GitHub webhook verification/receive, PR/branch sync read models, GitHub App Controlled Implementation v1 runtime/status boundaries, and Multi-user / Multi-session Branch Orchestrator v2 branch allocation/ownership metadata.
-- `packages/improvement` owns Phase 4 Preparation, Auto-improvement v0, and Governance v1 failure signals, deterministic clusters, improvement candidates, draft proposal metadata, draft registry changes, proposal readiness checks, proposal review queues, governance decisions, proposal eval run metadata, canary readiness checks, apply gates, governance audit events, eval requirement metadata, canary rollout plan metadata, safety policies, repository interfaces, DTO mappers, mock engine behavior, in-memory services, and Registry/Governance RequestContext Migration v1 attribution for migrated governance paths.
-- `packages/llm-gateway` abstracts model providers, owns LLM Gateway v2 provider-neutral interfaces, mock provider behavior, gated OpenAI-compatible HTTP provider behavior, route/fallback/routing-decision read models, provider health read models, disabled provider skeletons, model catalog, virtual model key policy objects, budget checks, usage ledger integration, LLM audit events, Enterprise LLM Provider Abstraction v0 provider catalog/auth/credential/token/adapter/local-agent boundary skeletons, Local CLI Provider Templates v1 metadata-only templates/parser profiles/compatibility rules/security constraints/readiness, and Aichestra Local Agent Protocol v1 registration/session/invocation/consent/event/audit models, mock signed channels, fixture daemon simulation, compatibility matrix, mock transport, DTOs, and in-memory repositories.
-- `packages/mcp-gateway` owns MCP Gateway v0 server/tool catalog models, deterministic `MockMCPGateway`, disabled real MCP transport skeletons, MCP invocation/audit models, DTOs, and in-memory repositories. It integrates with Auth/RBAC, Policy-as-code, Secrets/Sandbox redaction/network-deny controls, and dashboard/API read models without real MCP transport.
-- `packages/deployment-readiness` owns Production Deployment Readiness Planning v0 read-only deployment profile models, production risk/readiness models, GitHub App / Production Webhook Hardening Planning v0, Persistent DB Production Operations v1, Secret Backend Migration Planning v0, Production Secret Backend Implementation Option Decision v0, Production Auth/RBAC v1 Planning, Production Auth Provider Skeleton v1 readiness data, Policy Bundle / OPA-Cedar Planning v0, Policy Bundle Runtime PoC Planning v0, Policy Runtime Shadow Evaluation Planning v1 and Shadow Evaluator Skeleton v1 readiness metadata, staging readiness and execution planning models, GitHub App/LLM/Vault integration-test profile readiness models, Vault Live Integration Enablement v1 readiness/check/runbook metadata, Dashboard/Readiness Tenant Scope Planning and Implementation metadata, DTOs, and deterministic seed data. It must not run live infrastructure checks, deploy resources, create releases or tags, call external providers, read secrets, mint provider tokens, call LLM providers, connect to Vault or production databases by default, run migrations or backups, rotate/migrate secrets, issue auth credentials, create sessions, execute dynamic policy code, load remote policy bundles, execute policy runtimes, delete data, or enforce production or staging traffic.
-- `packages/auth` owns Production Auth/RBAC Planning v0 provider-neutral principal, actor, team, role, permission, resource scope, role binding, service account, identity provider, auth context, RequestContext Propagation v1 request/correlation context helpers, Service Account Actor Boundary v1 static mock catalog/context factory, Tenant/Repo/Provider Scope Model v1 mock scope catalog and `ScopeContextFactory`, Tenant Scope Enforcement v1 decision/mode/mismatch models and helper service, Production Auth Provider Skeleton v1 disabled future provider skeletons, provider registry/factory, config/readiness/session-token-boundary/identity-mapping metadata, AuthProvider, AuthorizationService, mock provider behavior, disabled future auth provider placeholders, DTOs, and in-memory auth audit repositories. Production Auth/RBAC v1 Planning and Production Auth Provider Skeleton v1 readiness data lives in `packages/deployment-readiness`.
-- `packages/registry` owns Skill, Harness, and Instruction registries, exact and simple semver version refs, repository boundaries, DTO mappers, registry audit logs, append-only history, rollback, approval queues, local eval result attachment, checksum verification, mock mutation authorization, local package manifests, import/export, package diffs, deterministic registry resolution, Registry/Governance RequestContext Migration v1 attribution for migrated registry paths, Skill / Harness Compatibility Matrix v1 advisory metadata, Registry Tenant Scope Enforcement v1 partial scope decisions, Registry Signed Package / Artifact Trust v1 digest/mock-signature/provenance/trust-decision metadata, and Eval Suite Execution Harness v1 deterministic mock eval suite/case/run/result/verdict metadata.
-- `packages/policy` owns Policy-as-code Skeleton v0 provider-neutral policy models, static/default policy rules, `PolicyResourceScope` helpers for scope metadata enrichment, Policy Runtime PoC Golden Test Harness v1 typed fixtures and StaticPolicyEngine-only offline harness, Policy Runtime Shadow Evaluator Skeleton v1 disabled/mock evaluator interfaces, comparison result models, mismatch records, and fixture report helpers, policy decision audit, DTOs, and policy service boundaries for Git, merge queue, real merge execution policy, PR ownership/handoff, registry scope enforcement, registry artifact trust, registry eval suite execution, LLM, Runner, Registry, and Auto-improvement operations.
-- `packages/runner` owns agent runner contracts, deterministic `MockAgentRunner`, disabled-by-default `LocalAgentRunner`, controlled fixture command execution boundaries, workspace validation, Agent Workspace Lifecycle v2 workspace leases/events/cleanup decisions, Agent Worktree Allocation v1 dry-run/fixture-only allocation requests/results/safety checks, Multi-session Agent Run Coordination v1 session/group/overlap/concurrency policy metadata, Cross-session File Lease / Edit Intent Graph v1 file leases/edit intents/graph/overlap metadata, harness execution policy, instruction assembly, in-memory runner repositories, command result capture, and runner DTOs/services.
-- `packages/security` owns Secrets and Sandbox Design v0 metadata-only secret refs/scopes/leases, SecretRef-backed Provider Credentials v1 env provider/credential manager/credential handle/resolution audit with Auth/RBAC and Policy checks, Vault-backed Secret Backend v1 gated provider/client boundary, secret access decisions, mock secret manager, sandbox profiles/sessions/decisions, network egress policy, redaction policy, security audit events, DTOs, and in-memory repositories.
-- `packages/observability` owns Observability / Audit Retention v0 common audit envelope models, audit taxonomy, retention classes, redaction classes, audit sanitizer, audit source normalization, retention policy read models, metric snapshots, trace skeletons, source coverage, Audit Query Scope Enforcement v1 decision/redaction metadata, External Observability Export v1 disabled/mock/future exporter skeletons, safe export envelopes, safety checks, readiness summaries, DTOs, and in-memory read-only/check-only service behavior.
-- `packages/db` owns schema, repository contracts, storage provider abstractions, repository factories, seed data, persistence adapters, and Durable Collaboration Stores v1 provider-neutral/in-memory/optional-Postgres repository boundaries for branch/session/workspace/worktree/edit/merge/conflict/PR/cleanup metadata.
-- `apps/web` owns the dashboard skeleton, API-backed dashboard read-model provider, explicit demo fallback, and read-model rendering.
+3. **The merge queue is sequential.**
+   - Only one candidate may be validated against main at a time.
+   - After one candidate is applied, the next candidate must be validated against the new main.
 
-## Implementation rules
+4. **The tested tree must be the applied tree.**
+   - Do not test a rebased result and then apply a different merge result.
+   - Do not test a merge commit and then apply the original branch with a different strategy.
+   - The exact candidate tree that passed preflight is the only tree that may be applied to main.
 
-- Keep provider integrations behind interfaces.
-- Prefer deterministic tests.
-- Avoid hidden global state.
-- Do not store secrets in source code.
-- Do not call OpenAI, Anthropic, GitHub, or other external APIs in default tests. Optional real GitHub integration tests may run only when every explicit Real Git Adapter v1/v2 gate is configured. Optional real remote LLM tests may run only when every explicit LLM Gateway v1/v2 gate is configured.
-- For signoff, audit, readiness, approval, execution-request, and release-candidate workflows, classify reviewed target scope, evidence scope, execution scope, and governance/policy scope before deciding whether a new diff requires reapproval. Evidence-only audit/readiness/request documents generated after target freeze do not automatically change the approved target, but any blocker, rejection, hold, expired validity, validation failure, no-secret/no-env failure, unsafe integration finding, target change, execution-action change, or governance-policy change must keep execution blocked until reviewed under the relevant policy.
-- All generated code must pass lint, typecheck, test, and build.
-- `POST /tasks/:id/run` must reject active queued/running TaskRuns with `409 Conflict`; completed or failed tasks may create a new TaskRun attempt.
-- Conflict Manager v1 must remain mock/local-only: deterministic file-overlap scoring, active lease tracking, mock merge queue status, and local dry-run simulation behind `MergeSimulator`.
-- Local dry-run simulation may use `git merge-tree` only against explicitly supplied local repositories or test fixtures. It must not fetch, push, call hosted Git providers, or mutate the user's working branch.
-- Merge Queue Policy v2 must remain mock-first and metadata-only: it may evaluate queue entries, rank readiness, record holds, use branch lease/workspace/coordination/edit-intent/dry-run/validation/approval/policy evidence, expose API/dashboard summaries, and deny future merge execution, but it must not execute merges, auto-merge, update remote PRs, fetch, push, rebase, force-push, delete branches, create worktrees, call providers, call LLMs, run vendor CLIs, mutate user workspaces, expose secrets/env values, or bypass Git, Auth/RBAC, Policy, Tenant Scope, Branch Lease, Workspace Lifecycle, Multi-session Coordination, Dashboard, Observability, or Safety gates.
-- Merge Queue Live Integration-Test Profile v1 must remain skipped-by-default and read-only: it may model required env gates (`AICHESTRA_MERGE_QUEUE_INTEGRATION_TESTS`, `AICHESTRA_ENABLE_REMOTE_GIT`, `AICHESTRA_GITHUB_INTEGRATION_TESTS` or `AICHESTRA_GITHUB_APP_INTEGRATION_TESTS`, `AICHESTRA_GIT_PROVIDER=github`, `AICHESTRA_GIT_ALLOWED_REPOS`, `AICHESTRA_GIT_ALLOWED_BRANCH_PREFIX=aichestra/test/`, `AICHESTRA_ALLOW_REMOTE_MERGE=false`, `AICHESTRA_ALLOW_REMOTE_REBASE=false`, `AICHESTRA_ALLOW_REMOTE_FORCE_PUSH=false`, `AICHESTRA_ALLOW_REMOTE_BRANCH_DELETE=false`, `AICHESTRA_MERGE_QUEUE_DRY_RUN_ONLY=true`, `AICHESTRA_TEST_MERGE_QUEUE_REPO`, `AICHESTRA_TEST_MERGE_QUEUE_BASE_BRANCH`, `AICHESTRA_TEST_MERGE_QUEUE_SOURCE_BRANCHES`), repo allowlist, branch prefix, dry-run-only policy, cleanup policy, test cases, safety checks, and readiness summary; expose read-only `/readiness/merge-queue-integration/*` and `/dashboard/merge-queue-integration` surfaces; and surface `mergeQueueIntegrationTests` `/health` metadata. It must not execute real merges, enable auto-merge, perform remote merge/rebase/force-push/branch-delete API calls, fetch, push, checkout/switch branches, run vendor CLIs, call LLMs, mutate workspaces, return env values, repo URLs from env, or branch names from env, or bypass Git, Merge Queue, Branch Lease, Workspace Lifecycle, Auth/RBAC, Policy, Tenant Scope, Dashboard, Observability, or Safety gates.
-- Conflict Resolution Assistant v1 must remain mock-first, deterministic, and metadata-only: it may consume dry-run merge simulation, conflict risk, merge queue, branch lease, workspace lease, coordination/edit-intent overlap, RequestContext/AuthContext, and policy/readiness metadata; produce conflict summaries, classifications, review-only resolution plans, suggested validation/tests, recommendations, and merge queue hold linkage metadata; expose API/dashboard/health visibility; and document future LLM hooks. It must not inspect source contents, mutate source files, apply patches, execute merges, auto-resolve conflicts, release holds automatically, fetch, push, rebase, force-push, checkout/switch branches, delete branches, create worktrees, update remote PRs, call providers, call real LLMs by default, run vendor CLIs, execute validation commands, read credential caches, expose secrets/env values, or bypass Git, Merge Queue, Auth/RBAC, Policy, SecretRef, Tenant Scope, Runner, Local Agent, Dashboard, Observability, Registry, Governance, Staging, CI/CD, or Safety gates. `applyAllowed` must stay false in v1.
-- PR Ownership / Handoff Model v1 must remain mock-first and metadata-only: it may record local PR/branch/task/agent-run ownership, reviewer metadata, handoff requests, handoff decisions, audit/correlation metadata, merge queue ownership readiness, and Conflict Resolution Assistant owner/reviewer linkage. It must not call GitHub APIs, assign remote reviewers, update remote PRs, push branches, merge/close PRs, delete branches, auto-merge, execute agents, call LLM/provider/vendor CLIs, mutate user workspaces, read credential caches, expose secrets/env values, or bypass Git, Merge Queue, Branch Lease, Workspace Lifecycle, Multi-session Coordination, Auth/RBAC, Policy, Tenant Scope, Dashboard, Observability, Registry, Governance, or Safety gates. Remote reviewer assignment and remote PR updates must remain future-denied policy actions.
-- Real Merge Execution Policy v1 must remain mock-first, deterministic, and metadata/readiness-only: it may model disabled real merge execution policy, merge execution requests, decisions, preconditions, forbidden operations, post-execution evidence templates, merge queue/branch lease/workspace/worktree/dry-run/conflict/PR ownership/approval/validation/tenant/policy/rollback evidence, API/dashboard/readiness/health visibility, and policy gates. It must not execute real merges, run `git merge`, auto-merge, fetch, push, remote push, rebase, force-push, checkout/switch branches, delete branches, update remote PRs, call GitHub APIs, create/delete worktrees, mutate user workspaces, execute validation commands, call providers, call real LLMs, run vendor CLIs, read credential caches, expose secrets/env values, or bypass Git, Merge Queue, Branch Lease, Workspace Lifecycle, Worktree Allocation, Multi-session Coordination, File Lease/Edit Intent, Conflict Assistant, PR Ownership, Auth/RBAC, Policy, Tenant Scope, Dashboard, Observability, Registry, Governance, or Safety gates. `mergeExecutionEnabled`, `autoMergeEnabled`, `remotePushEnabled`, `mergeExecutionPerformed`, `autoMergePerformed`, and `remotePushPerformed` must stay false in v1.
-- Branch Cleanup / Orphan Lease Recovery v1 must remain mock-first, metadata-only, and read-only by default: it may scan Branch Lease, Agent Workspace Lifecycle v2, Multi-user Branch Orchestrator v2, Agent Worktree Allocation v1, Multi-session Agent Run Coordination v1, Merge Queue Policy v2, and future PR Ownership Handoff snapshots; produce `OrphanLeaseRecord`, `CleanupRecommendation`, `CleanupDecision`, and `RecoveryAction` metadata; expose read-only `/git/cleanup/*` and `/dashboard/git-cleanup` surfaces plus `branchCleanup` `/health` metadata; and execute only metadata-only cleanup when policy allows. It must not delete real branches, remove real worktrees, close real PRs, delete files or directories outside test fixtures, run `git branch -D`, `git push --delete`, `git worktree remove`, `git clean`, `rm -rf`, `Remove-Item`, `fs.rm`, `unlink`, `rmdir`, `git fetch`, `git push`, `git merge`, `git rebase`, force-push, or branch deletion; call external providers; call real LLMs; execute vendor CLIs; read credential caches; expose secrets/env values; weaken Git, Workspace, Branch Lease, Merge Queue, Auth/RBAC, Policy, Tenant Scope, Dashboard, Observability, or Safety gates. `cleanup.destructive_execute_future`, `branch.delete_future`, `worktree.remove_future`, and `pr.close_future` must remain denied by default; destructive cleanup remains future-only.
-- Skill / Harness Compatibility Matrix v1 must remain mock-first, advisory, and metadata-only: it may define `RegistryCompatibilityContext`, `SkillCompatibilityProfile`, `HarnessCompatibilityProfile`, `InstructionCompatibilityProfile`, `RegistryCompatibilityRule`, `RegistryCompatibilityDecision`, and summary models; evaluate compatibility across task kind, language, framework, provider/model capability, runner capability, MCP tool/risk, security policy, and tenant/repo/provider scope; preserve Registry resolver lifecycle/approval/eval/checksum/semver/policy gates by reporting gate failures as `blocked_by_registry_gate`; expose read-only `/registry/compatibility/*`, `/readiness/registry/compatibility/summary`, `/dashboard/registry-compatibility`, and `/health.registryCompatibility` surfaces. It must not mutate registry entries, auto-apply recommendations, override resolver decisions, execute evals/canaries, call external providers/MCP/LLMs/vendor CLIs, run remote Git operations, read credential caches, expose secrets/env values, or weaken Registry resolver, lifecycle, approval, eval, checksum, semver, policy, Auth/RBAC, Tenant Scope, Dashboard, Observability, or Safety gates. `registry.compatibility.matrix.update_future` and `registry.compatibility.override_future` must remain denied by default; production tenant enforcement remains future and scope mismatches surface as warnings in v1.
-- Skill / Harness Drift Detection v1 must remain mock-first, advisory, and metadata-only: it may define `RegistryDriftSignal`, `RegistryDriftBaseline`, `RegistryDriftAssessment`, `RegistryDriftRecommendation`, and `RegistryDriftSummary` models; compute deterministic drift scores across `failure_rate_increase | token_cost_increase | runtime_increase | eval_status_decline | compatibility_warning_increase | manual_override_increase | rollback_involvement | conflict_involvement | stale_instruction | policy_denial_increase | provider_model_mismatch | unknown` signal kinds and classify into `no_drift | watch | degraded | critical | insufficient_data` statuses across `info | low | medium | high | critical` severities; link drift to Skill, Harness, Instruction, RegistryPackage, and Compatibility Profile targets; produce advisory recommendations (`monitor | create_improvement_candidate | require_eval | require_canary | review_instruction | review_harness | review_provider_compatibility | deprecate_future | rollback_review`) and governance follow-ups; optionally feed Auto-Improvement candidate proposal readiness as draft-only metadata; expose read-only `/registry/drift/*`, `/readiness/registry/drift/summary`, `/dashboard/registry-drift`, and `/health.registryDrift` surfaces. It must not execute real LLM calls, run real eval suites, run real canaries, mutate active registry entries through auto-improvement, auto-apply skill/harness changes, call external providers/MCP/LLMs/vendor CLIs, run remote Git operations, read credential caches, expose secrets/env values, or weaken Registry resolver, lifecycle, approval, eval, checksum, semver, policy, Auth/RBAC, Tenant Scope, Dashboard, Observability, Staging/CI, Governance, or Safety gates. `registry.drift.create_candidate_future` and `registry.drift.auto_apply_future` must remain denied by default; eval/canary recommendations remain advisory only.
-- Canary Execution Harness + Apply Workflow v1 must remain mock-first, deterministic, advisory, and metadata-only: it may define `RegistryCanaryPlan`, `RegistryCanaryRun`, `RegistryCanaryResult`, `RegistryCanaryVerdict`, `RegistryApplyWorkflow`, `RegistryApplyGateDecision`, `RegistryRollbackPlan`, and `RegistryCanaryApplySummary` models; execute deterministic mock canary runs only; classify canary verdicts as `passed | failed | warning | skipped | blocked` and compute `applyGateImpact ∈ {no_change | improves_readiness | blocks_apply | future_manual_review}`; compose apply workflows that require eval + canary + manual approval + rollback plan before reaching `ready_for_manual_apply_future`; record metadata-only apply decisions without mutating active registry entries; expose read-only `/registry/canary/*`, `/registry/apply-workflows/*`, `/readiness/registry/canary/summary`, `/readiness/registry/apply-workflows/summary`, `/dashboard/registry-canary-apply`, and `/health.registryCanaryApply` surfaces. It must not execute real LLM calls, real external canaries, real eval suites, real apply, auto-apply, mutate active Skill/Harness/Instruction/RegistryPackage records through auto-improvement, call external providers/MCP/LLMs/vendor CLIs, run remote Git operations, read credential caches, expose secrets/env values, or weaken Registry resolver, lifecycle, approval, eval, checksum, semver, policy, Auth/RBAC, Tenant Scope, SecretRef, Dashboard, Observability, Staging/CI, Governance, or Safety gates. `registry.canary.run_external_future`, `registry.apply.execute_future`, and `registry.apply.auto_apply_future` must remain denied by default; `autoApplyEnabled`, `activeRegistryMutationAllowed`, `applyPerformed`, `activeRegistryMutated`, `externalCanaryExecuted`, `realEvalExecuted`, and `realProviderCallExecuted` must stay literal `false` in v1.
-- Dashboard Scope Filtering v1 must remain representative, mock-first, and metadata-only: it may define `DashboardScopeFilterContext`, `DashboardPanelFilterDecision`, and `DashboardScopeFilterSummary` models; evaluate each `DashboardPanelScopeSummary` against a role/scope filter context built from the existing mock `AuthContext` or from safe-only demo headers (`x-aichestra-demo-role/tenant-id/team-id/project-id/resource-scope`); apply representative redaction to `security`, `vaultSecretBackend`, `observability`, `audit`, `githubApp`, `githubAppIntegration`, `llmIntegration`, `mcp`, `staging`, `stagingDryRun`, `stagingReleaseCandidate`, and `stagingExecution` panels via `filterPanelBody`; preserve the default mock-admin fallback so existing demo flows render unchanged; expose read-only `/dashboard/scope-filter`, dashboard "Dashboard Scope Filtering" panel, and filter summary metadata. It must not implement production Auth/RBAC, real tenant provisioning, row-level security, production tenant isolation, real OIDC/SAML/SCIM/session/JWT/API key, external identity provider calls, GitHub/OpenAI/Anthropic/Gemini/Bedrock/LiteLLM/MCP/Vault/Kubernetes/Temporal/OPA/Cedar/artifact-registry/cloud-service calls, remote Git operations, real LLM/MCP calls, or expose secrets/env values. Demo headers must remain explicitly non-authoritative — never read Authorization/cookie/session/JWT/API-key headers. `productionFiltering`, `productionAuthImplemented`, `productionTenantEnforcement`, and `externalIdentityProviderCalled` must stay literal `false`; `noSecretsExposed` must stay literal `true` in v1.
-- Registry Tenant Scope Enforcement v1 must remain partial representative enforcement only: it may attach `RegistryScopeDecision` and `RegistryScopeEnforcementSummary` metadata to registry resources, resolver results, approval queues, audit/readiness queries, mutation scope checks, API/dashboard/readiness/health surfaces, and policy scope evaluations. It must not implement production tenant provisioning, row-level security, production Auth/RBAC, sessions/JWTs/API keys/service-account credentials, external IdP/provider calls, real LLM/MCP/Git/Vault calls, active registry mutation through auto-improvement, resolver override, package visibility filtering as a production claim, or lifecycle/approval/eval/checksum/semver/policy/governance gate bypass. `registry.scope.enforce_future` must remain denied by default; production registry tenant isolation remains false.
-- Registry Signed Package / Artifact Trust v1 must remain mock-first and metadata-only: it may attach deterministic digest, mock signature, provenance, trust policy, trust decision, resolver, API/dashboard/readiness/health, and import/export planning metadata. It must not perform real signing or verification, generate or store signing keys, call Sigstore/Cosign/GPG/KMS/Vault transit/artifact registries/cloud services, upload/download artifacts, expose raw signatures/secrets/env values, mutate active registry entries through auto-improvement, or bypass lifecycle/approval/eval/checksum/semver/policy/governance/tenant-scope/resolver gates. `registry.artifact_signature.verify_future`, `registry.artifact.sign_future`, and `registry.artifact.import_trusted_future` must remain denied by default.
-- Eval Suite Execution Harness v1 must remain mock-first and deterministic: it may define eval suite/case/run/result/verdict models, execute mock/local metadata checks, attach registry/proposal eval metadata, expose API/dashboard/readiness/health visibility, and feed governance/proposal readiness metadata. It must not execute real external eval suites, call real LLM/MCP/providers/vendor CLIs, run remote Git, execute canaries, auto-apply, mutate active registry entries through auto-improvement, expose secrets/env values, or bypass lifecycle/approval/eval/checksum/semver/artifact trust/compatibility/tenant scope/policy/governance/apply gates. `registry.eval_suite.run_external_future` and `governance.eval.override_future` must remain denied by default.
-- Do not perform real provider merge/rebase operations.
-- Do not implement real Codex CLI, Claude Code, or Aider runner integration in the MVP scaffold.
-- Local Agent Runner v1 must stay mock-first: `MockAgentRunner` is the default, `LocalAgentRunner` is disabled by default, command execution is disabled by default, no secrets are injected, and no remote Git or direct provider calls are allowed. Any controlled remote LLM use must flow only through LLM Gateway v2 gates.
-- Local Agent Runner v1 command execution must go through `CommandExecutor`, use command+args arrays, avoid shell string execution, reject network/remote Git/destructive commands, size-limit stdout/stderr previews, and run only inside explicit fixture/temp workspaces.
-- Agent Workspace Lifecycle v2 must remain mock-first and metadata-only by default: one AgentRun maps to one active workspace lease, shared active workspace paths must be forbidden/flagged, fixture allocation must validate under the configured workspace root, future Git worktree/clone/remote workspace kinds are modeled only, cleanup decisions must not delete non-fixture user directories, and API/dashboard DTOs must redact full local paths and secret-like metadata.
-- Do not run real `git worktree add/remove`, branch checkout/switch, merge, rebase, fetch, push, force-push, branch deletion, or production workspace cleanup from Agent Workspace Lifecycle v2 default runtime/tests.
-- Agent Worktree Allocation v1 must remain mock-first and fixture-only by default: it may validate workspace root allowlists, requested paths, branch leases, branch names, shared path collisions, and create reviewable allocation metadata or fixture workspace lease linkage, but it must not run real `git worktree add/remove`, checkout/switch/reset/clean/fetch/push/merge/rebase, force-push, branch deletion, provider calls, LLM calls, vendor CLIs, destructive cleanup, source mutation, credential-cache reads, or expose secrets/env values/full local paths.
-- Multi-session Agent Run Coordination v1 must remain metadata-only and mock-first: `AgentSession`, `AgentRunCoordinationGroup`, `AgentSessionOverlap`, and `AgentConcurrencyPolicy` may detect same workspace, same branch, same file, same directory, missing target files, and base branch drift, but they must not execute agents, call LLM providers, call vendor CLIs, create branches, create worktrees, switch branches, push, merge, rebase, delete branches, delete workspaces, read credential caches, expose secrets/env values, or bypass Auth/RBAC, Policy, Git, LLM, Runner, Local Agent, Registry, Governance, Dashboard, Observability, Tenant Scope, or Secrets/Sandbox gates.
-- Multi-user / Multi-session Branch Orchestrator v2 must remain metadata-only and mock-first: `BranchOrchestrationRequest`, `BranchOrchestrationDecision`, `BranchNamingPolicy`, `BranchOwnershipRecord`, and `BaseBranchDriftStatus` may allocate safe branch names, link BranchLease/WorkspaceLease ids, detect branch collisions, block shared workspace leases, model base branch drift, and expose dashboard/API metadata, but they must not create real branches, switch branches, fetch, push, merge, rebase, force-push, delete branches, create/delete worktrees, mutate user workspaces, execute agents, call providers, read credential caches, expose secrets/env values, or bypass Auth/RBAC, Policy, Git, Runner, Local Agent, Tenant Scope, Dashboard, Observability, Registry, Governance, Staging, CI/CD, or Secrets/Sandbox gates.
-- Cross-session File Lease / Edit Intent Graph v1 must remain metadata-only and mock-first: `FileLease`, `EditIntent`, graph nodes/edges, and overlap assessments may model read/write intent, same-file overlap, same-directory overlap, same-branch metadata, same-workspace blockers, and broad unknown target warnings, but they must not lock real files at the OS level, read or modify source files, create branches, create worktrees, switch branches, push, merge, rebase, delete branches, delete workspaces, call providers, execute vendor CLIs, read credential caches, expose secrets/env values, or bypass existing safety gates.
-- Harness execution policy is authoritative; task prompts, skill instructions, and instruction artifacts must not override denied commands, network-disabled, remote-Git-disabled, file-write, timeout, output-size, or secret-scope boundaries.
-- Skill, Harness, and InstructionArtifact must remain separate concepts with separate domain types, APIs, and tests.
-- Registry v3 supports exact version pinning and simple semver ranges only. Do not add a full package manager.
-- Registry API responses must go through stable DTO mappers instead of returning internal domain entities directly.
-- Registry resolver selection must enforce lifecycle, approval, eval, and instruction checksum gates.
-- Registry mutation APIs must append registry audit logs and registry revisions with explicit actors; mock actors remain local-only until production auth/RBAC and request propagation are implemented.
-- Registry rollback must restore previous snapshots by creating new revisions, not by deleting history.
-- Registry mutation authorization must stay behind `RegistryMutationAuthorizer`; mock RBAC is not production auth.
-- Registry package manifests must remain local-only JSON references to registry objects. Do not add real artifact registry, package signing, OCI, npm, GitHub release, or remote package integration yet.
-- Registry imports must validate manifests, support dry-run behavior, and avoid overwriting non-draft active approved entries by default.
-- In-memory storage remains the default. Postgres storage is opt-in via `AICHESTRA_STORAGE_PROVIDER=postgres` and `AICHESTRA_DATABASE_URL`.
-- Postgres repositories must stay behind `StorageProvider`, `RepositoryFactory`, and repository interfaces. API handlers and workers must not instantiate Postgres repositories directly.
-- Postgres migrations must run only when explicitly invoked. Do not make tests, build, or app startup run migrations automatically.
-- Optional Postgres contract tests must be skipped unless `AICHESTRA_TEST_DATABASE_URL` is configured.
-- Persistent DB Production Operations v1 must remain read-only and non-destructive: database readiness APIs and dashboard panels may inspect local migration files and expose booleans/counts/checksums/planning metadata, but they must not connect to production databases, expose `AICHESTRA_DATABASE_URL`, `DATABASE_URL`, or `AICHESTRA_TEST_DATABASE_URL` values, execute migrations, run backup/restore jobs, delete data, run partition maintenance, or call external monitoring/export services.
-- Durable Collaboration Stores v1 must remain mock-first, metadata-only, and in-memory by default: it may define collaboration record inventories, repository contracts, in-memory repositories, optional Postgres schema/repositories behind existing storage gates, read-only `/readiness/collaboration-stores/*`, `/dashboard/collaboration-stores`, and health metadata. It must not require Postgres by default, expose DB URLs/env values/secrets/tokens/cookies/session ids/API keys/webhook secrets/credential caches/raw payloads, run remote Git, create/switch/merge/rebase/push/fetch/delete branches, run `git worktree`, delete worktrees, mutate user workspaces, execute real LLM calls, execute vendor CLIs, call providers, or weaken Auth/RBAC, Policy, Git, Runner, Local Agent, Tenant Scope, Dashboard, Observability, Registry, Governance, or Safety gates.
-- Secret Backend Migration Planning v0 must remain read-only and planning-only: readiness APIs, `/health`, and dashboard panels may expose backend options, migration phases, readiness checks, risks, lease/rotation expectations, SecretRef counts, and env fallback booleans/counts/status only. It must not connect to Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, or custom secret backends; migrate, read, print, rotate, issue, or export real secrets; implement BYOK, OAuth, WIF/IAM, or cloud identity exchange; read credential caches; expose env values; or inject secrets into runner, MCP, Local Agent, Git, LLM, or provider processes.
-- Production Secret Backend Implementation Option Decision v0 is decision/readiness metadata only. It may recommend a first production-grade backend, compare alternatives, map SecretRef provider values, define v1 implementation scope, expose read-only API/dashboard/health summaries, and record risks. The decision surface must not call Vault, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, custom secret backends, or cloud identity providers; read, print, migrate, rotate, or issue secrets; expose env values; read credential caches; implement BYOK/OAuth/WIF/IAM; or mark production secrets as ready.
-- Vault-backed Secret Backend v1 must remain non-default and explicitly gated. `AICHESTRA_SECRET_BACKEND_PROVIDER=vault` and `AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER=true` are required before Vault-backed SecretRefs can resolve, and default runtime/tests must use disabled or mock Vault clients. The gated HTTP client must stay isolated behind the Vault client boundary, must not be constructed by default, and must never expose Vault token values, Vault secret values, env values, private keys, webhook secrets, provider API keys, or credential cache paths in API, health, dashboard, audit, tests, errors, or docs. v1 does not implement production Vault rollout, HA, unseal, storage backend, cluster bootstrap, Vault Agent, Vault CSI, sidecars, Terraform, Helm, Kubernetes, production rotation, destructive migration, BYOK, OAuth/WIF/IAM, AppRole production rollout, or production readiness.
-- Vault Integration-Test Profile v1 must remain read-only and skipped by default. Optional live Vault tests may run only when `AICHESTRA_VAULT_INTEGRATION_TESTS=true`, `AICHESTRA_SECRET_BACKEND_PROVIDER=vault`, `AICHESTRA_ENABLE_VAULT_SECRET_PROVIDER=true`, `AICHESTRA_VAULT_ADDR`, `AICHESTRA_VAULT_AUTH_METHOD=token`, `AICHESTRA_VAULT_TOKEN`, `AICHESTRA_VAULT_KV_MOUNT`, `AICHESTRA_VAULT_ALLOWED_PATH_PREFIXES`, `AICHESTRA_TEST_VAULT_SECRET_PATH`, and `AICHESTRA_TEST_VAULT_SECRET_KEY` are configured. Missing gates skip live tests; unsafe gates block readiness. The test path must be allowlisted and clearly test-only. The profile must not write, delete, rotate, broadly list, or mutate Vault secrets; expose Vault token/address/path/key/secret/env values; read credential caches; call Vault in default runtime/tests; or mark Vault or production secrets production-ready.
-- Vault Live Integration Enablement v1 must remain read-only, metadata-only, and skipped by default. It may report manual live readiness, validation checks, a safe runbook, run-record metadata, missing/unsafe gate names, configured booleans, path allowlisted/safe booleans, and no-write/no-delete/no-rotate/no-broad-list status. It must not execute live validation by default, call Vault in readiness/API/dashboard paths, expose Vault token/address/path/key/secret/env values, write/delete/rotate/list secrets, read credential caches, implement production Vault rollout, or mark production Vault readiness true.
-- Phase 4 Preparation must remain metadata-only: do not call LLMs, do not use embeddings, do not execute evals, do not execute canary rollout, and do not mutate active registry entries from candidates or proposals.
-- Auto-improvement safety policy defaults must keep `allowAutoApply = false`, `requireHumanApproval = true`, `requireEvalPassed = true`, and `requireCanary = true`.
-- Auto-improvement v0 must remain deterministic, mock-only, and draft-only. It may create analyses, candidates, draft proposals, draft registry changes, and readiness records, but it must not apply changes, activate registry entries, approve proposals, execute evals, execute canaries, or call external services.
-- Governance v1 may record proposal decisions, proposal eval run metadata, canary readiness, apply gates, and governance audit events. It must not apply draft registry changes, mutate active registry entries, execute evals, execute canaries, or add real auth/provider integrations.
-- Real Integration Foundation v0 may add repository abstractions, schema designs, migration skeletons, and contract tests. It must not wire live databases or real provider services until an explicit follow-up task.
-- Production Auth/RBAC Planning v0 must remain mock-first and provider-neutral: `MockAuthProvider` is the default, future OIDC/SAML/SCIM/service-account providers are disabled placeholders, no real login/session/token/password/API-key issuance exists, and auth roles must not bypass Policy-as-code, SecretRef, sandbox, Git, LLM, runner, registry, or Local Agent gates.
-- Auth/RBAC v0 models and audit events must not store tokens, cookies, passwords, API keys, session secrets, SSO tokens, provider credentials, or credential-cache contents. `/auth/*`, `/health`, dashboard, and audit responses must clearly mark mock auth as non-production and must not expose secrets.
-- Production Auth/RBAC v1 Planning must remain read-only planning/readiness only: do not add real OIDC, SAML, SCIM, SSO, login/logout, password auth, production sessions, JWT issuance, external IdP calls, service-account credential issuance, tenant isolation enforcement, or durable auth migration behavior. `/readiness/auth/*`, `/dashboard/auth-production`, and `/health` may expose booleans, counts, statuses, blockers, and sanitized planning metadata only; they must not expose tokens, cookies, session ids, passwords, raw identity assertions, IdP client secrets, provider credentials, or env values.
-- Production Auth/RBAC Implementation Plan v1 is planning-only. It may define provider selection, session/token boundaries, request context propagation, security/audit requirements, implementation phases, blockers, and risks, but it must not implement real auth, call IdPs, issue sessions/JWTs/API keys/service-account credentials, read credential caches, expose secrets/env values, or mark production auth ready.
-- Production Auth Provider Skeleton v1 is disabled/readiness-only. It may define provider selection metadata, disabled future OIDC/SAML/SCIM/vendor/custom provider skeletons, config gate booleans, future session/token and identity-mapping boundary plans, safe RequestContext/AuthContext/PolicySubject metadata, read-only `/readiness/auth-providers/*`, `/dashboard/auth-providers`, `/auth/config`, and `/health` summaries. `MockAuthProvider` remains the only active default provider. It must not implement real OIDC/SAML/SCIM/SSO/login/logout/session handling, validate JWTs or identity tokens, parse cookies or Authorization headers as auth, issue API keys/JWTs/service-account credentials/sessions, call IdPs, sync SCIM users, expose env values/secrets/tokens/cookies/session ids/raw claims, bypass Policy-as-code, or claim production auth is enabled.
-- RequestContext Propagation v1 is implemented as a mock-first attribution and correlation layer only. It may propagate requestId, correlationId, mock/system actor, principal, roles, teams, authMode, source, and sanitized metadata through selected API/service/audit boundaries, but it must not implement real authentication, parse production sessions, issue credentials, read cookies/tokens into context, call external IdPs, bypass Policy-as-code, or mark production auth ready.
-- API AuthContext Middleware Skeleton v1 is implemented as a mock-first API ingress helper only. It may resolve one cached RequestContext per API request, use MockAuthProvider by default, support dashboard/readiness/system/webhook source metadata, and expose safe summaries, but it must not implement OIDC/SAML/SCIM/SSO/login/logout/session handling, validate JWTs, issue API keys or service-account credentials, treat Authorization headers or cookies as auth, call IdPs, expose secrets/env values, or claim production auth is enabled.
-- Service Account Actor Boundary v1 is implemented as mock-first service attribution only. It may use a static local service-account catalog, `ServiceAccountContextFactory`, `mock_service_account` AuthContext, serviceAccountId-enriched PolicySubject/audit metadata, and scoped service fallbacks for Git, GitHub App token handles, LLM, MCP, Security, Runner, and Local Agent policy paths, but it must not issue real service-account credentials, JWTs, API keys, sessions, client secrets, installation tokens, credential rotations, call IdPs/providers, bypass policy, expose secrets/env values, or claim production service accounts are enabled.
-- Registry/Governance RequestContext Migration v1 is implemented as mock-first attribution only. It may pass RequestContext/AuthContext through migrated registry mutation, registry resolver/read, governance decision, draft registry change, eval metadata, canary readiness, and apply-gate paths, and may use `registry_governance_service` or `improvement_governance_service` service-account metadata where appropriate. It must not implement real auth, issue service-account credentials, bypass policy, weaken registry lifecycle/approval/eval/checksum/rollback gates, enable auto-apply, mutate active registry entries through auto-improvement, execute real evals/canaries, call providers, expose secrets/env values, or claim production governance is enabled.
-- Tenant/Repo/Provider Scope Model v1 is implemented as mock/readiness metadata only. It may define common tenant, team, project, repo, provider, model, SecretRef, MCP tool, registry package, Local Agent host, audit query, and policy resource scope shapes; seed deterministic mock scopes; add optional scope fields to AuthContext, RequestContext, PolicySubject, policy resources, audit envelopes, readiness, and dashboard read models. It must not implement production tenant provisioning, tenant isolation enforcement, row-level security, production dashboard filtering, real Auth/RBAC, provider calls, credential issuance, secret/env exposure, or claim production tenancy is enabled.
-- Dashboard/Readiness Tenant Scope Planning v1 is implemented as planning/readiness metadata only. It may inventory dashboard panels and readiness endpoints, define target tenant/team/project/repo/provider/model/SecretRef/MCP/registry/local-agent/audit scope dimensions, role visibility matrices, fallback behavior, future filtering architecture, and read-only `/readiness/tenant-scope/*`, `/dashboard/tenant-scope`, and `/health` planning summaries. It must not implement production tenant enforcement, tenant provisioning, row-level security, production dashboard/readiness/audit filtering, production Auth/RBAC, external identity-provider calls, provider calls, credential issuance, secret/env exposure, or claim production tenant filtering is enabled.
-- Dashboard/Readiness Tenant Scope Implementation v1 is implemented as metadata/readiness only. It may attach `ScopedReadModelMetadata`, `DashboardPanelScopeSummary`, and `ReadinessEndpointScopeSummary` to dashboard/readiness read models; expose safe scope dimensions, missing-scope warnings, role visibility hints, redaction labels, fallback behavior, tenant filtering implemented false, production enforcement implemented false, and no-secret/no-env status. It must not hide panels, enforce tenant filtering, implement production tenant isolation, provision tenants, add row-level security, implement production Auth/RBAC, call external systems, expose secrets/env values, or claim production tenant filtering is enabled.
-- Tenant Scope Enforcement v1 is implemented as partial representative scaffolding only. It may define `TenantScopeEnforcementDecision`, enforcement mode, mismatch, summary, and helper service models; compare subject/resource scope metadata; attach safe scope-decision summaries to PolicySubject or policy resource metadata; expose read-only `/readiness/tenant-enforcement/*`, `/dashboard/tenant-enforcement`, dashboard/readiness `scopeDecisionSummary`, missing-scope warnings, audit-query warnings, and secret-adjacent helper decisions. It must not implement production tenant provisioning, production tenant isolation, row-level security, production DB tenant partitioning, production Auth/RBAC, real IdP calls, dashboard/readiness/audit filtering, durable tenant grants, provider calls, credential issuance, secret/env exposure, or claim production tenant enforcement is enabled. Policy deny remains authoritative; scope allow metadata must not override Policy-as-code.
-- Audit Query Scope Enforcement v1 must remain partial representative audit-read scoping only: it may define `AuditQueryScopeRequest`, `AuditQueryScopeDecision`, `AuditQueryRedactionPlan`, and `AuditQueryScopeEnforcementSummary`; evaluate summary/metadata/detail/raw-payload-forbidden requests against mock roles and scope metadata; attach safe `scopeDecisionSummary` metadata to `/observability/audit/events`; expose read-only/check-only `/readiness/audit-scope/*`, `/observability/audit/query-scope/check`, `/dashboard/observability`, and `/health` metadata; and redact audit detail fields. It must not implement production Auth/RBAC, tenant provisioning, row-level security, production audit storage, external SIEM/export, external observability backend, external IdP/provider calls, sessions/JWTs/API keys/service-account credentials, durable audit-query grants, production audit query filtering, raw payload access, or secret/env exposure. Raw payload access must stay forbidden and `productionStorageEnforcement` must stay false in v1.
-- External Observability Export v1 must remain disabled-by-default, mock-first, and metadata/check-only: it may define exporter provider options, `ObservabilityExportEnvelope`, `ObservabilityExportSafetyCheck`, readiness summaries, `DisabledObservabilityExporter`, test-only `MockObservabilityExporter`, future exporter skeletons, read-only/check-only `/observability/export/*`, dashboard metadata, and health metadata. It must not implement real OpenTelemetry export, send logs/metrics/traces/audit events to any external service, call Datadog/Grafana Cloud/CloudWatch/OpenSearch/Elasticsearch/Splunk/SIEM/S3/GCS/Azure Monitor/Honeycomb/Prometheus Pushgateway/custom backends, expose endpoint/auth values, export raw payloads/prompts/provider responses/log bodies, read credential caches, expose secrets/env values/tokens/cookies/session ids/API keys/Vault secrets/GitHub tokens/webhook secrets/database URLs, or weaken redaction, retention, audit, tenant scope, Auth/RBAC, Policy, SecretRef, Dashboard, or Safety gates. `exporterEnabled`, `externalCallsEnabled`, `rawPayloadExportAllowed`, and `secretExportAllowed` must stay literal `false` by default.
-- Real Git Adapter v2 keeps `MockGitProvider` as the default, supports `LocalGitProvider` only for explicit local fixture paths, allows GitHub branch/PR/changed-file operations only through `GitHubClient` behind explicit gates, and allows GitHub webhook receive/sync only through disabled-by-default verifier and receiver boundaries.
-- Remote Git operations must require explicit configuration: `AICHESTRA_GIT_PROVIDER=github`, `AICHESTRA_ENABLE_REMOTE_GIT=true`, operation-specific flags such as `AICHESTRA_ALLOW_REMOTE_BRANCH_CREATE=true` or `AICHESTRA_ALLOW_REMOTE_PR_CREATE=true`, a SecretRef-backed GitHub token or legacy `AICHESTRA_GITHUB_TOKEN`, `AICHESTRA_GITHUB_ALLOWED_REPOS`, and the allowed branch prefix.
-- Real Git Adapter v2 must not implement automatic merge, provider rebase, force-push, branch deletion, remote push, GitHub App installation rollout, GitLab, or Bitbucket. `AICHESTRA_ALLOW_REMOTE_MERGE` remains unsupported.
-- GitHub webhook handling must remain disabled unless `AICHESTRA_ENABLE_GITHUB_WEBHOOKS=true`. Verified webhook processing requires a SecretRef-backed webhook secret or gated legacy env secret, signature verification, optional webhook repo allowlist checks, policy allow decisions, and sanitized audit. Raw webhook payloads, webhook secrets, GitHub tokens, and credential cache contents must not be stored or exposed.
-- GitHub webhook sync may update webhook event metadata, verification results, PR sync states, branch sync states, changed-file refresh status, and merge queue risk/read-model fields non-destructively. It must not trigger workflows, execute agents, merge, rebase, push, force-push, delete branches, request reviewers, or mutate active registry entries.
-- Git provider selection and Git operations must flow through provider/service boundaries, not direct API handler instantiation. Git audit events must not expose tokens or secrets.
-- GitHub App Controlled Implementation v1 must remain gated and mock-first by default. `AICHESTRA_GITHUB_AUTH_MODE=github_app` requires `AICHESTRA_ENABLE_GITHUB_APP=true`, app id metadata, a metadata-only `github_app_private_key` SecretRef, installation allowlist, repo allowlist, Auth/RBAC allow, Policy allow, and existing remote Git gates before branch/PR/changed-file operations can use a mock token handle. It must not read private-key values, accept raw private-key env fallback, sign JWTs, exchange live installation tokens, call GitHub in default runtime/tests, expose token/private-key/webhook-secret values, auto-merge, rebase, force-push, or delete branches.
-- GitHub App integration-test profile v1 is read-only and skipped by default. Optional live tests may run only when `AICHESTRA_GITHUB_APP_INTEGRATION_TESTS=true`, `AICHESTRA_ENABLE_REMOTE_GIT=true`, `AICHESTRA_GITHUB_AUTH_MODE=github_app`, `AICHESTRA_ENABLE_GITHUB_APP=true`, app id metadata, private-key SecretRef metadata, installation allowlist, repo allowlist, `AICHESTRA_GITHUB_APP_ALLOWED_BRANCH_PREFIX=ai/`, branch/PR gates, and `AICHESTRA_ALLOW_REMOTE_MERGE=false` are configured. Missing gates skip live tests; unsafe gates block readiness. The profile must not return env values, private keys, installation tokens, webhook secrets, or legacy GitHub tokens and must not auto-merge, rebase, force-push, delete branches, or call GitHub in default tests.
-- GitHub App / Production Webhook Hardening Planning v0 must remain read-only planning metadata. It may expose permission matrices, webhook event allowlists, replay classification skeletons, dead-letter plans, credential readiness, endpoint plans, risks, `/readiness/github-app/*`, and `/dashboard/github-app`; it must not create a GitHub App, read or store GitHub App private keys, sign JWTs, mint installation tokens, call GitHub APIs, enable production webhooks, auto-merge, rebase, force-push, delete branches, expose webhook secrets, or bypass Auth/RBAC, Policy, SecretRef, Git, Observability, Dashboard, or Secrets/Sandbox gates.
-- LLM Gateway v2 keeps `MockLLMProvider` as the default, adds provider-aware route selection and bounded fallback read models, and supports one controlled OpenAI-compatible HTTP completion path behind explicit gates.
-- Remote LLM operations must require explicit configuration such as `AICHESTRA_LLM_PROVIDER=openai_compatible`, `AICHESTRA_ENABLE_REMOTE_LLM=true`, `AICHESTRA_ALLOW_REMOTE_LLM_COMPLETION=true`, `AICHESTRA_LLM_BASE_URL`, a SecretRef-backed LLM API key or legacy `AICHESTRA_LLM_API_KEY`, and model allowlist/default-model metadata. Remote completion must also pass virtual-key budget policy and Policy-as-code checks before any HTTP call.
-- LLM routing defaults to `AICHESTRA_LLM_ROUTING_MODE=mock_only`. Multi-provider mode and fallback require explicit routing/fallback configuration. Fallback must be bounded and must not bypass Auth/RBAC, Policy-as-code, SecretRef, provider/model allowlists, or budget gates.
-- Virtual model keys are internal policy objects only. Do not store OpenAI, Anthropic, Gemini, Bedrock, LiteLLM, or other provider API keys in source, model catalog records, virtual keys, audit events, or usage metadata.
-- LLM Gateway calls must record successful usage with `taskId` and `taskRunId`; blocked calls must create audit events and must not call external providers.
-- LLM Gateway v2 must not implement BYOK, OAuth/device-code/WIF/IAM, real Anthropic/Gemini/Bedrock/Vertex/Azure/LiteLLM calls, streaming, Local CLI provider execution, provider credential cache reads, or production secret manager rollout. SecretRef-backed env and gated Vault credential resolution are the only credential manager paths allowed in this milestone, and remote LLM gates remain authoritative.
-- LLM Gateway integration-test profile v1 must remain skipped by default. Live LLM tests require every explicit integration gate, model allowlist, budget cap, SecretRef or controlled test-only credential gate, Auth/RBAC, and Policy-as-code. Readiness APIs, `/health`, dashboard, and tests must not expose API keys, env values, raw prompts, raw provider responses, vendor CLI state, or credential cache paths.
-- Enterprise LLM Provider Abstraction v0 must remain skeleton-only: do not call Claude, Codex, Gemini, Vertex, Bedrock, Foundry, or any provider API/CLI.
-- Local CLI Provider Templates v1 must remain metadata-only: Claude Code, Codex CLI, Gemini CLI, Aider, custom, Cursor, Continue, and other vendor CLI templates are template-only/disabled/future, with no direct execution, PTY automation, credential-cache read, credential validation, secret forwarding, env value exposure, or real daemon behavior by default.
-- Provider auth config must not contain raw provider tokens. `local_cli` providers must use `external_cli_session` with `credentialAccess = never_read_tokens`.
-- Do not read or upload provider-owned credential caches such as `~/.codex/auth.json`, `~/.claude`, Google credential caches, OS keychains, or vendor CLI session files.
-- Aichestra Local Agent is a future user-machine daemon boundary and is not the same as Local Agent Runner. Do not implement a real Local Agent daemon, real network transport, or vendor CLI execution until an explicit future task.
-- Aichestra Local Agent Protocol v1 is mock-first metadata coordination only: no real daemon, no WebSocket/gRPC/HTTP tunnel, no vendor CLI execution, no credential cache reads, no PTY automation, no direct local CLI execution from Cloud, and no secret forwarding.
-- Local Agent Protocol v1 dispatch must go through `LocalAgentProtocolService`, `LocalAgentTransport`, static policy decisions, mock channel/handshake state, compatibility checks, consent records, sandbox/network/redaction references, and Local Agent protocol audit events.
-- `MockLocalAgentTransport` and `FixtureLocalAgentDaemon` must remain in-memory and must not run commands, read credential caches, or use network transport.
-- PTY interactive fallback, danger/full-access local CLI modes, local CLI shell execution, local CLI file write, and local CLI network access are denied by default.
-- Policy-as-code v0 must remain static/mock-first: do not add real OPA/Rego, Cedar, external policy services, dynamic policy code upload, `eval()`, or user-provided policy execution.
-- Policy Bundle / OPA-Cedar Planning v0 must remain read-only planning/readiness only: do not replace `StaticPolicyEngine`, add real OPA/Rego or Cedar execution, call external policy decision services, execute dynamic policy code, load remote policy bundles, implement hot reload, verify signed bundles, execute break-glass, or promote production policy changes. `/readiness/policy-bundles/*`, `/dashboard/policy-bundles`, and `/health` may expose sanitized engine options, bundle plans, domain mappings, checks, risks, migration phases, static rule counts, and no-dynamic-execution booleans only.
-- Policy Runtime Shadow Evaluation Planning v1 and Shadow Evaluator Skeleton v1 must remain read-only/disabled/mock readiness only: do not run a live shadow evaluator, candidate policy runtime, OPA/Rego runtime, Cedar runtime, signed bundle verification runtime, external policy service, dynamic policy code, remote bundle loading, hot reload, or policy enforcement change. `/readiness/policy-shadow/*`, `/readiness/policy-shadow/evaluator/*`, `/dashboard/policy-shadow`, and `/health` may expose sanitized plan, comparison-rule, mismatch taxonomy, planning report, readiness check, rollout, disabled evaluator status, mock fixture report, count, and no-execution metadata only. `StaticPolicyEngine` remains source of truth and `enforcementChanged` must stay false.
-- Policy Bundle Runtime PoC Planning v0 must remain read-only planning/readiness only: do not replace or bypass `StaticPolicyEngine`, implement OPA/Rego, Cedar, signed JSON/YAML, or custom runtime evaluators, execute dynamic policy code, load local or remote policy bundles, implement shadow enforcement, hot reload, signed bundle verification, runtime activation, external policy service calls, production Auth/RBAC, or tenant enforcement. `/readiness/policy-runtime-poc/*`, `/dashboard/policy-runtime-poc`, and `/health` may expose sanitized runtime options, input/output contract metadata, domain mappings, golden cases, checks, risks, summary counts, and no-runtime-execution booleans only.
-- Policy Runtime PoC Golden Test Harness v1 must remain offline, deterministic, and StaticPolicyEngine-only. It may define static normalized fixtures, compare current static decisions, expose sanitized read-only golden summary metadata at `/readiness/policy-runtime-poc/golden-summary` and `/dashboard/policy-runtime-poc`, and prepare future runtime comparison. It must not implement or execute OPA/Rego, Cedar, signed JSON/YAML bundles, signed bundle verification, custom policy services, shadow enforcement, dynamic policy code, local/remote policy bundle loading, hot reload, external policy service calls, production Auth/RBAC, tenant enforcement, secrets, env values, or mutation.
-- Policy Runtime Shadow Evaluation Planning v1 must remain planning/readiness only. Policy Runtime Shadow Evaluator Skeleton v1 may define `PolicyShadowEvaluator`, `DisabledPolicyShadowEvaluator`, deterministic `MockPolicyShadowEvaluator`, comparison rules, mismatch taxonomy, reporting, rollout/rollback, read-only `/readiness/policy-shadow/*` APIs, and dashboard/read-model metadata. It must not implement a live shadow evaluator, candidate runtime, OPA/Rego, Cedar, signed JSON/YAML evaluator, signed verification runtime, external policy service, dynamic policy execution, remote policy loading, hot reload, enforcement changes, production Auth/RBAC, tenant enforcement, secrets, env values, or mutation. `StaticPolicyEngine` remains source of truth and `enforcementChanged` must stay false.
-- Policy decisions must not weaken existing safety gates. Budget checks, harness policy, registry approval/eval/checksum gates, mock RBAC, governance apply gates, and provider-disabled defaults remain authoritative.
-- Policy decision audit must not store secrets, tokens, provider API keys, or raw prompts. Default policy rules must deny remote Git operations unless explicit Real Git Adapter v1/v2 gates and allowlists pass, deny unverified GitHub webhook processing, and must deny remote LLM completion, runner command execution by default, MCP tool calls, secret reads, runner secret injection, network egress, broad provider credential resolution, Local Agent secret forwarding, and improvement apply.
-- Secrets and Sandbox Design v0 must remain metadata-only and model-only. `SecretRef`, `SecretLease`, API responses, audit events, and test fixtures must not contain raw secret values, OAuth tokens, provider API keys, vendor credential cache content, or real credential file paths except redaction test strings.
-- Vault-backed Secret Backend v1 is implemented only as a gated SecretRef provider boundary. AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and custom production secret managers remain future placeholders until explicit future tasks. The env-backed SecretRef provider is explicit, allowlisted, and must not enumerate environment variables or expose values.
-- `SandboxProfile` container, Firecracker, and Kubernetes kinds are future placeholders. Do not add Docker, Kubernetes, Firecracker, VM, or production sandbox runtime integration in the MVP scaffold.
-- Network egress is denied by default and modeled through `NetworkEgressPolicy`; do not add real external network calls or make runner/provider paths more permissive.
-- Runner and provider output must be redacted and preview-limited before security audit storage where Secrets and Sandbox v0 controls the path.
-- Dashboard API-backed Read Model v0 routes must remain read-only. They may aggregate current repository/service/config/audit state, including Vault v1 status metadata, but must not run workflows, call GitHub, call LLM providers, call Vault in default runtime/tests, execute runner commands, create Local Agent fixture invocations, request secret leases, read credential caches, or expose raw secrets/tokens/unredacted logs.
-- Observability / Audit Retention v0 must remain read-only and mock-first: common audit envelopes must be sanitized before return, retention policies must not delete data, metric and trace models must stay skeleton/read-model only, Audit Query Scope Enforcement v1 must stay check/redaction-only, External Observability Export v1 must stay disabled/check-only, and `/observability/*` plus `/dashboard/observability` must not call external observability services, export audit logs, deliver alerts, read credential caches, expose raw prompts/outputs, expose raw webhook payloads, or expose secrets/tokens.
-- MCP Gateway v0 must stay mock-first. `MockMCPGateway` is the default; real MCP transport, stdio/http/sse MCP calls, real GitHub/Jira/Slack/DB/search integrations, network access, vendor CLI execution, credential cache reads, SecretLease issuance to tools, write/deploy tools, model-generated automatic tool execution, and Local Agent MCP forwarding are disabled or unimplemented by default. Low-risk read-only mock tools may run only through Auth/RBAC, Policy-as-code, redaction, and MCP audit boundaries.
-- Production Deployment Readiness Planning v0 is documentation and read-only planning metadata only. It may expose deployment profiles, readiness checks, risk registers, and dashboard/API read models, but it must not create deployable infrastructure, call Kubernetes/cloud/vendor CLIs, run live provider checks, read or validate real secrets, enable production traffic, or mark production as ready.
-- Staging Deployment Profile v0 is non-production readiness metadata only. It may expose a staging profile, integration gate matrix, readiness checks, promotion criteria, rollback criteria, health metadata, and dashboard/API read models, but it must not deploy anything, add Kubernetes/Terraform/Pulumi/Helm/cloud infrastructure, call external providers, run remote Git/LLM/MCP/auth tests without explicit gates, read or expose secrets/env values, enable remote merge/rebase/force-push/branch deletion, enable vendor CLI execution, enable production traffic, or mark staging as production-ready.
-- Staging Deployment Dry-run Profile v0 is read-only readiness aggregation only. It may expose a dry-run profile, source summaries, checks, blockers, report, summary, health metadata, and dashboard/API read models, but it must not deploy anything, run CI jobs, run remote integration tests, call external providers, read or expose secrets/env values, mutate resources, enable destructive Git/vendor CLI/MCP capabilities, mark staging as deployed, or mark production as ready.
-- Staging Release Candidate Checklist v0 is read-only staging RC readiness metadata only. It may expose checklist, gate, blocker, signoff, release-note, rollback, report, summary, health metadata, and dashboard/API read models, but it must not create a release, create a Git tag, create a GitHub release, deploy anything, run CI jobs, run remote integration tests, call external providers, read or expose secrets/env values, mutate resources, enable destructive Git/vendor CLI/MCP capabilities, mark staging as deployed, or mark production as ready.
-- Staging Deployment Execution Plan v0 is read-only staging execution planning metadata only. It may expose execution plan, step sequence, pre-deploy gates, optional integration decisions, go/no-go decision, rollback plan, health metadata, and dashboard/API read models, but it must not deploy anything, create releases or tags, run deployment commands, run CI jobs, run remote integration tests, call external providers, read or expose secrets/env values, issue credentials, mutate resources, enable destructive Git/vendor CLI/MCP capabilities, mark staging as deployed, or mark production as ready.
-- Staging Human Signoff Pack v0 is documentation/readiness metadata only. It may expose signoff pack availability, required role counts, pending role counts, approved role counts, pending signoff status, evidence checklist status, decision policy status, and deployment-blocked status, but it must not fake approval, record approval without real human evidence, implement identity/session/token workflow, deploy anything, create releases or tags, run remote integration tests, call providers, read or expose secrets/env values, mark staging as deployed, or mark production as ready.
-- Staging RC Evidence Pack v0 is documentation/evidence only. It may record validation evidence, skipped optional test evidence, release-note draft content, rollback planning evidence, and planning-ready signoff status, but it must not fake real human approval, create a release, create a Git tag, create a GitHub release, deploy anything, run remote integration tests, call external providers, expose secrets/env values, mark staging as deployed, or mark production as ready.
-- Staging CI/CD Pipeline Planning v0 is read-only planning metadata only. It may expose pipeline profiles, job definitions, optional integration test gates, readiness checks, risks, health metadata, and dashboard/API read models, but it must not create active deployment workflows, run CI jobs, deploy anything, call external providers, run remote Git/LLM/MCP/auth/vendor tests by default, expose secrets or env values, upload raw logs/prompts/provider outputs, or mark staging/production as ready.
+5. **Tests run in the integration sandbox, not merely in the session worktree.**
+   - Session-local tests are useful feedback.
+   - The gate is the test/typecheck/lint result on `latest main + candidate changes`.
 
-## MVP focus
+6. **Change intent is recorded before merge review.**
+   - Each completed session must produce a Change Manifest.
+   - The manifest is compared against the actual diff and used by the Semantic Merge Reviewer.
 
-The first working vertical slice is:
+7. **The merge LLM is advisory, not authoritative.**
+   - It identifies semantic risks, proposes fixes, and produces a review report.
+   - It does not bypass tests or human approval.
 
-User creates a task
--> system selects mock model and registry-backed mock skill, harness, and instruction refs
--> worker creates mock branch
--> mock agent run produces a diff summary
--> mock or local-only dry-run merge simulation records conflict evidence
--> mock PR is created
--> mock merge queue records conflict risk and simulation status
--> usage ledger records cost
--> web dashboard consumes read models and shows task status.
+8. **Human approval is required before applying a verified candidate to main.**
 
-## OIDC Provider Skeleton Hardening v1
+## MVP scope
 
-Status: `v1_implemented`. Keep OIDC as a disabled future provider unless a later task explicitly implements a gated integration profile. Do not add real OIDC login/callbacks, OAuth flows, PKCE, discovery/JWKS fetches, JWT validation, session/JWT/API-key issuance, raw token/cookie/header storage, external IdP calls, or env/secret exposure. MockAuthProvider remains default; selecting `oidc_future` must fail closed.
+Build a local single-user tool first. No central server is required.
+
+In scope:
+
+- Local CLI-first workflow
+- Optional local web UI later
+- Git worktree-per-session
+- Session registry in SQLite
+- Local artifact storage
+- Change Manifest generation and validation
+- Local merge queue
+- Integration sandbox
+- Mechanical conflict detection
+- Semantic merge review using a dedicated LLM session or prompt
+- Test/typecheck/lint gate
+- Human review and approval
+- Apply verified candidate tree to main
+
+Out of scope for MVP:
+
+- Multi-user presence
+- Enterprise permission model
+- Remote control plane
+- MCP gateway
+- Skill registry
+- Secret broker
+- Graph database
+- Full semantic static analysis
+- Automatic production deployment
+
+## Recommended implementation stack
+
+Prefer Rust for the MVP core unless the repository has already chosen another stack.
+
+Suggested crates and tools:
+
+- CLI: `clap`
+- Async/process: `tokio`
+- SQLite: `sqlx` or `rusqlite`
+- Git: shell out to `git` first; wrap commands carefully
+- File watching: `notify`
+- Serialization: `serde`, `serde_yaml`, `serde_json`
+- Hashing: `sha2`
+- Temp dirs: `tempfile`
+- Diff parsing: start simple with `git diff --name-status`, `git diff --stat`, and patch files
+
+Prefer native `git` commands in MVP because behavior is easier to audit and reproduce. Add `gitoxide` later only after the command-level merge semantics are locked.
+
+## Expected repository layout
+
+When creating the project, prefer this shape:
+
+```text
+repo-root/
+├── AGENTS.md
+├── README.md
+├── Cargo.toml
+├── crates/
+│   ├── aich-cli/          # CLI commands and user interaction
+│   ├── aich-core/         # domain model, orchestration, events
+│   ├── aich-git/          # git command wrapper and worktree manager
+│   ├── aich-ledger/       # SQLite schema and artifact store
+│   ├── aich-llm/          # LLM adapter wrapper and prompts
+│   ├── aich-merge/        # queue, preflight, semantic review pipeline
+│   └── aich-check/        # local check runner
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── MERGE_ALGORITHM.md
+│   └── SEMANTIC_MERGE.md
+├── .aichestra/
+│   ├── config.yaml
+│   ├── schemas/change-manifest.schema.yaml
+│   ├── templates/change-manifest.yaml
+│   └── prompts/
+│       ├── change-manifest.md
+│       └── semantic-merge-review.md
+└── tests/
+    └── fixtures/
+```
+
+For a very small first commit, a single Rust crate is acceptable. Keep module boundaries matching the future crate names.
+
+## Core commands to implement
+
+Target CLI command set:
+
+```bash
+aich init
+
+aich session start \
+  --goal "Describe the task" \
+  --provider codex \
+  --target src/auth.ts
+
+aich status
+
+aich session complete <session-id>
+
+aich queue
+
+aich preflight <session-id>
+
+aich review <session-id>
+
+aich approve <session-id>
+
+aich apply <session-id>
+```
+
+Optional later:
+
+```bash
+aich semantic-review <session-id>
+aich resolve <session-id>
+aich manifest edit <session-id>
+aich doctor
+```
+
+## State model
+
+Use SQLite for local state. Store large artifacts as files under `.aichestra/artifacts/` or an external Aichestra home directory.
+
+Important entities:
+
+- Session
+- PatchSet
+- ChangedFile
+- ContextSnapshot
+- ChangeManifest
+- MergeAttempt
+- SemanticReview
+- CheckResult
+- Approval
+- EventLog
+
+Persist event names even in MVP. They become future server sync events.
+
+Suggested events:
+
+- `repo.initialized`
+- `session.created`
+- `worktree.created`
+- `session.started`
+- `context.snapshot.created`
+- `files.changed`
+- `patchset.created`
+- `manifest.created`
+- `manifest.validated`
+- `merge.preflight.started`
+- `merge.mechanical.completed`
+- `merge.semantic_review.completed`
+- `check.completed`
+- `approval.requested`
+- `approval.approved`
+- `approval.rejected`
+- `merge.applied`
+- `merge.blocked`
+
+## Change Manifest rules
+
+Every completed LLM work session must produce a structured Change Manifest. The manifest records what changed, why it changed, and what assumptions the change makes.
+
+The manifest must include:
+
+- session id
+- task goal
+- base commit
+- head commit or patch id
+- summary of intent
+- changed files
+- changed symbols if known
+- newly created files
+- deleted or renamed files
+- breaking changes
+- migration notes
+- compatibility assumptions
+- tests added
+- tests run
+- risks and uncertainty
+
+Do not trust the manifest alone. Validate it against actual Git diff data.
+
+If the manifest claims no breaking changes but the diff changes exported function signatures, public API files, config files, migrations, or shared types, flag the manifest as suspicious and require review.
+
+## Semantic merge reviewer
+
+The Semantic Merge Reviewer is a dedicated LLM review step that runs after mechanical merge simulation and before approval.
+
+Inputs:
+
+- Candidate session Change Manifest
+- Already-applied or queued session manifests when relevant
+- Actual diff summary
+- Changed file list
+- Changed symbol summary if available
+- Mechanical merge result
+- Test results if any
+- Project rules from this AGENTS.md and `.aichestra/config.yaml`
+
+Outputs:
+
+- semantic risk level: low / medium / high / blocked
+- suspected semantic conflicts
+- assumptions that may have changed
+- call sites or tests that should be checked
+- proposed fix plan, if needed
+- optional patch suggestion, but never auto-apply without preflight
+- reviewer summary for the human
+
+The reviewer must say when it is uncertain. It must not claim safety merely because Git had no text conflict.
+
+## Merge algorithm: verified tree rule
+
+The implementation must follow this rule:
+
+> A candidate may be applied to main only if the exact candidate tree was created from latest main, passed checks in the integration sandbox, passed semantic review or had risks accepted, and received human approval.
+
+Recommended MVP strategy:
+
+1. Lock the local merge queue.
+2. Read current `main` commit as `main_before`.
+3. Create or reset a temporary integration sandbox worktree at `main_before`.
+4. Apply the candidate using one chosen strategy.
+5. If conflicts occur, block.
+6. If semantic review finds blocker risks, block or request a resolver patch.
+7. Run checks in the sandbox.
+8. If checks fail, block.
+9. Create the verified commit/tree in the sandbox.
+10. Store the verified tree id and commit id.
+11. Ask the user for approval.
+12. Before applying, verify main is still at `main_before`.
+13. Apply the verified commit/tree to main using the same result that was tested.
+14. Unlock queue.
+
+Do not mix rebase-tested results with merge-commit application. Do not use a different merge strategy in apply than in preflight.
+
+## Integration sandbox
+
+Use an integration sandbox as a temporary verification worktree. It is not necessarily a long-lived integration branch.
+
+Preferred MVP meaning:
+
+```text
+integration sandbox = temporary worktree used to create and test the candidate tree
+```
+
+Avoid introducing a persistent `aich/integration/local` branch unless the product explicitly supports staging multiple verified changes before promotion.
+
+## Git safety guidance
+
+Primary safety is architectural:
+
+- LLM sessions receive only their own worktree path.
+- The main worktree is not handed to coding agents.
+- The merge queue controls updates to main.
+
+Secondary safety is advisory/enforcement where practical:
+
+- Warn if main worktree becomes dirty.
+- Refuse to apply if main moved since preflight.
+- Refuse `git push --force` features in MVP.
+- Use hooks/wrappers as helpful guardrails, but do not depend on them for security.
+
+This is a single-user, non-adversarial MVP. Do not pretend it is a hardened sandbox.
+
+## Completion policy
+
+Prefer explicit human completion:
+
+```bash
+aich session complete <session-id>
+```
+
+Do not depend on an LLM's own "done" message as the only trigger. The complete command should:
+
+- inspect worktree dirty state
+- create a commit or patch set according to config
+- collect diff summary
+- request or generate Change Manifest
+- capture context snapshot hash
+- enqueue merge candidate
+
+Dirty tree policy must be explicit. Recommended MVP policy:
+
+- If there are changes, create a candidate commit on the session branch.
+- If there are untracked files, include only files under the repo root unless ignored.
+- If there are no changes, mark session as completed with no-op and do not enqueue.
+
+## Test gate policy
+
+Project checks are configured in `.aichestra/config.yaml`.
+
+The gate checks must run inside the integration sandbox after candidate application.
+
+Session worktree checks are useful but insufficient.
+
+For Rust project development, run:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all
+```
+
+For the target repo being managed by Aichestra, run the commands configured by the target repo's `.aichestra/config.yaml`.
+
+## Human review expectations
+
+Review output should show:
+
+- task goal
+- branch/worktree
+- base commit and candidate commit/tree
+- changed files
+- diff summary
+- Change Manifest summary
+- semantic review result
+- mechanical conflict result
+- test/typecheck/lint result
+- exact command that will apply the verified tree
+
+The user approves the verified candidate, not just the original session branch.
+
+## Coding conventions
+
+- Keep functions small and testable.
+- Wrap all shell command execution in a typed command layer.
+- Never build Git commands by string concatenation; pass args as arrays.
+- Record stdout/stderr artifacts for failed commands.
+- Prefer explicit errors with actionable messages.
+- Make merge state transitions durable in SQLite before running destructive operations.
+- Any function that changes Git state should be idempotent or have a recovery path.
+
+## Definition of done
+
+A change is done only when:
+
+- code compiles
+- relevant unit/integration tests pass
+- `cargo fmt` and `cargo clippy` pass for Aichestra code
+- merge algorithm invariants are not weakened
+- docs are updated if behavior changed
+- tests cover the core path or a regression scenario
+
+For changes to merge logic, also update `docs/MERGE_ALGORITHM.md`.
+
+For changes to semantic review, also update `docs/SEMANTIC_MERGE.md` and `.aichestra/prompts/semantic-merge-review.md`.
+
+## When working as Codex
+
+Before modifying code:
+
+1. Read this file.
+2. Inspect `docs/ARCHITECTURE.md`.
+3. Inspect `docs/MERGE_ALGORITHM.md` before touching merge, git, queue, or apply logic.
+4. Inspect `docs/SEMANTIC_MERGE.md` before touching Change Manifest or semantic review logic.
+5. Summarize the invariant affected by your change.
+
+When implementing:
+
+- Prefer minimal, high-confidence changes.
+- Add or update tests with the behavior change.
+- Do not weaken the verified-tree rule.
+- Do not add a server dependency to MVP paths.
+- Do not make automatic LLM conflict resolution bypass human approval.
+
+When reporting back:
+
+- State what changed.
+- State what tests/checks were run.
+- State any semantic risks or unresolved uncertainties.

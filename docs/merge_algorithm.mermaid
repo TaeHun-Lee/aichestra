@@ -1,0 +1,57 @@
+flowchart TB
+  DONE["작업 세션 완료<br/>aich session complete"]
+  DIFF["실제 diff / changed files 수집"]
+  MANIFEST["Change Manifest 생성"]
+  VALIDATE["Manifest vs Diff 검증"]
+  ENQUEUE["Local Merge Queue 등록"]
+
+  LOCK["Queue lock 획득"]
+  MAIN["현재 main commit 기록<br/>main_before"]
+  SANDBOX["Integration Sandbox 생성<br/>main_before 기준 임시 worktree"]
+  APPLY_CANDIDATE["candidate 적용<br/>merge/rebase/cherry-pick 중 하나로 고정"]
+  TEXT_CONFLICT{"text conflict 발생?"}
+
+  SEM["Semantic Merge LLM Review<br/>manifest + diff + merge result 분석"]
+  SEM_BLOCK{"semantic blocker?"}
+
+  CHECK["sandbox에서 test / typecheck / lint 실행"]
+  CHECK_PASS{"checks 통과?"}
+
+  VERIFIED["Verified Candidate 생성<br/>tree_id / commit_id 저장"]
+  REVIEW["Human Review<br/>diff + manifest + semantic report + test result"]
+  APPROVED{"사용자 승인?"}
+
+  MAIN_MOVED{"main이 preflight 이후 이동했는가?"}
+  APPLY["검증한 동일 tree/commit을 main에 반영"]
+  BLOCK["차단<br/>수정 / 재검증 필요"]
+
+  DONE --> DIFF
+  DIFF --> MANIFEST
+  MANIFEST --> VALIDATE
+  VALIDATE --> ENQUEUE
+
+  ENQUEUE --> LOCK
+  LOCK --> MAIN
+  MAIN --> SANDBOX
+  SANDBOX --> APPLY_CANDIDATE
+  APPLY_CANDIDATE --> TEXT_CONFLICT
+
+  TEXT_CONFLICT -- yes --> BLOCK
+  TEXT_CONFLICT -- no --> SEM
+
+  SEM --> SEM_BLOCK
+  SEM_BLOCK -- yes --> BLOCK
+  SEM_BLOCK -- no --> CHECK
+
+  CHECK --> CHECK_PASS
+  CHECK_PASS -- no --> BLOCK
+  CHECK_PASS -- yes --> VERIFIED
+
+  VERIFIED --> REVIEW
+  REVIEW --> APPROVED
+
+  APPROVED -- no --> BLOCK
+  APPROVED -- yes --> MAIN_MOVED
+
+  MAIN_MOVED -- yes --> BLOCK
+  MAIN_MOVED -- no --> APPLY
