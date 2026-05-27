@@ -21,6 +21,8 @@ This repository now contains a CLI-first local MVP slice:
 - `aich queue unlock --force`
 - `aich session start --goal ...`
 - `aich session complete <session-id>`
+- `aich session cleanup <session-id>`
+- `aich session prune --applied`
 - `aich preflight <session-id>`
 - `aich review <session-id>`
 - `aich approve <session-id>`

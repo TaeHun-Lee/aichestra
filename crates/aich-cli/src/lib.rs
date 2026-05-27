@@ -13,10 +13,11 @@ use aich_core::{
     SessionStatus,
 };
 use aich_git::{
-    ApplyVerifiedCommitRequest, CheckCommand, CompleteSessionWorktreeOutcome,
-    CompleteSessionWorktreeRequest, CreateWorktreeRequest, GitRepository, NativeGitWorktreeManager,
-    PreflightBlocked, PreflightCheckOutput, PreflightOutcome, PreflightRequest, PreflightRunner,
-    PreflightVerified, SessionWorktreeCompleter, VerifiedCommitApplier, WorktreeError,
+    ApplyVerifiedCommitRequest, CheckCommand, CleanupSessionWorktreeOutcome,
+    CleanupSessionWorktreeRequest, CompleteSessionWorktreeOutcome, CompleteSessionWorktreeRequest,
+    CreateWorktreeRequest, GitRepository, NativeGitWorktreeManager, PreflightBlocked,
+    PreflightCheckOutput, PreflightOutcome, PreflightRequest, PreflightRunner, PreflightVerified,
+    SessionWorktreeCleaner, SessionWorktreeCompleter, VerifiedCommitApplier, WorktreeError,
     WorktreeManager,
 };
 use aich_ledger::{
@@ -230,6 +231,19 @@ pub struct QueueUnlockResult {
     pub age_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SessionCleanupResult {
+    pub session: Session,
+    pub latest_attempt: MergeAttempt,
+    pub cleanup: CleanupSessionWorktreeOutcome,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SessionPruneResult {
+    pub cleaned: Vec<SessionCleanupResult>,
+    pub skipped: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DoctorSeverity {
     Ok,
@@ -330,6 +344,20 @@ struct SessionCompleteOptions {
     db_path: Option<PathBuf>,
     session_id: String,
     operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct SessionCleanupOptions {
+    repo_root: PathBuf,
+    db_path: Option<PathBuf>,
+    session_id: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct SessionPruneOptions {
+    repo_root: PathBuf,
+    db_path: Option<PathBuf>,
+    applied: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -606,6 +634,23 @@ fn run_session_command<W: Write>(args: &[String], cwd: &Path, out: &mut W) -> Re
             }
             Ok(())
         }
+        Some("cleanup") => {
+            let options = parse_session_cleanup_options(&args[1..], cwd)?;
+            let git = NativeGitWorktreeManager;
+            let result = cleanup_session_with(&options, &git)?;
+            render_session_cleanup_result(&result, out)
+        }
+        Some("prune") => {
+            let options = parse_session_prune_options(&args[1..], cwd)?;
+            let git = NativeGitWorktreeManager;
+            let result = prune_sessions_with(&options, &git)?;
+            writeln!(out, "Pruned sessions: {}", result.cleaned.len())?;
+            writeln!(out, "Skipped sessions: {}", result.skipped)?;
+            for cleaned in &result.cleaned {
+                render_session_cleanup_result(cleaned, out)?;
+            }
+            Ok(())
+        }
         Some("-h") | Some("--help") | None => Err(CliError::Usage(usage_text())),
         Some(command) => Err(CliError::Usage(format!(
             "unknown session command '{command}'\n\n{}",
@@ -634,6 +679,33 @@ fn run_auth_command<W: Write>(args: &[String], cwd: &Path, out: &mut W) -> Resul
             usage_text()
         ))),
     }
+}
+
+fn render_session_cleanup_result<W: Write>(
+    result: &SessionCleanupResult,
+    out: &mut W,
+) -> Result<(), CliError> {
+    writeln!(out, "Cleaned session {}", result.session.id)?;
+    writeln!(out, "Merge attempt: {}", result.latest_attempt.id)?;
+    writeln!(
+        out,
+        "Session worktree removed: {}",
+        yes_no(result.cleanup.session_worktree_removed)
+    )?;
+    writeln!(
+        out,
+        "Branch deleted: {}",
+        yes_no(result.cleanup.branch_deleted)
+    )?;
+    writeln!(
+        out,
+        "Sandbox worktrees removed: {}",
+        result.cleanup.sandbox_worktrees_removed.len()
+    )?;
+    for sandbox_path in &result.cleanup.sandbox_worktrees_removed {
+        writeln!(out, "- {}", sandbox_path.display())?;
+    }
+    Ok(())
 }
 
 fn run_auth_operator_command<W: Write>(
@@ -1070,6 +1142,120 @@ fn parse_session_complete_options(
         db_path,
         session_id,
         operator_id,
+    })
+}
+
+fn parse_session_cleanup_options(
+    args: &[String],
+    cwd: &Path,
+) -> Result<SessionCleanupOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown session cleanup option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "session cleanup accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage(
+            "session cleanup requires <session-id>".to_string(),
+        ));
+    };
+
+    Ok(SessionCleanupOptions {
+        repo_root,
+        db_path,
+        session_id,
+    })
+}
+
+fn parse_session_prune_options(
+    args: &[String],
+    cwd: &Path,
+) -> Result<SessionPruneOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut applied = false;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--applied" => {
+                applied = true;
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            other => {
+                return Err(CliError::Usage(format!(
+                    "unknown session prune option '{other}'\n\n{}",
+                    usage_text()
+                )));
+            }
+        }
+        index += 1;
+    }
+
+    if !applied {
+        return Err(CliError::Usage(
+            "session prune requires --applied to avoid removing active session worktrees"
+                .to_string(),
+        ));
+    }
+
+    Ok(SessionPruneOptions {
+        repo_root,
+        db_path,
+        applied,
     })
 }
 
@@ -2674,6 +2860,116 @@ where
     }
 }
 
+fn cleanup_session_with<C>(
+    options: &SessionCleanupOptions,
+    cleaner: &C,
+) -> Result<SessionCleanupResult, CliError>
+where
+    C: SessionWorktreeCleaner,
+{
+    let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
+    let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
+        CliError::Usage(format!("session '{}' does not exist", options.session_id))
+    })?;
+    cleanup_session_record(&options.repo_root, &ledger, session, cleaner)
+}
+
+fn prune_sessions_with<C>(
+    options: &SessionPruneOptions,
+    cleaner: &C,
+) -> Result<SessionPruneResult, CliError>
+where
+    C: SessionWorktreeCleaner,
+{
+    if !options.applied {
+        return Err(CliError::Usage(
+            "session prune requires --applied to avoid removing active session worktrees"
+                .to_string(),
+        ));
+    }
+
+    let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
+    let mut cleaned = Vec::new();
+    let mut skipped = 0;
+
+    for session in ledger.list_sessions()? {
+        let latest_attempt = latest_merge_attempt(&ledger, &session.id)?;
+        if session.status == SessionStatus::Completed
+            && latest_attempt
+                .as_ref()
+                .map(|attempt| attempt.status == MergeAttemptStatus::Applied)
+                .unwrap_or(false)
+        {
+            cleaned.push(cleanup_session_record(
+                &options.repo_root,
+                &ledger,
+                session,
+                cleaner,
+            )?);
+        } else {
+            skipped += 1;
+        }
+    }
+
+    Ok(SessionPruneResult { cleaned, skipped })
+}
+
+fn cleanup_session_record<C>(
+    repo_root: &Path,
+    ledger: &Ledger,
+    session: Session,
+    cleaner: &C,
+) -> Result<SessionCleanupResult, CliError>
+where
+    C: SessionWorktreeCleaner,
+{
+    let latest_attempt = latest_merge_attempt(ledger, &session.id)?.ok_or_else(|| {
+        CliError::Usage(format!(
+            "session '{}' has no applied merge attempt; cleanup is only allowed after apply",
+            session.id
+        ))
+    })?;
+    ensure_session_can_cleanup(&session, &latest_attempt)?;
+
+    let attempts = ledger.list_merge_attempts(&session.id)?;
+    let sandbox_paths: Vec<PathBuf> = attempts
+        .iter()
+        .map(|attempt| {
+            repo_root
+                .join(".aichestra")
+                .join("sandboxes")
+                .join(&attempt.id)
+        })
+        .collect();
+    let request = CleanupSessionWorktreeRequest {
+        repo_path: repo_root.to_path_buf(),
+        main_worktree_path: repo_root.to_path_buf(),
+        session_id: session.id.clone(),
+        branch: session.branch.clone(),
+        worktree_path: path_from_ledger(repo_root, &session.worktree_path),
+        sandbox_paths,
+    };
+    let cleanup = cleaner.cleanup_session_worktree(&request)?;
+
+    ledger.append_event(
+        &NewEvent::new(EventName::SessionCleaned)
+            .with_subject("session", session.id.clone())
+            .with_data_json(format!(
+                "{{\"merge_attempt_id\":\"{}\",\"session_worktree_removed\":{},\"branch_deleted\":{},\"sandbox_worktrees_removed\":{}}}",
+                json_escape(&latest_attempt.id),
+                cleanup.session_worktree_removed,
+                cleanup.branch_deleted,
+                cleanup.sandbox_worktrees_removed.len()
+            )),
+    )?;
+
+    Ok(SessionCleanupResult {
+        session,
+        latest_attempt,
+        cleanup,
+    })
+}
+
 fn run_preflight_with<R, P>(
     options: &PreflightOptions,
     git_repo: &R,
@@ -2910,6 +3206,29 @@ fn ensure_session_can_preflight(session: &Session) -> Result<(), CliError> {
             session.id,
             session.status.as_str(),
             session.id
+        )));
+    }
+
+    Ok(())
+}
+
+fn ensure_session_can_cleanup(
+    session: &Session,
+    latest_attempt: &MergeAttempt,
+) -> Result<(), CliError> {
+    if session.status != SessionStatus::Completed {
+        return Err(CliError::Usage(format!(
+            "session '{}' cannot be cleaned from status '{}'; cleanup is only allowed after apply",
+            session.id,
+            session.status.as_str()
+        )));
+    }
+    if latest_attempt.status != MergeAttemptStatus::Applied {
+        return Err(CliError::Usage(format!(
+            "session '{}' latest merge attempt '{}' is '{}'; cleanup is only allowed after apply",
+            session.id,
+            latest_attempt.id,
+            latest_attempt.status.as_str()
         )));
     }
 
@@ -4417,13 +4736,21 @@ fn short_hash(value: &str) -> String {
     value.chars().take(7).collect()
 }
 
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
 fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
     writeln!(out, "{}", usage_text())?;
     Ok(())
 }
 
 fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]
@@ -4545,6 +4872,30 @@ mod tests {
         ) -> Result<AppliedVerifiedCommit, WorktreeError> {
             self.requests.borrow_mut().push(request.clone());
             Ok(self.result.clone())
+        }
+    }
+
+    struct MockSessionCleaner {
+        requests: RefCell<Vec<CleanupSessionWorktreeRequest>>,
+        outcome: CleanupSessionWorktreeOutcome,
+    }
+
+    impl MockSessionCleaner {
+        fn new(outcome: CleanupSessionWorktreeOutcome) -> Self {
+            Self {
+                requests: RefCell::new(Vec::new()),
+                outcome,
+            }
+        }
+    }
+
+    impl SessionWorktreeCleaner for MockSessionCleaner {
+        fn cleanup_session_worktree(
+            &self,
+            request: &CleanupSessionWorktreeRequest,
+        ) -> Result<CleanupSessionWorktreeOutcome, WorktreeError> {
+            self.requests.borrow_mut().push(request.clone());
+            Ok(self.outcome.clone())
         }
     }
 
@@ -4680,6 +5031,18 @@ mod tests {
     fn queue_unlock_requires_force() {
         let err = parse_queue_unlock_options(&[], Path::new(".")).unwrap_err();
         assert!(matches!(err, CliError::Usage(message) if message.contains("--force")));
+    }
+
+    #[test]
+    fn session_cleanup_requires_session_id() {
+        let err = parse_session_cleanup_options(&[], Path::new(".")).unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+    }
+
+    #[test]
+    fn session_prune_requires_applied_flag() {
+        let err = parse_session_prune_options(&[], Path::new(".")).unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("--applied")));
     }
 
     fn seed_verified_review_candidate(
@@ -5692,6 +6055,194 @@ mod tests {
             .expect("events")
             .iter()
             .any(|event| event.name == "merge.applied"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn session_cleanup_removes_applied_session_worktree_branch_and_sandboxes() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+        run_approve_with(
+            &ApproveOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+        )
+        .expect("approve");
+        run_apply_with(
+            &ApplyOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+                applied_commit_id: "verified-commit".to_string(),
+                applied_tree_id: "verified-tree".to_string(),
+                stdout: String::new(),
+                stderr: String::new(),
+            }),
+        )
+        .expect("apply");
+
+        let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+            session_worktree_removed: true,
+            branch_deleted: true,
+            sandbox_worktrees_removed: vec![repo
+                .join(".aichestra")
+                .join("sandboxes")
+                .join(&attempt.id)],
+        });
+        let result = cleanup_session_with(
+            &SessionCleanupOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+            },
+            &cleaner,
+        )
+        .expect("cleanup");
+
+        assert_eq!(result.session.id, session.id);
+        assert_eq!(result.latest_attempt.status, MergeAttemptStatus::Applied);
+        let requests = cleaner.requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].session_id, session.id);
+        assert_eq!(requests[0].branch, "aich/session/session-review");
+        assert_eq!(
+            requests[0].worktree_path,
+            repo.join(".aichestra/worktrees/session-review")
+        );
+        assert_eq!(
+            requests[0].sandbox_paths,
+            vec![repo.join(".aichestra/sandboxes/merge-review")]
+        );
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger
+            .list_events()
+            .expect("events")
+            .iter()
+            .any(|event| event.name == "session.cleaned"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn session_cleanup_rejects_unapplied_session() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let session = seed_enqueued_candidate(&repo, "session-open");
+        let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+            session_worktree_removed: true,
+            branch_deleted: true,
+            sandbox_worktrees_removed: Vec::new(),
+        });
+
+        let err = cleanup_session_with(
+            &SessionCleanupOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id,
+            },
+            &cleaner,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, CliError::Usage(message) if message.contains("no applied merge attempt"))
+        );
+        assert!(cleaner.requests.borrow().is_empty());
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn session_prune_cleans_only_applied_sessions() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+        seed_enqueued_candidate(&repo, "session-open");
+
+        run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+        run_approve_with(
+            &ApproveOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+        )
+        .expect("approve");
+        run_apply_with(
+            &ApplyOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+                applied_commit_id: "verified-commit".to_string(),
+                applied_tree_id: "verified-tree".to_string(),
+                stdout: String::new(),
+                stderr: String::new(),
+            }),
+        )
+        .expect("apply");
+
+        let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+            session_worktree_removed: false,
+            branch_deleted: false,
+            sandbox_worktrees_removed: Vec::new(),
+        });
+        let result = prune_sessions_with(
+            &SessionPruneOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                applied: true,
+            },
+            &cleaner,
+        )
+        .expect("prune");
+
+        assert_eq!(result.cleaned.len(), 1);
+        assert_eq!(result.cleaned[0].session.id, session.id);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(cleaner.requests.borrow().len(), 1);
 
         let _ = fs::remove_dir_all(repo);
     }

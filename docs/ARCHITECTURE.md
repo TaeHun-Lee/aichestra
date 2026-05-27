@@ -113,6 +113,7 @@ flowchart TB
 10. `aich review` writes a semantic review report from the manifest, diff evidence, mechanical merge result, and sandbox check results.
 11. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
 12. `aich apply` acquires the same local `merge-queue` lock, then fast-forwards main to the approved verified commit only after rechecking main has not moved.
+13. After apply, `aich session cleanup <session-id>` or `aich session prune --applied` can remove the completed session worktree, merged session branch, and related sandbox worktrees.
 
 ## Safety boundary
 
@@ -126,6 +127,7 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - Blocked queue entries include recovery guidance, relevant artifact paths, and the exact rerun sequence for the session candidate.
 - `aich queue unlock --force` is the explicit local recovery path for stale queue locks and records `merge.queue_unlocked`.
 - `aich doctor` is a read-only local health check for initialization files, ledger access, default operator identity, queue entries, and stale queue lock suspicion.
+- Session cleanup is allowed only after an applied merge attempt and refuses dirty registered worktrees.
 - Preflight and apply must use the same candidate result.
 - Semantic review is advisory evidence. It can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.

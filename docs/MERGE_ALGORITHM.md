@@ -168,6 +168,12 @@ git merge --ff-only <approved_verified_commit_id>
 
 Before running the Git update, the command records the merge attempt as `applying`. After success it records the merge attempt as `applied`, marks the session `completed`, and appends `merge.applied`. The applied commit id and tree id must still match the approved verified commit/tree, or the attempt is blocked.
 
+## Session cleanup
+
+`aich session cleanup <session-id>` removes local execution resources for an applied session. It refuses cleanup unless the session is `completed` and its latest merge attempt is `applied`. Cleanup removes the registered session worktree, deletes the merged session branch with `git branch -d`, removes related sandbox worktrees, and records `session.cleaned`.
+
+`aich session prune --applied` runs the same cleanup across all applied sessions and skips any session that is still active, enqueued, blocked, verified, approved, or noop. Cleanup refuses dirty registered worktrees rather than discarding local files.
+
 ## Semantic review position
 
 Semantic review runs after the mechanical merge result is available and before approval. In the current CLI flow, `aich preflight` also runs the configured sandbox checks first, so `aich review` can include check evidence in the semantic report.
