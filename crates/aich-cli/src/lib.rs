@@ -5042,11 +5042,11 @@ fn llm_semantic_review_command_from_config(
 
 fn codex_semantic_review_command(model: Option<&str>, profile: Option<&str>) -> ProcessCommandSpec {
     let mut args = vec![
+        "--ask-for-approval".to_string(),
+        "never".to_string(),
         "exec".to_string(),
         "--sandbox".to_string(),
         "read-only".to_string(),
-        "--ask-for-approval".to_string(),
-        "never".to_string(),
         "--skip-git-repo-check".to_string(),
         "--ephemeral".to_string(),
         "--color".to_string(),
@@ -6005,7 +6005,9 @@ mod tests {
         let command = codex_semantic_review_command(Some("model-x"), Some("semantic-review"));
 
         assert_eq!(command.program, "codex");
-        assert_eq!(command.args[0], "exec");
+        assert_eq!(command.args[0], "--ask-for-approval");
+        assert_eq!(command.args[1], "never");
+        assert_eq!(command.args[2], "exec");
         assert!(command.args.contains(&"--sandbox".to_string()));
         assert!(command.args.contains(&"read-only".to_string()));
         assert!(command.args.contains(&"--ask-for-approval".to_string()));
