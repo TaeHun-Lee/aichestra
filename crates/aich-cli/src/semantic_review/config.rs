@@ -1,9 +1,9 @@
-use std::fs;
 use std::path::Path;
 
 use aich_core::SemanticRiskLevel;
 
-use crate::command_line::{parse_process_command, strip_yaml_scalar, ProcessCommandSpec};
+use crate::command_line::{parse_process_command, ProcessCommandSpec};
+use crate::config::{load_config, AichestraSemanticReviewConfig};
 use crate::CliError;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,85 +26,19 @@ pub(super) struct SemanticReviewAdapterConfig {
 pub(super) fn semantic_review_adapter_config_from_config(
     config_path: &Path,
 ) -> Result<SemanticReviewAdapterConfig, CliError> {
-    let config = fs::read_to_string(config_path)?;
-    let mut in_semantic_review = false;
-    let mut kind: Option<SemanticReviewAdapterKind> = None;
-    let mut legacy_provider: Option<String> = None;
-    let mut reviewer_id: Option<String> = None;
-    let mut model: Option<String> = None;
-    let mut profile: Option<String> = None;
-    let mut command_line: Option<String> = None;
-
-    for line in config.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        if !line.starts_with(' ') && trimmed.ends_with(':') {
-            in_semantic_review = trimmed == "semantic_review:";
-            continue;
-        }
-
-        if !in_semantic_review {
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("adapter:") {
-            let value = strip_yaml_scalar(value);
-            if !value.trim().is_empty() {
-                kind = Some(parse_semantic_review_adapter_kind(&value)?);
+    let semantic_review = semantic_review_config(config_path)?;
+    let legacy_provider = trim_config_value(semantic_review.reviewer_provider);
+    let kind = trim_config_value(semantic_review.adapter)
+        .map(|adapter| parse_semantic_review_adapter_kind(&adapter))
+        .transpose()?
+        .unwrap_or_else(|| {
+            if legacy_provider.as_deref() == Some("command") {
+                SemanticReviewAdapterKind::Command
+            } else {
+                SemanticReviewAdapterKind::Local
             }
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("reviewer_provider:") {
-            let value = strip_yaml_scalar(value);
-            if !value.trim().is_empty() {
-                legacy_provider = Some(value);
-            }
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("reviewer_id:") {
-            let value = strip_yaml_scalar(value);
-            if !value.trim().is_empty() {
-                reviewer_id = Some(value);
-            }
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("model:") {
-            let value = strip_yaml_scalar(value);
-            if !value.trim().is_empty() {
-                model = Some(value);
-            }
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("profile:") {
-            let value = strip_yaml_scalar(value);
-            if !value.trim().is_empty() {
-                profile = Some(value);
-            }
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("command:") {
-            let value = strip_yaml_scalar(value);
-            if !value.trim().is_empty() {
-                command_line = Some(value);
-            }
-        }
-    }
-
-    let kind = kind.unwrap_or_else(|| {
-        if legacy_provider.as_deref() == Some("command") {
-            SemanticReviewAdapterKind::Command
-        } else {
-            SemanticReviewAdapterKind::Local
-        }
-    });
+        });
+    let command_line = trim_config_value(semantic_review.command);
     let command = command_line
         .as_deref()
         .map(|line| parse_process_command("semantic_review.command", line))
@@ -113,9 +47,9 @@ pub(super) fn semantic_review_adapter_config_from_config(
     Ok(SemanticReviewAdapterConfig {
         kind,
         provider: legacy_provider,
-        reviewer_id,
-        model,
-        profile,
+        reviewer_id: trim_config_value(semantic_review.reviewer_id),
+        model: trim_config_value(semantic_review.model),
+        profile: trim_config_value(semantic_review.profile),
         command,
     })
 }
@@ -189,79 +123,46 @@ pub(crate) fn codex_semantic_review_command(
 }
 
 pub(super) fn semantic_review_prompt_path_from_config(config_path: &Path) -> String {
-    let Ok(config) = fs::read_to_string(config_path) else {
-        return ".aichestra/prompts/semantic-merge-review.md".to_string();
-    };
-    let mut in_semantic_review = false;
-
-    for line in config.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        if !line.starts_with(' ') && trimmed.ends_with(':') {
-            in_semantic_review = trimmed == "semantic_review:";
-            continue;
-        }
-
-        if in_semantic_review {
-            if let Some(value) = trimmed.strip_prefix("prompt_path:") {
-                let prompt_path = strip_yaml_scalar(value);
-                if !prompt_path.trim().is_empty() {
-                    return prompt_path;
-                }
-            }
-        }
-    }
-
-    ".aichestra/prompts/semantic-merge-review.md".to_string()
+    semantic_review_config(config_path)
+        .ok()
+        .and_then(|config| trim_config_value(config.prompt_path))
+        .unwrap_or_else(|| ".aichestra/prompts/semantic-merge-review.md".to_string())
 }
 
 pub(super) fn semantic_block_levels_from_config(
     config_path: &Path,
 ) -> Result<Vec<SemanticRiskLevel>, CliError> {
-    let config = fs::read_to_string(config_path)?;
-    let mut block_levels = Vec::new();
-    let mut in_semantic_review = false;
-    let mut in_block_levels = false;
-
-    for line in config.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        if !line.starts_with(' ') && trimmed.ends_with(':') {
-            in_semantic_review = trimmed == "semantic_review:";
-            in_block_levels = false;
-            continue;
-        }
-
-        if !in_semantic_review {
-            continue;
-        }
-
-        if trimmed == "risk_block_levels:" {
-            in_block_levels = true;
-            continue;
-        }
-
-        if in_block_levels {
-            if let Some(value) = trimmed.strip_prefix('-') {
-                block_levels.push(
-                    SemanticRiskLevel::parse(strip_yaml_scalar(value).as_str())
-                        .map_err(CliError::Usage)?,
-                );
-            } else if !line.starts_with("    ") {
-                in_block_levels = false;
-            }
-        }
-    }
+    let semantic_review = semantic_review_config(config_path)?;
+    let mut block_levels = semantic_review
+        .risk_block_levels
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(trim_string_value)
+        .map(|level| SemanticRiskLevel::parse(&level).map_err(CliError::Usage))
+        .collect::<Result<Vec<_>, _>>()?;
 
     if block_levels.is_empty() {
         block_levels.push(SemanticRiskLevel::Blocked);
     }
 
     Ok(block_levels)
+}
+
+fn semantic_review_config(config_path: &Path) -> Result<AichestraSemanticReviewConfig, CliError> {
+    Ok(load_config(config_path)?
+        .semantic_review
+        .unwrap_or_default())
+}
+
+fn trim_config_value(value: Option<String>) -> Option<String> {
+    value.and_then(trim_string_value)
+}
+
+fn trim_string_value(value: String) -> Option<String> {
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }

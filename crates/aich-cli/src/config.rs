@@ -86,36 +86,53 @@ safety:
   refuse_force_push_features: true
 "#;
 
-#[derive(Debug, Deserialize)]
-struct AichestraConfig {
-    git: Option<AichestraGitConfig>,
-    providers: Option<HashMap<String, AichestraProviderConfig>>,
-    sessions: Option<AichestraSessionConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AichestraGitConfig {
-    main_branch: Option<String>,
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct AichestraConfig {
+    pub(crate) git: Option<AichestraGitConfig>,
+    pub(crate) providers: Option<HashMap<String, AichestraProviderConfig>>,
+    pub(crate) sessions: Option<AichestraSessionConfig>,
+    pub(crate) semantic_review: Option<AichestraSemanticReviewConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct AichestraProviderConfig {
-    command: Option<String>,
+pub(crate) struct AichestraGitConfig {
+    pub(crate) main_branch: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct AichestraSessionConfig {
-    branch_prefix: Option<String>,
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct AichestraProviderConfig {
+    pub(crate) command: Option<String>,
 }
 
-pub(crate) fn session_branch_prefix_from_config(config_path: &Path) -> Result<String, CliError> {
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct AichestraSessionConfig {
+    pub(crate) branch_prefix: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct AichestraSemanticReviewConfig {
+    pub(crate) adapter: Option<String>,
+    pub(crate) reviewer_provider: Option<String>,
+    pub(crate) reviewer_id: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) profile: Option<String>,
+    pub(crate) command: Option<String>,
+    pub(crate) prompt_path: Option<String>,
+    pub(crate) risk_block_levels: Option<Vec<String>>,
+}
+
+pub(crate) fn load_config(config_path: &Path) -> Result<AichestraConfig, CliError> {
     let config = fs::read_to_string(config_path)?;
-    let parsed: AichestraConfig = serde_yaml::from_str(&config).map_err(|error| {
+    serde_yaml::from_str(&config).map_err(|error| {
         CliError::Usage(format!(
             "Aichestra config at {} is invalid YAML: {error}",
             config_path.display()
         ))
-    })?;
+    })
+}
+
+pub(crate) fn session_branch_prefix_from_config(config_path: &Path) -> Result<String, CliError> {
+    let parsed = load_config(config_path)?;
     let configured = parsed
         .sessions
         .and_then(|sessions| sessions.branch_prefix)
@@ -134,13 +151,7 @@ pub(crate) fn provider_command_from_config(
         ));
     }
 
-    let config = fs::read_to_string(config_path)?;
-    let parsed: AichestraConfig = serde_yaml::from_str(&config).map_err(|error| {
-        CliError::Usage(format!(
-            "Aichestra config at {} is invalid YAML: {error}",
-            config_path.display()
-        ))
-    })?;
+    let parsed = load_config(config_path)?;
     let Some(provider_config) = parsed
         .providers
         .and_then(|providers| providers.get(provider).cloned())
@@ -162,13 +173,7 @@ pub(crate) fn provider_command_from_config(
 }
 
 pub(crate) fn main_branch_from_config(config_path: &Path) -> Result<String, CliError> {
-    let config = fs::read_to_string(config_path)?;
-    let parsed: AichestraConfig = serde_yaml::from_str(&config).map_err(|error| {
-        CliError::Usage(format!(
-            "Aichestra config at {} is invalid YAML: {error}",
-            config_path.display()
-        ))
-    })?;
+    let parsed = load_config(config_path)?;
     let configured = parsed
         .git
         .and_then(|git| git.main_branch)
