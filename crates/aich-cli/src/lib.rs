@@ -228,6 +228,63 @@ pub struct QueueUnlockResult {
     pub age_ms: Option<i64>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DoctorSeverity {
+    Ok,
+    Warning,
+    Error,
+}
+
+impl DoctorSeverity {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Warning => "warning",
+            Self::Error => "error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct DoctorCheck {
+    severity: DoctorSeverity,
+    name: String,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct DoctorRunResult {
+    repo_root: PathBuf,
+    db_path: PathBuf,
+    checks: Vec<DoctorCheck>,
+}
+
+impl DoctorRunResult {
+    fn warning_count(&self) -> usize {
+        self.checks
+            .iter()
+            .filter(|check| check.severity == DoctorSeverity::Warning)
+            .count()
+    }
+
+    fn error_count(&self) -> usize {
+        self.checks
+            .iter()
+            .filter(|check| check.severity == DoctorSeverity::Error)
+            .count()
+    }
+
+    fn result_label(&self) -> &'static str {
+        if self.error_count() > 0 {
+            "error"
+        } else if self.warning_count() > 0 {
+            "warning"
+        } else {
+            "ok"
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct StatusOptions {
     repo_root: PathBuf,
@@ -247,6 +304,12 @@ struct QueueUnlockOptions {
     db_path: Option<PathBuf>,
     force: bool,
     reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct DoctorOptions {
+    repo_root: PathBuf,
+    db_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -444,6 +507,11 @@ where
         Some("status") => {
             let options = parse_status_options(&args[1..], cwd)?;
             render_status(&options, out)
+        }
+        Some("doctor") => {
+            let options = parse_doctor_options(&args[1..], cwd)?;
+            let result = run_doctor(&options)?;
+            render_doctor(&result, out)
         }
         Some("queue") => run_queue_command(&args[1..], cwd, out),
         Some("-h") | Some("--help") | None => {
@@ -704,6 +772,43 @@ fn parse_status_options(args: &[String], cwd: &Path) -> Result<StatusOptions, Cl
         db_path,
         recent_events_limit,
     })
+}
+
+fn parse_doctor_options(args: &[String], cwd: &Path) -> Result<DoctorOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            other => {
+                return Err(CliError::Usage(format!(
+                    "unknown doctor option '{other}'\n\n{}",
+                    usage_text()
+                )));
+            }
+        }
+        index += 1;
+    }
+
+    Ok(DoctorOptions { repo_root, db_path })
 }
 
 fn parse_queue_options(args: &[String], cwd: &Path) -> Result<QueueOptions, CliError> {
@@ -1537,6 +1642,232 @@ fn render_status<W: Write>(options: &StatusOptions, out: &mut W) -> Result<(), C
     }
 
     Ok(())
+}
+
+fn run_doctor(options: &DoctorOptions) -> Result<DoctorRunResult, CliError> {
+    let db_path = ledger_path(&options.repo_root, &options.db_path);
+    let aichestra_dir = options.repo_root.join(".aichestra");
+    let mut checks = Vec::new();
+
+    add_doctor_path_check(
+        &mut checks,
+        "config",
+        &aichestra_dir.join("config.yaml"),
+        "file",
+    );
+    add_doctor_path_check(
+        &mut checks,
+        "artifacts",
+        &aichestra_dir.join("artifacts"),
+        "dir",
+    );
+    add_doctor_path_check(
+        &mut checks,
+        "sandboxes",
+        &aichestra_dir.join("sandboxes"),
+        "dir",
+    );
+    add_doctor_path_check(
+        &mut checks,
+        "worktrees",
+        &aichestra_dir.join("worktrees"),
+        "dir",
+    );
+
+    if !db_path.is_file() {
+        add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Error,
+            "ledger",
+            format!("missing SQLite ledger at {}", db_path.display()),
+        );
+        return Ok(DoctorRunResult {
+            repo_root: options.repo_root.clone(),
+            db_path,
+            checks,
+        });
+    }
+
+    let ledger = match Ledger::open(&db_path) {
+        Ok(ledger) => {
+            add_doctor_check(
+                &mut checks,
+                DoctorSeverity::Ok,
+                "ledger",
+                format!("opened {}", db_path.display()),
+            );
+            ledger
+        }
+        Err(error) => {
+            add_doctor_check(
+                &mut checks,
+                DoctorSeverity::Error,
+                "ledger",
+                format!("failed to open {}: {error}", db_path.display()),
+            );
+            return Ok(DoctorRunResult {
+                repo_root: options.repo_root.clone(),
+                db_path,
+                checks,
+            });
+        }
+    };
+
+    match ledger.get_operator(DEFAULT_OPERATOR_ID) {
+        Ok(Some(operator)) if operator.status.as_str() == "active" => add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Ok,
+            "operator",
+            format!("default operator {DEFAULT_OPERATOR_ID} is active"),
+        ),
+        Ok(Some(operator)) => add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Warning,
+            "operator",
+            format!(
+                "default operator {DEFAULT_OPERATOR_ID} is {}",
+                operator.status.as_str()
+            ),
+        ),
+        Ok(None) => add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Error,
+            "operator",
+            format!("default operator {DEFAULT_OPERATOR_ID} is missing"),
+        ),
+        Err(error) => add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Error,
+            "operator",
+            format!("failed to read operators: {error}"),
+        ),
+    }
+
+    match queue_entries(&ledger) {
+        Ok(entries) => add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Ok,
+            "queue",
+            format!("{} candidate(s) need queue attention", entries.len()),
+        ),
+        Err(error) => add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Error,
+            "queue",
+            format!("failed to read queue entries: {error}"),
+        ),
+    }
+
+    match ledger.get_queue_lock(MERGE_QUEUE_LOCK_NAME) {
+        Ok(Some(lock)) => {
+            let now = now_millis();
+            let age_ms = queue_lock_age_ms(&lock, now);
+            let stale = is_queue_lock_stale(&lock, now);
+            add_doctor_check(
+                &mut checks,
+                if stale {
+                    DoctorSeverity::Warning
+                } else {
+                    DoctorSeverity::Ok
+                },
+                "queue lock",
+                format!(
+                    "{} held by {} for {} on session {}",
+                    if stale { "stale" } else { "active" },
+                    lock.holder_id,
+                    lock.operation,
+                    lock.session_id.as_deref().unwrap_or("-")
+                ),
+            );
+            add_doctor_check(
+                &mut checks,
+                if stale {
+                    DoctorSeverity::Warning
+                } else {
+                    DoctorSeverity::Ok
+                },
+                "queue lock age",
+                format_duration_ms(age_ms),
+            );
+        }
+        Ok(None) => add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Ok,
+            "queue lock",
+            "free".to_string(),
+        ),
+        Err(error) => add_doctor_check(
+            &mut checks,
+            DoctorSeverity::Error,
+            "queue lock",
+            format!("failed to read queue lock: {error}"),
+        ),
+    }
+
+    Ok(DoctorRunResult {
+        repo_root: options.repo_root.clone(),
+        db_path,
+        checks,
+    })
+}
+
+fn render_doctor<W: Write>(result: &DoctorRunResult, out: &mut W) -> Result<(), CliError> {
+    writeln!(out, "Aichestra doctor")?;
+    writeln!(out, "Repo: {}", result.repo_root.display())?;
+    writeln!(out, "Ledger: {}", result.db_path.display())?;
+    for check in &result.checks {
+        writeln!(
+            out,
+            "[{}] {}: {}",
+            check.severity.as_str(),
+            check.name,
+            check.detail
+        )?;
+    }
+    writeln!(
+        out,
+        "Summary: warnings={} errors={}",
+        result.warning_count(),
+        result.error_count()
+    )?;
+    writeln!(out, "Result: {}", result.result_label())?;
+    Ok(())
+}
+
+fn add_doctor_path_check(checks: &mut Vec<DoctorCheck>, name: &str, path: &Path, kind: &str) {
+    let ok = match kind {
+        "dir" => path.is_dir(),
+        "file" => path.is_file(),
+        _ => path.exists(),
+    };
+    if ok {
+        add_doctor_check(
+            checks,
+            DoctorSeverity::Ok,
+            name,
+            format!("found {}", path.display()),
+        );
+    } else {
+        add_doctor_check(
+            checks,
+            DoctorSeverity::Error,
+            name,
+            format!("missing {kind} at {}", path.display()),
+        );
+    }
+}
+
+fn add_doctor_check(
+    checks: &mut Vec<DoctorCheck>,
+    severity: DoctorSeverity,
+    name: impl Into<String>,
+    detail: impl Into<String>,
+) {
+    checks.push(DoctorCheck {
+        severity,
+        name: name.into(),
+        detail: detail.into(),
+    });
 }
 
 fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Result<(), CliError> {
@@ -3884,7 +4215,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]
@@ -5504,6 +5835,80 @@ mod tests {
         assert!(ledger.list_events().expect("events").iter().any(|event| {
             event.name == "merge.queue_unlocked" && event.data_json.contains("stale process")
         }));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn doctor_reports_missing_init_without_creating_ledger() {
+        let repo = unique_temp_dir();
+        let result = run_doctor(&DoctorOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("doctor");
+
+        assert_eq!(result.result_label(), "error");
+        assert!(result.error_count() > 0);
+        assert!(!repo.join(".aichestra/aichestra.db").exists());
+
+        let mut output = Vec::new();
+        render_doctor(&result, &mut output).expect("render doctor");
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Aichestra doctor"));
+        assert!(output.contains("Result: error"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn doctor_reports_initialized_repo_ok() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+
+        let mut output = Vec::new();
+        run_with_cwd(["aich", "doctor"], &repo, &mut output).expect("doctor");
+        let output = String::from_utf8(output).expect("utf8 output");
+
+        assert!(output.contains("[ok] config:"));
+        assert!(output.contains("[ok] ledger:"));
+        assert!(output.contains("[ok] operator: default operator local-user is active"));
+        assert!(output.contains("[ok] queue lock: free"));
+        assert!(output.contains("Summary: warnings=0 errors=0"));
+        assert!(output.contains("Result: ok"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn doctor_warns_when_queue_lock_is_stale() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger
+            .try_acquire_queue_lock(&QueueLock {
+                name: MERGE_QUEUE_LOCK_NAME.to_string(),
+                holder_id: "holder-1".to_string(),
+                operation: "preflight".to_string(),
+                session_id: Some("session-1".to_string()),
+                acquired_at_ms: now_millis() - QUEUE_LOCK_STALE_AFTER_MS - MILLIS_PER_SECOND,
+            })
+            .expect("acquire lock"));
+
+        let mut output = Vec::new();
+        run_with_cwd(["aich", "doctor"], &repo, &mut output).expect("doctor");
+        let output = String::from_utf8(output).expect("utf8 output");
+
+        assert!(output.contains("[warning] queue lock: stale held by holder-1"));
+        assert!(output.contains("Result: warning"));
 
         let _ = fs::remove_dir_all(repo);
     }

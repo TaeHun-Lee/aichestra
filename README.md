@@ -16,7 +16,9 @@ This repository now contains a CLI-first local MVP slice:
 - `aich auth whoami`
 - `aich auth operator add/list`
 - `aich status`
+- `aich doctor`
 - `aich queue`
+- `aich queue unlock --force`
 - `aich session start --goal ...`
 - `aich session complete <session-id>`
 - `aich preflight <session-id>`
@@ -57,6 +59,7 @@ Install Rust, then:
 
 ```bash
 cargo run -p aich-cli -- init
+cargo run -p aich-cli -- doctor
 cargo run -p aich-cli -- session start --goal "Describe the task" --provider codex --target src/auth.rs
 cargo run -p aich-cli -- queue
 ```
