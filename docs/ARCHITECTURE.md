@@ -129,7 +129,7 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - `aich doctor` is a read-only local health check for initialization files, ledger access, default operator identity, queue entries, and stale queue lock suspicion.
 - Session cleanup is allowed only after an applied merge attempt and refuses dirty registered worktrees.
 - Preflight and apply must use the same candidate result.
-- Semantic review is advisory evidence. It can block on explicit blocker risk, but it does not approve or apply changes.
+- Semantic review is advisory evidence. The default local adapter is deterministic, and the command adapter can delegate to any provider wrapper that reads stdin and returns report YAML. Either path can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.
 - Apply refuses a dirty main worktree and refuses any verified commit whose tree does not match the approved tree id.
 

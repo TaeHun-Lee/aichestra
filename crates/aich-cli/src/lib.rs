@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use aich_core::clock::now_millis;
@@ -39,6 +40,7 @@ const DEFAULT_OPERATOR_NAME: &str = "Local User";
 const CHANGE_MANIFEST_VALIDATION_STATUS: &str = "generated_from_diff";
 const PREFLIGHT_APPLY_STRATEGY: &str = "merge_no_ff_commit";
 const LOCAL_SEMANTIC_REVIEWER: &str = "local_mvp_static_reviewer";
+const COMMAND_SEMANTIC_REVIEWER: &str = "command_semantic_review_adapter";
 const MERGE_QUEUE_LOCK_NAME: &str = "merge-queue";
 const CONTEXT_SNAPSHOT_FILES: &[&str] = &[
     "AGENTS.md",
@@ -95,7 +97,8 @@ checks:
       required: true
 
 semantic_review:
-  reviewer_provider: codex
+  adapter: local
+  reviewer_id: local_mvp_static_reviewer
   prompt_path: .aichestra/prompts/semantic-merge-review.md
   risk_block_levels:
     - blocked
@@ -3465,8 +3468,146 @@ impl SemanticReviewAdapter for LocalSemanticReviewAdapter {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProcessCommandSpec {
+    program: String,
+    args: Vec<String>,
+}
+
+impl ProcessCommandSpec {
+    fn display(&self) -> String {
+        let mut parts = vec![self.program.clone()];
+        parts.extend(self.args.iter().cloned());
+        parts.join(" ")
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SemanticReviewAdapterKind {
+    Local,
+    Command,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SemanticReviewAdapterConfig {
+    kind: SemanticReviewAdapterKind,
+    reviewer_id: Option<String>,
+    command: Option<ProcessCommandSpec>,
+}
+
+struct CommandSemanticReviewAdapter {
+    reviewer_id: String,
+    command: ProcessCommandSpec,
+}
+
+impl CommandSemanticReviewAdapter {
+    fn new(reviewer_id: String, command: ProcessCommandSpec) -> Self {
+        Self {
+            reviewer_id,
+            command,
+        }
+    }
+}
+
+impl SemanticReviewAdapter for CommandSemanticReviewAdapter {
+    fn reviewer_id(&self) -> &str {
+        &self.reviewer_id
+    }
+
+    fn llm_executed(&self) -> bool {
+        true
+    }
+
+    fn review(
+        &self,
+        request: &SemanticReviewAdapterRequest<'_>,
+    ) -> Result<LocalSemanticReviewReport, CliError> {
+        let review_input = render_semantic_review_input(SemanticReviewInput {
+            reviewer_id: self.reviewer_id(),
+            llm_executed: self.llm_executed(),
+            session: request.session,
+            attempt: request.attempt,
+            manifest: request.manifest,
+            manifest_content: request.manifest_content,
+            patch_set: request.patch_set,
+            changed_files: request.changed_files,
+            check_results: request.check_results,
+            config_path: request.config_path,
+            prompt_path: request.prompt_path,
+            prompt_content: request.prompt_content,
+        });
+        let output = match run_semantic_review_command(&self.command, &review_input) {
+            Ok(output) => output,
+            Err(error) => {
+                return Ok(command_semantic_review_failure_report(
+                    "Semantic review command could not run.",
+                    error,
+                    &self.command,
+                ));
+            }
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Ok(command_semantic_review_failure_report(
+                "Semantic review command exited with a non-zero status.",
+                format!(
+                    "command `{}` exited with {}; stderr: {}",
+                    self.command.display(),
+                    output.status,
+                    truncate_for_report(stderr.trim(), 1_000)
+                ),
+                &self.command,
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        match parse_semantic_review_command_report(&stdout) {
+            Ok(report) => Ok(report),
+            Err(error) => Ok(command_semantic_review_failure_report(
+                "Semantic review command returned an invalid report.",
+                format!(
+                    "{error}; stdout: {}",
+                    truncate_for_report(stdout.trim(), 1_000)
+                ),
+                &self.command,
+            )),
+        }
+    }
+}
+
 fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError> {
-    run_review_with_adapter(options, &LocalSemanticReviewAdapter)
+    let config_path = options.repo_root.join(".aichestra/config.yaml");
+    if !config_path.exists() {
+        return Err(CliError::Usage(format!(
+            "Aichestra config not found at {}; run `aich init` first",
+            config_path.display()
+        )));
+    }
+
+    match semantic_review_adapter_config_from_config(&config_path)? {
+        SemanticReviewAdapterConfig {
+            kind: SemanticReviewAdapterKind::Local,
+            ..
+        } => run_review_with_adapter(options, &LocalSemanticReviewAdapter),
+        SemanticReviewAdapterConfig {
+            kind: SemanticReviewAdapterKind::Command,
+            reviewer_id,
+            command,
+        } => {
+            let command = command.ok_or_else(|| {
+                CliError::Usage(
+                    "semantic_review.command must be configured when semantic_review.adapter is command"
+                        .to_string(),
+                )
+            })?;
+            let adapter = CommandSemanticReviewAdapter::new(
+                reviewer_id.unwrap_or_else(|| COMMAND_SEMANTIC_REVIEWER.to_string()),
+                command,
+            );
+            run_review_with_adapter(options, &adapter)
+        }
+    }
 }
 
 fn run_review_with_adapter<A>(
@@ -3522,6 +3663,20 @@ where
         .is_some_and(|(content, expected)| sha256_hex(content.as_bytes()) != *expected);
     let prompt_path = semantic_review_prompt_path_from_config(&config_path);
     let prompt_content = read_optional_text(&path_from_ledger(&options.repo_root, &prompt_path))?;
+    let input = render_semantic_review_input(SemanticReviewInput {
+        reviewer_id: adapter.reviewer_id(),
+        llm_executed: adapter.llm_executed(),
+        session: &session,
+        attempt: &attempt,
+        manifest: &manifest,
+        manifest_content: manifest_content.as_deref(),
+        patch_set: patch_set.as_ref(),
+        changed_files: &changed_files,
+        check_results: &check_results,
+        config_path: &config_path,
+        prompt_path: &prompt_path,
+        prompt_content: prompt_content.as_deref(),
+    });
     let adapter_request = SemanticReviewAdapterRequest {
         session: &session,
         attempt: &attempt,
@@ -3545,20 +3700,6 @@ where
     fs::create_dir_all(&artifact_dir)?;
     let input_path = artifact_dir.join(format!("{review_id}-input.md"));
     let report_path = artifact_dir.join(format!("{review_id}.yaml"));
-    let input = render_semantic_review_input(SemanticReviewInput {
-        reviewer_id: adapter.reviewer_id(),
-        llm_executed: adapter.llm_executed(),
-        session: adapter_request.session,
-        attempt: adapter_request.attempt,
-        manifest: adapter_request.manifest,
-        manifest_content: adapter_request.manifest_content,
-        patch_set: adapter_request.patch_set,
-        changed_files: adapter_request.changed_files,
-        check_results: adapter_request.check_results,
-        config_path: adapter_request.config_path,
-        prompt_path: adapter_request.prompt_path,
-        prompt_content: adapter_request.prompt_content,
-    });
     fs::write(&input_path, input)?;
     let report_yaml = render_semantic_review_yaml(
         &review_id,
@@ -4289,6 +4430,304 @@ fn render_semantic_review_yaml(
     output
 }
 
+fn run_semantic_review_command(
+    command_spec: &ProcessCommandSpec,
+    review_input: &str,
+) -> Result<Output, String> {
+    let mut child = Command::new(&command_spec.program)
+        .args(&command_spec.args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            format!(
+                "failed to spawn semantic review command `{}`: {error}",
+                command_spec.display()
+            )
+        })?;
+
+    let write_result = match child.stdin.take() {
+        Some(mut stdin) => stdin.write_all(review_input.as_bytes()).map_err(|error| {
+            format!(
+                "failed to write review input to semantic review command `{}` stdin: {error}",
+                command_spec.display()
+            )
+        }),
+        None => Err(format!(
+            "failed to open stdin for semantic review command `{}`",
+            command_spec.display()
+        )),
+    };
+
+    let output = child.wait_with_output().map_err(|error| {
+        format!(
+            "failed to wait for semantic review command `{}`: {error}",
+            command_spec.display()
+        )
+    })?;
+
+    if let Err(error) = write_result {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "{error}; stderr: {}",
+            truncate_for_report(stderr.trim(), 1_000)
+        ));
+    }
+
+    Ok(output)
+}
+
+fn parse_semantic_review_command_report(output: &str) -> Result<LocalSemanticReviewReport, String> {
+    #[derive(Copy, Clone, Eq, PartialEq)]
+    enum Section {
+        None,
+        SuspectedConflicts,
+        RequiredActions,
+        SuggestedTests,
+        Uncertainty,
+    }
+
+    #[derive(Copy, Clone, Eq, PartialEq)]
+    enum ConflictList {
+        Files,
+        Symbols,
+    }
+
+    let yaml = semantic_review_yaml_from_command_output(output)?;
+    let mut risk_level: Option<SemanticRiskLevel> = None;
+    let mut summary: Option<String> = None;
+    let mut suspected_conflicts = Vec::new();
+    let mut required_actions = Vec::new();
+    let mut suggested_tests = Vec::new();
+    let mut uncertainty = Vec::new();
+    let mut section = Section::None;
+    let mut current_conflict: Option<SemanticConflictFinding> = None;
+    let mut conflict_list: Option<ConflictList> = None;
+
+    for line in yaml.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("```") {
+            continue;
+        }
+        if trimmed == "semantic_review:" {
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("risk_level:") {
+            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
+            section = Section::None;
+            risk_level = Some(
+                SemanticRiskLevel::parse(strip_yaml_scalar(value).as_str())
+                    .map_err(|error| format!("invalid semantic_review.risk_level: {error}"))?,
+            );
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("summary:") {
+            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
+            section = Section::None;
+            summary = Some(strip_yaml_scalar(value));
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("suspected_conflicts:") {
+            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
+            section = if strip_yaml_scalar(value) == "[]" {
+                Section::None
+            } else {
+                Section::SuspectedConflicts
+            };
+            conflict_list = None;
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("required_actions:") {
+            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
+            section = if strip_yaml_scalar(value) == "[]" {
+                Section::None
+            } else {
+                Section::RequiredActions
+            };
+            conflict_list = None;
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("suggested_tests:") {
+            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
+            section = if strip_yaml_scalar(value) == "[]" {
+                Section::None
+            } else {
+                Section::SuggestedTests
+            };
+            conflict_list = None;
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("uncertainty:") {
+            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
+            section = if strip_yaml_scalar(value) == "[]" {
+                Section::None
+            } else {
+                Section::Uncertainty
+            };
+            conflict_list = None;
+            continue;
+        }
+
+        match section {
+            Section::SuspectedConflicts => {
+                if let Some(value) = trimmed.strip_prefix("- type:") {
+                    push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
+                    current_conflict = Some(SemanticConflictFinding {
+                        conflict_type: strip_yaml_scalar(value),
+                        files: Vec::new(),
+                        explanation: String::new(),
+                        confidence: "medium".to_string(),
+                    });
+                    conflict_list = None;
+                    continue;
+                }
+
+                if let Some(value) = trimmed.strip_prefix("type:") {
+                    let finding =
+                        current_conflict.get_or_insert_with(default_semantic_conflict_finding);
+                    finding.conflict_type = strip_yaml_scalar(value);
+                    conflict_list = None;
+                    continue;
+                }
+
+                if let Some(value) = trimmed.strip_prefix("files:") {
+                    let _ = current_conflict.get_or_insert_with(default_semantic_conflict_finding);
+                    conflict_list = if strip_yaml_scalar(value) == "[]" {
+                        None
+                    } else {
+                        Some(ConflictList::Files)
+                    };
+                    continue;
+                }
+
+                if let Some(value) = trimmed.strip_prefix("symbols:") {
+                    conflict_list = if strip_yaml_scalar(value) == "[]" {
+                        None
+                    } else {
+                        Some(ConflictList::Symbols)
+                    };
+                    continue;
+                }
+
+                if let Some(value) = trimmed.strip_prefix("explanation:") {
+                    let finding =
+                        current_conflict.get_or_insert_with(default_semantic_conflict_finding);
+                    finding.explanation = strip_yaml_scalar(value);
+                    conflict_list = None;
+                    continue;
+                }
+
+                if let Some(value) = trimmed.strip_prefix("confidence:") {
+                    let finding =
+                        current_conflict.get_or_insert_with(default_semantic_conflict_finding);
+                    finding.confidence = strip_yaml_scalar(value);
+                    conflict_list = None;
+                    continue;
+                }
+
+                if let Some(value) = trimmed.strip_prefix("- ") {
+                    if conflict_list == Some(ConflictList::Files) {
+                        let finding =
+                            current_conflict.get_or_insert_with(default_semantic_conflict_finding);
+                        finding.files.push(strip_yaml_scalar(value));
+                    }
+                }
+            }
+            Section::RequiredActions => {
+                append_command_report_list_item(trimmed, &mut required_actions)
+            }
+            Section::SuggestedTests => {
+                append_command_report_list_item(trimmed, &mut suggested_tests)
+            }
+            Section::Uncertainty => append_command_report_list_item(trimmed, &mut uncertainty),
+            Section::None => {}
+        }
+    }
+
+    push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
+    let risk_level = risk_level.ok_or_else(|| "missing semantic_review.risk_level".to_string())?;
+    let summary = summary
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "missing semantic_review.summary".to_string())?;
+
+    Ok(LocalSemanticReviewReport {
+        risk_level,
+        summary,
+        suspected_conflicts,
+        required_actions,
+        suggested_tests,
+        uncertainty,
+    })
+}
+
+fn semantic_review_yaml_from_command_output(output: &str) -> Result<&str, String> {
+    let start = output
+        .find("semantic_review:")
+        .ok_or_else(|| "missing semantic_review root".to_string())?;
+    let yaml = &output[start..];
+    Ok(yaml.find("\n```").map_or(yaml, |end| &yaml[..end]))
+}
+
+fn append_command_report_list_item(trimmed: &str, values: &mut Vec<String>) {
+    if let Some(value) = trimmed.strip_prefix("- ") {
+        values.push(strip_yaml_scalar(value));
+    }
+}
+
+fn push_pending_conflict(
+    conflicts: &mut Vec<SemanticConflictFinding>,
+    current: &mut Option<SemanticConflictFinding>,
+) {
+    if let Some(mut finding) = current.take() {
+        if finding.conflict_type.trim().is_empty() {
+            finding.conflict_type = "unknown".to_string();
+        }
+        if finding.confidence.trim().is_empty() {
+            finding.confidence = "medium".to_string();
+        }
+        conflicts.push(finding);
+    }
+}
+
+fn default_semantic_conflict_finding() -> SemanticConflictFinding {
+    SemanticConflictFinding {
+        conflict_type: "unknown".to_string(),
+        files: Vec::new(),
+        explanation: String::new(),
+        confidence: "medium".to_string(),
+    }
+}
+
+fn command_semantic_review_failure_report(
+    summary: &str,
+    detail: String,
+    command_spec: &ProcessCommandSpec,
+) -> LocalSemanticReviewReport {
+    LocalSemanticReviewReport {
+        risk_level: SemanticRiskLevel::Blocked,
+        summary: summary.to_string(),
+        suspected_conflicts: vec![SemanticConflictFinding {
+            conflict_type: "reviewer_failure".to_string(),
+            files: Vec::new(),
+            explanation: detail.clone(),
+            confidence: "high".to_string(),
+        }],
+        required_actions: vec![format!(
+            "Fix semantic_review.command `{}` or switch semantic_review.adapter back to local, then rerun `aich review`.",
+            command_spec.display()
+        )],
+        suggested_tests: Vec::new(),
+        uncertainty: vec![detail],
+    }
+}
+
 fn append_semantic_conflicts_yaml(
     output: &mut String,
     findings: &[SemanticConflictFinding],
@@ -4329,6 +4768,92 @@ fn append_string_list_yaml(output: &mut String, values: &[String], indent: usize
 
     for value in values {
         output.push_str(&format!("{}- {}\n", " ".repeat(indent), yaml_quote(value)));
+    }
+}
+
+fn semantic_review_adapter_config_from_config(
+    config_path: &Path,
+) -> Result<SemanticReviewAdapterConfig, CliError> {
+    let config = fs::read_to_string(config_path)?;
+    let mut in_semantic_review = false;
+    let mut kind: Option<SemanticReviewAdapterKind> = None;
+    let mut legacy_provider: Option<String> = None;
+    let mut reviewer_id: Option<String> = None;
+    let mut command_line: Option<String> = None;
+
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if !line.starts_with(' ') && trimmed.ends_with(':') {
+            in_semantic_review = trimmed == "semantic_review:";
+            continue;
+        }
+
+        if !in_semantic_review {
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("adapter:") {
+            let value = strip_yaml_scalar(value);
+            if !value.trim().is_empty() {
+                kind = Some(parse_semantic_review_adapter_kind(&value)?);
+            }
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("reviewer_provider:") {
+            let value = strip_yaml_scalar(value);
+            if !value.trim().is_empty() {
+                legacy_provider = Some(value);
+            }
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("reviewer_id:") {
+            let value = strip_yaml_scalar(value);
+            if !value.trim().is_empty() {
+                reviewer_id = Some(value);
+            }
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("command:") {
+            let value = strip_yaml_scalar(value);
+            if !value.trim().is_empty() {
+                command_line = Some(value);
+            }
+        }
+    }
+
+    let kind = kind.unwrap_or_else(|| {
+        if legacy_provider.as_deref() == Some("command") {
+            SemanticReviewAdapterKind::Command
+        } else {
+            SemanticReviewAdapterKind::Local
+        }
+    });
+    let command = command_line
+        .as_deref()
+        .map(|line| parse_process_command("semantic_review.command", line))
+        .transpose()?;
+
+    Ok(SemanticReviewAdapterConfig {
+        kind,
+        reviewer_id,
+        command,
+    })
+}
+
+fn parse_semantic_review_adapter_kind(value: &str) -> Result<SemanticReviewAdapterKind, CliError> {
+    match value.trim() {
+        "local" => Ok(SemanticReviewAdapterKind::Local),
+        "command" => Ok(SemanticReviewAdapterKind::Command),
+        other => Err(CliError::Usage(format!(
+            "semantic_review.adapter must be 'local' or 'command', got '{other}'"
+        ))),
     }
 }
 
@@ -4528,6 +5053,87 @@ fn check_commands_from_config(config_path: &Path) -> Result<Vec<CheckCommand>, C
     }
 
     Ok(commands)
+}
+
+fn parse_process_command(label: &str, command_line: &str) -> Result<ProcessCommandSpec, CliError> {
+    let mut parts = split_command_line(command_line)
+        .map_err(|error| CliError::Usage(format!("{label} has invalid command syntax: {error}")))?;
+    if parts.is_empty() {
+        return Err(CliError::Usage(format!("{label} must not be empty")));
+    }
+    let program = parts.remove(0);
+    Ok(ProcessCommandSpec {
+        program,
+        args: parts,
+    })
+}
+
+fn split_command_line(command_line: &str) -> Result<Vec<String>, String> {
+    #[derive(Copy, Clone, Eq, PartialEq)]
+    enum Quote {
+        Single,
+        Double,
+    }
+
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<Quote> = None;
+    let mut escaped = false;
+    let mut has_current = false;
+
+    for character in command_line.chars() {
+        if escaped {
+            current.push(character);
+            has_current = true;
+            escaped = false;
+            continue;
+        }
+
+        match character {
+            '\\' if quote != Some(Quote::Single) => {
+                escaped = true;
+                has_current = true;
+            }
+            '\'' if quote.is_none() => {
+                quote = Some(Quote::Single);
+                has_current = true;
+            }
+            '\'' if quote == Some(Quote::Single) => {
+                quote = None;
+                has_current = true;
+            }
+            '"' if quote.is_none() => {
+                quote = Some(Quote::Double);
+                has_current = true;
+            }
+            '"' if quote == Some(Quote::Double) => {
+                quote = None;
+                has_current = true;
+            }
+            value if value.is_whitespace() && quote.is_none() => {
+                if has_current {
+                    parts.push(std::mem::take(&mut current));
+                    has_current = false;
+                }
+            }
+            other => {
+                current.push(other);
+                has_current = true;
+            }
+        }
+    }
+
+    if escaped {
+        return Err("command cannot end with an escape character".to_string());
+    }
+    if quote.is_some() {
+        return Err("command contains an unterminated quote".to_string());
+    }
+    if has_current {
+        parts.push(current);
+    }
+
+    Ok(parts)
 }
 
 fn parse_check_command(name: &str, command_line: &str) -> Result<CheckCommand, CliError> {
@@ -4816,6 +5422,14 @@ fn json_string_field(data: &str, field: &str) -> Option<String> {
 
 fn short_hash(value: &str) -> String {
     value.chars().take(7).collect()
+}
+
+fn truncate_for_report(value: &str, max_chars: usize) -> String {
+    let mut output: String = value.chars().take(max_chars).collect();
+    if value.chars().count() > max_chars {
+        output.push_str("...");
+    }
+    output
 }
 
 fn yes_no(value: bool) -> &'static str {
@@ -5164,6 +5778,14 @@ mod tests {
         assert!(matches!(err, CliError::Usage(message) if message.contains("--applied")));
     }
 
+    #[test]
+    fn split_command_line_preserves_quoted_arguments() {
+        assert_eq!(
+            split_command_line("reviewer --model \"gpt 5\" 'prompt file.md'").expect("split"),
+            vec!["reviewer", "--model", "gpt 5", "prompt file.md"]
+        );
+    }
+
     fn seed_verified_review_candidate(
         repo: &Path,
         changed_file_path: &str,
@@ -5256,6 +5878,16 @@ mod tests {
             .expect("insert check");
 
         (session, attempt)
+    }
+
+    fn configure_semantic_review_command(repo: &Path, reviewer_id: &str, command: &str) {
+        fs::write(
+            repo.join(".aichestra/config.yaml"),
+            format!(
+                "semantic_review:\n  adapter: command\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  risk_block_levels:\n    - blocked\n"
+            ),
+        )
+        .expect("write semantic review config");
     }
 
     fn seed_enqueued_candidate(repo: &Path, id: &str) -> Session {
@@ -6056,6 +6688,144 @@ mod tests {
                     .data_json
                     .contains("\"reviewer\":\"mock_llm_reviewer\"")
                 && event.data_json.contains("\"llm_executed\":true")
+        }));
+        assert_eq!(
+            ledger
+                .list_semantic_reviews(&attempt.id)
+                .expect("semantic reviews")
+                .len(),
+            1
+        );
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn review_runs_configured_command_semantic_adapter() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let script_path = repo.join("mock-semantic-review.sh");
+        fs::write(
+            &script_path,
+            r#"input=$(cat)
+case "$input" in
+  *"Semantic Review Input"*) ;;
+  *) echo "missing semantic review input" >&2; exit 2 ;;
+esac
+cat <<'YAML'
+semantic_review:
+  risk_level: low
+  summary: "Scripted command reviewer accepted the candidate."
+  suspected_conflicts: []
+  required_actions: []
+  suggested_tests:
+    - "cargo test --all"
+  uncertainty: []
+YAML
+"#,
+        )
+        .expect("write script");
+        configure_semantic_review_command(
+            &repo,
+            "scripted_command_reviewer",
+            &format!("sh {}", script_path.display()),
+        );
+        let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        let result = run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+
+        assert_eq!(result.semantic_review.risk_level, SemanticRiskLevel::Low);
+        assert!(!result.blocked);
+        assert_eq!(
+            result.summary,
+            "Scripted command reviewer accepted the candidate."
+        );
+        assert_eq!(result.suggested_tests, vec!["cargo test --all".to_string()]);
+
+        let report = fs::read_to_string(&result.report_path).expect("read report");
+        assert!(report.contains("reviewer: \"scripted_command_reviewer\""));
+        assert!(report.contains("llm_executed: true"));
+        assert!(report.contains("risk_level: \"low\""));
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger.list_events().expect("events").iter().any(|event| {
+            event.name == "merge.semantic_review.completed"
+                && event
+                    .data_json
+                    .contains("\"reviewer\":\"scripted_command_reviewer\"")
+                && event.data_json.contains("\"llm_executed\":true")
+        }));
+        assert_eq!(
+            ledger
+                .list_semantic_reviews(&attempt.id)
+                .expect("semantic reviews")
+                .len(),
+            1
+        );
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn review_blocks_when_command_adapter_returns_invalid_report() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let script_path = repo.join("invalid-semantic-review.sh");
+        fs::write(
+            &script_path,
+            "cat >/dev/null\nprintf '%s\\n' 'semantic_review:' '  summary: \"missing risk\"'\n",
+        )
+        .expect("write script");
+        configure_semantic_review_command(
+            &repo,
+            "invalid_command_reviewer",
+            &format!("sh {}", script_path.display()),
+        );
+        let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        let result = run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+
+        assert_eq!(
+            result.semantic_review.risk_level,
+            SemanticRiskLevel::Blocked
+        );
+        assert!(result.blocked);
+        assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Blocked);
+        assert!(result
+            .summary
+            .contains("Semantic review command returned an invalid report"));
+        assert!(result
+            .required_actions
+            .iter()
+            .any(|action| action.contains("semantic_review.command")));
+
+        let report = fs::read_to_string(&result.report_path).expect("read report");
+        assert!(report.contains("reviewer: \"invalid_command_reviewer\""));
+        assert!(report.contains("reviewer_failure"));
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger.list_events().expect("events").iter().any(|event| {
+            event.name == "merge.blocked" && event.data_json.contains("semantic_review")
         }));
         assert_eq!(
             ledger

@@ -43,7 +43,8 @@ checks:
       required: true
 
 semantic_review:
-  reviewer_provider: codex
+  adapter: local
+  reviewer_id: local_mvp_static_reviewer
   prompt_path: .aichestra/prompts/semantic-merge-review.md
   risk_block_levels:
     - blocked
