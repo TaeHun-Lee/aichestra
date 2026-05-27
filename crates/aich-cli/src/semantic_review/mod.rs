@@ -7,7 +7,8 @@ use std::fs;
 
 use aich_core::clock::now_millis;
 use aich_core::{
-    CheckResult, EventName, MergeAttempt, MergeAttemptStatus, NewEvent, SemanticReview,
+    ChangeManifest, CheckResult, EventName, MergeAttempt, MergeAttemptStatus, NewEvent,
+    SemanticReview, Session, SessionStatus,
 };
 use aich_ledger::MergeAttemptSemanticReviewUpdate;
 
@@ -27,7 +28,10 @@ use config::{
     semantic_review_adapter_config_from_config, semantic_review_prompt_path_from_config,
     SemanticReviewAdapterConfig, SemanticReviewAdapterKind,
 };
-use report::{render_semantic_review_input, render_semantic_review_yaml};
+use report::{
+    render_semantic_review_input, render_semantic_review_yaml, RelatedChangeManifest,
+    RelatedChangeManifestRelation,
+};
 
 pub(crate) use adapter::{SemanticReviewAdapter, SemanticReviewAdapterRequest};
 #[cfg(test)]
@@ -138,6 +142,7 @@ where
         .as_ref()
         .zip(manifest.manifest_hash.as_ref())
         .is_some_and(|(content, expected)| sha256_hex(content.as_bytes()) != *expected);
+    let related_manifests = related_change_manifests(&ledger, &options.repo_root, &session.id)?;
     let prompt_path = semantic_review_prompt_path_from_config(&config_path);
     let prompt_content = read_optional_text(&path_from_ledger(&options.repo_root, &prompt_path))?;
     let input = render_semantic_review_input(SemanticReviewInput {
@@ -150,6 +155,7 @@ where
         patch_set: patch_set.as_ref(),
         changed_files: &changed_files,
         check_results: &check_results,
+        related_manifests: &related_manifests,
         config_path: &config_path,
         prompt_path: &prompt_path,
         prompt_content: prompt_content.as_deref(),
@@ -164,6 +170,7 @@ where
         patch_set: patch_set.as_ref(),
         changed_files: &changed_files,
         check_results: &check_results,
+        related_manifests: &related_manifests,
         config_path: &config_path,
         prompt_path: &prompt_path,
         prompt_content: prompt_content.as_deref(),
@@ -254,6 +261,95 @@ where
         required_actions: report.required_actions,
         suggested_tests: report.suggested_tests,
         blocked,
+    })
+}
+
+fn related_change_manifests(
+    ledger: &aich_ledger::Ledger,
+    repo_root: &std::path::Path,
+    current_session_id: &str,
+) -> Result<Vec<RelatedChangeManifest>, CliError> {
+    let mut related = Vec::new();
+
+    for session in ledger.list_sessions()? {
+        if session.id == current_session_id || session.status == SessionStatus::Abandoned {
+            continue;
+        }
+
+        let attempts = ledger.list_merge_attempts(&session.id)?;
+        let latest_attempt = attempts.last();
+        let Some(relation) = related_manifest_relation(&session, latest_attempt) else {
+            continue;
+        };
+        let Some(manifest) = ledger
+            .list_change_manifests(&session.id)?
+            .into_iter()
+            .last()
+        else {
+            continue;
+        };
+
+        related.push(read_related_change_manifest(
+            repo_root,
+            session,
+            latest_attempt,
+            manifest,
+            relation,
+        )?);
+    }
+
+    Ok(related)
+}
+
+fn related_manifest_relation(
+    session: &Session,
+    latest_attempt: Option<&MergeAttempt>,
+) -> Option<RelatedChangeManifestRelation> {
+    if latest_attempt
+        .map(|attempt| attempt.status == MergeAttemptStatus::Applied)
+        .unwrap_or(false)
+    {
+        return Some(RelatedChangeManifestRelation::Applied);
+    }
+
+    if session.status == SessionStatus::Enqueued {
+        return Some(RelatedChangeManifestRelation::Queued);
+    }
+
+    None
+}
+
+fn read_related_change_manifest(
+    repo_root: &std::path::Path,
+    session: Session,
+    latest_attempt: Option<&MergeAttempt>,
+    manifest: ChangeManifest,
+    relation: RelatedChangeManifestRelation,
+) -> Result<RelatedChangeManifest, CliError> {
+    let manifest_path = path_from_ledger(repo_root, &manifest.manifest_path);
+    let manifest_content = read_optional_text(&manifest_path)?;
+    let manifest_hash_mismatch = manifest_content
+        .as_ref()
+        .zip(manifest.manifest_hash.as_ref())
+        .is_some_and(|(content, expected)| sha256_hex(content.as_bytes()) != *expected);
+
+    Ok(RelatedChangeManifest {
+        relation,
+        session_id: session.id,
+        session_status: session.status.as_str().to_string(),
+        goal: session.goal,
+        base_commit: session.base_commit,
+        head_commit: session.head_commit,
+        latest_attempt_id: latest_attempt.map(|attempt| attempt.id.clone()),
+        latest_attempt_status: latest_attempt.map(|attempt| attempt.status.as_str().to_string()),
+        latest_attempt_main_before_commit: latest_attempt
+            .map(|attempt| attempt.main_before_commit.clone()),
+        latest_attempt_verified_commit_id: latest_attempt
+            .and_then(|attempt| attempt.verified_commit_id.clone()),
+        manifest_id: manifest.id,
+        manifest_path: manifest.manifest_path,
+        manifest_hash_mismatch,
+        manifest_content,
     })
 }
 

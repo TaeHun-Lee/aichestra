@@ -64,6 +64,7 @@ The reviewer should receive:
 - Project rules from AGENTS.md
 - Candidate session manifest
 - Relevant previous manifests already applied after the candidate base commit
+- Relevant manifests from other queued candidates
 - Actual diff summary
 - Changed file list
 - Changed symbol summary if available
@@ -105,14 +106,16 @@ semantic_review:
 
 MVP starts with semantic review report generation only.
 
-`aich review <session-id>` runs semantic review through a `SemanticReviewAdapter` boundary. The current default adapter is a local deterministic reviewer rather than an external LLM provider. It reads the latest verified merge attempt, Change Manifest artifact, changed-file evidence, patch summary, configured semantic-review prompt, and sandbox check results, then writes:
+`aich review <session-id>` runs semantic review through a `SemanticReviewAdapter` boundary. The current default adapter is a local deterministic reviewer rather than an external LLM provider. It reads the latest verified merge attempt, Change Manifest artifact, related applied and queued Change Manifest artifacts, changed-file evidence, patch summary, configured semantic-review prompt, and sandbox check results, then writes:
 
 - a review input artifact for auditability
 - a YAML semantic review report
 - a `semantic_reviews` ledger row
 - `merge.semantic_review.completed` event data
 
-The report records the adapter reviewer id and `llm_executed` flag so the user can distinguish local deterministic evidence from a provider-backed Semantic Merge LLM review. Future LLM adapters should consume the same evidence bundle and return the same risk/report shape. They remain advisory and cannot approve, apply, or bypass the integration-sandbox checks.
+The review input artifact includes the candidate manifest separately from the related manifest bundle. Related manifests are labeled as `applied` or `queued`, include session and latest-attempt metadata when available, and are evidence for stale assumptions or cross-session conflicts; they do not by themselves approve, block, or reorder the queue.
+
+The report records the adapter reviewer id and `llm_executed` flag so the user can distinguish local deterministic evidence from a provider-backed Semantic Merge LLM review. Future LLM adapters should consume the same evidence bundle and return the same risk/report shape. They remain advisory and cannot approve, apply, reorder the queue, or bypass the integration-sandbox checks.
 
 The adapter is configured in `.aichestra/config.yaml`:
 

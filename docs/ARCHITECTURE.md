@@ -111,7 +111,7 @@ flowchart TB
 8. Preflight acquires the local `merge-queue` lock, then creates a temporary sandbox from latest main.
 9. The candidate is mechanically merged using the same strategy that will be used to apply.
 10. Checks run in the sandbox and store stdout/stderr artifacts.
-11. `aich review` calls the semantic review adapter, then writes a report from the manifest, diff evidence, mechanical merge result, configured prompt, and sandbox check results. Required checks form the gate, while optional checks remain review evidence. The default MVP adapter is local and deterministic; provider-backed LLM adapters must preserve the same advisory boundary.
+11. `aich review` calls the semantic review adapter, then writes a report from the manifest, related applied/queued manifests, diff evidence, mechanical merge result, configured prompt, and sandbox check results. Required checks form the gate, while optional checks remain review evidence. The default MVP adapter is local and deterministic; provider-backed LLM adapters must preserve the same advisory boundary.
 12. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
 13. `aich apply` acquires the same local `merge-queue` lock, then fast-forwards main to the approved verified commit only after rechecking main has not moved.
 14. A candidate that should not continue can be withdrawn with `aich session abandon <session-id>`, which marks the session `abandoned` and removes it from the queue view without touching main.

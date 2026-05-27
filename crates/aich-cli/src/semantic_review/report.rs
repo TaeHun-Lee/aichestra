@@ -30,6 +30,46 @@ pub(crate) struct LocalSemanticReviewReport {
     pub(crate) uncertainty: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RelatedChangeManifestRelation {
+    Applied,
+    Queued,
+}
+
+impl RelatedChangeManifestRelation {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::Queued => "queued",
+        }
+    }
+
+    fn title(&self) -> &'static str {
+        match self {
+            Self::Applied => "Applied",
+            Self::Queued => "Queued",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RelatedChangeManifest {
+    pub(crate) relation: RelatedChangeManifestRelation,
+    pub(crate) session_id: String,
+    pub(crate) session_status: String,
+    pub(crate) goal: String,
+    pub(crate) base_commit: String,
+    pub(crate) head_commit: Option<String>,
+    pub(crate) latest_attempt_id: Option<String>,
+    pub(crate) latest_attempt_status: Option<String>,
+    pub(crate) latest_attempt_main_before_commit: Option<String>,
+    pub(crate) latest_attempt_verified_commit_id: Option<String>,
+    pub(crate) manifest_id: String,
+    pub(crate) manifest_path: String,
+    pub(crate) manifest_hash_mismatch: bool,
+    pub(crate) manifest_content: Option<String>,
+}
+
 pub(crate) fn build_local_semantic_review_report(
     manifest: &ChangeManifest,
     manifest_content: Option<&str>,
@@ -263,6 +303,7 @@ pub(crate) struct SemanticReviewInput<'a> {
     pub(crate) patch_set: Option<&'a PatchSet>,
     pub(crate) changed_files: &'a [ChangedFile],
     pub(crate) check_results: &'a [CheckResult],
+    pub(crate) related_manifests: &'a [RelatedChangeManifest],
     pub(crate) config_path: &'a Path,
     pub(crate) prompt_path: &'a str,
     pub(crate) prompt_content: Option<&'a str>,
@@ -306,6 +347,18 @@ pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> St
             output.push_str("```\n\n");
         }
         None => output.push_str("_Manifest artifact could not be read._\n\n"),
+    }
+
+    output.push_str("## Related Change Manifests\n\n");
+    if input.related_manifests.is_empty() {
+        output.push_str("_No other applied or queued Change Manifests are recorded._\n");
+    } else {
+        output.push_str(
+            "Use these other session manifests to look for stale assumptions, overlapping intent, and cross-session semantic conflicts.\n\n",
+        );
+        for related in input.related_manifests {
+            append_related_change_manifest(&mut output, related);
+        }
     }
 
     output.push_str("## Diff Evidence\n\n");
@@ -367,6 +420,61 @@ pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> St
     }
 
     output
+}
+
+fn append_related_change_manifest(output: &mut String, related: &RelatedChangeManifest) {
+    output.push_str(&format!(
+        "### {} Manifest: {}\n\n",
+        related.relation.title(),
+        related.session_id
+    ));
+    output.push_str(&format!("- relation: `{}`\n", related.relation.as_str()));
+    output.push_str(&format!("- session_status: `{}`\n", related.session_status));
+    output.push_str(&format!("- goal: `{}`\n", related.goal));
+    output.push_str(&format!("- base_commit: `{}`\n", related.base_commit));
+    output.push_str(&format!(
+        "- head_commit: `{}`\n",
+        related.head_commit.as_deref().unwrap_or("")
+    ));
+    output.push_str(&format!(
+        "- latest_attempt_id: `{}`\n",
+        related.latest_attempt_id.as_deref().unwrap_or("")
+    ));
+    output.push_str(&format!(
+        "- latest_attempt_status: `{}`\n",
+        related.latest_attempt_status.as_deref().unwrap_or("")
+    ));
+    output.push_str(&format!(
+        "- latest_attempt_main_before: `{}`\n",
+        related
+            .latest_attempt_main_before_commit
+            .as_deref()
+            .unwrap_or("")
+    ));
+    output.push_str(&format!(
+        "- latest_attempt_verified_commit: `{}`\n",
+        related
+            .latest_attempt_verified_commit_id
+            .as_deref()
+            .unwrap_or("")
+    ));
+    output.push_str(&format!("- manifest_id: `{}`\n", related.manifest_id));
+    output.push_str(&format!("- manifest_path: `{}`\n", related.manifest_path));
+    output.push_str(&format!(
+        "- manifest_hash_mismatch: `{}`\n\n",
+        related.manifest_hash_mismatch
+    ));
+    match related.manifest_content.as_deref() {
+        Some(content) => {
+            output.push_str("```yaml\n");
+            output.push_str(content);
+            if !content.ends_with('\n') {
+                output.push('\n');
+            }
+            output.push_str("```\n\n");
+        }
+        None => output.push_str("_Related manifest artifact could not be read._\n\n"),
+    }
 }
 
 pub(crate) struct SemanticReviewReportMetadata<'a> {

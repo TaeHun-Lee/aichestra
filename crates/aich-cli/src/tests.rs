@@ -148,6 +148,7 @@ impl SemanticReviewAdapter for MockSemanticReviewAdapter {
         );
         assert_eq!(request.changed_files.len(), 1);
         assert_eq!(request.check_results.len(), 1);
+        assert!(request.related_manifests.is_empty());
 
         Ok(LocalSemanticReviewReport {
             risk_level: SemanticRiskLevel::Low,
@@ -156,6 +157,54 @@ impl SemanticReviewAdapter for MockSemanticReviewAdapter {
             required_actions: Vec::new(),
             suggested_tests: vec!["cargo test --all".to_string()],
             uncertainty: vec!["Mock adapter output is test-only.".to_string()],
+        })
+    }
+}
+
+struct RelatedManifestSemanticReviewAdapter;
+
+impl SemanticReviewAdapter for RelatedManifestSemanticReviewAdapter {
+    fn reviewer_id(&self) -> &str {
+        "related_manifest_reviewer"
+    }
+
+    fn llm_executed(&self) -> bool {
+        true
+    }
+
+    fn review(
+        &self,
+        request: &SemanticReviewAdapterRequest<'_>,
+    ) -> Result<LocalSemanticReviewReport, CliError> {
+        assert_eq!(request.related_manifests.len(), 2);
+        assert_eq!(request.related_manifests[0].relation.as_str(), "applied");
+        assert_eq!(
+            request.related_manifests[0].session_id,
+            "session-applied-context"
+        );
+        assert!(request.related_manifests[0]
+            .manifest_content
+            .as_deref()
+            .unwrap_or("")
+            .contains("session-applied-context"));
+        assert_eq!(request.related_manifests[1].relation.as_str(), "queued");
+        assert_eq!(
+            request.related_manifests[1].session_id,
+            "session-queued-context"
+        );
+        assert!(request.related_manifests[1]
+            .manifest_content
+            .as_deref()
+            .unwrap_or("")
+            .contains("session-queued-context"));
+
+        Ok(LocalSemanticReviewReport {
+            risk_level: SemanticRiskLevel::Low,
+            summary: "Related manifests were included.".to_string(),
+            suspected_conflicts: Vec::new(),
+            required_actions: Vec::new(),
+            suggested_tests: Vec::new(),
+            uncertainty: Vec::new(),
         })
     }
 }
@@ -776,6 +825,32 @@ fn seed_enqueued_candidate(repo: &Path, id: &str) -> Session {
         .expect("insert manifest");
 
     session
+}
+
+fn mark_seeded_candidate_applied(repo: &Path, session: &Session) {
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let now = now_millis();
+    let attempt = MergeAttempt {
+        id: format!("merge-{}", session.id),
+        session_id: session.id.clone(),
+        status: MergeAttemptStatus::Applied,
+        main_before_commit: "base-commit".to_string(),
+        candidate_commit: session
+            .head_commit
+            .clone()
+            .unwrap_or_else(|| "head-commit".to_string()),
+        apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+        verified_tree_id: Some(format!("{}-tree", session.id)),
+        verified_commit_id: Some(format!("{}-verified", session.id)),
+        checks_passed: true,
+        semantic_risk_level: Some("low".to_string()),
+    };
+    ledger
+        .insert_merge_attempt(&attempt, now + 4, now + 4)
+        .expect("insert applied attempt");
+    ledger
+        .update_session_status(&session.id, SessionStatus::Completed, now + 5)
+        .expect("mark session completed");
 }
 
 fn insert_queue_candidate(
@@ -1965,6 +2040,47 @@ fn review_uses_injected_semantic_review_adapter() {
             .len(),
         1
     );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn review_input_includes_applied_and_queued_manifests() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    let applied = seed_enqueued_candidate(&repo, "session-applied-context");
+    mark_seeded_candidate_applied(&repo, &applied);
+    seed_enqueued_candidate(&repo, "session-queued-context");
+
+    let result = run_review_with_adapter(
+        &ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &RelatedManifestSemanticReviewAdapter,
+    )
+    .expect("review");
+
+    assert_eq!(result.semantic_review.risk_level, SemanticRiskLevel::Low);
+    assert_eq!(result.summary, "Related manifests were included.");
+
+    let input_path = result
+        .report_path
+        .with_file_name(format!("{}-input.md", result.semantic_review.id));
+    let input = fs::read_to_string(input_path).expect("read input");
+    assert!(input.contains("## Related Change Manifests"));
+    assert!(input.contains("### Applied Manifest: session-applied-context"));
+    assert!(input.contains("### Queued Manifest: session-queued-context"));
+    assert!(input.contains("session-applied-context"));
+    assert!(input.contains("session-queued-context"));
+    assert!(!input.contains("### Queued Manifest: session-review"));
 
     let _ = fs::remove_dir_all(repo);
 }

@@ -12,7 +12,7 @@ use super::parser::parse_semantic_review_command_report;
 use super::report::{
     build_local_semantic_review_report, command_semantic_review_failure_report,
     llm_semantic_review_failure_report, render_semantic_review_input, LocalSemanticReviewReport,
-    SemanticReviewInput,
+    RelatedChangeManifest, SemanticReviewInput,
 };
 
 pub(crate) struct SemanticReviewAdapterRequest<'a> {
@@ -25,6 +25,7 @@ pub(crate) struct SemanticReviewAdapterRequest<'a> {
     pub(crate) patch_set: Option<&'a PatchSet>,
     pub(crate) changed_files: &'a [ChangedFile],
     pub(crate) check_results: &'a [CheckResult],
+    pub(crate) related_manifests: &'a [RelatedChangeManifest],
     pub(crate) config_path: &'a Path,
     pub(crate) prompt_path: &'a str,
     pub(crate) prompt_content: Option<&'a str>,
@@ -104,6 +105,7 @@ impl SemanticReviewAdapter for CommandSemanticReviewAdapter {
             patch_set: request.patch_set,
             changed_files: request.changed_files,
             check_results: request.check_results,
+            related_manifests: request.related_manifests,
             config_path: request.config_path,
             prompt_path: request.prompt_path,
             prompt_content: request.prompt_content,
@@ -188,6 +190,7 @@ impl SemanticReviewAdapter for LlmSemanticReviewAdapter {
             patch_set: request.patch_set,
             changed_files: request.changed_files,
             check_results: request.check_results,
+            related_manifests: request.related_manifests,
             config_path: request.config_path,
             prompt_path: request.prompt_path,
             prompt_content: request.prompt_content,
