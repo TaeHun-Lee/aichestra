@@ -103,14 +103,14 @@ semantic_review:
 
 MVP starts with semantic review report generation only.
 
-`aich review <session-id>` currently uses a local deterministic reviewer rather than an external LLM adapter. It reads the latest verified merge attempt, Change Manifest artifact, changed-file evidence, patch summary, and sandbox check results, then writes:
+`aich review <session-id>` runs semantic review through a `SemanticReviewAdapter` boundary. The current default adapter is a local deterministic reviewer rather than an external LLM provider. It reads the latest verified merge attempt, Change Manifest artifact, changed-file evidence, patch summary, configured semantic-review prompt, and sandbox check results, then writes:
 
 - a review input artifact for auditability
 - a YAML semantic review report
 - a `semantic_reviews` ledger row
 - `merge.semantic_review.completed` event data
 
-The report records `llm_executed: false` so the user can distinguish this MVP evidence from a later provider-backed Semantic Merge LLM review.
+The report records the adapter reviewer id and `llm_executed` flag so the user can distinguish local deterministic evidence from a provider-backed Semantic Merge LLM review. Future LLM adapters should consume the same evidence bundle and return the same risk/report shape. They remain advisory and cannot approve, apply, or bypass the integration-sandbox checks.
 
 Automatic patch application is optional and should remain behind explicit human approval. If a proposed patch is applied, the resulting tree becomes a new candidate and must go through checks again.
 

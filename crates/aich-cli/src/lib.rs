@@ -3414,7 +3414,68 @@ struct LocalSemanticReviewReport {
     uncertainty: Vec<String>,
 }
 
+struct SemanticReviewAdapterRequest<'a> {
+    session: &'a Session,
+    attempt: &'a MergeAttempt,
+    manifest: &'a ChangeManifest,
+    manifest_content: Option<&'a str>,
+    manifest_hash_mismatch: bool,
+    patch_set: Option<&'a PatchSet>,
+    changed_files: &'a [ChangedFile],
+    check_results: &'a [CheckResult],
+    config_path: &'a Path,
+    prompt_path: &'a str,
+    prompt_content: Option<&'a str>,
+}
+
+trait SemanticReviewAdapter {
+    fn reviewer_id(&self) -> &str;
+
+    fn llm_executed(&self) -> bool;
+
+    fn review(
+        &self,
+        request: &SemanticReviewAdapterRequest<'_>,
+    ) -> Result<LocalSemanticReviewReport, CliError>;
+}
+
+struct LocalSemanticReviewAdapter;
+
+impl SemanticReviewAdapter for LocalSemanticReviewAdapter {
+    fn reviewer_id(&self) -> &str {
+        LOCAL_SEMANTIC_REVIEWER
+    }
+
+    fn llm_executed(&self) -> bool {
+        false
+    }
+
+    fn review(
+        &self,
+        request: &SemanticReviewAdapterRequest<'_>,
+    ) -> Result<LocalSemanticReviewReport, CliError> {
+        Ok(build_local_semantic_review_report(
+            request.manifest,
+            request.manifest_content,
+            request.manifest_hash_mismatch,
+            request.attempt,
+            request.changed_files,
+            request.check_results,
+        ))
+    }
+}
+
 fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError> {
+    run_review_with_adapter(options, &LocalSemanticReviewAdapter)
+}
+
+fn run_review_with_adapter<A>(
+    options: &ReviewOptions,
+    adapter: &A,
+) -> Result<ReviewRunResult, CliError>
+where
+    A: SemanticReviewAdapter,
+{
     let aichestra_dir = options.repo_root.join(".aichestra");
     let config_path = aichestra_dir.join("config.yaml");
     if !config_path.exists() {
@@ -3461,15 +3522,20 @@ fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError>
         .is_some_and(|(content, expected)| sha256_hex(content.as_bytes()) != *expected);
     let prompt_path = semantic_review_prompt_path_from_config(&config_path);
     let prompt_content = read_optional_text(&path_from_ledger(&options.repo_root, &prompt_path))?;
-
-    let report = build_local_semantic_review_report(
-        &manifest,
-        manifest_content.as_deref(),
+    let adapter_request = SemanticReviewAdapterRequest {
+        session: &session,
+        attempt: &attempt,
+        manifest: &manifest,
+        manifest_content: manifest_content.as_deref(),
         manifest_hash_mismatch,
-        &attempt,
-        &changed_files,
-        &check_results,
-    );
+        patch_set: patch_set.as_ref(),
+        changed_files: &changed_files,
+        check_results: &check_results,
+        config_path: &config_path,
+        prompt_path: &prompt_path,
+        prompt_content: prompt_content.as_deref(),
+    };
+    let report = adapter.review(&adapter_request)?;
     let created_at_ms = now_millis();
     let review_id = next_semantic_review_id(created_at_ms);
     let artifact_dir = aichestra_dir
@@ -3480,16 +3546,18 @@ fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError>
     let input_path = artifact_dir.join(format!("{review_id}-input.md"));
     let report_path = artifact_dir.join(format!("{review_id}.yaml"));
     let input = render_semantic_review_input(SemanticReviewInput {
-        session: &session,
-        attempt: &attempt,
-        manifest: &manifest,
-        manifest_content: manifest_content.as_deref(),
-        patch_set: patch_set.as_ref(),
-        changed_files: &changed_files,
-        check_results: &check_results,
-        config_path: &config_path,
-        prompt_path: &prompt_path,
-        prompt_content: prompt_content.as_deref(),
+        reviewer_id: adapter.reviewer_id(),
+        llm_executed: adapter.llm_executed(),
+        session: adapter_request.session,
+        attempt: adapter_request.attempt,
+        manifest: adapter_request.manifest,
+        manifest_content: adapter_request.manifest_content,
+        patch_set: adapter_request.patch_set,
+        changed_files: adapter_request.changed_files,
+        check_results: adapter_request.check_results,
+        config_path: adapter_request.config_path,
+        prompt_path: adapter_request.prompt_path,
+        prompt_content: adapter_request.prompt_content,
     });
     fs::write(&input_path, input)?;
     let report_yaml = render_semantic_review_yaml(
@@ -3498,7 +3566,11 @@ fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError>
         &attempt,
         &operator,
         &report,
-        &display_path_for_ledger(&options.repo_root, &input_path),
+        SemanticReviewReportMetadata {
+            reviewer_id: adapter.reviewer_id(),
+            llm_executed: adapter.llm_executed(),
+            input_artifact: &display_path_for_ledger(&options.repo_root, &input_path),
+        },
     );
     fs::write(&report_path, report_yaml)?;
 
@@ -3527,10 +3599,12 @@ fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError>
         &NewEvent::new(EventName::MergeSemanticReviewCompleted)
             .with_subject("merge_attempt", attempt.id.clone())
             .with_data_json(format!(
-                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"risk_level\":\"{}\",\"blocked\":{}}}",
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{}}}",
                 json_escape(&operator.id),
                 json_escape(&session.id),
                 json_escape(&semantic_review.id),
+                json_escape(adapter.reviewer_id()),
+                adapter.llm_executed(),
                 report.risk_level.as_str(),
                 blocked
             )),
@@ -4050,6 +4124,8 @@ fn is_shared_contract_path(path: &str) -> bool {
 }
 
 struct SemanticReviewInput<'a> {
+    reviewer_id: &'a str,
+    llm_executed: bool,
     session: &'a Session,
     attempt: &'a MergeAttempt,
     manifest: &'a ChangeManifest,
@@ -4065,8 +4141,8 @@ struct SemanticReviewInput<'a> {
 fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> String {
     let mut output = String::new();
     output.push_str("# Semantic Review Input\n\n");
-    output.push_str(&format!("- reviewer: `{LOCAL_SEMANTIC_REVIEWER}`\n"));
-    output.push_str("- llm_executed: `false`\n");
+    output.push_str(&format!("- reviewer: `{}`\n", input.reviewer_id));
+    output.push_str(&format!("- llm_executed: `{}`\n", input.llm_executed));
     output.push_str(&format!("- session_id: `{}`\n", input.session.id));
     output.push_str(&format!("- goal: `{}`\n", input.session.goal));
     output.push_str(&format!("- merge_attempt_id: `{}`\n", input.attempt.id));
@@ -4161,13 +4237,19 @@ fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> String {
     output
 }
 
+struct SemanticReviewReportMetadata<'a> {
+    reviewer_id: &'a str,
+    llm_executed: bool,
+    input_artifact: &'a str,
+}
+
 fn render_semantic_review_yaml(
     review_id: &str,
     session: &Session,
     attempt: &MergeAttempt,
     operator: &Operator,
     report: &LocalSemanticReviewReport,
-    input_artifact: &str,
+    metadata: SemanticReviewReportMetadata<'_>,
 ) -> String {
     let mut output = String::new();
     output.push_str("semantic_review:\n");
@@ -4179,9 +4261,9 @@ fn render_semantic_review_yaml(
     ));
     output.push_str(&format!(
         "  reviewer: {}\n",
-        yaml_quote(LOCAL_SEMANTIC_REVIEWER)
+        yaml_quote(metadata.reviewer_id)
     ));
-    output.push_str("  llm_executed: false\n");
+    output.push_str(&format!("  llm_executed: {}\n", metadata.llm_executed));
     output.push_str(&format!("  operator_id: {}\n", yaml_quote(&operator.id)));
     output.push_str(&format!(
         "  risk_level: {}\n",
@@ -4190,7 +4272,7 @@ fn render_semantic_review_yaml(
     output.push_str(&format!("  summary: {}\n", yaml_quote(&report.summary)));
     output.push_str(&format!(
         "  input_artifact: {}\n",
-        yaml_quote(input_artifact)
+        yaml_quote(metadata.input_artifact)
     ));
     output.push_str("  suspected_conflicts:\n");
     append_semantic_conflicts_yaml(&mut output, &report.suspected_conflicts, 4);
@@ -4848,6 +4930,43 @@ mod tests {
         ) -> Result<PreflightOutcome, WorktreeError> {
             self.requests.borrow_mut().push(request.clone());
             Ok(self.outcome.clone())
+        }
+    }
+
+    struct MockSemanticReviewAdapter;
+
+    impl SemanticReviewAdapter for MockSemanticReviewAdapter {
+        fn reviewer_id(&self) -> &str {
+            "mock_llm_reviewer"
+        }
+
+        fn llm_executed(&self) -> bool {
+            true
+        }
+
+        fn review(
+            &self,
+            request: &SemanticReviewAdapterRequest<'_>,
+        ) -> Result<LocalSemanticReviewReport, CliError> {
+            assert_eq!(request.session.id, "session-review");
+            assert_eq!(request.attempt.id, "merge-review");
+            assert!(request.manifest_content.is_some());
+            assert!(request.config_path.ends_with(".aichestra/config.yaml"));
+            assert_eq!(
+                request.prompt_path,
+                ".aichestra/prompts/semantic-merge-review.md"
+            );
+            assert_eq!(request.changed_files.len(), 1);
+            assert_eq!(request.check_results.len(), 1);
+
+            Ok(LocalSemanticReviewReport {
+                risk_level: SemanticRiskLevel::Low,
+                summary: "Mock LLM adapter reviewed the candidate.".to_string(),
+                suspected_conflicts: Vec::new(),
+                required_actions: Vec::new(),
+                suggested_tests: vec!["cargo test --all".to_string()],
+                uncertainty: vec!["Mock adapter output is test-only.".to_string()],
+            })
         }
     }
 
@@ -5880,6 +5999,63 @@ mod tests {
         let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
         assert!(ledger.list_events().expect("events").iter().any(|event| {
             event.name == "merge.blocked" && event.data_json.contains("semantic_review")
+        }));
+        assert_eq!(
+            ledger
+                .list_semantic_reviews(&attempt.id)
+                .expect("semantic reviews")
+                .len(),
+            1
+        );
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn review_uses_injected_semantic_review_adapter() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        let result = run_review_with_adapter(
+            &ReviewOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockSemanticReviewAdapter,
+        )
+        .expect("review");
+
+        assert_eq!(result.semantic_review.risk_level, SemanticRiskLevel::Low);
+        assert!(!result.blocked);
+        assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Verified);
+        assert_eq!(result.summary, "Mock LLM adapter reviewed the candidate.");
+
+        let report = fs::read_to_string(&result.report_path).expect("read report");
+        assert!(report.contains("reviewer: \"mock_llm_reviewer\""));
+        assert!(report.contains("llm_executed: true"));
+        assert!(report.contains("risk_level: \"low\""));
+
+        let input_path = result
+            .report_path
+            .with_file_name(format!("{}-input.md", result.semantic_review.id));
+        let input = fs::read_to_string(input_path).expect("read input");
+        assert!(input.contains("- reviewer: `mock_llm_reviewer`"));
+        assert!(input.contains("- llm_executed: `true`"));
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger.list_events().expect("events").iter().any(|event| {
+            event.name == "merge.semantic_review.completed"
+                && event
+                    .data_json
+                    .contains("\"reviewer\":\"mock_llm_reviewer\"")
+                && event.data_json.contains("\"llm_executed\":true")
         }));
         assert_eq!(
             ledger
