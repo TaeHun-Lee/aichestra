@@ -127,10 +127,10 @@ If the merge fails, record conflict files and block.
 2. Creates a detached sandbox worktree under `.aichestra/sandboxes/<merge-attempt-id>`.
 3. Runs `git merge --no-ff --no-commit <candidate_commit>` in the sandbox.
 4. Commits the merged sandbox result as the verified candidate commit.
-5. Runs configured checks from `.aichestra/config.yaml` inside the sandbox.
+5. Runs configured checks from `.aichestra/config.yaml` inside the sandbox. Each check supports `required`, `timeout_seconds` or `timeout_ms`, and `env`.
 6. Stores check stdout/stderr artifacts and the resulting merge attempt status.
 
-If the mechanical merge conflicts or any check fails, the merge attempt is marked `blocked`. If all configured checks pass, the merge attempt stores `verified_tree_id` and `verified_commit_id` and is marked `verified`.
+If the mechanical merge conflicts, or any required check fails or times out, the merge attempt is marked `blocked`. Optional checks are still recorded as evidence, but their failure does not mark the candidate blocked. If all required checks pass, the merge attempt stores `verified_tree_id` and `verified_commit_id` and is marked `verified`.
 
 ## Review implementation
 

@@ -98,6 +98,30 @@ impl Ledger {
 
     pub fn initialize_schema(&self) -> Result<()> {
         self.conn.execute_batch(schema::SCHEMA_SQL)?;
+        self.ensure_column(
+            "check_results",
+            "required",
+            "ALTER TABLE check_results ADD COLUMN required INTEGER NOT NULL DEFAULT 1",
+        )?;
+        self.ensure_column(
+            "check_results",
+            "timed_out",
+            "ALTER TABLE check_results ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0",
+        )?;
+        Ok(())
+    }
+
+    fn ensure_column(&self, table: &str, column: &str, alter_sql: &str) -> Result<()> {
+        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+
+        for existing in columns {
+            if existing? == column {
+                return Ok(());
+            }
+        }
+
+        self.conn.execute(alter_sql, [])?;
         Ok(())
     }
 
@@ -705,16 +729,18 @@ impl Ledger {
         self.conn.execute(
             r#"
             INSERT INTO check_results (
-              id, merge_attempt_id, name, command, result, stdout_artifact, stderr_artifact,
+              id, merge_attempt_id, name, command, required, timed_out, result, stdout_artifact, stderr_artifact,
               created_at_ms
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             "#,
             params![
                 &check_result.id,
                 &check_result.merge_attempt_id,
                 &check_result.name,
                 &check_result.command,
+                if check_result.required { 1_i64 } else { 0_i64 },
+                if check_result.timed_out { 1_i64 } else { 0_i64 },
                 check_result.result.as_str(),
                 &check_result.stdout_artifact,
                 &check_result.stderr_artifact,
@@ -728,7 +754,7 @@ impl Ledger {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT id, merge_attempt_id, name, command, result, stdout_artifact, stderr_artifact,
-                   created_at_ms
+                   created_at_ms, required, timed_out
             FROM check_results
             WHERE merge_attempt_id = ?1
             ORDER BY created_at_ms ASC, id ASC
@@ -737,6 +763,8 @@ impl Ledger {
 
         let rows = stmt.query_map(params![merge_attempt_id], |row| {
             let result_value: String = row.get(4)?;
+            let required: i64 = row.get(8)?;
+            let timed_out: i64 = row.get(9)?;
             let result = CheckResultStatus::parse(&result_value).map_err(|error| {
                 rusqlite::Error::FromSqlConversionFailure(
                     4,
@@ -750,6 +778,8 @@ impl Ledger {
                 merge_attempt_id: row.get(1)?,
                 name: row.get(2)?,
                 command: row.get(3)?,
+                required: required != 0,
+                timed_out: timed_out != 0,
                 result,
                 stdout_artifact: row.get(5)?,
                 stderr_artifact: row.get(6)?,
@@ -1057,6 +1087,17 @@ mod tests {
         ))
     }
 
+    fn table_columns(ledger: &Ledger, table: &str) -> Vec<String> {
+        let mut stmt = ledger
+            .conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .expect("table info");
+        stmt.query_map([], |row| row.get::<_, String>(1))
+            .expect("query columns")
+            .map(|column| column.expect("column"))
+            .collect()
+    }
+
     #[test]
     fn initializes_schema_and_round_trips_session_and_event() {
         let db_path = unique_db_path();
@@ -1106,6 +1147,37 @@ mod tests {
             ledger.recent_events(1).expect("recent events")[0].name,
             "session.created"
         );
+
+        drop(ledger);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migrates_existing_check_results_metadata_columns() {
+        let db_path = unique_db_path();
+        let conn = Connection::open(&db_path).expect("open raw db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE check_results (
+              id TEXT PRIMARY KEY,
+              merge_attempt_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              command TEXT NOT NULL,
+              result TEXT NOT NULL,
+              stdout_artifact TEXT,
+              stderr_artifact TEXT,
+              created_at_ms INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("create old check_results table");
+        drop(conn);
+
+        let ledger = Ledger::open(&db_path).expect("open ledger");
+        let columns = table_columns(&ledger, "check_results");
+
+        assert!(columns.contains(&"required".to_string()));
+        assert!(columns.contains(&"timed_out".to_string()));
 
         drop(ledger);
         let _ = fs::remove_file(db_path);
@@ -1268,6 +1340,8 @@ mod tests {
             merge_attempt_id: "merge-1".to_string(),
             name: "test".to_string(),
             command: "cargo test --all".to_string(),
+            required: true,
+            timed_out: false,
             result: CheckResultStatus::Passed,
             stdout_artifact: Some(".aichestra/artifacts/stdout".to_string()),
             stderr_artifact: Some(".aichestra/artifacts/stderr".to_string()),

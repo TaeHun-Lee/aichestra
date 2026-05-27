@@ -98,6 +98,8 @@ pub struct CheckResult {
     pub merge_attempt_id: String,
     pub name: String,
     pub command: String,
+    pub required: bool,
+    pub timed_out: bool,
     pub result: CheckResultStatus,
     pub stdout_artifact: Option<String>,
     pub stderr_artifact: Option<String>,

@@ -468,6 +468,8 @@ fn local_review_blocks_invalid_change_manifest_yaml() {
             merge_attempt_id: attempt.id.clone(),
             name: "test".to_string(),
             command: "cargo test --all".to_string(),
+            required: true,
+            timed_out: false,
             result: CheckResultStatus::Passed,
             stdout_artifact: None,
             stderr_artifact: None,
@@ -566,6 +568,8 @@ fn seed_verified_review_candidate(
             merge_attempt_id: attempt.id.clone(),
             name: "test".to_string(),
             command: "cargo test --all".to_string(),
+            required: true,
+            timed_out: false,
             result: CheckResultStatus::Passed,
             stdout_artifact: None,
             stderr_artifact: None,
@@ -1391,6 +1395,8 @@ fn preflight_records_verified_attempt_and_check_artifacts() {
             checks: vec![PreflightCheckOutput {
                 name: "test".to_string(),
                 command: "cargo test --all".to_string(),
+                required: true,
+                timed_out: false,
                 passed: true,
                 code: Some(0),
                 stdout: "ok\n".to_string(),
@@ -1786,6 +1792,8 @@ fn preflight_records_blocked_attempt_when_checks_fail() {
             checks: vec![PreflightCheckOutput {
                 name: "test".to_string(),
                 command: "cargo test --all".to_string(),
+                required: true,
+                timed_out: false,
                 passed: false,
                 code: Some(101),
                 stdout: String::new(),
@@ -3503,6 +3511,8 @@ fn queue_shows_blocked_check_recovery_guidance() {
                 merge_attempt_id: "merge-session-blocked-check".to_string(),
                 name: "test".to_string(),
                 command: "cargo test --all".to_string(),
+                required: true,
+                timed_out: false,
                 result: CheckResultStatus::Failed,
                 stdout_artifact: Some(
                     ".aichestra/artifacts/merge-attempts/merge-session-blocked-check/checks/0-test.stdout"

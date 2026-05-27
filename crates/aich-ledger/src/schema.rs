@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS schema_metadata (
 );
 
 INSERT INTO schema_metadata (key, value)
-VALUES ('schema_version', '3')
+VALUES ('schema_version', '4')
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
 CREATE TABLE IF NOT EXISTS operators (
@@ -109,10 +109,14 @@ CREATE TABLE IF NOT EXISTS check_results (
   merge_attempt_id TEXT NOT NULL REFERENCES merge_attempts(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   command TEXT NOT NULL,
+  required INTEGER NOT NULL DEFAULT 1,
+  timed_out INTEGER NOT NULL DEFAULT 0,
   result TEXT NOT NULL,
   stdout_artifact TEXT,
   stderr_artifact TEXT,
-  created_at_ms INTEGER NOT NULL
+  created_at_ms INTEGER NOT NULL,
+  CHECK (required IN (0, 1)),
+  CHECK (timed_out IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS approvals (
@@ -154,5 +158,5 @@ CREATE INDEX IF NOT EXISTS idx_event_log_subject
 CREATE INDEX IF NOT EXISTS idx_merge_attempts_session
   ON merge_attempts(session_id, created_at_ms);
 
-PRAGMA user_version = 3;
+PRAGMA user_version = 4;
 "#;

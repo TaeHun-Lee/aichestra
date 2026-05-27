@@ -132,6 +132,8 @@ semantic_review:
 
 `providers.<name>.command` is executed with the session worktree as `cwd`; the session task input is sent on stdin and stdout/stderr are stored as artifacts.
 
+`checks.commands[]` is parsed as structured YAML. `required: true` checks form the sandbox gate; failures or timeouts block preflight. `required: false` checks are recorded for review but do not block verification. Use `timeout_seconds` or `timeout_ms` for time limits, and `env` to pass explicit environment variables to the sandbox check process.
+
 `semantic_review.adapter` supports:
 
 - `local`: deterministic MVP reviewer

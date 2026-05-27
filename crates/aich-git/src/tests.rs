@@ -98,6 +98,9 @@ fn native_preflight_verifies_merge_commit_and_runs_checks() {
                     "--exit-code".to_string(),
                     "HEAD".to_string(),
                 ],
+                required: true,
+                timeout_ms: None,
+                env: Vec::new(),
             }],
         })
         .expect("preflight");
@@ -155,6 +158,9 @@ fn native_apply_fast_forwards_to_verified_commit() {
                 name: "status".to_string(),
                 program: "git".to_string(),
                 args: vec!["status".to_string(), "--short".to_string()],
+                required: true,
+                timeout_ms: None,
+                env: Vec::new(),
             }],
         })
         .expect("preflight");
@@ -499,6 +505,9 @@ fn native_preflight_blocks_mechanical_conflict() {
                 name: "status".to_string(),
                 program: "git".to_string(),
                 args: vec!["status".to_string(), "--short".to_string()],
+                required: true,
+                timeout_ms: None,
+                env: Vec::new(),
             }],
         })
         .expect("preflight");
@@ -548,6 +557,9 @@ fn native_preflight_blocks_failed_checks_after_creating_verified_tree() {
                     "HEAD~1".to_string(),
                     "HEAD".to_string(),
                 ],
+                required: true,
+                timeout_ms: None,
+                env: Vec::new(),
             }],
         })
         .expect("preflight");
@@ -561,6 +573,99 @@ fn native_preflight_blocks_failed_checks_after_creating_verified_tree() {
     assert!(blocked.verified_commit_id.is_some());
     assert_eq!(blocked.checks.len(), 1);
     assert!(!blocked.checks[0].passed);
+
+    fs::remove_dir_all(temp_dir).expect("remove temp repo");
+}
+
+#[test]
+fn native_preflight_records_optional_failed_checks_without_blocking() {
+    let temp_dir = unique_temp_dir("aich-git-preflight-optional-check");
+    let (repo, main_before, candidate_commit) = prepare_mergeable_candidate(&temp_dir);
+
+    let outcome = NativeGitWorktreeManager
+        .run_preflight(&PreflightRequest {
+            repo_path: repo,
+            sandbox_path: temp_dir.join("sandbox-optional-check"),
+            session_id: "session-1".to_string(),
+            main_before_commit: main_before,
+            candidate_commit,
+            check_commands: vec![CheckCommand {
+                name: "advisory-diff".to_string(),
+                program: "git".to_string(),
+                args: vec![
+                    "diff".to_string(),
+                    "--quiet".to_string(),
+                    "HEAD~1".to_string(),
+                    "HEAD".to_string(),
+                ],
+                required: false,
+                timeout_ms: None,
+                env: Vec::new(),
+            }],
+        })
+        .expect("preflight");
+
+    let verified = match outcome {
+        PreflightOutcome::Verified(verified) => verified,
+        PreflightOutcome::Blocked(blocked) => panic!("unexpected block: {blocked:?}"),
+    };
+    assert_eq!(verified.checks.len(), 1);
+    assert!(!verified.checks[0].required);
+    assert!(!verified.checks[0].passed);
+
+    fs::remove_dir_all(temp_dir).expect("remove temp repo");
+}
+
+#[test]
+fn native_preflight_passes_check_environment_to_sandbox_process() {
+    let temp_dir = unique_temp_dir("aich-git-preflight-check-env");
+    let (repo, main_before, candidate_commit) = prepare_mergeable_candidate(&temp_dir);
+
+    let outcome = NativeGitWorktreeManager
+        .run_preflight(&PreflightRequest {
+            repo_path: repo,
+            sandbox_path: temp_dir.join("sandbox-check-env"),
+            session_id: "session-1".to_string(),
+            main_before_commit: main_before,
+            candidate_commit,
+            check_commands: vec![env_check_command()],
+        })
+        .expect("preflight");
+
+    let verified = match outcome {
+        PreflightOutcome::Verified(verified) => verified,
+        PreflightOutcome::Blocked(blocked) => panic!("unexpected block: {blocked:?}"),
+    };
+    assert!(verified.checks[0].passed);
+
+    fs::remove_dir_all(temp_dir).expect("remove temp repo");
+}
+
+#[test]
+fn native_preflight_blocks_required_timed_out_check() {
+    let temp_dir = unique_temp_dir("aich-git-preflight-check-timeout");
+    let (repo, main_before, candidate_commit) = prepare_mergeable_candidate(&temp_dir);
+
+    let outcome = NativeGitWorktreeManager
+        .run_preflight(&PreflightRequest {
+            repo_path: repo,
+            sandbox_path: temp_dir.join("sandbox-check-timeout"),
+            session_id: "session-1".to_string(),
+            main_before_commit: main_before,
+            candidate_commit,
+            check_commands: vec![timeout_check_command()],
+        })
+        .expect("preflight");
+
+    let blocked = match outcome {
+        PreflightOutcome::Blocked(blocked) => blocked,
+        PreflightOutcome::Verified(verified) => panic!("unexpected verified: {verified:?}"),
+    };
+    assert_eq!(blocked.reason, "checks_failed");
+    assert!(blocked.checks[0].required);
+    assert!(blocked.checks[0].timed_out);
+    assert!(!blocked.checks[0].passed);
+    assert!(blocked.checks[0].stderr.contains("timed out"));
 
     fs::remove_dir_all(temp_dir).expect("remove temp repo");
 }
@@ -597,6 +702,84 @@ fn init_test_repo(temp_dir: &Path) -> PathBuf {
     git(&repo, &["config", "core.autocrlf", "false"]);
     git(&repo, &["config", "core.eol", "lf"]);
     repo
+}
+
+fn prepare_mergeable_candidate(temp_dir: &Path) -> (PathBuf, String, String) {
+    let repo = init_test_repo(temp_dir);
+
+    fs::write(repo.join("file.txt"), "base\n").expect("write base file");
+    git(&repo, &["add", "file.txt"]);
+    git(&repo, &["commit", "-q", "-m", "initial"]);
+    git(&repo, &["branch", "-M", "main"]);
+    let main_before = git(&repo, &["rev-parse", "HEAD"]);
+
+    git(&repo, &["checkout", "-q", "-b", "candidate"]);
+    fs::write(repo.join("file.txt"), "base\ncandidate\n").expect("write candidate file");
+    git(&repo, &["add", "file.txt"]);
+    git(&repo, &["commit", "-q", "-m", "candidate"]);
+    let candidate_commit = git(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["checkout", "-q", "main"]);
+
+    (repo, main_before, candidate_commit)
+}
+
+#[cfg(windows)]
+fn env_check_command() -> CheckCommand {
+    CheckCommand {
+        name: "env-check".to_string(),
+        program: "powershell".to_string(),
+        args: vec![
+            "-NoProfile".to_string(),
+            "-Command".to_string(),
+            "if ($env:AICH_CHECK_MODE -eq 'sandbox') { exit 0 } else { exit 17 }".to_string(),
+        ],
+        required: true,
+        timeout_ms: None,
+        env: vec![("AICH_CHECK_MODE".to_string(), "sandbox".to_string())],
+    }
+}
+
+#[cfg(not(windows))]
+fn env_check_command() -> CheckCommand {
+    CheckCommand {
+        name: "env-check".to_string(),
+        program: "sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            "test \"$AICH_CHECK_MODE\" = sandbox".to_string(),
+        ],
+        required: true,
+        timeout_ms: None,
+        env: vec![("AICH_CHECK_MODE".to_string(), "sandbox".to_string())],
+    }
+}
+
+#[cfg(windows)]
+fn timeout_check_command() -> CheckCommand {
+    CheckCommand {
+        name: "timeout-check".to_string(),
+        program: "powershell".to_string(),
+        args: vec![
+            "-NoProfile".to_string(),
+            "-Command".to_string(),
+            "Start-Sleep -Milliseconds 1000".to_string(),
+        ],
+        required: true,
+        timeout_ms: Some(50),
+        env: Vec::new(),
+    }
+}
+
+#[cfg(not(windows))]
+fn timeout_check_command() -> CheckCommand {
+    CheckCommand {
+        name: "timeout-check".to_string(),
+        program: "sh".to_string(),
+        args: vec!["-c".to_string(), "sleep 1".to_string()],
+        required: true,
+        timeout_ms: Some(50),
+        env: Vec::new(),
+    }
 }
 
 fn git(repo: &Path, args: &[&str]) -> String {

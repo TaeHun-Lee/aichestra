@@ -117,20 +117,10 @@ pub(crate) fn parse_check_command(
         name: name.to_string(),
         program,
         args: parts,
+        required: true,
+        timeout_ms: None,
+        env: Vec::new(),
     })
-}
-
-pub(crate) fn strip_yaml_scalar(value: &str) -> String {
-    let value = value.trim();
-    if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
-        {
-            return value[1..value.len() - 1].to_string();
-        }
-    }
-    value.to_string()
 }
 
 #[cfg(test)]

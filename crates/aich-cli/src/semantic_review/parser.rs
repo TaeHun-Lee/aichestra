@@ -1,197 +1,91 @@
 use aich_core::SemanticRiskLevel;
-
-use crate::command_line::strip_yaml_scalar;
+use serde::Deserialize;
 
 use super::report::{LocalSemanticReviewReport, SemanticConflictFinding};
+
+#[derive(Debug, Deserialize)]
+struct SemanticReviewDocument {
+    semantic_review: ParsedSemanticReview,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParsedSemanticReview {
+    #[serde(default)]
+    _id: Option<String>,
+    #[serde(default)]
+    _session_id: Option<String>,
+    #[serde(default)]
+    _merge_attempt_id: Option<String>,
+    #[serde(default)]
+    _reviewer: Option<String>,
+    #[serde(default)]
+    _llm_executed: Option<bool>,
+    #[serde(default)]
+    _operator_id: Option<String>,
+    risk_level: String,
+    summary: String,
+    #[serde(default)]
+    _input_artifact: Option<String>,
+    #[serde(default)]
+    suspected_conflicts: Vec<ParsedSemanticConflict>,
+    #[serde(default)]
+    required_actions: Vec<String>,
+    #[serde(default)]
+    suggested_tests: Vec<String>,
+    #[serde(rename = "proposed_patch", default)]
+    _proposed_patch: Option<ParsedProposedPatch>,
+    #[serde(default)]
+    uncertainty: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParsedSemanticConflict {
+    #[serde(default, rename = "type")]
+    conflict_type: String,
+    #[serde(default)]
+    files: Vec<String>,
+    #[serde(default)]
+    _symbols: Vec<String>,
+    #[serde(default)]
+    explanation: String,
+    #[serde(default = "default_confidence")]
+    confidence: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParsedProposedPatch {
+    #[serde(default)]
+    _available: bool,
+    #[serde(default)]
+    _description: Option<String>,
+    #[serde(default)]
+    _path: Option<String>,
+    #[serde(default)]
+    _patch_artifact: Option<String>,
+}
 
 pub(super) fn parse_semantic_review_command_report(
     output: &str,
 ) -> Result<LocalSemanticReviewReport, String> {
-    #[derive(Copy, Clone, Eq, PartialEq)]
-    enum Section {
-        None,
-        SuspectedConflicts,
-        RequiredActions,
-        SuggestedTests,
-        Uncertainty,
-    }
-
-    #[derive(Copy, Clone, Eq, PartialEq)]
-    enum ConflictList {
-        Files,
-        Symbols,
-    }
-
     let yaml = semantic_review_yaml_from_command_output(output)?;
-    let mut risk_level: Option<SemanticRiskLevel> = None;
-    let mut summary: Option<String> = None;
-    let mut suspected_conflicts = Vec::new();
-    let mut required_actions = Vec::new();
-    let mut suggested_tests = Vec::new();
-    let mut uncertainty = Vec::new();
-    let mut section = Section::None;
-    let mut current_conflict: Option<SemanticConflictFinding> = None;
-    let mut conflict_list: Option<ConflictList> = None;
-
-    for line in yaml.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("```") {
-            continue;
-        }
-        if trimmed == "semantic_review:" {
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("risk_level:") {
-            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
-            section = Section::None;
-            risk_level = Some(
-                SemanticRiskLevel::parse(strip_yaml_scalar(value).as_str())
-                    .map_err(|error| format!("invalid semantic_review.risk_level: {error}"))?,
-            );
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("summary:") {
-            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
-            section = Section::None;
-            summary = Some(strip_yaml_scalar(value));
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("suspected_conflicts:") {
-            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
-            section = if strip_yaml_scalar(value) == "[]" {
-                Section::None
-            } else {
-                Section::SuspectedConflicts
-            };
-            conflict_list = None;
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("required_actions:") {
-            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
-            section = if strip_yaml_scalar(value) == "[]" {
-                Section::None
-            } else {
-                Section::RequiredActions
-            };
-            conflict_list = None;
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("suggested_tests:") {
-            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
-            section = if strip_yaml_scalar(value) == "[]" {
-                Section::None
-            } else {
-                Section::SuggestedTests
-            };
-            conflict_list = None;
-            continue;
-        }
-
-        if let Some(value) = trimmed.strip_prefix("uncertainty:") {
-            push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
-            section = if strip_yaml_scalar(value) == "[]" {
-                Section::None
-            } else {
-                Section::Uncertainty
-            };
-            conflict_list = None;
-            continue;
-        }
-
-        match section {
-            Section::SuspectedConflicts => {
-                if let Some(value) = trimmed.strip_prefix("- type:") {
-                    push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
-                    current_conflict = Some(SemanticConflictFinding {
-                        conflict_type: strip_yaml_scalar(value),
-                        files: Vec::new(),
-                        explanation: String::new(),
-                        confidence: "medium".to_string(),
-                    });
-                    conflict_list = None;
-                    continue;
-                }
-
-                if let Some(value) = trimmed.strip_prefix("type:") {
-                    let finding =
-                        current_conflict.get_or_insert_with(default_semantic_conflict_finding);
-                    finding.conflict_type = strip_yaml_scalar(value);
-                    conflict_list = None;
-                    continue;
-                }
-
-                if let Some(value) = trimmed.strip_prefix("files:") {
-                    let _ = current_conflict.get_or_insert_with(default_semantic_conflict_finding);
-                    conflict_list = if strip_yaml_scalar(value) == "[]" {
-                        None
-                    } else {
-                        Some(ConflictList::Files)
-                    };
-                    continue;
-                }
-
-                if let Some(value) = trimmed.strip_prefix("symbols:") {
-                    conflict_list = if strip_yaml_scalar(value) == "[]" {
-                        None
-                    } else {
-                        Some(ConflictList::Symbols)
-                    };
-                    continue;
-                }
-
-                if let Some(value) = trimmed.strip_prefix("explanation:") {
-                    let finding =
-                        current_conflict.get_or_insert_with(default_semantic_conflict_finding);
-                    finding.explanation = strip_yaml_scalar(value);
-                    conflict_list = None;
-                    continue;
-                }
-
-                if let Some(value) = trimmed.strip_prefix("confidence:") {
-                    let finding =
-                        current_conflict.get_or_insert_with(default_semantic_conflict_finding);
-                    finding.confidence = strip_yaml_scalar(value);
-                    conflict_list = None;
-                    continue;
-                }
-
-                if let Some(value) = trimmed.strip_prefix("- ") {
-                    if conflict_list == Some(ConflictList::Files) {
-                        let finding =
-                            current_conflict.get_or_insert_with(default_semantic_conflict_finding);
-                        finding.files.push(strip_yaml_scalar(value));
-                    }
-                }
-            }
-            Section::RequiredActions => {
-                append_command_report_list_item(trimmed, &mut required_actions)
-            }
-            Section::SuggestedTests => {
-                append_command_report_list_item(trimmed, &mut suggested_tests)
-            }
-            Section::Uncertainty => append_command_report_list_item(trimmed, &mut uncertainty),
-            Section::None => {}
-        }
-    }
-
-    push_pending_conflict(&mut suspected_conflicts, &mut current_conflict);
-    let risk_level = risk_level.ok_or_else(|| "missing semantic_review.risk_level".to_string())?;
-    let summary = summary
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| "missing semantic_review.summary".to_string())?;
+    let document: SemanticReviewDocument = serde_yaml::from_str(yaml)
+        .map_err(|error| format!("invalid semantic_review YAML: {error}"))?;
+    let review = document.semantic_review;
+    let risk_level = SemanticRiskLevel::parse(review.risk_level.trim())
+        .map_err(|error| format!("invalid semantic_review.risk_level: {error}"))?;
+    let summary = trim_required_field("semantic_review.summary", review.summary)?;
 
     Ok(LocalSemanticReviewReport {
         risk_level,
         summary,
-        suspected_conflicts,
-        required_actions,
-        suggested_tests,
-        uncertainty,
+        suspected_conflicts: review
+            .suspected_conflicts
+            .into_iter()
+            .map(SemanticConflictFinding::from)
+            .collect(),
+        required_actions: normalize_string_list(review.required_actions),
+        suggested_tests: normalize_string_list(review.suggested_tests),
+        uncertainty: normalize_string_list(review.uncertainty),
     })
 }
 
@@ -200,35 +94,165 @@ fn semantic_review_yaml_from_command_output(output: &str) -> Result<&str, String
         .find("semantic_review:")
         .ok_or_else(|| "missing semantic_review root".to_string())?;
     let yaml = &output[start..];
-    Ok(yaml.find("\n```").map_or(yaml, |end| &yaml[..end]))
+    Ok(yaml.find("\n```").map_or(yaml, |end| &yaml[..end]).trim())
 }
 
-fn append_command_report_list_item(trimmed: &str, values: &mut Vec<String>) {
-    if let Some(value) = trimmed.strip_prefix("- ") {
-        values.push(strip_yaml_scalar(value));
+fn trim_required_field(field: &str, value: String) -> Result<String, String> {
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        Err(format!("missing {field}"))
+    } else {
+        Ok(trimmed)
     }
 }
 
-fn push_pending_conflict(
-    conflicts: &mut Vec<SemanticConflictFinding>,
-    current: &mut Option<SemanticConflictFinding>,
-) {
-    if let Some(mut finding) = current.take() {
-        if finding.conflict_type.trim().is_empty() {
-            finding.conflict_type = "unknown".to_string();
+fn normalize_string_list(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .filter_map(|value| {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        })
+        .collect()
+}
+
+fn default_confidence() -> String {
+    "medium".to_string()
+}
+
+impl From<ParsedSemanticConflict> for SemanticConflictFinding {
+    fn from(value: ParsedSemanticConflict) -> Self {
+        let conflict_type = value.conflict_type.trim();
+        let confidence = value.confidence.trim();
+        Self {
+            conflict_type: if conflict_type.is_empty() {
+                "unknown".to_string()
+            } else {
+                conflict_type.to_string()
+            },
+            files: normalize_string_list(value.files),
+            explanation: value.explanation.trim().to_string(),
+            confidence: if confidence.is_empty() {
+                default_confidence()
+            } else {
+                confidence.to_string()
+            },
         }
-        if finding.confidence.trim().is_empty() {
-            finding.confidence = "medium".to_string();
-        }
-        conflicts.push(finding);
     }
 }
 
-fn default_semantic_conflict_finding() -> SemanticConflictFinding {
-    SemanticConflictFinding {
-        conflict_type: "unknown".to_string(),
-        files: Vec::new(),
-        explanation: String::new(),
-        confidence: "medium".to_string(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_structured_yaml_report_with_conflicts() {
+        let report = parse_semantic_review_command_report(
+            r#"
+```yaml
+semantic_review:
+  risk_level: high
+  summary: >
+    API surface changed and call sites should be checked.
+  suspected_conflicts:
+    - type: api_contract_change
+      files:
+        - src/auth.rs
+      symbols:
+        - login
+      explanation: >
+        The login signature changed.
+      confidence: high
+  required_actions:
+    - "Audit call sites."
+  suggested_tests:
+    - "cargo test auth"
+  proposed_patch:
+    available: false
+  uncertainty:
+    - "No call graph is available."
+```
+"#,
+        )
+        .expect("parse report");
+
+        assert_eq!(report.risk_level, SemanticRiskLevel::High);
+        assert_eq!(
+            report.summary,
+            "API surface changed and call sites should be checked."
+        );
+        assert_eq!(report.suspected_conflicts.len(), 1);
+        assert_eq!(
+            report.suspected_conflicts[0],
+            SemanticConflictFinding {
+                conflict_type: "api_contract_change".to_string(),
+                files: vec!["src/auth.rs".to_string()],
+                explanation: "The login signature changed.".to_string(),
+                confidence: "high".to_string(),
+            }
+        );
+        assert_eq!(
+            report.required_actions,
+            vec!["Audit call sites.".to_string()]
+        );
+        assert_eq!(report.suggested_tests, vec!["cargo test auth".to_string()]);
+        assert_eq!(
+            report.uncertainty,
+            vec!["No call graph is available.".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_yaml_shape() {
+        let err = parse_semantic_review_command_report(
+            r#"
+semantic_review:
+  risk_level: low
+  summary: ok
+  suspected_conflicts: "not a list"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("invalid semantic_review YAML"));
+
+        let err = parse_semantic_review_command_report(
+            r#"
+semantic_review:
+  risk_level: low
+  summary: ok
+  proposed_patch: "not a proposed patch object"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("invalid semantic_review YAML"));
+    }
+
+    #[test]
+    fn rejects_missing_or_invalid_required_fields() {
+        let missing_summary = parse_semantic_review_command_report(
+            r#"
+semantic_review:
+  risk_level: low
+  summary: ""
+"#,
+        )
+        .unwrap_err();
+        assert!(missing_summary.contains("missing semantic_review.summary"));
+
+        let invalid_risk = parse_semantic_review_command_report(
+            r#"
+semantic_review:
+  risk_level: safe
+  summary: "invalid risk"
+"#,
+        )
+        .unwrap_err();
+        assert!(invalid_risk.contains("invalid semantic_review.risk_level"));
     }
 }

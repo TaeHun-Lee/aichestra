@@ -119,22 +119,42 @@ pub(crate) fn build_local_semantic_review_report(
             .push("Re-run session completion so changed-file evidence is recorded.".to_string());
     }
 
-    let failed_checks: Vec<String> = check_results
+    let failed_required_checks: Vec<String> = check_results
         .iter()
-        .filter(|check| check.result == CheckResultStatus::Failed)
+        .filter(|check| check.required && check.result == CheckResultStatus::Failed)
         .map(|check| check.name.clone())
         .collect();
-    if !attempt.checks_passed || !failed_checks.is_empty() {
+    let failed_optional_checks: Vec<String> = check_results
+        .iter()
+        .filter(|check| !check.required && check.result == CheckResultStatus::Failed)
+        .map(|check| check.name.clone())
+        .collect();
+    if !attempt.checks_passed || !failed_required_checks.is_empty() {
         findings.push(SemanticConflictFinding {
             conflict_type: "test_gap".to_string(),
             files: Vec::new(),
             explanation: format!(
-                "The verified candidate does not have a clean check gate: {}",
-                failed_checks.join(", ")
+                "The verified candidate does not have a clean required check gate: {}",
+                failed_required_checks.join(", ")
             ),
             confidence: "high".to_string(),
         });
         required_actions.push("Fix failing checks and run `aich preflight` again.".to_string());
+    }
+    if !failed_optional_checks.is_empty() {
+        findings.push(SemanticConflictFinding {
+            conflict_type: "test_gap".to_string(),
+            files: Vec::new(),
+            explanation: format!(
+                "Optional check(s) failed but did not block the preflight gate: {}",
+                failed_optional_checks.join(", ")
+            ),
+            confidence: "medium".to_string(),
+        });
+        suggested_tests.push(
+            "Review failed optional checks before approval if they cover relevant behavior."
+                .to_string(),
+        );
     }
 
     if check_results.is_empty() {
@@ -191,7 +211,7 @@ pub(crate) fn build_local_semantic_review_report(
                 finding.conflict_type.as_str(),
                 "manifest_mismatch" | "unknown"
             )
-    }) || !failed_checks.is_empty()
+    }) || !failed_required_checks.is_empty()
         || !attempt.checks_passed
     {
         SemanticRiskLevel::Blocked
@@ -323,10 +343,12 @@ pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> St
     } else {
         for check in input.check_results {
             output.push_str(&format!(
-                "- `{}`: {} via `{}`\n",
+                "- `{}`: {} via `{}` (required={}, timed_out={})\n",
                 check.name,
                 check.result.as_str(),
-                check.command
+                check.command,
+                check.required,
+                check.timed_out
             ));
         }
     }

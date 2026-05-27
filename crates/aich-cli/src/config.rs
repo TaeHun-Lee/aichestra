@@ -55,12 +55,15 @@ checks:
     - name: fmt
       command: cargo fmt --all -- --check
       required: true
+      timeout_seconds: 600
     - name: clippy
       command: cargo clippy --all-targets -- -D warnings
       required: true
+      timeout_seconds: 600
     - name: test
       command: cargo test --all
       required: true
+      timeout_seconds: 600
 
 semantic_review:
   adapter: local
@@ -91,6 +94,7 @@ pub(crate) struct AichestraConfig {
     pub(crate) git: Option<AichestraGitConfig>,
     pub(crate) providers: Option<HashMap<String, AichestraProviderConfig>>,
     pub(crate) sessions: Option<AichestraSessionConfig>,
+    pub(crate) checks: Option<AichestraChecksConfig>,
     pub(crate) semantic_review: Option<AichestraSemanticReviewConfig>,
 }
 
@@ -107,6 +111,21 @@ pub(crate) struct AichestraProviderConfig {
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct AichestraSessionConfig {
     pub(crate) branch_prefix: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct AichestraChecksConfig {
+    pub(crate) commands: Option<Vec<AichestraCheckCommandConfig>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct AichestraCheckCommandConfig {
+    pub(crate) name: Option<String>,
+    pub(crate) command: Option<String>,
+    pub(crate) required: Option<bool>,
+    pub(crate) timeout_ms: Option<u64>,
+    pub(crate) timeout_seconds: Option<u64>,
+    pub(crate) env: Option<HashMap<String, String>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

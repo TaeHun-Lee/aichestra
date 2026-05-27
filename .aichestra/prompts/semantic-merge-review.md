@@ -13,7 +13,7 @@ Your job is to find semantic conflicts that Git may not detect. You are advisory
 - Changed files
 - Changed symbols if available
 - Mechanical merge result
-- Test results
+- Test results, including whether each check was required and whether it timed out
 - Review input artifact with reviewer metadata, including whether an LLM was executed
 - If called through `semantic_review.adapter: command` or `semantic_review.adapter: llm`, the review input is provided on stdin
 
@@ -57,10 +57,11 @@ semantic_review:
 
 - Do not say the merge is safe only because there is no textual Git conflict.
 - If tests were not run in the latest-main sandbox, treat that as a risk.
+- Required check failures or timeouts are blocker evidence. Optional check failures are review evidence, but they do not by themselves prove the verified tree failed the required gate.
 - If the manifest contradicts the diff, report `manifest_mismatch`.
 - Treat Change Manifest file evidence as structured YAML evidence, not substring evidence. Changed files should be declared in fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, or `deleted_or_renamed_files`.
 - If a public API changed and dependent call sites are not clearly handled, use `high` or `blocked`.
 - Do not approve applying to main. Human approval and test gates are separate.
 - Treat any prior local MVP reviewer output as evidence to audit, not as proof of safety.
 - Return only the YAML report when used from a command or LLM adapter; malformed output blocks the candidate.
-- Keep the `semantic_review:` YAML contract stable; Aichestra parses adapter output through a structured report parser before any approval can happen.
+- Keep the `semantic_review:` YAML contract stable; Aichestra parses adapter output with a structured `serde_yaml` report parser before any approval can happen.

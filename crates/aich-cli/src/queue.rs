@@ -132,7 +132,7 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
             writeln!(
                 out,
                 "  checks: {}",
-                queue_check_label(attempt, entry.check_results.len())
+                queue_check_label(attempt, &entry.check_results)
             )?;
         }
         if let Some(review) = entry.latest_review.as_ref() {
@@ -347,13 +347,42 @@ fn queue_status_summary(entries: &[QueueEntry]) -> QueueStatusSummary {
     summary
 }
 
-fn queue_check_label(attempt: &MergeAttempt, check_count: usize) -> String {
-    if check_count == 0 {
+fn queue_check_label(attempt: &MergeAttempt, checks: &[CheckResult]) -> String {
+    if checks.is_empty() {
         "none".to_string()
-    } else if attempt.checks_passed {
-        format!("{check_count} passed")
     } else {
-        format!("{check_count} recorded, not passed")
+        let required_total = checks.iter().filter(|check| check.required).count();
+        let required_failed = checks
+            .iter()
+            .filter(|check| check.required && check.result == CheckResultStatus::Failed)
+            .count();
+        let optional_failed = checks
+            .iter()
+            .filter(|check| !check.required && check.result == CheckResultStatus::Failed)
+            .count();
+        let timed_out = checks.iter().filter(|check| check.timed_out).count();
+        let mut parts = Vec::new();
+
+        if required_total > 0 {
+            parts.push(format!(
+                "{}/{} required passed",
+                required_total.saturating_sub(required_failed),
+                required_total
+            ));
+        } else {
+            parts.push("no required checks".to_string());
+        }
+        if optional_failed > 0 {
+            parts.push(format!("{optional_failed} optional failed"));
+        }
+        if timed_out > 0 {
+            parts.push(format!("{timed_out} timed out"));
+        }
+        if !attempt.checks_passed {
+            parts.push("gate failed".to_string());
+        }
+
+        parts.join(", ")
     }
 }
 
@@ -372,7 +401,7 @@ fn blocked_recovery_for_queue_entry(
         .unwrap_or_else(|| infer_blocked_reason(attempt, latest_review, check_results));
     let failed_checks: Vec<&CheckResult> = check_results
         .iter()
-        .filter(|check| check.result == CheckResultStatus::Failed)
+        .filter(|check| check.required && check.result == CheckResultStatus::Failed)
         .collect();
     let mut artifacts = Vec::new();
     let mut next_steps = vec![
@@ -482,7 +511,7 @@ fn infer_blocked_reason(
         "semantic_review".to_string()
     } else if check_results
         .iter()
-        .any(|check| check.result == CheckResultStatus::Failed)
+        .any(|check| check.required && check.result == CheckResultStatus::Failed)
     {
         "checks_failed".to_string()
     } else if attempt.verified_commit_id.is_none() || attempt.verified_tree_id.is_none() {

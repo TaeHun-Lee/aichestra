@@ -68,7 +68,7 @@ The reviewer should receive:
 - Changed file list
 - Changed symbol summary if available
 - Mechanical merge result
-- Check results, if already run
+- Check results, if already run, including whether each check was required and whether it timed out
 - Test commands configured in .aichestra/config.yaml
 ```
 
@@ -126,7 +126,7 @@ semantic_review:
   command: your-review-command --flag
 ```
 
-`adapter: command` is provider-agnostic. Aichestra passes the rendered review input artifact to the command on stdin and expects stdout to contain a `semantic_review:` YAML document matching the report schema. The command is executed directly as a program plus args, not through a shell. If the command exits non-zero or returns an invalid report, Aichestra records a `blocked` semantic review so the candidate cannot be approved or applied until the reviewer configuration/output is fixed.
+`adapter: command` is provider-agnostic. Aichestra passes the rendered review input artifact to the command on stdin and expects stdout to contain a `semantic_review:` YAML document matching the report schema. The report is parsed with `serde_yaml` into a structured report model; malformed YAML, missing `risk_level`, missing `summary`, invalid risk values, or incorrectly typed lists are rejected. The command is executed directly as a program plus args, not through a shell. If the command exits non-zero or returns an invalid report, Aichestra records a `blocked` semantic review so the candidate cannot be approved or applied until the reviewer configuration/output is fixed.
 
 `adapter: llm` is the built-in LLM wrapper path. With `reviewer_provider: codex`, Aichestra runs `codex exec` non-interactively with a read-only sandbox, no command approval, the rendered review input on stdin, and the same YAML output contract. Custom LLM providers can use `adapter: llm` with an explicit `command`, which lets a local wrapper call any provider while keeping the same audit artifacts and blocking behavior.
 
@@ -147,9 +147,9 @@ This split is internal only. The external review contract remains the same `sema
 
 The local MVP reviewer is intentionally conservative:
 
-- `blocked`: missing manifest artifact, manifest hash drift, changed-file evidence missing from the manifest, missing changed-file evidence, or failed check evidence
+- `blocked`: missing manifest artifact, manifest hash drift, changed-file evidence missing from the manifest, missing changed-file evidence, or failed required check evidence
 - `high`: shared API, schema, config, dependency, migration, type, `lib.rs`, or `mod.rs` surfaces changed
-- `medium`: no direct blocker found, but the Change Manifest is generated from diff metadata and semantic impact is not inferred
+- `medium`: no direct blocker found, but the Change Manifest is generated from diff metadata, semantic impact is not inferred, or optional checks failed
 - `low`: reserved for reviewed manifest evidence with no direct conflict or shared-surface risk
 
 Only configured block levels mark the merge attempt blocked. The default config blocks `blocked` only.
