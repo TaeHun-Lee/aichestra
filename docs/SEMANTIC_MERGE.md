@@ -32,6 +32,8 @@ The manifest is useful but not authoritative. Actual diff data always wins.
 
 This generated manifest is evidence, not final proof of intent. It does not infer changed symbols or semantic impact in the MVP path, so human review or a later LLM manifest-edit step must fill in intent details before relying on it for semantic merge decisions.
 
+Manifest-vs-diff validation parses the Change Manifest as YAML and compares actual changed files against structured fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, and `deleted_or_renamed_files`. It does not treat arbitrary string containment as proof that a file was declared. Invalid YAML or missing structured file evidence is a manifest mismatch.
+
 ## Semantic Merge LLM role
 
 The Semantic Merge LLM is an advisory reviewer and patch planner.

@@ -11,6 +11,7 @@ Never test one result and apply another.
 - **Session branch**: branch created for one LLM work session, for example `aich/session-123/fix-login`.
 - **Session worktree**: worktree checked out to the session branch.
 - **Main worktree**: developer's main checkout. LLM sessions do not work here.
+- **Configured main branch/ref**: `.aichestra/config.yaml` `git.main_branch` names the local branch that represents main. Commands resolve it as `refs/heads/<branch>` instead of assuming the current `HEAD`.
 - **Integration sandbox**: temporary worktree created from latest main for preflight.
 - **Candidate**: the patch or commit set produced by a session.
 - **Verified candidate**: candidate result after mechanical merge, semantic review, checks, and approval.
@@ -29,7 +30,7 @@ Use one consistent strategy for both preflight and apply. The simplest MVP strat
 
 ```text
 lock queue
-read current main commit as main_before
+read configured main ref commit as main_before
 create/reset sandbox at main_before
 apply candidate using chosen strategy
 if conflict: block
@@ -39,8 +40,8 @@ run checks in sandbox
 if checks fail: block
 create/store verified candidate commit/tree
 request human approval
-before apply, verify main is still main_before
-apply verified candidate to main
+before apply, verify configured main ref is still main_before
+apply verified candidate to the configured main branch worktree
 unlock queue
 ```
 
@@ -91,6 +92,8 @@ Applied candidates are omitted from the queue view because they no longer requir
 
 If another preflight or apply command already holds the lock, the command refuses to run and points the user to `aich queue`. The queue view reports whether the lock is free or held, how old the lock is, and whether it is stale by the MVP age heuristic. Normal command completion and ordinary error paths release the lock automatically.
 
+Preflight is queue-head constrained for new candidates. A new `aich preflight <session-id>` may run only for the earliest `enqueued` queue entry, and it refuses to preflight a different session while another candidate is already `preflight_running`, `verified`, or `approved`. This prevents creating multiple verified candidates from the same main commit and then discovering at apply time that only the first one was still based on the latest main. Re-running preflight for the same blocked, verified, or approved session remains allowed as a local recovery path when the existing attempt must be refreshed. After a verified or approved candidate is applied, the next enqueued candidate must be preflighted against the new main commit.
+
 If a process crash leaves a stale lock behind, the user can run:
 
 ```bash
@@ -119,7 +122,7 @@ If the merge fails, record conflict files and block.
 
 `aich preflight <session-id>` creates a merge attempt for an `enqueued` session and uses `merge_no_ff_commit` as the apply strategy for the verified candidate. The command:
 
-1. Reads current main as `main_before_commit`.
+1. Reads `.aichestra/config.yaml` `git.main_branch` and resolves `refs/heads/<branch>` as `main_before_commit`.
 2. Creates a detached sandbox worktree under `.aichestra/sandboxes/<merge-attempt-id>`.
 3. Runs `git merge --no-ff --no-commit <candidate_commit>` in the sandbox.
 4. Commits the merged sandbox result as the verified candidate commit.
@@ -158,6 +161,7 @@ Before apply:
 - ensure main has not moved since `main_before`
 - ensure human approval refers to the verified merge attempt
 - ensure the approved tree/commit ids match the preflight record
+- ensure the main worktree is checked out to configured `git.main_branch`
 - ensure the main worktree is clean
 
 If main moved, do not apply. Re-run preflight on the new main.
@@ -192,6 +196,7 @@ Block the candidate when:
 - checks fail
 - user rejects approval
 - main moved between preflight and apply
+- main worktree is detached or checked out to a branch other than configured `git.main_branch`
 - verified tree id does not match the approved tree id
 
 ## Recovery

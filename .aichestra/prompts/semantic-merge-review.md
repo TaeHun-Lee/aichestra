@@ -58,6 +58,7 @@ semantic_review:
 - Do not say the merge is safe only because there is no textual Git conflict.
 - If tests were not run in the latest-main sandbox, treat that as a risk.
 - If the manifest contradicts the diff, report `manifest_mismatch`.
+- Treat Change Manifest file evidence as structured YAML evidence, not substring evidence. Changed files should be declared in fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, or `deleted_or_renamed_files`.
 - If a public API changed and dependent call sites are not clearly handled, use `high` or `blocked`.
 - Do not approve applying to main. Human approval and test gates are separate.
 - Treat any prior local MVP reviewer output as evidence to audit, not as proof of safety.

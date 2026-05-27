@@ -17,4 +17,6 @@ aich-core = { path = "crates/aich-core" }
 aich-git = { path = "crates/aich-git" }
 aich-ledger = { path = "crates/aich-ledger" }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_yaml = "0.9.34"
 sha2 = "0.10.9"

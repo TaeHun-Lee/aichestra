@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
@@ -24,6 +25,7 @@ use aich_git::{
 use aich_ledger::{
     EventRecord, Ledger, MergeAttemptResultUpdate, MergeAttemptSemanticReviewUpdate,
 };
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -43,6 +45,7 @@ const LOCAL_SEMANTIC_REVIEWER: &str = "local_mvp_static_reviewer";
 const COMMAND_SEMANTIC_REVIEWER: &str = "command_semantic_review_adapter";
 const LLM_SEMANTIC_REVIEWER: &str = "llm_semantic_review_adapter";
 const MERGE_QUEUE_LOCK_NAME: &str = "merge-queue";
+const DEFAULT_MAIN_BRANCH: &str = "main";
 const CONTEXT_SNAPSHOT_FILES: &[&str] = &[
     "AGENTS.md",
     "CLAUDE.md",
@@ -66,6 +69,9 @@ sessions:
   require_dedicated_worktree: true
   disallow_main_worktree_for_llm: true
   completion_trigger: human_command
+
+git:
+  main_branch: main
 
 auth:
   default_operator_id: local-user
@@ -2569,6 +2575,60 @@ fn init_repo(options: &InitOptions) -> Result<InitResult, CliError> {
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct AichestraConfig {
+    git: Option<AichestraGitConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AichestraGitConfig {
+    main_branch: Option<String>,
+}
+
+fn main_branch_from_config(config_path: &Path) -> Result<String, CliError> {
+    let config = fs::read_to_string(config_path)?;
+    let parsed: AichestraConfig = serde_yaml::from_str(&config).map_err(|error| {
+        CliError::Usage(format!(
+            "Aichestra config at {} is invalid YAML: {error}",
+            config_path.display()
+        ))
+    })?;
+    let configured = parsed
+        .git
+        .and_then(|git| git.main_branch)
+        .unwrap_or_else(|| DEFAULT_MAIN_BRANCH.to_string());
+    let branch = normalize_main_branch_name(&configured)?;
+    Ok(branch)
+}
+
+fn normalize_main_branch_name(value: &str) -> Result<String, CliError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(CliError::Usage(
+            "git.main_branch must not be empty".to_string(),
+        ));
+    }
+    if let Some(branch) = trimmed.strip_prefix("refs/heads/") {
+        let branch = branch.trim();
+        if branch.is_empty() {
+            return Err(CliError::Usage(
+                "git.main_branch must name a local branch".to_string(),
+            ));
+        }
+        return Ok(branch.to_string());
+    }
+    if trimmed.starts_with("refs/") {
+        return Err(CliError::Usage(
+            "git.main_branch must be a local branch name or refs/heads/<branch>".to_string(),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn main_branch_ref(main_branch: &str) -> String {
+    format!("refs/heads/{main_branch}")
+}
+
 fn start_session_with<R, W>(
     options: &SessionStartOptions,
     git_repo: &R,
@@ -2591,7 +2651,9 @@ where
     let db_path = ledger_path(&options.repo_root, &options.db_path);
     let ledger = Ledger::open(&db_path)?;
     let operator = resolve_active_operator(&ledger, options.operator_id.as_deref())?;
-    let head = git_repo.head_commit(&options.repo_root)?;
+    let main_branch = main_branch_from_config(&config_path)?;
+    let main_ref = main_branch_ref(&main_branch);
+    let head = git_repo.ref_commit(&options.repo_root, &main_ref)?;
     let created_at_ms = now_millis();
     let session_id = next_session_id(created_at_ms);
     let branch = format!("aich/session/{session_id}");
@@ -2685,6 +2747,8 @@ where
     let outcome = completer.complete_session_worktree(&CompleteSessionWorktreeRequest {
         session_id: session.id.clone(),
         worktree_path,
+        session_branch: session.branch.clone(),
+        main_branch: main_branch_from_config(&config_path)?,
         base_commit: session.base_commit.clone(),
     })?;
 
@@ -3014,8 +3078,12 @@ where
         )));
     }
     let _queue_lock = acquire_merge_queue_lock(&ledger, "preflight", &session.id)?;
+    ensure_preflight_queue_position(&ledger, &session.id)?;
 
-    let main_before = git_repo.head_commit(&options.repo_root)?.commit_id;
+    let main_branch = main_branch_from_config(&config_path)?;
+    let main_before = git_repo
+        .ref_commit(&options.repo_root, &main_branch_ref(&main_branch))?
+        .commit_id;
     let created_at_ms = now_millis();
     let attempt_id = next_merge_attempt_id(created_at_ms);
     let sandbox_path = aichestra_dir.join("sandboxes").join(&attempt_id);
@@ -3190,6 +3258,65 @@ fn acquire_merge_queue_lock<'a>(
     Err(CliError::Usage(format!(
         "merge queue is locked{held_by}; run `aich queue` to inspect the active lock"
     )))
+}
+
+fn ensure_preflight_queue_position(ledger: &Ledger, session_id: &str) -> Result<(), CliError> {
+    let entries = queue_entries(ledger)?;
+
+    if let Some(blocking) = entries.iter().find(|entry| {
+        entry.session.id != session_id
+            && matches!(
+                entry.status.as_str(),
+                "preflight_running" | "verified" | "approved"
+            )
+    }) {
+        return Err(CliError::Usage(format!(
+            "cannot preflight session '{}' while session '{}' is {}; finish it first with `{}`",
+            session_id,
+            blocking.session.id,
+            blocking.status,
+            queue_next_action(blocking)
+        )));
+    }
+
+    let current_status = entries
+        .iter()
+        .find(|entry| entry.session.id == session_id)
+        .map(|entry| entry.status.as_str());
+
+    if matches!(current_status, Some("blocked" | "verified" | "approved")) {
+        return Ok(());
+    }
+
+    if matches!(current_status, Some("preflight_running")) {
+        return Err(CliError::Usage(format!(
+            "session '{session_id}' already has a preflight in progress"
+        )));
+    }
+
+    if !matches!(current_status, Some("enqueued")) {
+        return Err(CliError::Usage(format!(
+            "session '{session_id}' is not preflightable; run `aich queue` to inspect candidate state"
+        )));
+    }
+
+    let Some(head) = entries
+        .iter()
+        .find(|entry| entry.status.as_str() == "enqueued")
+    else {
+        return Err(CliError::Usage(format!(
+            "session '{session_id}' is not preflightable; run `aich queue` to inspect candidate state"
+        )));
+    };
+
+    if head.session.id != session_id {
+        return Err(CliError::Usage(format!(
+            "session '{}' is not the queue head; preflight session '{}' first",
+            session_id, head.session.id
+        )));
+    }
+
+    Ok(())
 }
 
 fn ensure_session_can_complete(session: &Session) -> Result<(), CliError> {
@@ -3938,7 +4065,10 @@ where
         )));
     }
 
-    let current_main = git_repo.head_commit(&options.repo_root)?.commit_id;
+    let main_branch = main_branch_from_config(&config_path)?;
+    let current_main = git_repo
+        .ref_commit(&options.repo_root, &main_branch_ref(&main_branch))?
+        .commit_id;
     let created_at_ms = now_millis();
     let approval = Approval {
         id: next_approval_id(created_at_ms),
@@ -4029,13 +4159,17 @@ where
     })?;
     let _queue_lock = acquire_merge_queue_lock(&ledger, "apply", &session.id)?;
 
-    let current_main = git_repo.head_commit(&options.repo_root)?.commit_id;
+    let main_branch = main_branch_from_config(&config_path)?;
+    let current_main = git_repo
+        .ref_commit(&options.repo_root, &main_branch_ref(&main_branch))?
+        .commit_id;
     assert_verified_candidate_can_apply(&attempt, &approval, &current_main)
         .map_err(|error| CliError::Usage(format!("candidate cannot be applied: {error}")))?;
 
     ledger.update_merge_attempt_status(&attempt.id, MergeAttemptStatus::Applying, now_millis())?;
     let applied = match applier.apply_verified_commit(&ApplyVerifiedCommitRequest {
         repo_path: options.repo_root.clone(),
+        main_branch,
         verified_commit_id: approval.approved_verified_commit_id.clone(),
         verified_tree_id: approval.approved_verified_tree_id.clone(),
     }) {
@@ -4199,8 +4333,28 @@ fn build_local_semantic_review_report(
         );
     }
 
+    let manifest_evidence = manifest_content.and_then(|content| {
+        match parse_manifest_diff_evidence(content) {
+            Ok(evidence) => Some(evidence),
+            Err(error) => {
+                findings.push(SemanticConflictFinding {
+                    conflict_type: "manifest_mismatch".to_string(),
+                    files: vec![manifest.manifest_path.clone()],
+                    explanation: format!(
+                        "The Change Manifest could not be parsed as structured YAML diff evidence: {error}"
+                    ),
+                    confidence: "high".to_string(),
+                });
+                required_actions.push(
+                    "Fix or regenerate the Change Manifest so changed files are listed in the structured YAML fields."
+                        .to_string(),
+                );
+                None
+            }
+        }
+    });
     let missing_manifest_files =
-        changed_files_missing_from_manifest(changed_files, manifest_content);
+        changed_files_missing_from_manifest(changed_files, manifest_evidence.as_ref());
     if !missing_manifest_files.is_empty() {
         findings.push(SemanticConflictFinding {
             conflict_type: "manifest_mismatch".to_string(),
@@ -4339,17 +4493,75 @@ fn build_local_semantic_review_report(
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct ChangeManifestDocument {
+    change_manifest: ParsedChangeManifest,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParsedChangeManifest {
+    #[serde(default)]
+    changed_areas: Vec<ParsedChangedArea>,
+    #[serde(default)]
+    newly_created_files: Vec<String>,
+    #[serde(default)]
+    deleted_or_renamed_files: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ParsedChangedArea {
+    file: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ManifestDiffEvidence {
+    changed_files: BTreeSet<String>,
+}
+
+fn parse_manifest_diff_evidence(content: &str) -> Result<ManifestDiffEvidence, String> {
+    let document: ChangeManifestDocument =
+        serde_yaml::from_str(content).map_err(|error| error.to_string())?;
+    let mut changed_files = BTreeSet::new();
+
+    for area in document.change_manifest.changed_areas {
+        insert_manifest_file_path(&mut changed_files, &area.file);
+    }
+    for file in document.change_manifest.newly_created_files {
+        insert_manifest_file_path(&mut changed_files, &file);
+    }
+    for file in document.change_manifest.deleted_or_renamed_files {
+        insert_manifest_file_path(&mut changed_files, &file);
+    }
+
+    Ok(ManifestDiffEvidence { changed_files })
+}
+
+fn insert_manifest_file_path(changed_files: &mut BTreeSet<String>, path: &str) {
+    let path = normalize_manifest_file_path(path);
+    if !path.is_empty() {
+        changed_files.insert(path);
+    }
+}
+
+fn normalize_manifest_file_path(path: &str) -> String {
+    path.trim().replace('\\', "/")
+}
+
 fn changed_files_missing_from_manifest(
     changed_files: &[ChangedFile],
-    manifest_content: Option<&str>,
+    manifest_evidence: Option<&ManifestDiffEvidence>,
 ) -> Vec<String> {
-    let Some(manifest_content) = manifest_content else {
+    let Some(manifest_evidence) = manifest_evidence else {
         return Vec::new();
     };
 
     changed_files
         .iter()
-        .filter(|file| !manifest_content.contains(&file.path))
+        .filter(|file| {
+            !manifest_evidence
+                .changed_files
+                .contains(&normalize_manifest_file_path(&file.path))
+        })
         .map(|file| file.path.clone())
         .collect()
 }
@@ -5292,20 +5504,20 @@ fn split_command_line(command_line: &str) -> Result<Vec<String>, String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut quote: Option<Quote> = None;
-    let mut escaped = false;
     let mut has_current = false;
 
-    for character in command_line.chars() {
-        if escaped {
-            current.push(character);
-            has_current = true;
-            escaped = false;
-            continue;
-        }
-
+    let mut characters = command_line.chars().peekable();
+    while let Some(character) = characters.next() {
         match character {
             '\\' if quote != Some(Quote::Single) => {
-                escaped = true;
+                match characters.peek().copied() {
+                    Some(next)
+                        if next == '\\' || next == '\'' || next == '"' || next.is_whitespace() =>
+                    {
+                        current.push(characters.next().expect("peeked character"));
+                    }
+                    _ => current.push('\\'),
+                }
                 has_current = true;
             }
             '\'' if quote.is_none() => {
@@ -5337,9 +5549,6 @@ fn split_command_line(command_line: &str) -> Result<Vec<String>, String> {
         }
     }
 
-    if escaped {
-        return Err("command cannot end with an escape character".to_string());
-    }
     if quote.is_some() {
         return Err("command contains an unterminated quote".to_string());
     }
@@ -5351,17 +5560,22 @@ fn split_command_line(command_line: &str) -> Result<Vec<String>, String> {
 }
 
 fn parse_check_command(name: &str, command_line: &str) -> Result<CheckCommand, CliError> {
-    let mut parts = command_line.split_whitespace();
-    let Some(program) = parts.next() else {
+    let mut parts = split_command_line(command_line).map_err(|error| {
+        CliError::Usage(format!(
+            "check command '{name}' has invalid syntax: {error}"
+        ))
+    })?;
+    if parts.is_empty() {
         return Err(CliError::Usage(format!(
             "check command '{name}' must not be empty"
         )));
-    };
+    }
+    let program = parts.remove(0);
 
     Ok(CheckCommand {
         name: name.to_string(),
-        program: program.to_string(),
-        args: parts.map(ToString::to_string).collect(),
+        program,
+        args: parts,
     })
 }
 
@@ -5593,6 +5807,7 @@ fn display_path_for_ledger(repo_root: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .display()
         .to_string()
+        .replace('\\', "/")
 }
 
 fn comparable_path(path: &Path) -> PathBuf {
@@ -5691,6 +5906,39 @@ mod tests {
         fn head_commit(&self, _repo_path: &Path) -> Result<HeadCommit, WorktreeError> {
             Ok(HeadCommit {
                 commit_id: "other-main".to_string(),
+            })
+        }
+    }
+
+    struct RecordingGitRepository {
+        refs: RefCell<Vec<String>>,
+        commit_id: String,
+    }
+
+    impl RecordingGitRepository {
+        fn new(commit_id: &str) -> Self {
+            Self {
+                refs: RefCell::new(Vec::new()),
+                commit_id: commit_id.to_string(),
+            }
+        }
+    }
+
+    impl GitRepository for RecordingGitRepository {
+        fn head_commit(&self, _repo_path: &Path) -> Result<HeadCommit, WorktreeError> {
+            Ok(HeadCommit {
+                commit_id: "head-commit".to_string(),
+            })
+        }
+
+        fn ref_commit(
+            &self,
+            _repo_path: &Path,
+            git_ref: &str,
+        ) -> Result<HeadCommit, WorktreeError> {
+            self.refs.borrow_mut().push(git_ref.to_string());
+            Ok(HeadCommit {
+                commit_id: self.commit_id.clone(),
             })
         }
     }
@@ -6001,6 +6249,22 @@ mod tests {
     }
 
     #[test]
+    fn split_command_line_preserves_windows_backslash_paths() {
+        assert_eq!(
+            split_command_line(
+                r#"reviewer --script C:\Users\dev\aich\review.ps1 "prompt file.md""#
+            )
+            .expect("split"),
+            vec![
+                "reviewer",
+                "--script",
+                r"C:\Users\dev\aich\review.ps1",
+                "prompt file.md"
+            ]
+        );
+    }
+
+    #[test]
     fn codex_semantic_review_command_uses_safe_noninteractive_defaults() {
         let command = codex_semantic_review_command(Some("model-x"), Some("semantic-review"));
 
@@ -6019,6 +6283,84 @@ mod tests {
         assert!(command.args.contains(&"--profile".to_string()));
         assert!(command.args.contains(&"semantic-review".to_string()));
         assert_eq!(command.args.last().map(String::as_str), Some("-"));
+    }
+
+    #[test]
+    fn structured_manifest_validation_rejects_path_substring_match() {
+        let evidence = parse_manifest_diff_evidence(
+            "change_manifest:\n  changed_areas:\n    - file: \"docs/src/lib.rs.md\"\n",
+        )
+        .expect("parse manifest");
+
+        let missing = changed_files_missing_from_manifest(
+            &[ChangedFile::new("src/lib.rs", "modified")],
+            Some(&evidence),
+        );
+
+        assert_eq!(missing, vec!["src/lib.rs".to_string()]);
+    }
+
+    #[test]
+    fn structured_manifest_validation_normalizes_windows_separators() {
+        let evidence = parse_manifest_diff_evidence(
+            "change_manifest:\n  changed_areas:\n    - file: \"src\\\\lib.rs\"\n",
+        )
+        .expect("parse manifest");
+
+        let missing = changed_files_missing_from_manifest(
+            &[ChangedFile::new("src/lib.rs", "modified")],
+            Some(&evidence),
+        );
+
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn local_review_blocks_invalid_change_manifest_yaml() {
+        let manifest = ChangeManifest {
+            id: "manifest-1".to_string(),
+            session_id: "session-1".to_string(),
+            manifest_path: ".aichestra/artifacts/change-manifest.yaml".to_string(),
+            manifest_hash: None,
+            validation_status: CHANGE_MANIFEST_VALIDATION_STATUS.to_string(),
+            created_at_ms: now_millis(),
+        };
+        let attempt = MergeAttempt {
+            id: "merge-1".to_string(),
+            session_id: "session-1".to_string(),
+            status: MergeAttemptStatus::Verified,
+            main_before_commit: "base-commit".to_string(),
+            candidate_commit: "head-commit".to_string(),
+            apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+            verified_tree_id: Some("tree".to_string()),
+            verified_commit_id: Some("commit".to_string()),
+            checks_passed: true,
+            semantic_risk_level: None,
+        };
+
+        let report = build_local_semantic_review_report(
+            &manifest,
+            Some("change_manifest:\n  changed_areas: ["),
+            false,
+            &attempt,
+            &[ChangedFile::new("README.md", "modified")],
+            &[CheckResult {
+                id: "check-1".to_string(),
+                merge_attempt_id: attempt.id.clone(),
+                name: "test".to_string(),
+                command: "cargo test --all".to_string(),
+                result: CheckResultStatus::Passed,
+                stdout_artifact: None,
+                stderr_artifact: None,
+                created_at_ms: now_millis(),
+            }],
+        );
+
+        assert_eq!(report.risk_level, SemanticRiskLevel::Blocked);
+        assert!(report
+            .suspected_conflicts
+            .iter()
+            .any(|finding| finding.conflict_type == "manifest_mismatch"));
     }
 
     fn seed_verified_review_candidate(
@@ -6140,6 +6482,27 @@ mod tests {
         .expect("write semantic review llm config");
     }
 
+    fn configure_main_branch(repo: &Path, branch: &str) {
+        let config_path = repo.join(".aichestra/config.yaml");
+        let config = fs::read_to_string(&config_path).expect("read config");
+        let updated = if config.contains("main_branch:") {
+            config
+                .lines()
+                .map(|line| {
+                    if line.trim_start().starts_with("main_branch:") {
+                        format!("  main_branch: {branch}")
+                    } else {
+                        line.to_string()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            format!("{config}\ngit:\n  main_branch: {branch}\n")
+        };
+        fs::write(config_path, updated).expect("write main branch config");
+    }
+
     fn seed_enqueued_candidate(repo: &Path, id: &str) -> Session {
         let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
         let now = now_millis();
@@ -6257,6 +6620,26 @@ mod tests {
         }
     }
 
+    fn write_semantic_review_test_command(
+        repo: &Path,
+        script_stem: &str,
+        powershell_script: &str,
+        shell_script: &str,
+    ) -> String {
+        if cfg!(windows) {
+            let script_path = repo.join(format!("{script_stem}.ps1"));
+            fs::write(&script_path, powershell_script).expect("write script");
+            format!(
+                "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\"",
+                script_path.display()
+            )
+        } else {
+            let script_path = repo.join(format!("{script_stem}.sh"));
+            fs::write(&script_path, shell_script).expect("write script");
+            format!("sh \"{}\"", script_path.display())
+        }
+    }
+
     #[test]
     fn session_start_records_session_worktree_request_and_events() {
         let repo = unique_temp_dir();
@@ -6312,6 +6695,39 @@ mod tests {
                 "worktree.created",
                 "session.started"
             ]
+        );
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn session_start_reads_base_from_configured_main_ref() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        configure_main_branch(&repo, "trunk");
+
+        let options = SessionStartOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            goal: "use configured main".to_string(),
+            provider: "codex".to_string(),
+            target_path: None,
+            operator_id: None,
+        };
+        let git = RecordingGitRepository::new("trunk-base");
+        let worktrees = MockWorktreeManager::new();
+
+        let result = start_session_with(&options, &git, &worktrees).expect("start session");
+
+        assert_eq!(result.session.base_commit, "trunk-base");
+        assert_eq!(worktrees.requests.borrow()[0].base_ref, "trunk-base");
+        assert_eq!(
+            git.refs.borrow().as_slice(),
+            &["refs/heads/trunk".to_string()]
         );
 
         let _ = fs::remove_dir_all(repo);
@@ -6420,6 +6836,8 @@ mod tests {
         let requests = completer.requests.borrow();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].session_id, session.id);
+        assert_eq!(requests[0].session_branch, session.branch);
+        assert_eq!(requests[0].main_branch, "main");
         assert_eq!(requests[0].base_commit, "base-commit");
 
         let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
@@ -6714,6 +7132,223 @@ mod tests {
     }
 
     #[test]
+    fn preflight_requires_queue_head() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let head = seed_enqueued_candidate(&repo, "session-a");
+        let later = seed_enqueued_candidate(&repo, "session-b");
+        let preflight_runner =
+            MockPreflightRunner::new(PreflightOutcome::Verified(aich_git::PreflightVerified {
+                verified_tree_id: "verified-tree".to_string(),
+                verified_commit_id: "verified-commit".to_string(),
+                checks: Vec::new(),
+            }));
+
+        let err = run_preflight_with(
+            &PreflightOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: later.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &preflight_runner,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, CliError::Usage(message) if message.contains("queue head") && message.contains(&head.id))
+        );
+        assert!(preflight_runner.requests.borrow().is_empty());
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn preflight_refuses_while_verified_candidate_is_pending() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        insert_queue_candidate(
+            &ledger,
+            "session-verified",
+            SessionStatus::Enqueued,
+            Some(MergeAttemptStatus::Verified),
+            false,
+        );
+        let later = seed_enqueued_candidate(&repo, "session-later");
+        let preflight_runner =
+            MockPreflightRunner::new(PreflightOutcome::Verified(aich_git::PreflightVerified {
+                verified_tree_id: "verified-tree".to_string(),
+                verified_commit_id: "verified-commit".to_string(),
+                checks: Vec::new(),
+            }));
+
+        let err = run_preflight_with(
+            &PreflightOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: later.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &preflight_runner,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, CliError::Usage(message) if message.contains("session-verified") && message.contains("verified"))
+        );
+        assert!(preflight_runner.requests.borrow().is_empty());
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn preflight_allows_refreshing_same_verified_candidate() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let session = seed_enqueued_candidate(&repo, "session-refresh");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        ledger
+            .insert_merge_attempt(
+                &MergeAttempt {
+                    id: "merge-refresh".to_string(),
+                    session_id: session.id.clone(),
+                    status: MergeAttemptStatus::Verified,
+                    main_before_commit: "old-main".to_string(),
+                    candidate_commit: "head-commit".to_string(),
+                    apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+                    verified_tree_id: Some("old-tree".to_string()),
+                    verified_commit_id: Some("old-commit".to_string()),
+                    checks_passed: true,
+                    semantic_risk_level: Some("medium".to_string()),
+                },
+                now_millis(),
+                now_millis(),
+            )
+            .expect("insert verified attempt");
+        let preflight_runner =
+            MockPreflightRunner::new(PreflightOutcome::Verified(aich_git::PreflightVerified {
+                verified_tree_id: "new-tree".to_string(),
+                verified_commit_id: "new-commit".to_string(),
+                checks: Vec::new(),
+            }));
+
+        let result = run_preflight_with(
+            &PreflightOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &preflight_runner,
+        )
+        .expect("preflight");
+
+        assert_eq!(
+            result.merge_attempt.verified_tree_id.as_deref(),
+            Some("new-tree")
+        );
+        assert_eq!(preflight_runner.requests.borrow().len(), 1);
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn preflight_reads_main_before_from_configured_main_ref() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        configure_main_branch(&repo, "trunk");
+
+        let start_options = SessionStartOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            goal: "verify trunk candidate".to_string(),
+            provider: "codex".to_string(),
+            target_path: None,
+            operator_id: None,
+        };
+        let git = RecordingGitRepository::new("trunk-base");
+        let worktrees = MockWorktreeManager::new();
+        let session = start_session_with(&start_options, &git, &worktrees)
+            .expect("start session")
+            .session;
+        let completer = MockSessionCompleter::new(CompleteSessionWorktreeOutcome::Changes(
+            aich_git::CompletedSessionWorktree {
+                head_commit: "head-commit".to_string(),
+                diff_stat: " README.md | 1 +\n".to_string(),
+                diff_patch: "diff --git a/README.md b/README.md\n".to_string(),
+                changed_files: vec![aich_git::GitChangedFile {
+                    path: "README.md".to_string(),
+                    change_type: "modified".to_string(),
+                }],
+                committed_worktree_changes: true,
+            },
+        ));
+        complete_session_with(
+            &SessionCompleteOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &completer,
+        )
+        .expect("complete session");
+
+        let preflight_runner =
+            MockPreflightRunner::new(PreflightOutcome::Verified(aich_git::PreflightVerified {
+                verified_tree_id: "verified-tree".to_string(),
+                verified_commit_id: "verified-commit".to_string(),
+                checks: Vec::new(),
+            }));
+        let result = run_preflight_with(
+            &PreflightOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &git,
+            &preflight_runner,
+        )
+        .expect("preflight");
+
+        assert_eq!(result.merge_attempt.main_before_commit, "trunk-base");
+        assert_eq!(
+            preflight_runner.requests.borrow()[0].main_before_commit,
+            "trunk-base"
+        );
+        assert_eq!(
+            git.refs.borrow().as_slice(),
+            &[
+                "refs/heads/trunk".to_string(),
+                "refs/heads/trunk".to_string()
+            ]
+        );
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
     fn preflight_records_blocked_attempt_when_checks_fail() {
         let repo = unique_temp_dir();
         init_repo(&InitOptions {
@@ -6958,9 +7593,25 @@ mod tests {
             db_path: None,
         })
         .expect("init");
-        let script_path = repo.join("mock-semantic-review.sh");
-        fs::write(
-            &script_path,
+        let command = write_semantic_review_test_command(
+            &repo,
+            "mock-semantic-review",
+            r#"$inputText = [Console]::In.ReadToEnd()
+if (-not $inputText.Contains('Semantic Review Input')) {
+  [Console]::Error.WriteLine('missing semantic review input')
+  exit 2
+}
+@'
+semantic_review:
+  risk_level: low
+  summary: "Scripted command reviewer accepted the candidate."
+  suspected_conflicts: []
+  required_actions: []
+  suggested_tests:
+    - "cargo test --all"
+  uncertainty: []
+'@
+"#,
             r#"input=$(cat)
 case "$input" in
   *"Semantic Review Input"*) ;;
@@ -6977,13 +7628,8 @@ semantic_review:
   uncertainty: []
 YAML
 "#,
-        )
-        .expect("write script");
-        configure_semantic_review_command(
-            &repo,
-            "scripted_command_reviewer",
-            &format!("sh {}", script_path.display()),
         );
+        configure_semantic_review_command(&repo, "scripted_command_reviewer", &command);
         let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
 
         let result = run_review_with(&ReviewOptions {
@@ -7034,9 +7680,30 @@ YAML
             db_path: None,
         })
         .expect("init");
-        let script_path = repo.join("mock-llm-semantic-review.sh");
-        fs::write(
-            &script_path,
+        let command = write_semantic_review_test_command(
+            &repo,
+            "mock-llm-semantic-review",
+            r#"$inputText = [Console]::In.ReadToEnd()
+if (-not $inputText.Contains('reviewer: `custom_llm_reviewer`')) {
+  [Console]::Error.WriteLine('missing llm reviewer input')
+  exit 2
+}
+if (-not (Get-Location).Path.Contains('aich-cli-test-')) {
+  [Console]::Error.WriteLine('command did not run from repo root')
+  exit 3
+}
+@'
+semantic_review:
+  risk_level: low
+  summary: "Custom LLM reviewer accepted the candidate."
+  suspected_conflicts: []
+  required_actions: []
+  suggested_tests:
+    - "cargo test --all"
+  uncertainty:
+    - "Custom command stands in for a provider LLM in this test."
+'@
+"#,
             r#"input=$(cat)
 case "$input" in
   *"reviewer: \`custom_llm_reviewer\`"*) ;;
@@ -7058,14 +7725,8 @@ semantic_review:
     - "Custom command stands in for a provider LLM in this test."
 YAML
 "#,
-        )
-        .expect("write script");
-        configure_semantic_review_llm(
-            &repo,
-            "custom_llm_reviewer",
-            "custom",
-            &format!("sh {}", script_path.display()),
         );
+        configure_semantic_review_llm(&repo, "custom_llm_reviewer", "custom", &command);
         let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
 
         let result = run_review_with(&ReviewOptions {
@@ -7116,17 +7777,18 @@ YAML
             db_path: None,
         })
         .expect("init");
-        let script_path = repo.join("invalid-semantic-review.sh");
-        fs::write(
-            &script_path,
-            "cat >/dev/null\nprintf '%s\\n' 'semantic_review:' '  summary: \"missing risk\"'\n",
-        )
-        .expect("write script");
-        configure_semantic_review_command(
+        let command = write_semantic_review_test_command(
             &repo,
-            "invalid_command_reviewer",
-            &format!("sh {}", script_path.display()),
+            "invalid-semantic-review",
+            r#"[Console]::In.ReadToEnd() | Out-Null
+@'
+semantic_review:
+  summary: "missing risk"
+'@
+"#,
+            "cat >/dev/null\nprintf '%s\\n' 'semantic_review:' '  summary: \"missing risk\"'\n",
         );
+        configure_semantic_review_command(&repo, "invalid_command_reviewer", &command);
         let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
 
         let result = run_review_with(&ReviewOptions {
@@ -7263,6 +7925,7 @@ YAML
             db_path: None,
         })
         .expect("init");
+        configure_main_branch(&repo, "trunk");
         let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
 
         run_review_with(&ReviewOptions {
@@ -7310,6 +7973,7 @@ YAML
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].verified_commit_id, "verified-commit");
         assert_eq!(requests[0].verified_tree_id, "verified-tree");
+        assert_eq!(requests[0].main_branch, "trunk");
 
         let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
         let loaded_session = ledger

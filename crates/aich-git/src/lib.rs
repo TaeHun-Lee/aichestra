@@ -11,6 +11,15 @@ pub struct HeadCommit {
 
 pub trait GitRepository {
     fn head_commit(&self, repo_path: &Path) -> Result<HeadCommit, WorktreeError>;
+
+    fn ref_commit(&self, repo_path: &Path, git_ref: &str) -> Result<HeadCommit, WorktreeError> {
+        let _ = git_ref;
+        self.head_commit(repo_path)
+    }
+
+    fn current_branch(&self, _repo_path: &Path) -> Result<Option<String>, WorktreeError> {
+        Ok(None)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,6 +32,8 @@ pub struct GitChangedFile {
 pub struct CompleteSessionWorktreeRequest {
     pub session_id: String,
     pub worktree_path: PathBuf,
+    pub session_branch: String,
+    pub main_branch: String,
     pub base_commit: String,
 }
 
@@ -141,6 +152,7 @@ pub trait PreflightRunner {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApplyVerifiedCommitRequest {
     pub repo_path: PathBuf,
+    pub main_branch: String,
     pub verified_commit_id: String,
     pub verified_tree_id: String,
 }
@@ -220,29 +232,21 @@ pub struct NativeGitWorktreeManager;
 
 impl GitRepository for NativeGitWorktreeManager {
     fn head_commit(&self, repo_path: &Path) -> Result<HeadCommit, WorktreeError> {
-        let args = vec!["rev-parse".to_string(), "HEAD".to_string()];
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repo_path)
-            .args(&args)
-            .output()?;
+        resolve_commit(repo_path, "HEAD")
+    }
 
-        if !output.status.success() {
-            return Err(WorktreeError::GitCommandFailed {
-                args,
-                code: output.status.code(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            });
-        }
-
-        let commit_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if commit_id.is_empty() {
+    fn ref_commit(&self, repo_path: &Path, git_ref: &str) -> Result<HeadCommit, WorktreeError> {
+        if git_ref.trim().is_empty() {
             return Err(WorktreeError::InvalidRequest(
-                "git rev-parse HEAD returned an empty commit id".to_string(),
+                "git ref is required".to_string(),
             ));
         }
 
-        Ok(HeadCommit { commit_id })
+        resolve_commit(repo_path, &format!("{}^{{commit}}", git_ref.trim()))
+    }
+
+    fn current_branch(&self, repo_path: &Path) -> Result<Option<String>, WorktreeError> {
+        current_branch_name(repo_path)
     }
 }
 
@@ -291,6 +295,7 @@ impl SessionWorktreeCompleter for NativeGitWorktreeManager {
         request: &CompleteSessionWorktreeRequest,
     ) -> Result<CompleteSessionWorktreeOutcome, WorktreeError> {
         validate_complete_session_worktree_request(request)?;
+        ensure_session_worktree_branch(request)?;
 
         let mut committed_worktree_changes = false;
         let status = run_git_stdout(
@@ -482,6 +487,7 @@ impl VerifiedCommitApplier for NativeGitWorktreeManager {
         request: &ApplyVerifiedCommitRequest,
     ) -> Result<AppliedVerifiedCommit, WorktreeError> {
         validate_apply_verified_commit_request(request)?;
+        ensure_main_worktree_branch(&request.repo_path, &request.main_branch)?;
 
         let status = run_git_stdout(&request.repo_path, &["status", "--porcelain"])?;
         if !status.trim().is_empty() {
@@ -613,6 +619,16 @@ pub fn validate_complete_session_worktree_request(
             "base commit is required".to_string(),
         ));
     }
+    if request.session_branch.trim().is_empty() {
+        return Err(WorktreeError::InvalidRequest(
+            "session branch is required".to_string(),
+        ));
+    }
+    if request.main_branch.trim().is_empty() {
+        return Err(WorktreeError::InvalidRequest(
+            "main branch is required".to_string(),
+        ));
+    }
     if request.worktree_path.as_os_str().is_empty() {
         return Err(WorktreeError::InvalidRequest(
             "worktree path is required".to_string(),
@@ -707,6 +723,11 @@ pub fn validate_apply_verified_commit_request(
             "repo path is required".to_string(),
         ));
     }
+    if request.main_branch.trim().is_empty() {
+        return Err(WorktreeError::InvalidRequest(
+            "main branch is required".to_string(),
+        ));
+    }
     if request.verified_commit_id.trim().is_empty() {
         return Err(WorktreeError::InvalidRequest(
             "verified commit id is required".to_string(),
@@ -719,6 +740,65 @@ pub fn validate_apply_verified_commit_request(
     }
 
     Ok(())
+}
+
+fn resolve_commit(repo_path: &Path, rev: &str) -> Result<HeadCommit, WorktreeError> {
+    let commit_id = run_git_stdout(repo_path, &["rev-parse", "--verify", rev])?
+        .trim()
+        .to_string();
+    if commit_id.is_empty() {
+        return Err(WorktreeError::InvalidRequest(format!(
+            "git rev-parse {rev} returned an empty commit id"
+        )));
+    }
+
+    Ok(HeadCommit { commit_id })
+}
+
+fn current_branch_name(repo_path: &Path) -> Result<Option<String>, WorktreeError> {
+    let branch = run_git_stdout(repo_path, &["branch", "--show-current"])?
+        .trim()
+        .to_string();
+    if branch.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(branch))
+    }
+}
+
+fn ensure_session_worktree_branch(
+    request: &CompleteSessionWorktreeRequest,
+) -> Result<(), WorktreeError> {
+    let current_branch = current_branch_name(&request.worktree_path)?;
+    match current_branch.as_deref() {
+        Some(branch) if branch == request.main_branch => Err(WorktreeError::InvalidRequest(
+            format!(
+                "session worktree is on configured main branch '{branch}'; refuse to complete from main"
+            ),
+        )),
+        Some(branch) if branch == request.session_branch => Ok(()),
+        Some(branch) => Err(WorktreeError::InvalidRequest(format!(
+            "session worktree is on branch '{branch}', expected session branch '{}'",
+            request.session_branch
+        ))),
+        None => Err(WorktreeError::InvalidRequest(format!(
+            "session worktree is detached; expected session branch '{}'",
+            request.session_branch
+        ))),
+    }
+}
+
+fn ensure_main_worktree_branch(repo_path: &Path, main_branch: &str) -> Result<(), WorktreeError> {
+    let current_branch = current_branch_name(repo_path)?;
+    match current_branch.as_deref() {
+        Some(branch) if branch == main_branch => Ok(()),
+        Some(branch) => Err(WorktreeError::InvalidRequest(format!(
+            "main worktree is on branch '{branch}', expected configured main branch '{main_branch}'"
+        ))),
+        None => Err(WorktreeError::InvalidRequest(format!(
+            "main worktree is detached; expected configured main branch '{main_branch}'"
+        ))),
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1123,6 +1203,7 @@ mod tests {
         let applied = NativeGitWorktreeManager
             .apply_verified_commit(&ApplyVerifiedCommitRequest {
                 repo_path: repo.clone(),
+                main_branch: "main".to_string(),
                 verified_commit_id: verified.verified_commit_id.clone(),
                 verified_tree_id: verified.verified_tree_id.clone(),
             })
@@ -1133,6 +1214,81 @@ mod tests {
         assert_eq!(
             fs::read_to_string(repo.join("file.txt")).expect("read main file"),
             "base\ncandidate\n"
+        );
+
+        fs::remove_dir_all(temp_dir).expect("remove temp repo");
+    }
+
+    #[test]
+    fn native_ref_commit_reads_configured_main_ref() {
+        let temp_dir = unique_temp_dir("aich-git-main-ref");
+        let repo = init_test_repo(&temp_dir);
+
+        fs::write(repo.join("file.txt"), "base\n").expect("write base file");
+        git(&repo, &["add", "file.txt"]);
+        git(&repo, &["commit", "-q", "-m", "initial"]);
+        git(&repo, &["branch", "-M", "trunk"]);
+        let trunk_commit = git(&repo, &["rev-parse", "HEAD"]);
+
+        let resolved = NativeGitWorktreeManager
+            .ref_commit(&repo, "refs/heads/trunk")
+            .expect("resolve trunk ref");
+
+        assert_eq!(resolved.commit_id, trunk_commit);
+
+        fs::remove_dir_all(temp_dir).expect("remove temp repo");
+    }
+
+    #[test]
+    fn native_complete_refuses_configured_main_branch() {
+        let temp_dir = unique_temp_dir("aich-git-complete-main-refused");
+        let repo = init_test_repo(&temp_dir);
+
+        fs::write(repo.join("file.txt"), "base\n").expect("write base file");
+        git(&repo, &["add", "file.txt"]);
+        git(&repo, &["commit", "-q", "-m", "initial"]);
+        git(&repo, &["branch", "-M", "main"]);
+        let base_commit = git(&repo, &["rev-parse", "HEAD"]);
+
+        let err = NativeGitWorktreeManager
+            .complete_session_worktree(&CompleteSessionWorktreeRequest {
+                session_id: "session-1".to_string(),
+                worktree_path: repo.clone(),
+                session_branch: "aich/session/session-1".to_string(),
+                main_branch: "main".to_string(),
+                base_commit,
+            })
+            .unwrap_err();
+
+        assert!(
+            matches!(err, WorktreeError::InvalidRequest(message) if message.contains("configured main branch"))
+        );
+
+        fs::remove_dir_all(temp_dir).expect("remove temp repo");
+    }
+
+    #[test]
+    fn native_apply_refuses_wrong_main_branch_checkout() {
+        let temp_dir = unique_temp_dir("aich-git-apply-wrong-branch");
+        let repo = init_test_repo(&temp_dir);
+
+        fs::write(repo.join("file.txt"), "base\n").expect("write base file");
+        git(&repo, &["add", "file.txt"]);
+        git(&repo, &["commit", "-q", "-m", "initial"]);
+        git(&repo, &["branch", "-M", "main"]);
+        git(&repo, &["checkout", "-q", "-b", "feature"]);
+
+        let err = NativeGitWorktreeManager
+            .apply_verified_commit(&ApplyVerifiedCommitRequest {
+                repo_path: repo.clone(),
+                main_branch: "main".to_string(),
+                verified_commit_id: "dummy-commit".to_string(),
+                verified_tree_id: "dummy-tree".to_string(),
+            })
+            .unwrap_err();
+
+        assert!(
+            matches!(err, WorktreeError::InvalidRequest(message) if message.contains("expected configured main branch"))
         );
 
         fs::remove_dir_all(temp_dir).expect("remove temp repo");
@@ -1420,6 +1576,8 @@ mod tests {
             &repo,
             &["config", "user.email", "aichestra-test@example.invalid"],
         );
+        git(&repo, &["config", "core.autocrlf", "false"]);
+        git(&repo, &["config", "core.eol", "lf"]);
         repo
     }
 
