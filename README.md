@@ -10,15 +10,27 @@ the exact tree tested in preflight must be the tree applied to main
 
 ## Current Slice
 
-This repository now contains the first Rust workspace slice:
+This repository now contains a CLI-first local MVP slice:
 
 - `aich init`
+- `aich auth whoami`
+- `aich auth operator add/list`
+- `aich status`
+- `aich queue`
 - `aich session start --goal ...`
+- `aich session complete <session-id>`
+- `aich preflight <session-id>`
+- `aich review <session-id>`
+- `aich approve <session-id>`
+- `aich apply <session-id>`
 - SQLite schema initialization
 - session domain model
-- worktree manager interface
+- worktree manager and native Git adapter
 - append-only event ledger
-- verified-tree domain guard for future preflight/apply paths
+- generated Change Manifest artifacts
+- sandbox preflight checks
+- local semantic review report artifacts
+- verified-tree approval and apply guards
 
 ## Layout
 
@@ -46,6 +58,7 @@ Install Rust, then:
 ```bash
 cargo run -p aich-cli -- init
 cargo run -p aich-cli -- session start --goal "Describe the task" --provider codex --target src/auth.rs
+cargo run -p aich-cli -- queue
 ```
 
 Checks:

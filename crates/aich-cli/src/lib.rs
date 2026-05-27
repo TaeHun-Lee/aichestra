@@ -224,6 +224,12 @@ struct StatusOptions {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+struct QueueOptions {
+    repo_root: PathBuf,
+    db_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct SessionStartOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
@@ -271,6 +277,16 @@ struct ApplyOptions {
     db_path: Option<PathBuf>,
     session_id: String,
     operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct QueueEntry {
+    session: Session,
+    status: String,
+    latest_attempt: Option<MergeAttempt>,
+    latest_approval: Option<Approval>,
+    latest_review: Option<SemanticReview>,
+    check_count: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -408,6 +424,10 @@ where
         Some("status") => {
             let options = parse_status_options(&args[1..], cwd)?;
             render_status(&options, out)
+        }
+        Some("queue") => {
+            let options = parse_queue_options(&args[1..], cwd)?;
+            render_queue(&options, out)
         }
         Some("-h") | Some("--help") | None => {
             write_usage(out)?;
@@ -634,6 +654,43 @@ fn parse_status_options(args: &[String], cwd: &Path) -> Result<StatusOptions, Cl
         db_path,
         recent_events_limit,
     })
+}
+
+fn parse_queue_options(args: &[String], cwd: &Path) -> Result<QueueOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            other => {
+                return Err(CliError::Usage(format!(
+                    "unknown queue option '{other}'\n\n{}",
+                    usage_text()
+                )));
+            }
+        }
+        index += 1;
+    }
+
+    Ok(QueueOptions { repo_root, db_path })
 }
 
 fn parse_session_start_options(
@@ -1369,6 +1426,211 @@ fn render_status<W: Write>(options: &StatusOptions, out: &mut W) -> Result<(), C
     }
 
     Ok(())
+}
+
+fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Result<(), CliError> {
+    let db_path = ledger_path(&options.repo_root, &options.db_path);
+    if !db_path.exists() {
+        return Err(CliError::Usage(format!(
+            "Aichestra ledger not found at {}; run `aich init` first",
+            db_path.display()
+        )));
+    }
+
+    let ledger = Ledger::open(&db_path)?;
+    let entries = queue_entries(&ledger)?;
+    let summary = queue_status_summary(&entries);
+
+    writeln!(out, "Aichestra queue")?;
+    writeln!(out, "Repo: {}", options.repo_root.display())?;
+    writeln!(out, "Ledger: {}", db_path.display())?;
+    writeln!(out, "Entries: {}", entries.len())?;
+    writeln!(
+        out,
+        "Summary: enqueued={} preflight_running={} verified={} approved={} blocked={}",
+        summary.enqueued,
+        summary.preflight_running,
+        summary.verified,
+        summary.approved,
+        summary.blocked
+    )?;
+
+    if entries.is_empty() {
+        writeln!(out, "No queued candidates.")?;
+        return Ok(());
+    }
+
+    for entry in entries {
+        writeln!(out, "- {} [{}]", entry.session.id, entry.status)?;
+        writeln!(out, "  goal: {}", entry.session.goal)?;
+        writeln!(out, "  branch: {}", entry.session.branch)?;
+        writeln!(
+            out,
+            "  target: {}",
+            entry.session.target_path.as_deref().unwrap_or("-")
+        )?;
+        writeln!(
+            out,
+            "  candidate: {}",
+            entry
+                .session
+                .head_commit
+                .as_deref()
+                .map(short_hash)
+                .unwrap_or_else(|| "-".to_string())
+        )?;
+        if let Some(attempt) = entry.latest_attempt.as_ref() {
+            writeln!(out, "  attempt: {}", attempt.id)?;
+            writeln!(
+                out,
+                "  main_before: {}",
+                short_hash(&attempt.main_before_commit)
+            )?;
+            if let Some(commit) = attempt.verified_commit_id.as_deref() {
+                writeln!(out, "  verified_commit: {}", short_hash(commit))?;
+            }
+            if let Some(tree) = attempt.verified_tree_id.as_deref() {
+                writeln!(out, "  verified_tree: {}", short_hash(tree))?;
+            }
+            writeln!(
+                out,
+                "  semantic_risk: {}",
+                attempt.semantic_risk_level.as_deref().unwrap_or("unknown")
+            )?;
+            writeln!(
+                out,
+                "  checks: {}",
+                queue_check_label(attempt, entry.check_count)
+            )?;
+        }
+        if let Some(review) = entry.latest_review.as_ref() {
+            writeln!(
+                out,
+                "  review: {} ({})",
+                review.id,
+                review.risk_level.as_str()
+            )?;
+        }
+        if let Some(approval) = entry.latest_approval.as_ref() {
+            writeln!(
+                out,
+                "  approval: {} by {}",
+                approval.id, approval.approved_by
+            )?;
+        }
+        writeln!(out, "  next: {}", queue_next_action(&entry))?;
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct QueueStatusSummary {
+    enqueued: usize,
+    preflight_running: usize,
+    verified: usize,
+    approved: usize,
+    blocked: usize,
+}
+
+fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError> {
+    let mut entries = Vec::new();
+
+    for session in ledger.list_sessions()? {
+        let attempts = ledger.list_merge_attempts(&session.id)?;
+        let latest_attempt = attempts.into_iter().last();
+        let mut latest_approval = None;
+        let mut latest_review = None;
+        let mut check_count = 0;
+
+        if let Some(attempt) = latest_attempt.as_ref() {
+            latest_approval = ledger.list_approvals(&attempt.id)?.into_iter().last();
+            latest_review = ledger
+                .list_semantic_reviews(&attempt.id)?
+                .into_iter()
+                .last();
+            check_count = ledger.list_check_results(&attempt.id)?.len();
+        }
+
+        let Some(status) =
+            queue_entry_status(&session, latest_attempt.as_ref(), latest_approval.as_ref())
+        else {
+            continue;
+        };
+
+        entries.push(QueueEntry {
+            session,
+            status,
+            latest_attempt,
+            latest_approval,
+            latest_review,
+            check_count,
+        });
+    }
+
+    Ok(entries)
+}
+
+fn queue_entry_status(
+    session: &Session,
+    latest_attempt: Option<&MergeAttempt>,
+    latest_approval: Option<&Approval>,
+) -> Option<String> {
+    match latest_attempt {
+        Some(attempt) => match attempt.status {
+            MergeAttemptStatus::PreflightRunning | MergeAttemptStatus::Applying => {
+                Some("preflight_running".to_string())
+            }
+            MergeAttemptStatus::Blocked => Some("blocked".to_string()),
+            MergeAttemptStatus::Verified if latest_approval.is_some() => {
+                Some("approved".to_string())
+            }
+            MergeAttemptStatus::Verified => Some("verified".to_string()),
+            MergeAttemptStatus::Pending if session.status == SessionStatus::Enqueued => {
+                Some("enqueued".to_string())
+            }
+            MergeAttemptStatus::Applied => None,
+            MergeAttemptStatus::Pending => None,
+        },
+        None if session.status == SessionStatus::Enqueued => Some("enqueued".to_string()),
+        None => None,
+    }
+}
+
+fn queue_status_summary(entries: &[QueueEntry]) -> QueueStatusSummary {
+    let mut summary = QueueStatusSummary::default();
+    for entry in entries {
+        match entry.status.as_str() {
+            "enqueued" => summary.enqueued += 1,
+            "preflight_running" => summary.preflight_running += 1,
+            "verified" => summary.verified += 1,
+            "approved" => summary.approved += 1,
+            "blocked" => summary.blocked += 1,
+            _ => {}
+        }
+    }
+    summary
+}
+
+fn queue_check_label(attempt: &MergeAttempt, check_count: usize) -> String {
+    if check_count == 0 {
+        "none".to_string()
+    } else if attempt.checks_passed {
+        format!("{check_count} passed")
+    } else {
+        format!("{check_count} recorded, not passed")
+    }
+}
+
+fn queue_next_action(entry: &QueueEntry) -> String {
+    match entry.status.as_str() {
+        "enqueued" => format!("aich preflight {}", entry.session.id),
+        "preflight_running" => "wait for preflight to finish or inspect artifacts".to_string(),
+        "verified" => format!("aich review {}", entry.session.id),
+        "approved" => format!("aich apply {}", entry.session.id),
+        "blocked" => "revise candidate, then run aich preflight again".to_string(),
+        _ => "-".to_string(),
+    }
 }
 
 fn init_repo(options: &InitOptions) -> Result<InitResult, CliError> {
@@ -3360,7 +3622,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich queue [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]
@@ -3705,6 +3967,68 @@ mod tests {
             .expect("insert check");
 
         (session, attempt)
+    }
+
+    fn insert_queue_candidate(
+        ledger: &Ledger,
+        id: &str,
+        session_status: SessionStatus,
+        attempt_status: Option<MergeAttemptStatus>,
+        approved: bool,
+    ) {
+        let now = now_millis();
+        let mut session = Session::new(
+            id,
+            format!("queue task {id}"),
+            "codex",
+            format!("aich/session/{id}"),
+            format!(".aichestra/worktrees/{id}"),
+            "base-commit",
+            now,
+        );
+        session.status = session_status;
+        session.head_commit = Some(format!("{id}-head"));
+        session.updated_at_ms = now + 1;
+        ledger
+            .insert_session(&session)
+            .expect("insert queue session");
+
+        let Some(status) = attempt_status else {
+            return;
+        };
+
+        let needs_verified_ids = matches!(
+            status,
+            MergeAttemptStatus::Verified | MergeAttemptStatus::Applied
+        );
+        let attempt = MergeAttempt {
+            id: format!("merge-{id}"),
+            session_id: id.to_string(),
+            status,
+            main_before_commit: "base-commit".to_string(),
+            candidate_commit: format!("{id}-head"),
+            apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+            verified_tree_id: needs_verified_ids.then(|| format!("{id}-tree")),
+            verified_commit_id: needs_verified_ids.then(|| format!("{id}-verified")),
+            checks_passed: needs_verified_ids,
+            semantic_risk_level: needs_verified_ids.then(|| "medium".to_string()),
+        };
+        ledger
+            .insert_merge_attempt(&attempt, now + 2, now + 2)
+            .expect("insert queue attempt");
+
+        if approved {
+            ledger
+                .insert_approval(&Approval {
+                    id: format!("approval-{id}"),
+                    merge_attempt_id: attempt.id,
+                    approved_by: DEFAULT_OPERATOR_ID.to_string(),
+                    approved_verified_tree_id: format!("{id}-tree"),
+                    approved_verified_commit_id: format!("{id}-verified"),
+                    created_at_ms: now + 3,
+                })
+                .expect("insert queue approval");
+        }
     }
 
     #[test]
@@ -4533,6 +4857,83 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, CliError::Usage(message) if message.contains("main moved")));
         assert!(applier.requests.borrow().is_empty());
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn queue_shows_human_readable_candidate_states() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+
+        insert_queue_candidate(
+            &ledger,
+            "session-enqueued",
+            SessionStatus::Enqueued,
+            None,
+            false,
+        );
+        insert_queue_candidate(
+            &ledger,
+            "session-preflight",
+            SessionStatus::Enqueued,
+            Some(MergeAttemptStatus::PreflightRunning),
+            false,
+        );
+        insert_queue_candidate(
+            &ledger,
+            "session-verified",
+            SessionStatus::Enqueued,
+            Some(MergeAttemptStatus::Verified),
+            false,
+        );
+        insert_queue_candidate(
+            &ledger,
+            "session-blocked",
+            SessionStatus::Enqueued,
+            Some(MergeAttemptStatus::Blocked),
+            false,
+        );
+        insert_queue_candidate(
+            &ledger,
+            "session-approved",
+            SessionStatus::Enqueued,
+            Some(MergeAttemptStatus::Verified),
+            true,
+        );
+        insert_queue_candidate(
+            &ledger,
+            "session-applied",
+            SessionStatus::Completed,
+            Some(MergeAttemptStatus::Applied),
+            true,
+        );
+
+        let options = QueueOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        };
+        let mut output = Vec::new();
+        render_queue(&options, &mut output).expect("render queue");
+        let output = String::from_utf8(output).expect("utf8 output");
+
+        assert!(output.contains("Aichestra queue"));
+        assert!(output
+            .contains("Summary: enqueued=1 preflight_running=1 verified=1 approved=1 blocked=1"));
+        assert!(output.contains("- session-enqueued [enqueued]"));
+        assert!(output.contains("- session-preflight [preflight_running]"));
+        assert!(output.contains("- session-verified [verified]"));
+        assert!(output.contains("- session-blocked [blocked]"));
+        assert!(output.contains("- session-approved [approved]"));
+        assert!(output.contains("next: aich preflight session-enqueued"));
+        assert!(output.contains("next: aich review session-verified"));
+        assert!(output.contains("next: aich apply session-approved"));
+        assert!(!output.contains("session-applied ["));
 
         let _ = fs::remove_dir_all(repo);
     }

@@ -73,6 +73,18 @@ Choose one strategy and keep it consistent.
 
 `aich session complete <session-id>` is the candidate creation boundary. It inspects the session worktree, commits any dirty tracked or unignored untracked changes on the session branch, records the patch set and generated Change Manifest, and marks sessions with real diffs as `enqueued`. If the session branch has no diff from its recorded base commit, the session is marked `noop` and does not enter the merge queue.
 
+## Queue display
+
+`aich queue` is a read-only view of candidates that still need merge-queue attention. It combines session status, the latest merge attempt, semantic review evidence, and approval records into human-facing states:
+
+- `enqueued`: session completion produced a candidate, but preflight has not produced a merge attempt yet
+- `preflight_running`: the latest merge attempt is currently in preflight or applying transition state
+- `verified`: preflight checks passed and a verified tree/commit exists, but approval has not been recorded
+- `approved`: a human approval exists for the verified tree/commit and the next step is apply
+- `blocked`: the latest merge attempt is blocked by conflict, failed checks, or blocking semantic review
+
+Applied candidates are omitted from the queue view because they no longer require merge-queue action.
+
 ## Conflict detection
 
 MVP may use normal Git operations in a temporary sandbox because this is easiest to reason about:

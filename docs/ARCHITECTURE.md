@@ -106,7 +106,7 @@ flowchart TB
 3. Each LLM runs only in its own session worktree.
 4. On completion, Aichestra records actual diffs, creates a candidate patch set, and writes a generated Change Manifest draft.
 5. The generated manifest records diff-derived file evidence and remains subject to human/semantic review.
-6. A candidate enters the local merge queue.
+6. A candidate enters the local merge queue and appears in `aich queue` as `enqueued`.
 7. Preflight creates a temporary sandbox from latest main.
 8. The candidate is mechanically merged using the same strategy that will be used to apply.
 9. Checks run in the sandbox and store stdout/stderr artifacts.
@@ -121,6 +121,7 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - LLM session cwd is a session worktree.
 - Main worktree is not handed to agents.
 - The merge queue is the only path to main.
+- `aich queue` is read-only and reports candidate state from session, merge attempt, review, and approval ledger records.
 - Preflight and apply must use the same candidate result.
 - Semantic review is advisory evidence. It can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.
