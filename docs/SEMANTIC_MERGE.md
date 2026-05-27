@@ -163,3 +163,5 @@ Human review should show:
 - unresolved uncertainty
 
 The user should approve with awareness of semantic risk.
+
+`aich approve <session-id>` can approve `low`, `medium`, or `high` semantic review results, because those risks remain advisory. A `blocked` semantic review marks the merge attempt blocked and must be resolved before approval.

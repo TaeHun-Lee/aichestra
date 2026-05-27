@@ -110,6 +110,19 @@ The current local MVP reviewer is deterministic and conservative. It does not ca
 
 If the configured `semantic_review.risk_block_levels` contains the produced risk level, the merge attempt is marked `blocked`. By default only `blocked` risk blocks the attempt. Non-blocking risks remain advisory evidence for the later human approval gate.
 
+## Approval implementation
+
+`aich approve <session-id>` records human approval for the latest merge attempt only. The command refuses approval unless:
+
+- the latest merge attempt is `verified`
+- sandbox checks passed
+- verified tree and commit ids are present
+- semantic review has been recorded
+- semantic review did not block the attempt
+- current main still matches the preflight `main_before_commit`
+
+The approval row stores the operator id, merge attempt id, `approved_verified_tree_id`, and `approved_verified_commit_id`. This intentionally approves the verified candidate result, not the original session branch. Re-running preflight creates a new merge attempt and therefore requires a new review/approval path.
+
 ## Applying to main
 
 Before apply:

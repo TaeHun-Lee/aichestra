@@ -6,9 +6,9 @@ use std::fs;
 use std::path::Path;
 
 use aich_core::{
-    ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, ContextSnapshot, EventName,
-    MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole, OperatorStatus, PatchSet,
-    SemanticReview, SemanticRiskLevel, Session, SessionStatus,
+    Approval, ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, ContextSnapshot,
+    EventName, MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole, OperatorStatus,
+    PatchSet, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
 };
 use rusqlite::{params, types::Type, Connection, Row};
 
@@ -739,6 +739,57 @@ impl Ledger {
         Ok(results)
     }
 
+    pub fn insert_approval(&self, approval: &Approval) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO approvals (
+              id, merge_attempt_id, approved_by, approved_verified_tree_id,
+              approved_verified_commit_id, decision, created_at_ms
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, 'approved', ?6)
+            "#,
+            params![
+                &approval.id,
+                &approval.merge_attempt_id,
+                &approval.approved_by,
+                &approval.approved_verified_tree_id,
+                &approval.approved_verified_commit_id,
+                approval.created_at_ms,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_approvals(&self, merge_attempt_id: &str) -> Result<Vec<Approval>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, merge_attempt_id, approved_by, approved_verified_tree_id,
+                   approved_verified_commit_id, created_at_ms
+            FROM approvals
+            WHERE merge_attempt_id = ?1
+              AND decision = 'approved'
+            ORDER BY created_at_ms ASC, id ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![merge_attempt_id], |row| {
+            Ok(Approval {
+                id: row.get(0)?,
+                merge_attempt_id: row.get(1)?,
+                approved_by: row.get(2)?,
+                approved_verified_tree_id: row.get(3)?,
+                approved_verified_commit_id: row.get(4)?,
+                created_at_ms: row.get(5)?,
+            })
+        })?;
+
+        let mut approvals = Vec::new();
+        for row in rows {
+            approvals.push(row?);
+        }
+        Ok(approvals)
+    }
+
     pub fn append_event(&self, event: &NewEvent) -> Result<i64> {
         self.conn.execute(
             r#"
@@ -1187,6 +1238,20 @@ mod tests {
                 .list_semantic_reviews("merge-1")
                 .expect("list semantic reviews"),
             vec![semantic_review]
+        );
+
+        let approval = Approval {
+            id: "approval-1".to_string(),
+            merge_attempt_id: "merge-1".to_string(),
+            approved_by: "local-user".to_string(),
+            approved_verified_tree_id: "tree-1".to_string(),
+            approved_verified_commit_id: "verified-commit".to_string(),
+            created_at_ms: now + 10,
+        };
+        ledger.insert_approval(&approval).expect("insert approval");
+        assert_eq!(
+            ledger.list_approvals("merge-1").expect("list approvals"),
+            vec![approval]
         );
 
         drop(ledger);

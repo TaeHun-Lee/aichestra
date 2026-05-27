@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use aich_core::clock::now_millis;
 use aich_core::{
-    ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, ContextSnapshot, EventName,
-    MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole, PatchSet, SemanticReview,
-    SemanticRiskLevel, Session, SessionStatus,
+    assert_verified_candidate_can_apply, Approval, ChangeManifest, ChangedFile, CheckResult,
+    CheckResultStatus, ContextSnapshot, EventName, MergeAttempt, MergeAttemptStatus, NewEvent,
+    Operator, OperatorRole, PatchSet, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
 };
 use aich_git::{
     CheckCommand, CompleteSessionWorktreeOutcome, CompleteSessionWorktreeRequest,
@@ -24,6 +24,7 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static ARTIFACT_COUNTER: AtomicU64 = AtomicU64::new(1);
 static MERGE_ATTEMPT_COUNTER: AtomicU64 = AtomicU64::new(1);
 static SEMANTIC_REVIEW_COUNTER: AtomicU64 = AtomicU64::new(1);
+static APPROVAL_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 const DEFAULT_OPERATOR_ID: &str = "local-user";
 const DEFAULT_OPERATOR_NAME: &str = "Local User";
@@ -198,6 +199,14 @@ pub struct ReviewRunResult {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ApproveRunResult {
+    pub approval: Approval,
+    pub merge_attempt: MergeAttempt,
+    pub operator: Operator,
+    pub semantic_reviews: Vec<SemanticReview>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct StatusOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
@@ -232,6 +241,14 @@ struct PreflightOptions {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct ReviewOptions {
+    repo_root: PathBuf,
+    db_path: Option<PathBuf>,
+    session_id: String,
+    operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ApproveOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
     session_id: String,
@@ -327,6 +344,35 @@ where
             if result.blocked {
                 writeln!(out, "Blocked: semantic_review")?;
             }
+            Ok(())
+        }
+        Some("approve") => {
+            let options = parse_approve_options(&args[1..], cwd)?;
+            let git = NativeGitWorktreeManager;
+            let result = run_approve_with(&options, &git)?;
+            writeln!(out, "Approved {}", result.merge_attempt.session_id)?;
+            writeln!(out, "Approval: {}", result.approval.id)?;
+            writeln!(out, "Merge attempt: {}", result.merge_attempt.id)?;
+            writeln!(out, "Operator: {}", result.operator.id)?;
+            writeln!(
+                out,
+                "Approved tree: {}",
+                result.approval.approved_verified_tree_id
+            )?;
+            writeln!(
+                out,
+                "Approved commit: {}",
+                result.approval.approved_verified_commit_id
+            )?;
+            writeln!(
+                out,
+                "Semantic risk: {}",
+                result
+                    .merge_attempt
+                    .semantic_risk_level
+                    .as_deref()
+                    .unwrap_or("unknown")
+            )?;
             Ok(())
         }
         Some("status") => {
@@ -834,6 +880,69 @@ fn parse_review_options(args: &[String], cwd: &Path) -> Result<ReviewOptions, Cl
     };
 
     Ok(ReviewOptions {
+        repo_root,
+        db_path,
+        session_id,
+        operator_id,
+    })
+}
+
+fn parse_approve_options(args: &[String], cwd: &Path) -> Result<ApproveOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut operator_id = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown approve option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "approve accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage("approve requires <session-id>".to_string()));
+    };
+
+    Ok(ApproveOptions {
         repo_root,
         db_path,
         session_id,
@@ -1646,6 +1755,11 @@ fn next_semantic_review_id(created_at_ms: i64) -> String {
     format!("semantic-review-{created_at_ms}-{counter}")
 }
 
+fn next_approval_id(created_at_ms: i64) -> String {
+    let counter = APPROVAL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("approval-{created_at_ms}-{counter}")
+}
+
 fn next_artifact_id(created_at_ms: i64) -> String {
     let counter = ARTIFACT_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{created_at_ms}-{counter}")
@@ -1879,9 +1993,9 @@ fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError>
                 session.id, session.id
             ))
         })?;
-    let attempt = latest_verified_merge_attempt(&ledger, &session.id)?.ok_or_else(|| {
+    let attempt = latest_merge_attempt(&ledger, &session.id)?.ok_or_else(|| {
         CliError::Usage(format!(
-            "session '{}' has no verified preflight attempt; run `aich preflight {}` first",
+            "session '{}' has no preflight attempt; run `aich preflight {}` first",
             session.id, session.id
         ))
     })?;
@@ -2004,15 +2118,104 @@ fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError>
     })
 }
 
-fn latest_verified_merge_attempt(
+fn latest_merge_attempt(
     ledger: &Ledger,
     session_id: &str,
 ) -> Result<Option<MergeAttempt>, CliError> {
-    Ok(ledger
-        .list_merge_attempts(session_id)?
-        .into_iter()
-        .rev()
-        .find(|attempt| attempt.status == MergeAttemptStatus::Verified))
+    Ok(ledger.list_merge_attempts(session_id)?.into_iter().last())
+}
+
+fn run_approve_with<R>(options: &ApproveOptions, git_repo: &R) -> Result<ApproveRunResult, CliError>
+where
+    R: GitRepository,
+{
+    let aichestra_dir = options.repo_root.join(".aichestra");
+    let config_path = aichestra_dir.join("config.yaml");
+    if !config_path.exists() {
+        return Err(CliError::Usage(format!(
+            "Aichestra config not found at {}; run `aich init` first",
+            config_path.display()
+        )));
+    }
+
+    let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
+    let operator = resolve_active_operator(&ledger, options.operator_id.as_deref())?;
+    let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
+        CliError::Usage(format!("session '{}' does not exist", options.session_id))
+    })?;
+    let attempt = latest_merge_attempt(&ledger, &session.id)?.ok_or_else(|| {
+        CliError::Usage(format!(
+            "session '{}' has no preflight attempt; run `aich preflight {}` first",
+            session.id, session.id
+        ))
+    })?;
+    ensure_attempt_can_be_approved(&attempt)?;
+
+    let semantic_reviews = ledger.list_semantic_reviews(&attempt.id)?;
+    let Some(latest_review) = semantic_reviews.last() else {
+        return Err(CliError::Usage(format!(
+            "merge attempt '{}' has no semantic review; run `aich review {}` first",
+            attempt.id, session.id
+        )));
+    };
+    if latest_review.risk_level == SemanticRiskLevel::Blocked {
+        return Err(CliError::Usage(format!(
+            "merge attempt '{}' has blocked semantic risk; revise the candidate and run preflight/review again",
+            attempt.id
+        )));
+    }
+
+    let current_main = git_repo.head_commit(&options.repo_root)?.commit_id;
+    let created_at_ms = now_millis();
+    let approval = Approval {
+        id: next_approval_id(created_at_ms),
+        merge_attempt_id: attempt.id.clone(),
+        approved_by: operator.id.clone(),
+        approved_verified_tree_id: attempt
+            .verified_tree_id
+            .clone()
+            .expect("verified attempt must have tree id"),
+        approved_verified_commit_id: attempt
+            .verified_commit_id
+            .clone()
+            .expect("verified attempt must have commit id"),
+        created_at_ms,
+    };
+    assert_verified_candidate_can_apply(&attempt, &approval, &current_main)
+        .map_err(|error| CliError::Usage(format!("candidate cannot be approved: {error}")))?;
+
+    ledger.append_event(
+        &NewEvent::new(EventName::ApprovalRequested)
+            .with_subject("merge_attempt", attempt.id.clone())
+            .with_data_json(format!(
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"verified_tree_id\":\"{}\",\"verified_commit_id\":\"{}\",\"semantic_risk_level\":\"{}\"}}",
+                json_escape(&operator.id),
+                json_escape(&session.id),
+                json_escape(&approval.approved_verified_tree_id),
+                json_escape(&approval.approved_verified_commit_id),
+                json_escape(attempt.semantic_risk_level.as_deref().unwrap_or("unknown"))
+            )),
+    )?;
+    ledger.insert_approval(&approval)?;
+    ledger.append_event(
+        &NewEvent::new(EventName::ApprovalApproved)
+            .with_subject("merge_attempt", attempt.id.clone())
+            .with_data_json(format!(
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"approval_id\":\"{}\",\"verified_tree_id\":\"{}\",\"verified_commit_id\":\"{}\"}}",
+                json_escape(&operator.id),
+                json_escape(&session.id),
+                json_escape(&approval.id),
+                json_escape(&approval.approved_verified_tree_id),
+                json_escape(&approval.approved_verified_commit_id)
+            )),
+    )?;
+
+    Ok(ApproveRunResult {
+        approval,
+        merge_attempt: attempt,
+        operator,
+        semantic_reviews,
+    })
 }
 
 fn ensure_attempt_can_be_reviewed(attempt: &MergeAttempt) -> Result<(), CliError> {
@@ -2038,6 +2241,29 @@ fn ensure_attempt_can_be_reviewed(attempt: &MergeAttempt) -> Result<(), CliError
         return Err(CliError::Usage(format!(
             "merge attempt '{}' has no verified tree/commit; run `aich preflight {}` again",
             attempt.id, attempt.session_id
+        )));
+    }
+
+    Ok(())
+}
+
+fn ensure_attempt_can_be_approved(attempt: &MergeAttempt) -> Result<(), CliError> {
+    ensure_attempt_can_be_reviewed(attempt)?;
+    if attempt
+        .semantic_risk_level
+        .as_deref()
+        .unwrap_or("")
+        .is_empty()
+    {
+        return Err(CliError::Usage(format!(
+            "merge attempt '{}' has no semantic risk result; run `aich review {}` first",
+            attempt.id, attempt.session_id
+        )));
+    }
+    if attempt.semantic_risk_level.as_deref() == Some(SemanticRiskLevel::Blocked.as_str()) {
+        return Err(CliError::Usage(format!(
+            "merge attempt '{}' is blocked by semantic review",
+            attempt.id
         )));
     }
 
@@ -2929,7 +3155,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]
@@ -3136,6 +3362,12 @@ mod tests {
         assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
     }
 
+    #[test]
+    fn approve_requires_session_id() {
+        let err = parse_approve_options(&[], Path::new(".")).unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+    }
+
     fn seed_verified_review_candidate(
         repo: &Path,
         changed_file_path: &str,
@@ -3203,7 +3435,7 @@ mod tests {
             id: "merge-review".to_string(),
             session_id: session.id.clone(),
             status: MergeAttemptStatus::Verified,
-            main_before_commit: "main-before".to_string(),
+            main_before_commit: "base-commit".to_string(),
             candidate_commit: "head-commit".to_string(),
             apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
             verified_tree_id: Some("verified-tree".to_string()),
@@ -3805,6 +4037,91 @@ mod tests {
                 .len(),
             1
         );
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn approve_records_exact_verified_tree_after_review() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+
+        let result = run_approve_with(
+            &ApproveOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+        )
+        .expect("approve");
+
+        assert_eq!(result.merge_attempt.id, attempt.id);
+        assert_eq!(result.approval.merge_attempt_id, attempt.id);
+        assert_eq!(result.approval.approved_by, DEFAULT_OPERATOR_ID);
+        assert_eq!(result.approval.approved_verified_tree_id, "verified-tree");
+        assert_eq!(
+            result.approval.approved_verified_commit_id,
+            "verified-commit"
+        );
+        assert_eq!(
+            result.merge_attempt.semantic_risk_level.as_deref(),
+            Some("medium")
+        );
+        assert_eq!(result.semantic_reviews.len(), 1);
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert_eq!(
+            ledger.list_approvals(&attempt.id).expect("list approvals"),
+            vec![result.approval]
+        );
+        let event_names: Vec<String> = ledger
+            .list_events()
+            .expect("events")
+            .into_iter()
+            .map(|event| event.name)
+            .collect();
+        assert!(event_names.contains(&"approval.requested".to_string()));
+        assert!(event_names.contains(&"approval.approved".to_string()));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn approve_requires_semantic_review_first() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        let err = run_approve_with(
+            &ApproveOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("aich review")));
 
         let _ = fs::remove_dir_all(repo);
     }
