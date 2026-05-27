@@ -190,9 +190,11 @@ Block the candidate when:
 
 A blocked candidate should remain in the ledger with its artifacts. The developer can:
 
+- inspect `aich queue` for `blocked_reason`, recovery guidance, and artifact paths
+- inspect failed check stderr/stdout, semantic review reports, merge stderr/stdout, or `conflicts.txt`
 - ask a worker LLM to revise the session branch
 - create a conflict-resolution session
 - manually edit the session branch
 - abandon the candidate
 
-Every retry creates a new MergeAttempt.
+After revising the candidate, run `aich session complete <session-id>` to record the new candidate head and then run `aich preflight <session-id>` again. Every retry creates a new MergeAttempt.

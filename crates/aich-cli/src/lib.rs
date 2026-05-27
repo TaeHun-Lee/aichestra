@@ -19,7 +19,9 @@ use aich_git::{
     PreflightVerified, SessionWorktreeCompleter, VerifiedCommitApplier, WorktreeError,
     WorktreeManager,
 };
-use aich_ledger::{Ledger, MergeAttemptResultUpdate, MergeAttemptSemanticReviewUpdate};
+use aich_ledger::{
+    EventRecord, Ledger, MergeAttemptResultUpdate, MergeAttemptSemanticReviewUpdate,
+};
 use sha2::{Digest, Sha256};
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -369,7 +371,16 @@ struct QueueEntry {
     latest_attempt: Option<MergeAttempt>,
     latest_approval: Option<Approval>,
     latest_review: Option<SemanticReview>,
-    check_count: usize,
+    check_results: Vec<CheckResult>,
+    blocked_recovery: Option<BlockedRecovery>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct BlockedRecovery {
+    reason: String,
+    summary: String,
+    artifacts: Vec<String>,
+    next_steps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1967,7 +1978,7 @@ fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Result<(), Cli
             writeln!(
                 out,
                 "  checks: {}",
-                queue_check_label(attempt, entry.check_count)
+                queue_check_label(attempt, entry.check_results.len())
             )?;
         }
         if let Some(review) = entry.latest_review.as_ref() {
@@ -1984,6 +1995,22 @@ fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Result<(), Cli
                 "  approval: {} by {}",
                 approval.id, approval.approved_by
             )?;
+        }
+        if let Some(recovery) = entry.blocked_recovery.as_ref() {
+            writeln!(out, "  blocked_reason: {}", recovery.reason)?;
+            writeln!(out, "  recovery: {}", recovery.summary)?;
+            if !recovery.artifacts.is_empty() {
+                writeln!(out, "  artifacts:")?;
+                for artifact in &recovery.artifacts {
+                    writeln!(out, "    - {artifact}")?;
+                }
+            }
+            if !recovery.next_steps.is_empty() {
+                writeln!(out, "  next_steps:")?;
+                for step in &recovery.next_steps {
+                    writeln!(out, "    - {step}")?;
+                }
+            }
         }
         writeln!(out, "  next: {}", queue_next_action(&entry))?;
     }
@@ -2071,13 +2098,14 @@ struct QueueStatusSummary {
 
 fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError> {
     let mut entries = Vec::new();
+    let events = ledger.list_events()?;
 
     for session in ledger.list_sessions()? {
         let attempts = ledger.list_merge_attempts(&session.id)?;
         let latest_attempt = attempts.into_iter().last();
         let mut latest_approval = None;
         let mut latest_review = None;
-        let mut check_count = 0;
+        let mut check_results = Vec::new();
 
         if let Some(attempt) = latest_attempt.as_ref() {
             latest_approval = ledger.list_approvals(&attempt.id)?.into_iter().last();
@@ -2085,7 +2113,7 @@ fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError> {
                 .list_semantic_reviews(&attempt.id)?
                 .into_iter()
                 .last();
-            check_count = ledger.list_check_results(&attempt.id)?.len();
+            check_results = ledger.list_check_results(&attempt.id)?;
         }
 
         let Some(status) =
@@ -2093,6 +2121,15 @@ fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError> {
         else {
             continue;
         };
+        let blocked_recovery = latest_attempt.as_ref().and_then(|attempt| {
+            blocked_recovery_for_queue_entry(
+                &session,
+                attempt,
+                latest_review.as_ref(),
+                &check_results,
+                &events,
+            )
+        });
 
         entries.push(QueueEntry {
             session,
@@ -2100,7 +2137,8 @@ fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError> {
             latest_attempt,
             latest_approval,
             latest_review,
-            check_count,
+            check_results,
+            blocked_recovery,
         });
     }
 
@@ -2158,13 +2196,155 @@ fn queue_check_label(attempt: &MergeAttempt, check_count: usize) -> String {
     }
 }
 
+fn blocked_recovery_for_queue_entry(
+    session: &Session,
+    attempt: &MergeAttempt,
+    latest_review: Option<&SemanticReview>,
+    check_results: &[CheckResult],
+    events: &[EventRecord],
+) -> Option<BlockedRecovery> {
+    if attempt.status != MergeAttemptStatus::Blocked {
+        return None;
+    }
+
+    let reason = latest_blocked_reason(attempt, events)
+        .unwrap_or_else(|| infer_blocked_reason(attempt, latest_review, check_results));
+    let failed_checks: Vec<&CheckResult> = check_results
+        .iter()
+        .filter(|check| check.result == CheckResultStatus::Failed)
+        .collect();
+    let mut artifacts = Vec::new();
+    let mut next_steps = vec![
+        format!(
+            "Fix the candidate in its session worktree: {}",
+            session.worktree_path
+        ),
+        format!("Run `aich session complete {}` after the fix", session.id),
+        format!(
+            "Run `aich preflight {}` to create a new verified attempt",
+            session.id
+        ),
+    ];
+
+    let summary = match reason.as_str() {
+        "mechanical_conflict" => {
+            artifacts.push(merge_attempt_artifact(&attempt.id, "conflicts.txt"));
+            artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stderr"));
+            artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stdout"));
+            "Git could not mechanically merge the candidate into latest main.".to_string()
+        }
+        "checks_failed" => {
+            for check in &failed_checks {
+                if let Some(stderr) = check.stderr_artifact.as_deref() {
+                    artifacts.push(format!("{} stderr: {stderr}", check.name));
+                }
+                if let Some(stdout) = check.stdout_artifact.as_deref() {
+                    artifacts.push(format!("{} stdout: {stdout}", check.name));
+                }
+            }
+            if failed_checks.is_empty() {
+                "Sandbox checks failed; inspect the merge-attempt artifacts.".to_string()
+            } else {
+                format!(
+                    "Sandbox check(s) failed: {}.",
+                    failed_checks
+                        .iter()
+                        .map(|check| check.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        }
+        "semantic_review" => {
+            if let Some(review) = latest_review {
+                if let Some(report_path) = review.report_path.as_deref() {
+                    artifacts.push(format!("semantic review: {report_path}"));
+                }
+            }
+            next_steps.insert(
+                0,
+                "Read the semantic review report and address the required actions".to_string(),
+            );
+            "Semantic review found blocker-level risk.".to_string()
+        }
+        "applied_tree_mismatch" => {
+            artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stdout"));
+            artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stderr"));
+            "The applied commit/tree did not match the approved verified candidate.".to_string()
+        }
+        "preflight_error" => {
+            artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stderr"));
+            artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stdout"));
+            "Preflight failed before a verified candidate could be produced.".to_string()
+        }
+        _ => {
+            artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stderr"));
+            artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stdout"));
+            "The merge attempt is blocked; inspect the recorded artifacts and event log."
+                .to_string()
+        }
+    };
+
+    artifacts.sort();
+    artifacts.dedup();
+
+    Some(BlockedRecovery {
+        reason,
+        summary,
+        artifacts,
+        next_steps,
+    })
+}
+
+fn latest_blocked_reason(attempt: &MergeAttempt, events: &[EventRecord]) -> Option<String> {
+    events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.name == EventName::MergeBlocked.as_str()
+                && event.subject_type.as_deref() == Some("merge_attempt")
+                && event.subject_id.as_deref() == Some(attempt.id.as_str())
+        })
+        .and_then(|event| json_string_field(&event.data_json, "reason"))
+        .filter(|reason| !reason.trim().is_empty())
+}
+
+fn infer_blocked_reason(
+    attempt: &MergeAttempt,
+    latest_review: Option<&SemanticReview>,
+    check_results: &[CheckResult],
+) -> String {
+    if latest_review
+        .map(|review| review.risk_level == SemanticRiskLevel::Blocked)
+        .unwrap_or(false)
+    {
+        "semantic_review".to_string()
+    } else if check_results
+        .iter()
+        .any(|check| check.result == CheckResultStatus::Failed)
+    {
+        "checks_failed".to_string()
+    } else if attempt.verified_commit_id.is_none() || attempt.verified_tree_id.is_none() {
+        "mechanical_conflict".to_string()
+    } else {
+        "unknown".to_string()
+    }
+}
+
+fn merge_attempt_artifact(attempt_id: &str, artifact_name: &str) -> String {
+    format!(".aichestra/artifacts/merge-attempts/{attempt_id}/{artifact_name}")
+}
+
 fn queue_next_action(entry: &QueueEntry) -> String {
     match entry.status.as_str() {
         "enqueued" => format!("aich preflight {}", entry.session.id),
         "preflight_running" => "wait for preflight to finish or inspect artifacts".to_string(),
         "verified" => format!("aich review {}", entry.session.id),
         "approved" => format!("aich apply {}", entry.session.id),
-        "blocked" => "revise candidate, then run aich preflight again".to_string(),
+        "blocked" => format!(
+            "follow recovery steps, then run aich session complete {}, then aich preflight {}",
+            entry.session.id, entry.session.id
+        ),
         _ => "-".to_string(),
     }
 }
@@ -4205,6 +4385,34 @@ fn json_escape(value: &str) -> String {
         .replace('\n', "\\n")
 }
 
+fn json_string_field(data: &str, field: &str) -> Option<String> {
+    let needle = format!("\"{field}\":\"");
+    let start = data.find(&needle)? + needle.len();
+    let mut escaped = false;
+    let mut value = String::new();
+
+    for character in data[start..].chars() {
+        if escaped {
+            value.push(match character {
+                'n' => '\n',
+                '"' => '"',
+                '\\' => '\\',
+                other => other,
+            });
+            escaped = false;
+            continue;
+        }
+
+        match character {
+            '\\' => escaped = true,
+            '"' => return Some(value),
+            other => value.push(other),
+        }
+    }
+
+    None
+}
+
 fn short_hash(value: &str) -> String {
     value.chars().take(7).collect()
 }
@@ -5717,6 +5925,70 @@ mod tests {
         assert!(output.contains("next: aich review session-verified"));
         assert!(output.contains("next: aich apply session-approved"));
         assert!(!output.contains("session-applied ["));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn queue_shows_blocked_check_recovery_guidance() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        insert_queue_candidate(
+            &ledger,
+            "session-blocked-check",
+            SessionStatus::Enqueued,
+            Some(MergeAttemptStatus::Blocked),
+            false,
+        );
+        ledger
+            .insert_check_result(&CheckResult {
+                id: "check-blocked".to_string(),
+                merge_attempt_id: "merge-session-blocked-check".to_string(),
+                name: "test".to_string(),
+                command: "cargo test --all".to_string(),
+                result: CheckResultStatus::Failed,
+                stdout_artifact: Some(
+                    ".aichestra/artifacts/merge-attempts/merge-session-blocked-check/checks/0-test.stdout"
+                        .to_string(),
+                ),
+                stderr_artifact: Some(
+                    ".aichestra/artifacts/merge-attempts/merge-session-blocked-check/checks/0-test.stderr"
+                        .to_string(),
+                ),
+                created_at_ms: now_millis(),
+            })
+            .expect("insert failed check");
+        ledger
+            .append_event(
+                &NewEvent::new(EventName::MergeBlocked)
+                    .with_subject("merge_attempt", "merge-session-blocked-check")
+                    .with_data_json(
+                        "{\"operator_id\":\"local-user\",\"session_id\":\"session-blocked-check\",\"reason\":\"checks_failed\"}",
+                    ),
+            )
+            .expect("blocked event");
+
+        let mut output = Vec::new();
+        render_queue(
+            &QueueOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+            },
+            &mut output,
+        )
+        .expect("render queue");
+        let output = String::from_utf8(output).expect("utf8 output");
+
+        assert!(output.contains("blocked_reason: checks_failed"));
+        assert!(output.contains("recovery: Sandbox check(s) failed: test."));
+        assert!(output.contains("test stderr: .aichestra/artifacts/merge-attempts/merge-session-blocked-check/checks/0-test.stderr"));
+        assert!(output.contains("Run `aich session complete session-blocked-check` after the fix"));
+        assert!(output.contains("then run aich session complete session-blocked-check"));
 
         let _ = fs::remove_dir_all(repo);
     }

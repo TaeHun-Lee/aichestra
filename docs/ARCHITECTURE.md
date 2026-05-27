@@ -123,6 +123,7 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - The merge queue is the only path to main.
 - `preflight` and `apply` serialize queue activity through a durable SQLite `merge-queue` lock.
 - `aich queue` reports candidate state from session, merge attempt, review, approval, and queue lock ledger records.
+- Blocked queue entries include recovery guidance, relevant artifact paths, and the exact rerun sequence for the session candidate.
 - `aich queue unlock --force` is the explicit local recovery path for stale queue locks and records `merge.queue_unlocked`.
 - `aich doctor` is a read-only local health check for initialization files, ledger access, default operator identity, queue entries, and stale queue lock suspicion.
 - Preflight and apply must use the same candidate result.
