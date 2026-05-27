@@ -59,6 +59,27 @@ pub struct Ledger {
     conn: Connection,
 }
 
+pub struct LedgerTransaction<'a> {
+    ledger: &'a Ledger,
+    completed: bool,
+}
+
+impl LedgerTransaction<'_> {
+    pub fn commit(mut self) -> Result<()> {
+        self.ledger.conn.execute_batch("COMMIT")?;
+        self.completed = true;
+        Ok(())
+    }
+}
+
+impl Drop for LedgerTransaction<'_> {
+    fn drop(&mut self) {
+        if !self.completed {
+            let _ = self.ledger.conn.execute_batch("ROLLBACK");
+        }
+    }
+}
+
 pub struct MergeAttemptResultUpdate<'a> {
     pub id: &'a str,
     pub status: MergeAttemptStatus,
@@ -109,6 +130,14 @@ impl Ledger {
             "ALTER TABLE check_results ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0",
         )?;
         Ok(())
+    }
+
+    pub fn begin_immediate_transaction(&self) -> Result<LedgerTransaction<'_>> {
+        self.conn.execute_batch("BEGIN IMMEDIATE TRANSACTION")?;
+        Ok(LedgerTransaction {
+            ledger: self,
+            completed: false,
+        })
     }
 
     fn ensure_column(&self, table: &str, column: &str, alter_sql: &str) -> Result<()> {
@@ -1205,6 +1234,52 @@ mod tests {
         let operators = ledger.list_operators().expect("list operators");
         assert_eq!(operators.len(), 1);
         assert_eq!(operators[0].role, OperatorRole::Maintainer);
+
+        drop(ledger);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn transaction_rolls_back_when_not_committed() {
+        let db_path = unique_db_path();
+        let ledger = Ledger::open(&db_path).expect("open ledger");
+        let now = now_millis();
+        let session = Session::new(
+            "session-tx",
+            "transaction test",
+            "codex",
+            "aich/session-tx/test",
+            ".aichestra/worktrees/session-tx",
+            "base-commit",
+            now,
+        );
+
+        {
+            let _tx = ledger
+                .begin_immediate_transaction()
+                .expect("begin transaction");
+            ledger.insert_session(&session).expect("insert session");
+        }
+
+        assert!(ledger
+            .get_session("session-tx")
+            .expect("get rolled back session")
+            .is_none());
+
+        {
+            let tx = ledger
+                .begin_immediate_transaction()
+                .expect("begin transaction");
+            ledger.insert_session(&session).expect("insert session");
+            tx.commit().expect("commit transaction");
+        }
+
+        assert_eq!(
+            ledger
+                .get_session("session-tx")
+                .expect("get committed session"),
+            Some(session)
+        );
 
         drop(ledger);
         let _ = fs::remove_file(db_path);

@@ -131,6 +131,7 @@ where
     if applied.applied_commit_id != approval.approved_verified_commit_id
         || applied.applied_tree_id != approval.approved_verified_tree_id
     {
+        let tx = ledger.begin_immediate_transaction()?;
         ledger.update_merge_attempt_status(
             &attempt.id,
             MergeAttemptStatus::Blocked,
@@ -145,6 +146,7 @@ where
                     json_escape(&session.id)
                 )),
         )?;
+        tx.commit()?;
         return Err(CliError::Usage(
             "applied commit/tree did not match the approved verified candidate".to_string(),
         ));
@@ -318,6 +320,7 @@ fn finish_applied_attempt(
     operator: &Operator,
     applied: AppliedCandidate<'_>,
 ) -> Result<ApplyRunResult, CliError> {
+    let tx = ledger.begin_immediate_transaction()?;
     if attempt.status != MergeAttemptStatus::Applied {
         ledger.update_merge_attempt_status(
             &attempt.id,
@@ -343,6 +346,7 @@ fn finish_applied_attempt(
                 )),
         )?;
     }
+    tx.commit()?;
 
     let merge_attempt = ledger
         .get_merge_attempt(&attempt.id)?

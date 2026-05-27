@@ -89,6 +89,7 @@ where
     assert_verified_candidate_can_apply(&attempt, &approval, &current_main)
         .map_err(|error| CliError::Usage(format!("candidate cannot be approved: {error}")))?;
 
+    let tx = ledger.begin_immediate_transaction()?;
     ledger.append_event(
         &NewEvent::new(EventName::ApprovalRequested)
             .with_subject("merge_attempt", attempt.id.clone())
@@ -114,6 +115,7 @@ where
                 json_escape(&approval.approved_verified_commit_id)
             )),
     )?;
+    tx.commit()?;
 
     Ok(ApproveRunResult {
         approval,

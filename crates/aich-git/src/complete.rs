@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::{
     current_branch_name, git_diff_has_changes, run_git_stdout, run_git_success,
     run_git_success_with_config, NativeGitWorktreeManager, WorktreeError,
@@ -8,6 +10,7 @@ use std::path::PathBuf;
 pub struct GitChangedFile {
     pub path: String,
     pub change_type: String,
+    pub symbols_json: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -103,8 +106,8 @@ impl SessionWorktreeCompleter for NativeGitWorktreeManager {
             CompletedSessionWorktree {
                 head_commit,
                 diff_stat,
+                changed_files: parse_changed_files(&name_status, &diff_patch),
                 diff_patch,
-                changed_files: parse_name_status(&name_status),
                 committed_worktree_changes,
             },
         ))
@@ -187,9 +190,21 @@ pub(crate) fn parse_name_status(output: &str) -> Vec<GitChangedFile> {
             Some(GitChangedFile {
                 path: path.to_string(),
                 change_type: change_type_from_name_status(status).to_string(),
+                symbols_json: "[]".to_string(),
             })
         })
         .collect()
+}
+
+pub(crate) fn parse_changed_files(name_status: &str, diff_patch: &str) -> Vec<GitChangedFile> {
+    let symbols_by_path = changed_symbols_by_path(diff_patch);
+    let mut files = parse_name_status(name_status);
+    for file in &mut files {
+        if let Some(symbols) = symbols_by_path.get(&file.path) {
+            file.symbols_json = json_string_array(symbols);
+        }
+    }
+    files
 }
 
 fn change_type_from_name_status(status: &str) -> &'static str {
@@ -203,4 +218,177 @@ fn change_type_from_name_status(status: &str) -> &'static str {
         Some('U') => "unmerged",
         _ => "changed",
     }
+}
+
+fn changed_symbols_by_path(diff_patch: &str) -> BTreeMap<String, Vec<String>> {
+    let mut current_path: Option<String> = None;
+    let mut symbols: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+    for line in diff_patch.lines() {
+        if let Some(path) = diff_git_b_path(line) {
+            current_path = Some(path.to_string());
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            if path != "/dev/null" {
+                current_path = Some(path.to_string());
+            }
+            continue;
+        }
+
+        let Some(path) = current_path.as_deref() else {
+            continue;
+        };
+
+        if let Some(context) = hunk_header_context(line) {
+            insert_symbol_candidate(&mut symbols, path, context);
+            continue;
+        }
+
+        if (line.starts_with('+') || line.starts_with('-'))
+            && !line.starts_with("+++")
+            && !line.starts_with("---")
+        {
+            insert_symbol_candidate(&mut symbols, path, &line[1..]);
+        }
+    }
+
+    symbols
+        .into_iter()
+        .map(|(path, values)| (path, values.into_iter().collect()))
+        .collect()
+}
+
+fn diff_git_b_path(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("diff --git ")?;
+    let mut parts = rest.split_whitespace();
+    let _a_path = parts.next()?;
+    let b_path = parts.next()?;
+    b_path.strip_prefix("b/")
+}
+
+fn hunk_header_context(line: &str) -> Option<&str> {
+    if !line.starts_with("@@") {
+        return None;
+    }
+    let end = line.rfind("@@")?;
+    let context = line[end + 2..].trim();
+    if context.is_empty() {
+        None
+    } else {
+        Some(context)
+    }
+}
+
+fn insert_symbol_candidate(
+    symbols: &mut BTreeMap<String, BTreeSet<String>>,
+    path: &str,
+    line: &str,
+) {
+    if let Some(symbol) = symbol_from_declaration(line) {
+        symbols.entry(path.to_string()).or_default().insert(symbol);
+    }
+}
+
+fn symbol_from_declaration(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
+        return None;
+    }
+
+    let normalized = line
+        .trim_start_matches("pub ")
+        .trim_start_matches("pub(crate) ")
+        .trim_start_matches("pub(super) ")
+        .trim_start_matches("export ")
+        .trim_start_matches("default ")
+        .trim_start_matches("async ")
+        .trim();
+
+    for keyword in [
+        "fn", "struct", "enum", "trait", "mod", "type", "const", "static",
+    ] {
+        if let Some(name) = symbol_name_after_keyword(normalized, keyword) {
+            return Some(name);
+        }
+    }
+
+    if let Some(value) = normalized.strip_prefix("impl ") {
+        let name = clean_symbol_name(value);
+        if !name.is_empty() {
+            return Some(format!("impl {name}"));
+        }
+    }
+
+    for keyword in ["function", "class", "interface", "def", "func"] {
+        if let Some(name) = symbol_name_after_keyword(normalized, keyword) {
+            return Some(name);
+        }
+    }
+
+    for keyword in ["const", "let", "var"] {
+        if let Some(name) = symbol_name_after_keyword(normalized, keyword) {
+            return Some(name);
+        }
+    }
+
+    None
+}
+
+fn symbol_name_after_keyword(line: &str, keyword: &str) -> Option<String> {
+    let value = line.strip_prefix(keyword)?;
+    if !value.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let name = clean_symbol_name(value.trim());
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+fn clean_symbol_name(value: &str) -> String {
+    value
+        .trim_start_matches("async ")
+        .trim_start_matches("unsafe ")
+        .trim()
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '<' | '>' | '\''))
+        .collect::<String>()
+        .to_string()
+}
+
+fn json_string_array(values: &[String]) -> String {
+    if values.is_empty() {
+        return "[]".to_string();
+    }
+
+    let mut output = String::from("[");
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        output.push('"');
+        output.push_str(&json_escape(value));
+        output.push('"');
+    }
+    output.push(']');
+    output
+}
+
+fn json_escape(value: &str) -> String {
+    let mut output = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            other if other.is_control() => output.push_str(&format!("\\u{:04x}", other as u32)),
+            other => output.push(other),
+        }
+    }
+    output
 }

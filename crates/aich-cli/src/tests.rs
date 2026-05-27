@@ -1273,6 +1273,7 @@ fn session_complete_records_patchset_manifest_and_enqueues_session() {
             changed_files: vec![aich_git::GitChangedFile {
                 path: "src/lib.rs".to_string(),
                 change_type: "modified".to_string(),
+                symbols_json: "[\"run\"]".to_string(),
             }],
             committed_worktree_changes: true,
         },
@@ -1291,6 +1292,7 @@ fn session_complete_records_patchset_manifest_and_enqueues_session() {
     let manifest = fs::read_to_string(&manifest_path).expect("read manifest");
     assert!(manifest.contains("session_id:"));
     assert!(manifest.contains("src/lib.rs"));
+    assert!(manifest.contains("- \"run\""));
     assert!(manifest.contains(CHANGE_MANIFEST_VALIDATION_STATUS));
 
     let requests = completer.requests.borrow();
@@ -1315,6 +1317,7 @@ fn session_complete_records_patchset_manifest_and_enqueues_session() {
         .expect("changed files");
     assert_eq!(changed_files[0].path, "src/lib.rs");
     assert_eq!(changed_files[0].change_type, "modified");
+    assert_eq!(changed_files[0].symbols_json, "[\"run\"]");
     assert_eq!(
         ledger
             .list_context_snapshots(&session.id)
@@ -1451,6 +1454,7 @@ fn preflight_records_verified_attempt_and_check_artifacts() {
             changed_files: vec![aich_git::GitChangedFile {
                 path: "src/lib.rs".to_string(),
                 change_type: "modified".to_string(),
+                symbols_json: "[]".to_string(),
             }],
             committed_worktree_changes: true,
         },
@@ -1758,6 +1762,7 @@ fn preflight_reads_main_before_from_configured_main_ref() {
             changed_files: vec![aich_git::GitChangedFile {
                 path: "README.md".to_string(),
                 change_type: "modified".to_string(),
+                symbols_json: "[]".to_string(),
             }],
             committed_worktree_changes: true,
         },
@@ -1844,6 +1849,7 @@ fn preflight_records_blocked_attempt_when_checks_fail() {
             changed_files: vec![aich_git::GitChangedFile {
                 path: "README.md".to_string(),
                 change_type: "modified".to_string(),
+                symbols_json: "[]".to_string(),
             }],
             committed_worktree_changes: true,
         },

@@ -94,6 +94,7 @@ where
         checks_passed: false,
         semantic_risk_level: None,
     };
+    let tx = ledger.begin_immediate_transaction()?;
     ledger.insert_merge_attempt(&attempt, created_at_ms, created_at_ms)?;
     ledger.append_event(
         &NewEvent::new(EventName::MergePreflightStarted)
@@ -106,6 +107,7 @@ where
                 json_escape(&candidate_commit)
             )),
     )?;
+    tx.commit()?;
 
     let check_commands = check_commands_from_config(&config_path)?;
     let outcome = match preflight_runner.run_preflight(&PreflightRequest {
@@ -118,6 +120,7 @@ where
     }) {
         Ok(outcome) => outcome,
         Err(error) => {
+            let tx = ledger.begin_immediate_transaction()?;
             ledger.update_merge_attempt_result(MergeAttemptResultUpdate {
                 id: &attempt.id,
                 status: MergeAttemptStatus::Blocked,
@@ -137,6 +140,7 @@ where
                         json_escape(&error.to_string())
                     )),
             )?;
+            tx.commit()?;
             return Err(CliError::Usage(format!(
                 "preflight failed for session '{}': {error}. Inspect artifacts under {} and run `aich queue`; after fixing the issue, re-run `aich preflight {}`.",
                 session.id,
@@ -253,6 +257,7 @@ fn finish_verified_preflight(
     context: PreflightFinishContext<'_>,
     verified: PreflightVerified,
 ) -> Result<PreflightRunResult, CliError> {
+    let tx = context.ledger.begin_immediate_transaction()?;
     let check_results = persist_preflight_checks(
         context.ledger,
         context.attempt_id,
@@ -292,6 +297,7 @@ fn finish_verified_preflight(
                 check_results.len()
             )),
     )?;
+    tx.commit()?;
 
     let merge_attempt = context
         .ledger
@@ -330,6 +336,7 @@ fn finish_blocked_preflight(
         )?;
     }
 
+    let tx = context.ledger.begin_immediate_transaction()?;
     let check_results = persist_preflight_checks(
         context.ledger,
         context.attempt_id,
@@ -381,6 +388,7 @@ fn finish_blocked_preflight(
                 json_escape(&blocked.reason)
             )),
     )?;
+    tx.commit()?;
 
     let merge_attempt = context
         .ledger

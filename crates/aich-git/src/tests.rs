@@ -1,5 +1,5 @@
 use super::*;
-use crate::complete::parse_name_status;
+use crate::complete::{parse_changed_files, parse_name_status};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,20 +47,67 @@ fn parses_name_status_into_changed_files() {
             GitChangedFile {
                 path: "src/lib.rs".to_string(),
                 change_type: "modified".to_string(),
+                symbols_json: "[]".to_string(),
             },
             GitChangedFile {
                 path: "README.md".to_string(),
                 change_type: "added".to_string(),
+                symbols_json: "[]".to_string(),
             },
             GitChangedFile {
                 path: "old.txt".to_string(),
                 change_type: "deleted".to_string(),
+                symbols_json: "[]".to_string(),
             },
             GitChangedFile {
                 path: "new_name.rs".to_string(),
                 change_type: "renamed".to_string(),
+                symbols_json: "[]".to_string(),
             },
         ]
+    );
+}
+
+#[test]
+fn extracts_changed_symbols_from_patch() {
+    let files = parse_changed_files(
+        "M\tsrc/lib.rs\nA\tsrc/app.ts\n",
+        r#"diff --git a/src/lib.rs b/src/lib.rs
+index 1111111..2222222 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,8 @@ pub fn existing()
++pub fn login(user: User) -> bool {
++    true
++}
++struct SessionState {
++}
+diff --git a/src/app.ts b/src/app.ts
+new file mode 100644
+--- /dev/null
++++ b/src/app.ts
+@@ -0,0 +1,3 @@
++export class AppShell {}
++export const routeTable = []
+"#,
+    );
+
+    assert_eq!(files.len(), 2);
+    assert_eq!(
+        files[0],
+        GitChangedFile {
+            path: "src/lib.rs".to_string(),
+            change_type: "modified".to_string(),
+            symbols_json: "[\"SessionState\",\"existing\",\"login\"]".to_string(),
+        }
+    );
+    assert_eq!(
+        files[1],
+        GitChangedFile {
+            path: "src/app.ts".to_string(),
+            change_type: "added".to_string(),
+            symbols_json: "[\"AppShell\",\"routeTable\"]".to_string(),
+        }
     );
 }
 

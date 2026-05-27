@@ -15,6 +15,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aich-check"
+version = "0.1.0"
+
+[[package]]
 name = "aich-cli"
 version = "0.1.0"
 dependencies = [
@@ -33,6 +37,9 @@ version = "0.1.0"
 [[package]]
 name = "aich-git"
 version = "0.1.0"
+dependencies = [
+ "aich-check",
+]
 
 [[package]]
 name = "aich-ledger"

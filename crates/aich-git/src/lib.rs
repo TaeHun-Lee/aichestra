@@ -3,6 +3,8 @@ use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::process::Command;
 
+pub use aich_check::CheckCommand;
+
 mod apply;
 mod cleanup;
 mod complete;
@@ -23,8 +25,8 @@ pub use complete::{
     SessionWorktreeCompleter,
 };
 pub use preflight::{
-    validate_preflight_request, CheckCommand, PreflightBlocked, PreflightCheckOutput,
-    PreflightOutcome, PreflightRequest, PreflightRunner, PreflightVerified,
+    validate_preflight_request, PreflightBlocked, PreflightCheckOutput, PreflightOutcome,
+    PreflightRequest, PreflightRunner, PreflightVerified,
 };
 pub use worktree::{
     validate_worktree_request, CreateWorktreeRequest, GitRepository, HeadCommit, SessionWorktree,
@@ -59,6 +61,15 @@ impl Error for WorktreeError {}
 impl From<std::io::Error> for WorktreeError {
     fn from(value: std::io::Error) -> Self {
         Self::Io(value)
+    }
+}
+
+impl From<aich_check::CheckError> for WorktreeError {
+    fn from(value: aich_check::CheckError) -> Self {
+        match value {
+            aich_check::CheckError::InvalidRequest(message) => Self::InvalidRequest(message),
+            aich_check::CheckError::Io(error) => Self::Io(error),
+        }
     }
 }
 

@@ -84,6 +84,7 @@ where
     );
     session.target_path = options.target_path.clone();
 
+    let tx = ledger.begin_immediate_transaction()?;
     ledger.insert_session(&session)?;
     ledger.append_event(
         &NewEvent::new(EventName::SessionCreated)
@@ -93,6 +94,7 @@ where
                 json_escape(&operator.id)
             )),
     )?;
+    tx.commit()?;
 
     let request = CreateWorktreeRequest {
         repo_path: options.repo_root.clone(),
@@ -110,6 +112,7 @@ where
 
     session.status = SessionStatus::Running;
     session.updated_at_ms = now_millis();
+    let tx = ledger.begin_immediate_transaction()?;
     ledger.update_session_status(&session.id, SessionStatus::Running, session.updated_at_ms)?;
     ledger.append_event(
         &NewEvent::new(EventName::WorktreeCreated)
@@ -128,6 +131,7 @@ where
                 json_escape(&operator.id)
             )),
     )?;
+    tx.commit()?;
 
     Ok(SessionStartResult { session, operator })
 }
@@ -169,6 +173,7 @@ where
     match outcome {
         CompleteSessionWorktreeOutcome::NoChanges { head_commit } => {
             let updated_at_ms = now_millis();
+            let tx = ledger.begin_immediate_transaction()?;
             ledger.update_session_completion(
                 &session.id,
                 SessionStatus::Noop,
@@ -187,6 +192,7 @@ where
                         json_escape(&head_commit)
                     )),
             )?;
+            tx.commit()?;
 
             Ok(SessionCompleteResult {
                 session,
@@ -217,7 +223,11 @@ where
             let changed_files: Vec<ChangedFile> = changes
                 .changed_files
                 .iter()
-                .map(|file| ChangedFile::new(file.path.clone(), file.change_type.clone()))
+                .map(|file| ChangedFile {
+                    path: file.path.clone(),
+                    change_type: file.change_type.clone(),
+                    symbols_json: file.symbols_json.clone(),
+                })
                 .collect();
 
             let patch_set = PatchSet {
@@ -258,6 +268,7 @@ where
                 created_at_ms,
             };
 
+            let tx = ledger.begin_immediate_transaction()?;
             ledger.insert_patch_set(&patch_set, &changed_files)?;
             ledger.insert_context_snapshot(&context_snapshot)?;
             ledger.insert_change_manifest(&change_manifest)?;
@@ -328,6 +339,7 @@ where
                         json_escape(&changes.head_commit)
                     )),
             )?;
+            tx.commit()?;
 
             Ok(SessionCompleteResult {
                 session,
@@ -376,6 +388,7 @@ pub(crate) fn abandon_session_with(
 
     let previous_status = session.status.as_str().to_string();
     let updated_at_ms = now_millis();
+    let tx = ledger.begin_immediate_transaction()?;
     ledger.update_session_status(&session.id, SessionStatus::Abandoned, updated_at_ms)?;
     ledger.append_event(
         &NewEvent::new(EventName::SessionAbandoned)
@@ -394,6 +407,7 @@ pub(crate) fn abandon_session_with(
                     .unwrap_or_else(|| "null".to_string())
             )),
     )?;
+    tx.commit()?;
 
     let session = ledger
         .get_session(&session.id)?

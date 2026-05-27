@@ -386,7 +386,10 @@ pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> St
         output.push_str("- none recorded\n");
     } else {
         for file in input.changed_files {
-            output.push_str(&format!("- `{}` ({})\n", file.path, file.change_type));
+            output.push_str(&format!(
+                "- `{}` ({}, symbols={})\n",
+                file.path, file.change_type, file.symbols_json
+            ));
         }
     }
 

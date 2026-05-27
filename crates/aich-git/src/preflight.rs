@@ -1,34 +1,14 @@
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+
+use aich_check::{run_check_command, validate_check_command, CheckCommand};
 
 use crate::{
     run_git_output, run_git_stdout, run_git_success_with_config, NativeGitWorktreeManager,
     WorktreeError,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CheckCommand {
-    pub name: String,
-    pub program: String,
-    pub args: Vec<String>,
-    pub required: bool,
-    pub timeout_ms: Option<u64>,
-    pub env: Vec<(String, String)>,
-}
-
-impl CheckCommand {
-    pub fn display_command(&self) -> String {
-        let mut command = self.program.clone();
-        for arg in &self.args {
-            command.push(' ');
-            command.push_str(arg);
-        }
-        command
-    }
-}
+pub type PreflightCheckOutput = aich_check::CheckOutput;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreflightRequest {
@@ -38,18 +18,6 @@ pub struct PreflightRequest {
     pub main_before_commit: String,
     pub candidate_commit: String,
     pub check_commands: Vec<CheckCommand>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PreflightCheckOutput {
-    pub name: String,
-    pub command: String,
-    pub required: bool,
-    pub timed_out: bool,
-    pub passed: bool,
-    pub code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -200,94 +168,8 @@ pub fn validate_preflight_request(request: &PreflightRequest) -> Result<(), Work
         ));
     }
     for command in &request.check_commands {
-        if command.name.trim().is_empty() {
-            return Err(WorktreeError::InvalidRequest(
-                "check command name is required".to_string(),
-            ));
-        }
-        if command.program.trim().is_empty() {
-            return Err(WorktreeError::InvalidRequest(format!(
-                "check command '{}' program is required",
-                command.name
-            )));
-        }
-        if command.timeout_ms == Some(0) {
-            return Err(WorktreeError::InvalidRequest(format!(
-                "check command '{}' timeout must be greater than zero",
-                command.name
-            )));
-        }
-        for (key, _) in &command.env {
-            if key.trim().is_empty() || key.contains('=') {
-                return Err(WorktreeError::InvalidRequest(format!(
-                    "check command '{}' has an invalid env key",
-                    command.name
-                )));
-            }
-        }
+        validate_check_command(command)?;
     }
 
     Ok(())
-}
-
-fn run_check_command(
-    worktree_path: &Path,
-    command: &CheckCommand,
-) -> Result<PreflightCheckOutput, WorktreeError> {
-    let (output, timed_out) = run_check_process(worktree_path, command)?;
-    let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    if timed_out {
-        if !stderr.ends_with('\n') && !stderr.is_empty() {
-            stderr.push('\n');
-        }
-        stderr.push_str(&format!(
-            "check '{}' timed out after {} ms\n",
-            command.name,
-            command.timeout_ms.unwrap_or_default()
-        ));
-    }
-
-    Ok(PreflightCheckOutput {
-        name: command.name.clone(),
-        command: command.display_command(),
-        required: command.required,
-        timed_out,
-        passed: output.status.success() && !timed_out,
-        code: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr,
-    })
-}
-
-fn run_check_process(
-    worktree_path: &Path,
-    command: &CheckCommand,
-) -> Result<(Output, bool), WorktreeError> {
-    let mut child = Command::new(&command.program)
-        .args(&command.args)
-        .envs(command.env.iter().map(|(key, value)| (key, value)))
-        .current_dir(worktree_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    let Some(timeout_ms) = command.timeout_ms else {
-        return Ok((child.wait_with_output()?, false));
-    };
-
-    let timeout = Duration::from_millis(timeout_ms);
-    let started = Instant::now();
-    loop {
-        if child.try_wait()?.is_some() {
-            return Ok((child.wait_with_output()?, false));
-        }
-
-        if started.elapsed() >= timeout {
-            let _ = child.kill();
-            return Ok((child.wait_with_output()?, true));
-        }
-
-        sleep(Duration::from_millis(50).min(timeout.saturating_sub(started.elapsed())));
-    }
 }

@@ -207,10 +207,11 @@ where
         report_path: Some(display_path_for_ledger(&options.repo_root, &report_path)),
         created_at_ms,
     };
-    ledger.insert_semantic_review(&semantic_review)?;
-
     let block_levels = semantic_block_levels_from_config(&config_path)?;
     let blocked = block_levels.contains(&report.risk_level);
+    let tx = ledger.begin_immediate_transaction()?;
+    ledger.insert_semantic_review(&semantic_review)?;
+
     ledger.update_merge_attempt_semantic_review(MergeAttemptSemanticReviewUpdate {
         id: &attempt.id,
         status: if blocked {
@@ -247,6 +248,7 @@ where
                 )),
         )?;
     }
+    tx.commit()?;
 
     let merge_attempt = ledger
         .get_merge_attempt(&attempt.id)?

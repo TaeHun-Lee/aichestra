@@ -12,7 +12,7 @@ Your job is to find semantic conflicts that Git may not detect. You are advisory
 - Relevant queued candidate Change Manifests
 - Actual diff summary
 - Changed files
-- Changed symbols if available
+- Changed symbols if available. These are MVP heuristics from diff hunks and declaration lines, not a complete call graph.
 - Mechanical merge result
 - Test results, including whether each check was required and whether it timed out
 - Review input artifact with reviewer metadata, including whether an LLM was executed

@@ -30,7 +30,7 @@ The manifest is useful but not authoritative. Actual diff data always wins.
 
 `aich session complete <session-id>` creates a generated Change Manifest draft from the session goal and actual Git diff metadata. It records the base commit, head commit, changed files, diff artifacts, and context snapshot hash with `validation_status: generated_from_diff`.
 
-This generated manifest is evidence, not final proof of intent. It does not infer changed symbols or semantic impact in the MVP path, so human review or a later LLM manifest-edit step must fill in intent details before relying on it for semantic merge decisions.
+This generated manifest is evidence, not final proof of intent. It includes MVP changed-symbol hints extracted from Git diff hunk headers and changed declaration lines, but those hints are heuristic. It still does not prove semantic impact, so human review or a later LLM manifest-edit step must fill in intent details before relying on it for semantic merge decisions.
 
 Manifest-vs-diff validation parses the Change Manifest as YAML and compares actual changed files against structured fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, and `deleted_or_renamed_files`. It does not treat arbitrary string containment as proof that a file was declared. Invalid YAML or missing structured file evidence is a manifest mismatch.
 
@@ -106,7 +106,7 @@ semantic_review:
 
 MVP starts with semantic review report generation only.
 
-`aich review <session-id>` runs semantic review through a `SemanticReviewAdapter` boundary. The current default adapter is a local deterministic reviewer rather than an external LLM provider. It reads the latest verified merge attempt, Change Manifest artifact, related applied and queued Change Manifest artifacts, changed-file evidence, patch summary, configured semantic-review prompt, and sandbox check results, then writes:
+`aich review <session-id>` runs semantic review through a `SemanticReviewAdapter` boundary. The current default adapter is a local deterministic reviewer rather than an external LLM provider. It reads the latest verified merge attempt, Change Manifest artifact, related applied and queued Change Manifest artifacts, changed-file and MVP changed-symbol evidence, patch summary, configured semantic-review prompt, and sandbox check results, then writes:
 
 - a review input artifact for auditability
 - a YAML semantic review report

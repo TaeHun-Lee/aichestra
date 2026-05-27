@@ -43,7 +43,7 @@ flowchart TB
     MECH["Mechanical Merge Simulation\nsame strategy as apply"]
     SEMLLM["Semantic Merge LLM Session\nintent-aware merge review"]
     SEMREPORT["Semantic Merge Report\nrisks / blockers / proposed fixes / tests to run"]
-    CHECK["Local Check Runner\nrun checks inside sandbox"]
+    CHECK["aich-check Runner\nrun checks inside sandbox"]
     REVIEW["Human Review Gate\ndiff + manifest + semantic report + test result"]
     APPLY["Apply Verified Candidate\nonly tested tree/commit may update main"]
 
@@ -105,8 +105,8 @@ flowchart TB
 2. Aichestra creates one branch and one worktree per session.
 3. `aich session run <session-id>` can launch the configured provider command with the session worktree as `cwd`; the run input, stdout, stderr, and metadata are stored as artifacts.
 4. Each LLM runs only in its own session worktree.
-5. On completion, Aichestra records actual diffs, creates a candidate patch set, and writes a generated Change Manifest draft.
-6. The generated manifest records diff-derived file evidence and remains subject to human/semantic review.
+5. On completion, Aichestra records actual diffs, creates a candidate patch set, extracts MVP changed-symbol evidence from diff hunks, and writes a generated Change Manifest draft.
+6. The generated manifest records diff-derived file and symbol evidence and remains subject to human/semantic review.
 7. A candidate enters the local merge queue and appears in `aich queue` as `enqueued`.
 8. Preflight acquires the local `merge-queue` lock, then creates a temporary sandbox from latest main.
 9. The candidate is mechanically merged using the same strategy that will be used to apply.
@@ -133,7 +133,8 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - `aich session abandon` records `session.abandoned`, refuses to run while the merge queue lock is held, and refuses sessions that are applying or already applied.
 - Session cleanup is allowed for applied sessions, no-op sessions, failed-start sessions without candidate merge state, and abandoned sessions. It refuses dirty registered worktrees, records `session.cleaned`, reports cleaned sessions in status, and skips already-cleaned sessions during prune.
 - Preflight and apply must use the same candidate result.
-- Preflight runs configured checks inside the integration sandbox with explicit `required`, timeout, and environment settings. Required check failures or timeouts block verification; optional check failures are recorded for review without bypassing the required gate.
+- Preflight runs configured checks inside the integration sandbox through the `aich-check` runner with explicit `required`, timeout, and environment settings. Required check failures or timeouts block verification; optional check failures are recorded for review without bypassing the required gate.
+- Ledger updates that record related state transitions, evidence rows, and events are grouped in SQLite transaction boundaries so partial metadata is less likely after ordinary write failures.
 - Semantic review is advisory evidence. The default local adapter is deterministic, the command adapter can delegate to any provider wrapper, and the LLM adapter can run provider CLIs such as Codex with stdin/YAML report contracts. Any path can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.
 - Apply refuses a dirty main worktree and refuses any verified commit whose tree does not match the approved tree id.

@@ -72,7 +72,7 @@ Choose one strategy and keep it consistent.
 
 ## Candidate creation
 
-`aich session complete <session-id>` is the candidate creation boundary. It inspects the session worktree, commits any dirty tracked or unignored untracked changes on the session branch, records the patch set and generated Change Manifest, and marks sessions with real diffs as `enqueued`. If the session branch has no diff from its recorded base commit, the session is marked `noop` and does not enter the merge queue.
+`aich session complete <session-id>` is the candidate creation boundary. It inspects the session worktree, commits any dirty tracked or unignored untracked changes on the session branch, records the patch set and generated Change Manifest, and marks sessions with real diffs as `enqueued`. Changed symbols are captured with MVP diff heuristics from hunk headers and changed declaration lines, then stored as `changed_files.symbols_json` and rendered into the generated manifest. If the session branch has no diff from its recorded base commit, the session is marked `noop` and does not enter the merge queue.
 
 ## Queue display
 
@@ -127,10 +127,10 @@ If the merge fails, record conflict files and block.
 2. Creates a detached sandbox worktree under `.aichestra/sandboxes/<merge-attempt-id>`.
 3. Runs `git merge --no-ff --no-commit <candidate_commit>` in the sandbox.
 4. Commits the merged sandbox result as the verified candidate commit.
-5. Runs configured checks from `.aichestra/config.yaml` inside the sandbox. Each check supports `required`, `timeout_seconds` or `timeout_ms`, and `env`.
+5. Runs configured checks from `.aichestra/config.yaml` inside the sandbox through the `aich-check` runner. Each check supports `required`, `timeout_seconds` or `timeout_ms`, and `env`.
 6. Stores check stdout/stderr artifacts and the resulting merge attempt status.
 
-If the mechanical merge conflicts, or any required check fails or times out, the merge attempt is marked `blocked`. Optional checks are still recorded as evidence, but their failure does not mark the candidate blocked. If all required checks pass, the merge attempt stores `verified_tree_id` and `verified_commit_id` and is marked `verified`.
+If the mechanical merge conflicts, or any required check fails or times out, the merge attempt is marked `blocked`. Optional checks are still recorded as evidence, but their failure does not mark the candidate blocked. If all required checks pass, the merge attempt stores `verified_tree_id` and `verified_commit_id` and is marked `verified`. Ledger updates that belong to one transition, such as preflight start, preflight finish, review result, approval, and apply finalization, are grouped in SQLite transaction boundaries.
 
 ## Review implementation
 

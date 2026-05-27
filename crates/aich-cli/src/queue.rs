@@ -195,6 +195,7 @@ pub(crate) fn run_queue_unlock(
 
     let age_ms = queue_lock_age_ms(&lock, now);
     let stale = is_queue_lock_stale(&lock, now);
+    let tx = ledger.begin_immediate_transaction()?;
     let released = ledger.release_queue_lock(&lock.name, &lock.holder_id)?;
     if !released {
         return Err(CliError::Usage(
@@ -216,6 +217,7 @@ pub(crate) fn run_queue_unlock(
                 json_escape(options.reason.as_deref().unwrap_or(""))
             )),
     )?;
+    tx.commit()?;
 
     Ok(QueueUnlockResult {
         released_lock: Some(lock),

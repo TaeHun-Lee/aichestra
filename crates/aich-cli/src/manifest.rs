@@ -194,7 +194,7 @@ pub(crate) fn render_change_manifest(
     );
     output.push_str("  uncertainty:\n");
     output.push_str(
-        "    - \"Changed symbols and semantic impact are not inferred in this MVP path.\"\n",
+        "    - \"Changed symbols are inferred with MVP diff heuristics; semantic impact still needs review.\"\n",
     );
     output.push_str("  evidence:\n");
     output.push_str(&format!(
@@ -233,7 +233,8 @@ fn append_changed_areas_yaml(output: &mut String, changed_files: &[ChangedFile],
             " ".repeat(indent),
             yaml_quote(&file.change_type)
         ));
-        output.push_str(&format!("{}  symbols: []\n", " ".repeat(indent)));
+        output.push_str(&format!("{}  symbols:\n", " ".repeat(indent)));
+        append_symbol_yaml(output, file, indent + 4);
         output.push_str(&format!(
             "{}  purpose: \"Detected by git diff during session completion.\"\n",
             " ".repeat(indent)
@@ -245,6 +246,26 @@ fn append_changed_areas_yaml(output: &mut String, changed_files: &[ChangedFile],
         output.push_str(&format!("{}  before: \"\"\n", " ".repeat(indent)));
         output.push_str(&format!("{}  after: \"\"\n", " ".repeat(indent)));
     }
+}
+
+fn append_symbol_yaml(output: &mut String, file: &ChangedFile, indent: usize) {
+    let symbols = changed_file_symbols(file);
+    if symbols.is_empty() {
+        output.push_str(&format!("{}[]\n", " ".repeat(indent)));
+        return;
+    }
+
+    for symbol in symbols {
+        output.push_str(&format!(
+            "{}- {}\n",
+            " ".repeat(indent),
+            yaml_quote(&symbol)
+        ));
+    }
+}
+
+fn changed_file_symbols(file: &ChangedFile) -> Vec<String> {
+    serde_yaml::from_str::<Vec<String>>(&file.symbols_json).unwrap_or_default()
 }
 
 fn append_file_path_yaml(output: &mut String, changed_files: &[&ChangedFile], indent: usize) {
