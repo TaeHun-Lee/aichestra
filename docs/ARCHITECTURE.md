@@ -103,17 +103,18 @@ flowchart TB
 
 1. The developer starts one or more sessions.
 2. Aichestra creates one branch and one worktree per session.
-3. Each LLM runs only in its own session worktree.
-4. On completion, Aichestra records actual diffs, creates a candidate patch set, and writes a generated Change Manifest draft.
-5. The generated manifest records diff-derived file evidence and remains subject to human/semantic review.
-6. A candidate enters the local merge queue and appears in `aich queue` as `enqueued`.
-7. Preflight acquires the local `merge-queue` lock, then creates a temporary sandbox from latest main.
-8. The candidate is mechanically merged using the same strategy that will be used to apply.
-9. Checks run in the sandbox and store stdout/stderr artifacts.
-10. `aich review` calls the semantic review adapter, then writes a report from the manifest, diff evidence, mechanical merge result, configured prompt, and sandbox check results. The default MVP adapter is local and deterministic; provider-backed LLM adapters must preserve the same advisory boundary.
-11. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
-12. `aich apply` acquires the same local `merge-queue` lock, then fast-forwards main to the approved verified commit only after rechecking main has not moved.
-13. After apply, `aich session cleanup <session-id>` or `aich session prune --applied` can remove the completed session worktree, merged session branch, and related sandbox worktrees.
+3. `aich session run <session-id>` can launch the configured provider command with the session worktree as `cwd`; the run input, stdout, stderr, and metadata are stored as artifacts.
+4. Each LLM runs only in its own session worktree.
+5. On completion, Aichestra records actual diffs, creates a candidate patch set, and writes a generated Change Manifest draft.
+6. The generated manifest records diff-derived file evidence and remains subject to human/semantic review.
+7. A candidate enters the local merge queue and appears in `aich queue` as `enqueued`.
+8. Preflight acquires the local `merge-queue` lock, then creates a temporary sandbox from latest main.
+9. The candidate is mechanically merged using the same strategy that will be used to apply.
+10. Checks run in the sandbox and store stdout/stderr artifacts.
+11. `aich review` calls the semantic review adapter, then writes a report from the manifest, diff evidence, mechanical merge result, configured prompt, and sandbox check results. The default MVP adapter is local and deterministic; provider-backed LLM adapters must preserve the same advisory boundary.
+12. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
+13. `aich apply` acquires the same local `merge-queue` lock, then fast-forwards main to the approved verified commit only after rechecking main has not moved.
+14. After apply, `aich session cleanup <session-id>` or `aich session prune --applied` can remove the completed session worktree, merged session branch, and related sandbox worktrees.
 
 ## Safety boundary
 
@@ -121,6 +122,7 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 
 - LLM session cwd is a session worktree.
 - Main worktree is not handed to agents.
+- Provider commands are configured under `providers.<name>.command` and receive the session task input on stdin.
 - The merge queue is the only path to main.
 - `preflight` and `apply` serialize queue activity through a durable SQLite `merge-queue` lock.
 - `aich queue` reports candidate state from session, merge attempt, review, approval, and queue lock ledger records.

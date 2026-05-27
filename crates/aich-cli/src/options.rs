@@ -56,6 +56,14 @@ pub(crate) struct SessionCompleteOptions {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct SessionRunOptions {
+    pub(crate) repo_root: PathBuf,
+    pub(crate) db_path: Option<PathBuf>,
+    pub(crate) session_id: String,
+    pub(crate) operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct SessionCleanupOptions {
     pub(crate) repo_root: PathBuf,
     pub(crate) db_path: Option<PathBuf>,
@@ -513,6 +521,69 @@ pub(crate) fn parse_session_complete_options(
     };
 
     Ok(SessionCompleteOptions {
+        repo_root,
+        db_path,
+        session_id,
+        operator_id,
+    })
+}
+
+pub(crate) fn parse_session_run_options(
+    args: &[String],
+    cwd: &Path,
+) -> Result<SessionRunOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut operator_id = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if !value.starts_with('-') && session_id.is_none() => {
+                session_id = Some(value.to_string());
+            }
+            other => {
+                return Err(CliError::Usage(format!(
+                    "unknown session run option '{other}'\n\n{}",
+                    usage_text()
+                )));
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id else {
+        return Err(CliError::Usage(
+            "session run requires <session-id>".to_string(),
+        ));
+    };
+
+    Ok(SessionRunOptions {
         repo_root,
         db_path,
         session_id,

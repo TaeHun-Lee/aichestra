@@ -497,7 +497,7 @@ fn ensure_session_can_cleanup(
     Ok(())
 }
 
-fn ensure_session_worktree_is_dedicated(
+pub(crate) fn ensure_session_worktree_is_dedicated(
     repo_root: &Path,
     worktree_path: &Path,
 ) -> Result<(), CliError> {

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -22,6 +23,10 @@ sessions:
   require_dedicated_worktree: true
   disallow_main_worktree_for_llm: true
   completion_trigger: human_command
+
+providers:
+  codex:
+    command: codex --ask-for-approval never exec --sandbox workspace-write --skip-git-repo-check --ephemeral --color never -
 
 git:
   main_branch: main
@@ -83,11 +88,55 @@ safety:
 #[derive(Debug, Deserialize)]
 struct AichestraConfig {
     git: Option<AichestraGitConfig>,
+    providers: Option<HashMap<String, AichestraProviderConfig>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct AichestraGitConfig {
     main_branch: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct AichestraProviderConfig {
+    command: Option<String>,
+}
+
+pub(crate) fn provider_command_from_config(
+    config_path: &Path,
+    provider: &str,
+) -> Result<String, CliError> {
+    let provider = provider.trim();
+    if provider.is_empty() {
+        return Err(CliError::Usage(
+            "session provider must not be empty".to_string(),
+        ));
+    }
+
+    let config = fs::read_to_string(config_path)?;
+    let parsed: AichestraConfig = serde_yaml::from_str(&config).map_err(|error| {
+        CliError::Usage(format!(
+            "Aichestra config at {} is invalid YAML: {error}",
+            config_path.display()
+        ))
+    })?;
+    let Some(provider_config) = parsed
+        .providers
+        .and_then(|providers| providers.get(provider).cloned())
+    else {
+        return Err(CliError::Usage(format!(
+            "provider '{provider}' is not configured; add providers.{provider}.command to {}",
+            config_path.display()
+        )));
+    };
+    let Some(command) = provider_config
+        .command
+        .filter(|command| !command.trim().is_empty())
+    else {
+        return Err(CliError::Usage(format!(
+            "providers.{provider}.command must not be empty"
+        )));
+    };
+    Ok(command)
 }
 
 pub(crate) fn main_branch_from_config(config_path: &Path) -> Result<String, CliError> {
