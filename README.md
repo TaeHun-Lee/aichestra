@@ -8,9 +8,11 @@ The key invariant is unchanged:
 the exact tree tested in preflight must be the tree applied to main
 ```
 
-## Current Slice
+## What It Does
 
-This repository now contains a CLI-first local MVP slice:
+Aichestra lets one developer run multiple AI coding sessions against one repo without letting those sessions share a working directory or update main directly.
+
+The current MVP provides:
 
 - `aich init`
 - `aich auth whoami`
@@ -20,29 +22,36 @@ This repository now contains a CLI-first local MVP slice:
 - `aich queue`
 - `aich queue unlock --force`
 - `aich session start --goal ...`
+- `aich session run <session-id>`
 - `aich session complete <session-id>`
+- `aich session abandon <session-id>`
 - `aich session cleanup <session-id>`
 - `aich session prune --applied`
+- `aich session prune --inactive`
 - `aich preflight <session-id>`
 - `aich review <session-id>`
 - `aich approve <session-id>`
 - `aich apply <session-id>`
-- SQLite schema initialization
-- session domain model
-- worktree manager and native Git adapter
-- append-only event ledger
-- generated Change Manifest artifacts
-- sandbox preflight checks
-- local semantic review report artifacts
-- verified-tree approval and apply guards
+
+Core behavior:
+
+- one branch and worktree per session
+- configured provider command execution from the session worktree
+- generated Change Manifest artifacts validated against actual diff evidence
+- queue-head preflight with a durable SQLite queue lock
+- integration sandbox checks before approval
+- semantic review through `local`, `command`, or `llm` adapters
+- human approval for the exact verified tree/commit
+- apply guards for configured main branch/ref, clean main worktree, and main-not-moved checks
+- apply crash recovery for interrupted `applying` transitions
 
 ## Layout
 
 ```text
 crates/
-  aich-cli/      # CLI entrypoint and init command
+  aich-cli/      # CLI commands and user interaction
   aich-core/     # session, event, merge invariant domain models
-  aich-git/      # worktree manager interface and native git adapter shell
+  aich-git/      # worktree manager interface and native git adapter
   aich-ledger/   # SQLite schema and repository helpers
 docs/
   ARCHITECTURE.md
@@ -55,22 +64,101 @@ docs/
   templates/
 ```
 
-## Run
+## Quick Start
 
 Install Rust, then:
 
 ```bash
 cargo run -p aich-cli -- init
 cargo run -p aich-cli -- doctor
-cargo run -p aich-cli -- session start --goal "Describe the task" --provider codex --target src/auth.rs
-cargo run -p aich-cli -- queue
 ```
 
-Checks:
+Start and run a session:
+
+```bash
+cargo run -p aich-cli -- session start --goal "Describe the task" --provider codex --target src/auth.rs
+cargo run -p aich-cli -- session run <session-id>
+cargo run -p aich-cli -- session complete <session-id>
+```
+
+Validate and apply through the queue:
+
+```bash
+cargo run -p aich-cli -- queue
+cargo run -p aich-cli -- preflight <session-id>
+cargo run -p aich-cli -- review <session-id>
+cargo run -p aich-cli -- approve <session-id>
+cargo run -p aich-cli -- apply <session-id>
+```
+
+Clean up applied or inactive session resources:
+
+```bash
+cargo run -p aich-cli -- session cleanup <session-id>
+cargo run -p aich-cli -- session prune --applied
+cargo run -p aich-cli -- session prune --inactive
+```
+
+Withdraw a candidate without applying it:
+
+```bash
+cargo run -p aich-cli -- session abandon <session-id>
+```
+
+## Configuration
+
+`.aichestra/config.yaml` controls local workflow behavior.
+
+Important settings:
+
+```yaml
+sessions:
+  branch_prefix: aich/session
+
+providers:
+  codex:
+    command: codex --ask-for-approval never exec --sandbox workspace-write --skip-git-repo-check --ephemeral --color never -
+
+git:
+  main_branch: main
+
+semantic_review:
+  adapter: local
+  risk_block_levels:
+    - blocked
+```
+
+`git.main_branch` is resolved as `refs/heads/<branch>`. `aich apply` expects the main worktree to be on that configured branch.
+
+`providers.<name>.command` is executed with the session worktree as `cwd`; the session task input is sent on stdin and stdout/stderr are stored as artifacts.
+
+`semantic_review.adapter` supports:
+
+- `local`: deterministic MVP reviewer
+- `command`: external command that returns a `semantic_review:` YAML document on stdout
+- `llm`: provider wrapper path; the built-in `codex` provider uses non-interactive read-only `codex exec`
+
+## Recovery
+
+If preflight or apply leaves a stale queue lock:
+
+```bash
+cargo run -p aich-cli -- queue
+cargo run -p aich-cli -- queue unlock --force --reason "stale process"
+```
+
+If apply was interrupted, re-run:
+
+```bash
+cargo run -p aich-cli -- apply <session-id>
+```
+
+Aichestra will only recover when configured main is still at the preflight `main_before` commit or already at the approved verified commit.
+
+## Checks
 
 ```bash
 cargo fmt --all -- --check
-cargo test --all
 cargo clippy --all-targets -- -D warnings
+cargo test --workspace --no-fail-fast
 ```
-

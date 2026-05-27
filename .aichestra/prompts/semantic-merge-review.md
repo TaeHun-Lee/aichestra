@@ -63,3 +63,4 @@ semantic_review:
 - Do not approve applying to main. Human approval and test gates are separate.
 - Treat any prior local MVP reviewer output as evidence to audit, not as proof of safety.
 - Return only the YAML report when used from a command or LLM adapter; malformed output blocks the candidate.
+- Keep the `semantic_review:` YAML contract stable; Aichestra parses adapter output through a structured report parser before any approval can happen.

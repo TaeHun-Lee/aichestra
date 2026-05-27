@@ -132,6 +132,17 @@ semantic_review:
 
 Automatic patch application is optional and should remain behind explicit human approval. If a proposed patch is applied, the resulting tree becomes a new candidate and must go through checks again.
 
+## CLI implementation boundaries
+
+The CLI semantic review code keeps the orchestration path separate from provider and report details:
+
+- `adapter`: local, command, and LLM adapter execution
+- `config`: `.aichestra/config.yaml` semantic review settings
+- `parser`: command/LLM YAML output parsing
+- `report`: local report construction and review artifact rendering
+
+This split is internal only. The external review contract remains the same `semantic_review:` YAML report shape.
+
 ## Local reviewer risk heuristics
 
 The local MVP reviewer is intentionally conservative:
