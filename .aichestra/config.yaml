@@ -19,7 +19,7 @@ providers:
     command: codex --ask-for-approval never exec --sandbox workspace-write --skip-git-repo-check --ephemeral --color never -
 
 git:
-  main_branch: main
+  main_branch: codex/codex-work
 
 merge:
   queue_mode: sequential
