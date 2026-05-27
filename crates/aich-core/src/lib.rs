@@ -10,6 +10,6 @@ pub use change::{ChangeManifest, ChangedFile, ContextSnapshot, PatchSet};
 pub use event::{EventName, NewEvent};
 pub use merge::{
     assert_verified_candidate_can_apply, Approval, CheckResult, CheckResultStatus, MergeAttempt,
-    MergeAttemptStatus, SemanticReview, SemanticRiskLevel, VerifiedTreeViolation,
+    MergeAttemptStatus, QueueLock, SemanticReview, SemanticRiskLevel, VerifiedTreeViolation,
 };
 pub use session::{Session, SessionStatus};

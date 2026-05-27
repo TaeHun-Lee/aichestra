@@ -85,6 +85,12 @@ Choose one strategy and keep it consistent.
 
 Applied candidates are omitted from the queue view because they no longer require merge-queue action.
 
+## Queue lock
+
+`aich preflight <session-id>` and `aich apply <session-id>` acquire the durable local `merge-queue` lock before reading or mutating merge-queue state. The lock is stored in SQLite under `queue_locks` with the holder id, operation, optional session id, and acquisition timestamp.
+
+If another preflight or apply command already holds the lock, the command refuses to run and points the user to `aich queue`. The queue view reports whether the lock is free or held. Normal command completion and ordinary error paths release the lock automatically; a process crash may leave a stale lock for inspection rather than silently allowing concurrent queue activity.
+
 ## Conflict detection
 
 MVP may use normal Git operations in a temporary sandbox because this is easiest to reason about:

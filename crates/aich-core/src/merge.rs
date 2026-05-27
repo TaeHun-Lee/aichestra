@@ -51,6 +51,15 @@ pub struct MergeAttempt {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueueLock {
+    pub name: String,
+    pub holder_id: String,
+    pub operation: String,
+    pub session_id: Option<String>,
+    pub acquired_at_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Approval {
     pub id: String,
     pub merge_attempt_id: String,

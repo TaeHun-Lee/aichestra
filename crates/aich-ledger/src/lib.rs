@@ -8,7 +8,7 @@ use std::path::Path;
 use aich_core::{
     Approval, ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, ContextSnapshot,
     EventName, MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole, OperatorStatus,
-    PatchSet, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
+    PatchSet, QueueLock, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
 };
 use rusqlite::{params, types::Type, Connection, Row};
 
@@ -815,6 +815,62 @@ impl Ledger {
         Ok(approvals)
     }
 
+    pub fn try_acquire_queue_lock(&self, lock: &QueueLock) -> Result<bool> {
+        let rows = self.conn.execute(
+            r#"
+            INSERT OR IGNORE INTO queue_locks (
+              name, holder_id, operation, session_id, acquired_at_ms
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![
+                &lock.name,
+                &lock.holder_id,
+                &lock.operation,
+                &lock.session_id,
+                lock.acquired_at_ms,
+            ],
+        )?;
+
+        Ok(rows == 1)
+    }
+
+    pub fn get_queue_lock(&self, name: &str) -> Result<Option<QueueLock>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT name, holder_id, operation, session_id, acquired_at_ms
+            FROM queue_locks
+            WHERE name = ?1
+            "#,
+        )?;
+
+        let mut rows = stmt.query(params![name])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+
+        Ok(Some(QueueLock {
+            name: row.get(0)?,
+            holder_id: row.get(1)?,
+            operation: row.get(2)?,
+            session_id: row.get(3)?,
+            acquired_at_ms: row.get(4)?,
+        }))
+    }
+
+    pub fn release_queue_lock(&self, name: &str, holder_id: &str) -> Result<bool> {
+        let rows = self.conn.execute(
+            r#"
+            DELETE FROM queue_locks
+            WHERE name = ?1
+              AND holder_id = ?2
+            "#,
+            params![name, holder_id],
+        )?;
+
+        Ok(rows == 1)
+    }
+
     pub fn append_event(&self, event: &NewEvent) -> Result<i64> {
         self.conn.execute(
             r#"
@@ -1288,6 +1344,38 @@ mod tests {
                 .get_merge_attempt("merge-1")
                 .expect("get applied attempt"),
             Some(attempt)
+        );
+
+        let lock = QueueLock {
+            name: "merge-queue".to_string(),
+            holder_id: "holder-1".to_string(),
+            operation: "preflight".to_string(),
+            session_id: Some("session-2".to_string()),
+            acquired_at_ms: now + 12,
+        };
+        assert!(ledger
+            .try_acquire_queue_lock(&lock)
+            .expect("acquire queue lock"));
+        assert!(!ledger
+            .try_acquire_queue_lock(&QueueLock {
+                holder_id: "holder-2".to_string(),
+                ..lock.clone()
+            })
+            .expect("second queue lock blocked"));
+        assert_eq!(
+            ledger
+                .get_queue_lock("merge-queue")
+                .expect("get queue lock"),
+            Some(lock.clone())
+        );
+        assert!(ledger
+            .release_queue_lock("merge-queue", "holder-1")
+            .expect("release queue lock"));
+        assert_eq!(
+            ledger
+                .get_queue_lock("merge-queue")
+                .expect("queue lock released"),
+            None
         );
 
         drop(ledger);

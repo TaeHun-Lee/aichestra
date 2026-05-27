@@ -9,7 +9,8 @@ use aich_core::clock::now_millis;
 use aich_core::{
     assert_verified_candidate_can_apply, Approval, ChangeManifest, ChangedFile, CheckResult,
     CheckResultStatus, ContextSnapshot, EventName, MergeAttempt, MergeAttemptStatus, NewEvent,
-    Operator, OperatorRole, PatchSet, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
+    Operator, OperatorRole, PatchSet, QueueLock, SemanticReview, SemanticRiskLevel, Session,
+    SessionStatus,
 };
 use aich_git::{
     ApplyVerifiedCommitRequest, CheckCommand, CompleteSessionWorktreeOutcome,
@@ -26,12 +27,14 @@ static ARTIFACT_COUNTER: AtomicU64 = AtomicU64::new(1);
 static MERGE_ATTEMPT_COUNTER: AtomicU64 = AtomicU64::new(1);
 static SEMANTIC_REVIEW_COUNTER: AtomicU64 = AtomicU64::new(1);
 static APPROVAL_COUNTER: AtomicU64 = AtomicU64::new(1);
+static QUEUE_LOCK_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 const DEFAULT_OPERATOR_ID: &str = "local-user";
 const DEFAULT_OPERATOR_NAME: &str = "Local User";
 const CHANGE_MANIFEST_VALIDATION_STATUS: &str = "generated_from_diff";
 const PREFLIGHT_APPLY_STRATEGY: &str = "merge_no_ff_commit";
 const LOCAL_SEMANTIC_REVIEWER: &str = "local_mvp_static_reviewer";
+const MERGE_QUEUE_LOCK_NAME: &str = "merge-queue";
 const CONTEXT_SNAPSHOT_FILES: &[&str] = &[
     "AGENTS.md",
     "CLAUDE.md",
@@ -1440,10 +1443,23 @@ fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Result<(), Cli
     let ledger = Ledger::open(&db_path)?;
     let entries = queue_entries(&ledger)?;
     let summary = queue_status_summary(&entries);
+    let queue_lock = ledger.get_queue_lock(MERGE_QUEUE_LOCK_NAME)?;
 
     writeln!(out, "Aichestra queue")?;
     writeln!(out, "Repo: {}", options.repo_root.display())?;
     writeln!(out, "Ledger: {}", db_path.display())?;
+    match queue_lock.as_ref() {
+        Some(lock) => {
+            writeln!(
+                out,
+                "Lock: held by {} ({}, session {})",
+                lock.holder_id,
+                lock.operation,
+                lock.session_id.as_deref().unwrap_or("-")
+            )?;
+        }
+        None => writeln!(out, "Lock: free")?,
+    }
     writeln!(out, "Entries: {}", entries.len())?;
     writeln!(
         out,
@@ -1997,6 +2013,7 @@ where
             session.id, session.id
         )));
     }
+    let _queue_lock = acquire_merge_queue_lock(&ledger, "preflight", &session.id)?;
 
     let main_before = git_repo.head_commit(&options.repo_root)?.commit_id;
     let created_at_ms = now_millis();
@@ -2115,9 +2132,64 @@ fn next_approval_id(created_at_ms: i64) -> String {
     format!("approval-{created_at_ms}-{counter}")
 }
 
+fn next_queue_lock_holder_id(acquired_at_ms: i64) -> String {
+    let counter = QUEUE_LOCK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("queue-lock-{acquired_at_ms}-{counter}")
+}
+
 fn next_artifact_id(created_at_ms: i64) -> String {
     let counter = ARTIFACT_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{created_at_ms}-{counter}")
+}
+
+struct QueueLockGuard<'a> {
+    ledger: &'a Ledger,
+    lock: QueueLock,
+}
+
+impl Drop for QueueLockGuard<'_> {
+    fn drop(&mut self) {
+        let _ = self
+            .ledger
+            .release_queue_lock(&self.lock.name, &self.lock.holder_id);
+    }
+}
+
+fn acquire_merge_queue_lock<'a>(
+    ledger: &'a Ledger,
+    operation: &str,
+    session_id: &str,
+) -> Result<QueueLockGuard<'a>, CliError> {
+    let acquired_at_ms = now_millis();
+    let lock = QueueLock {
+        name: MERGE_QUEUE_LOCK_NAME.to_string(),
+        holder_id: next_queue_lock_holder_id(acquired_at_ms),
+        operation: operation.to_string(),
+        session_id: Some(session_id.to_string()),
+        acquired_at_ms,
+    };
+
+    if ledger.try_acquire_queue_lock(&lock)? {
+        return Ok(QueueLockGuard { ledger, lock });
+    }
+
+    let held_by = match ledger.get_queue_lock(MERGE_QUEUE_LOCK_NAME)? {
+        Some(existing) => format!(
+            " by {} for {}{}",
+            existing.holder_id,
+            existing.operation,
+            existing
+                .session_id
+                .as_deref()
+                .map(|id| format!(" on session {id}"))
+                .unwrap_or_default()
+        ),
+        None => String::new(),
+    };
+
+    Err(CliError::Usage(format!(
+        "merge queue is locked{held_by}; run `aich queue` to inspect the active lock"
+    )))
 }
 
 fn ensure_session_can_complete(session: &Session) -> Result<(), CliError> {
@@ -2609,6 +2681,7 @@ where
             attempt.id, session.id
         ))
     })?;
+    let _queue_lock = acquire_merge_queue_lock(&ledger, "apply", &session.id)?;
 
     let current_main = git_repo.head_commit(&options.repo_root)?.commit_id;
     assert_verified_candidate_can_apply(&attempt, &approval, &current_main)
@@ -3969,6 +4042,61 @@ mod tests {
         (session, attempt)
     }
 
+    fn seed_enqueued_candidate(repo: &Path, id: &str) -> Session {
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        let now = now_millis();
+        let mut session = Session::new(
+            id,
+            format!("candidate {id}"),
+            "codex",
+            format!("aich/session/{id}"),
+            format!(".aichestra/worktrees/{id}"),
+            "base-commit",
+            now,
+        );
+        session.status = SessionStatus::Enqueued;
+        session.head_commit = Some("head-commit".to_string());
+        session.updated_at_ms = now + 1;
+        ledger.insert_session(&session).expect("insert session");
+
+        let patch_set = PatchSet {
+            id: format!("patch-{id}"),
+            session_id: session.id.clone(),
+            base_commit: "base-commit".to_string(),
+            head_commit: Some("head-commit".to_string()),
+            patch_id: Some("head-commit".to_string()),
+            diff_stat: Some(" README.md | 1 +\n".to_string()),
+            created_at_ms: now + 2,
+        };
+        ledger
+            .insert_patch_set(&patch_set, &[ChangedFile::new("README.md", "modified")])
+            .expect("insert patch set");
+
+        let artifact_dir = repo
+            .join(".aichestra/artifacts/sessions")
+            .join(&session.id)
+            .join("completion");
+        fs::create_dir_all(&artifact_dir).expect("artifact dir");
+        let manifest_path = artifact_dir.join("change-manifest.yaml");
+        let manifest_content = format!(
+            "change_manifest:\n  session_id: \"{}\"\n  changed_areas:\n    - file: \"README.md\"\n",
+            session.id
+        );
+        fs::write(&manifest_path, &manifest_content).expect("write manifest");
+        ledger
+            .insert_change_manifest(&ChangeManifest {
+                id: format!("manifest-{id}"),
+                session_id: session.id.clone(),
+                manifest_path: display_path_for_ledger(repo, &manifest_path),
+                manifest_hash: Some(sha256_hex(manifest_content.as_bytes())),
+                validation_status: CHANGE_MANIFEST_VALIDATION_STATUS.to_string(),
+                created_at_ms: now + 3,
+            })
+            .expect("insert manifest");
+
+        session
+    }
+
     fn insert_queue_candidate(
         ledger: &Ledger,
         id: &str,
@@ -4417,6 +4545,12 @@ mod tests {
                 .len(),
             1
         );
+        assert_eq!(
+            ledger
+                .get_queue_lock(MERGE_QUEUE_LOCK_NAME)
+                .expect("queue lock"),
+            None
+        );
         let event_names: Vec<String> = ledger
             .list_events()
             .expect("events")
@@ -4426,6 +4560,57 @@ mod tests {
         assert!(event_names.contains(&"merge.preflight.started".to_string()));
         assert!(event_names.contains(&"merge.mechanical.completed".to_string()));
         assert!(event_names.contains(&"check.completed".to_string()));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn preflight_refuses_when_queue_lock_is_held() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let session = seed_enqueued_candidate(&repo, "session-lock");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger
+            .try_acquire_queue_lock(&QueueLock {
+                name: MERGE_QUEUE_LOCK_NAME.to_string(),
+                holder_id: "holder-1".to_string(),
+                operation: "apply".to_string(),
+                session_id: Some("other-session".to_string()),
+                acquired_at_ms: now_millis(),
+            })
+            .expect("acquire lock"));
+
+        let preflight_runner =
+            MockPreflightRunner::new(PreflightOutcome::Verified(aich_git::PreflightVerified {
+                verified_tree_id: "verified-tree".to_string(),
+                verified_commit_id: "verified-commit".to_string(),
+                checks: Vec::new(),
+            }));
+
+        let err = run_preflight_with(
+            &PreflightOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &preflight_runner,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, CliError::Usage(message) if message.contains("merge queue is locked"))
+        );
+        assert!(preflight_runner.requests.borrow().is_empty());
+        assert!(ledger
+            .get_queue_lock(MERGE_QUEUE_LOCK_NAME)
+            .expect("queue lock")
+            .is_some());
 
         let _ = fs::remove_dir_all(repo);
     }
@@ -4762,11 +4947,82 @@ mod tests {
             .expect("get attempt")
             .expect("attempt");
         assert_eq!(loaded_attempt.status, MergeAttemptStatus::Applied);
+        assert_eq!(
+            ledger
+                .get_queue_lock(MERGE_QUEUE_LOCK_NAME)
+                .expect("queue lock"),
+            None
+        );
         assert!(ledger
             .list_events()
             .expect("events")
             .iter()
             .any(|event| event.name == "merge.applied"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn apply_refuses_when_queue_lock_is_held() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+        run_approve_with(
+            &ApproveOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+        )
+        .expect("approve");
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger
+            .try_acquire_queue_lock(&QueueLock {
+                name: MERGE_QUEUE_LOCK_NAME.to_string(),
+                holder_id: "holder-1".to_string(),
+                operation: "preflight".to_string(),
+                session_id: Some("other-session".to_string()),
+                acquired_at_ms: now_millis(),
+            })
+            .expect("acquire lock"));
+        let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+            applied_commit_id: "verified-commit".to_string(),
+            applied_tree_id: "verified-tree".to_string(),
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+
+        let err = run_apply_with(
+            &ApplyOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &applier,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, CliError::Usage(message) if message.contains("merge queue is locked"))
+        );
+        assert!(applier.requests.borrow().is_empty());
 
         let _ = fs::remove_dir_all(repo);
     }
@@ -4923,6 +5179,7 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
 
         assert!(output.contains("Aichestra queue"));
+        assert!(output.contains("Lock: free"));
         assert!(output
             .contains("Summary: enqueued=1 preflight_running=1 verified=1 approved=1 blocked=1"));
         assert!(output.contains("- session-enqueued [enqueued]"));
@@ -4934,6 +5191,41 @@ mod tests {
         assert!(output.contains("next: aich review session-verified"));
         assert!(output.contains("next: aich apply session-approved"));
         assert!(!output.contains("session-applied ["));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn queue_shows_active_lock() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger
+            .try_acquire_queue_lock(&QueueLock {
+                name: MERGE_QUEUE_LOCK_NAME.to_string(),
+                holder_id: "holder-1".to_string(),
+                operation: "preflight".to_string(),
+                session_id: Some("session-1".to_string()),
+                acquired_at_ms: now_millis(),
+            })
+            .expect("acquire lock"));
+
+        let mut output = Vec::new();
+        render_queue(
+            &QueueOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+            },
+            &mut output,
+        )
+        .expect("render queue");
+        let output = String::from_utf8(output).expect("utf8 output");
+
+        assert!(output.contains("Lock: held by holder-1 (preflight, session session-1)"));
 
         let _ = fs::remove_dir_all(repo);
     }

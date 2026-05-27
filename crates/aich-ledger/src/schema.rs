@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS schema_metadata (
 );
 
 INSERT INTO schema_metadata (key, value)
-VALUES ('schema_version', '2')
+VALUES ('schema_version', '3')
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
 CREATE TABLE IF NOT EXISTS operators (
@@ -128,6 +128,17 @@ CREATE TABLE IF NOT EXISTS approvals (
   CHECK (length(approved_verified_commit_id) > 0)
 );
 
+CREATE TABLE IF NOT EXISTS queue_locks (
+  name TEXT PRIMARY KEY,
+  holder_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  session_id TEXT,
+  acquired_at_ms INTEGER NOT NULL,
+  CHECK (length(name) > 0),
+  CHECK (length(holder_id) > 0),
+  CHECK (length(operation) > 0)
+);
+
 CREATE TABLE IF NOT EXISTS event_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_name TEXT NOT NULL,
@@ -143,5 +154,5 @@ CREATE INDEX IF NOT EXISTS idx_event_log_subject
 CREATE INDEX IF NOT EXISTS idx_merge_attempts_session
   ON merge_attempts(session_id, created_at_ms);
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 "#;

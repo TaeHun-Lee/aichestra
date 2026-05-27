@@ -107,12 +107,12 @@ flowchart TB
 4. On completion, Aichestra records actual diffs, creates a candidate patch set, and writes a generated Change Manifest draft.
 5. The generated manifest records diff-derived file evidence and remains subject to human/semantic review.
 6. A candidate enters the local merge queue and appears in `aich queue` as `enqueued`.
-7. Preflight creates a temporary sandbox from latest main.
+7. Preflight acquires the local `merge-queue` lock, then creates a temporary sandbox from latest main.
 8. The candidate is mechanically merged using the same strategy that will be used to apply.
 9. Checks run in the sandbox and store stdout/stderr artifacts.
 10. `aich review` writes a semantic review report from the manifest, diff evidence, mechanical merge result, and sandbox check results.
 11. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
-12. `aich apply` fast-forwards main to the approved verified commit only after rechecking main has not moved.
+12. `aich apply` acquires the same local `merge-queue` lock, then fast-forwards main to the approved verified commit only after rechecking main has not moved.
 
 ## Safety boundary
 
@@ -121,7 +121,8 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - LLM session cwd is a session worktree.
 - Main worktree is not handed to agents.
 - The merge queue is the only path to main.
-- `aich queue` is read-only and reports candidate state from session, merge attempt, review, and approval ledger records.
+- `preflight` and `apply` serialize queue activity through a durable SQLite `merge-queue` lock.
+- `aich queue` is read-only and reports candidate state from session, merge attempt, review, approval, and queue lock ledger records.
 - Preflight and apply must use the same candidate result.
 - Semantic review is advisory evidence. It can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.
