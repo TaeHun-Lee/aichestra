@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use aich_core::clock::now_millis;
 use aich_core::{
     ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, ContextSnapshot, EventName,
-    MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole, PatchSet, Session,
-    SessionStatus,
+    MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole, PatchSet, SemanticReview,
+    SemanticRiskLevel, Session, SessionStatus,
 };
 use aich_git::{
     CheckCommand, CompleteSessionWorktreeOutcome, CompleteSessionWorktreeRequest,
@@ -17,17 +17,19 @@ use aich_git::{
     PreflightCheckOutput, PreflightOutcome, PreflightRequest, PreflightRunner, PreflightVerified,
     SessionWorktreeCompleter, WorktreeError, WorktreeManager,
 };
-use aich_ledger::{Ledger, MergeAttemptResultUpdate};
+use aich_ledger::{Ledger, MergeAttemptResultUpdate, MergeAttemptSemanticReviewUpdate};
 use sha2::{Digest, Sha256};
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static ARTIFACT_COUNTER: AtomicU64 = AtomicU64::new(1);
 static MERGE_ATTEMPT_COUNTER: AtomicU64 = AtomicU64::new(1);
+static SEMANTIC_REVIEW_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 const DEFAULT_OPERATOR_ID: &str = "local-user";
 const DEFAULT_OPERATOR_NAME: &str = "Local User";
 const CHANGE_MANIFEST_VALIDATION_STATUS: &str = "generated_from_diff";
 const PREFLIGHT_APPLY_STRATEGY: &str = "merge_no_ff_commit";
+const LOCAL_SEMANTIC_REVIEWER: &str = "local_mvp_static_reviewer";
 const CONTEXT_SNAPSHOT_FILES: &[&str] = &[
     "AGENTS.md",
     "CLAUDE.md",
@@ -184,6 +186,18 @@ pub struct PreflightRunResult {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ReviewRunResult {
+    pub semantic_review: SemanticReview,
+    pub merge_attempt: MergeAttempt,
+    pub operator: Operator,
+    pub report_path: PathBuf,
+    pub summary: String,
+    pub required_actions: Vec<String>,
+    pub suggested_tests: Vec<String>,
+    pub blocked: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct StatusOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
@@ -210,6 +224,14 @@ struct SessionCompleteOptions {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct PreflightOptions {
+    repo_root: PathBuf,
+    db_path: Option<PathBuf>,
+    session_id: String,
+    operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ReviewOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
     session_id: String,
@@ -287,6 +309,23 @@ where
             writeln!(out, "Checks: {}", result.check_results.len())?;
             if let Some(reason) = result.blocked_reason.as_deref() {
                 writeln!(out, "Blocked reason: {reason}")?;
+            }
+            Ok(())
+        }
+        Some("review") => {
+            let options = parse_review_options(&args[1..], cwd)?;
+            let result = run_review_with(&options)?;
+            writeln!(out, "Review {}", result.semantic_review.risk_level.as_str())?;
+            writeln!(out, "Session: {}", result.merge_attempt.session_id)?;
+            writeln!(out, "Merge attempt: {}", result.merge_attempt.id)?;
+            writeln!(out, "Semantic review: {}", result.semantic_review.id)?;
+            writeln!(out, "Operator: {}", result.operator.id)?;
+            writeln!(out, "Report: {}", result.report_path.display())?;
+            writeln!(out, "Summary: {}", result.summary)?;
+            writeln!(out, "Required actions: {}", result.required_actions.len())?;
+            writeln!(out, "Suggested tests: {}", result.suggested_tests.len())?;
+            if result.blocked {
+                writeln!(out, "Blocked: semantic_review")?;
             }
             Ok(())
         }
@@ -732,6 +771,69 @@ fn parse_preflight_options(args: &[String], cwd: &Path) -> Result<PreflightOptio
     };
 
     Ok(PreflightOptions {
+        repo_root,
+        db_path,
+        session_id,
+        operator_id,
+    })
+}
+
+fn parse_review_options(args: &[String], cwd: &Path) -> Result<ReviewOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut operator_id = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown review option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "review accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage("review requires <session-id>".to_string()));
+    };
+
+    Ok(ReviewOptions {
         repo_root,
         db_path,
         session_id,
@@ -1539,6 +1641,11 @@ fn next_merge_attempt_id(created_at_ms: i64) -> String {
     format!("merge-attempt-{created_at_ms}-{counter}")
 }
 
+fn next_semantic_review_id(created_at_ms: i64) -> String {
+    let counter = SEMANTIC_REVIEW_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("semantic-review-{created_at_ms}-{counter}")
+}
+
 fn next_artifact_id(created_at_ms: i64) -> String {
     let counter = ARTIFACT_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{created_at_ms}-{counter}")
@@ -1727,6 +1834,730 @@ fn finish_blocked_preflight(
         check_results,
         blocked_reason: Some(blocked.reason),
     })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SemanticConflictFinding {
+    conflict_type: String,
+    files: Vec<String>,
+    explanation: String,
+    confidence: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LocalSemanticReviewReport {
+    risk_level: SemanticRiskLevel,
+    summary: String,
+    suspected_conflicts: Vec<SemanticConflictFinding>,
+    required_actions: Vec<String>,
+    suggested_tests: Vec<String>,
+    uncertainty: Vec<String>,
+}
+
+fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError> {
+    let aichestra_dir = options.repo_root.join(".aichestra");
+    let config_path = aichestra_dir.join("config.yaml");
+    if !config_path.exists() {
+        return Err(CliError::Usage(format!(
+            "Aichestra config not found at {}; run `aich init` first",
+            config_path.display()
+        )));
+    }
+
+    let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
+    let operator = resolve_active_operator(&ledger, options.operator_id.as_deref())?;
+    let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
+        CliError::Usage(format!("session '{}' does not exist", options.session_id))
+    })?;
+    let manifest = ledger
+        .list_change_manifests(&session.id)?
+        .into_iter()
+        .last()
+        .ok_or_else(|| {
+            CliError::Usage(format!(
+                "session '{}' has no Change Manifest; run `aich session complete {}` first",
+                session.id, session.id
+            ))
+        })?;
+    let attempt = latest_verified_merge_attempt(&ledger, &session.id)?.ok_or_else(|| {
+        CliError::Usage(format!(
+            "session '{}' has no verified preflight attempt; run `aich preflight {}` first",
+            session.id, session.id
+        ))
+    })?;
+    ensure_attempt_can_be_reviewed(&attempt)?;
+
+    let patch_set = ledger.list_patch_sets(&session.id)?.into_iter().last();
+    let changed_files = match patch_set.as_ref() {
+        Some(patch_set) => ledger.list_changed_files(&patch_set.id)?,
+        None => Vec::new(),
+    };
+    let check_results = ledger.list_check_results(&attempt.id)?;
+    let manifest_path = path_from_ledger(&options.repo_root, &manifest.manifest_path);
+    let manifest_content = read_optional_text(&manifest_path)?;
+    let manifest_hash_mismatch = manifest_content
+        .as_ref()
+        .zip(manifest.manifest_hash.as_ref())
+        .is_some_and(|(content, expected)| sha256_hex(content.as_bytes()) != *expected);
+    let prompt_path = semantic_review_prompt_path_from_config(&config_path);
+    let prompt_content = read_optional_text(&path_from_ledger(&options.repo_root, &prompt_path))?;
+
+    let report = build_local_semantic_review_report(
+        &manifest,
+        manifest_content.as_deref(),
+        manifest_hash_mismatch,
+        &attempt,
+        &changed_files,
+        &check_results,
+    );
+    let created_at_ms = now_millis();
+    let review_id = next_semantic_review_id(created_at_ms);
+    let artifact_dir = aichestra_dir
+        .join("artifacts")
+        .join("merge-attempts")
+        .join(&attempt.id);
+    fs::create_dir_all(&artifact_dir)?;
+    let input_path = artifact_dir.join(format!("{review_id}-input.md"));
+    let report_path = artifact_dir.join(format!("{review_id}.yaml"));
+    let input = render_semantic_review_input(SemanticReviewInput {
+        session: &session,
+        attempt: &attempt,
+        manifest: &manifest,
+        manifest_content: manifest_content.as_deref(),
+        patch_set: patch_set.as_ref(),
+        changed_files: &changed_files,
+        check_results: &check_results,
+        config_path: &config_path,
+        prompt_path: &prompt_path,
+        prompt_content: prompt_content.as_deref(),
+    });
+    fs::write(&input_path, input)?;
+    let report_yaml = render_semantic_review_yaml(
+        &review_id,
+        &session,
+        &attempt,
+        &operator,
+        &report,
+        &display_path_for_ledger(&options.repo_root, &input_path),
+    );
+    fs::write(&report_path, report_yaml)?;
+
+    let semantic_review = SemanticReview {
+        id: review_id,
+        merge_attempt_id: attempt.id.clone(),
+        risk_level: report.risk_level,
+        report_path: Some(display_path_for_ledger(&options.repo_root, &report_path)),
+        created_at_ms,
+    };
+    ledger.insert_semantic_review(&semantic_review)?;
+
+    let block_levels = semantic_block_levels_from_config(&config_path)?;
+    let blocked = block_levels.contains(&report.risk_level);
+    ledger.update_merge_attempt_semantic_review(MergeAttemptSemanticReviewUpdate {
+        id: &attempt.id,
+        status: if blocked {
+            MergeAttemptStatus::Blocked
+        } else {
+            MergeAttemptStatus::Verified
+        },
+        semantic_risk_level: report.risk_level,
+        updated_at_ms: now_millis(),
+    })?;
+    ledger.append_event(
+        &NewEvent::new(EventName::MergeSemanticReviewCompleted)
+            .with_subject("merge_attempt", attempt.id.clone())
+            .with_data_json(format!(
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"risk_level\":\"{}\",\"blocked\":{}}}",
+                json_escape(&operator.id),
+                json_escape(&session.id),
+                json_escape(&semantic_review.id),
+                report.risk_level.as_str(),
+                blocked
+            )),
+    )?;
+    if blocked {
+        ledger.append_event(
+            &NewEvent::new(EventName::MergeBlocked)
+                .with_subject("merge_attempt", attempt.id.clone())
+                .with_data_json(format!(
+                    "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"reason\":\"semantic_review\",\"risk_level\":\"{}\"}}",
+                    json_escape(&operator.id),
+                    json_escape(&session.id),
+                    report.risk_level.as_str()
+                )),
+        )?;
+    }
+
+    let merge_attempt = ledger
+        .get_merge_attempt(&attempt.id)?
+        .ok_or_else(|| CliError::Usage(format!("merge attempt '{}' does not exist", attempt.id)))?;
+
+    Ok(ReviewRunResult {
+        semantic_review,
+        merge_attempt,
+        operator,
+        report_path,
+        summary: report.summary,
+        required_actions: report.required_actions,
+        suggested_tests: report.suggested_tests,
+        blocked,
+    })
+}
+
+fn latest_verified_merge_attempt(
+    ledger: &Ledger,
+    session_id: &str,
+) -> Result<Option<MergeAttempt>, CliError> {
+    Ok(ledger
+        .list_merge_attempts(session_id)?
+        .into_iter()
+        .rev()
+        .find(|attempt| attempt.status == MergeAttemptStatus::Verified))
+}
+
+fn ensure_attempt_can_be_reviewed(attempt: &MergeAttempt) -> Result<(), CliError> {
+    if attempt.status != MergeAttemptStatus::Verified {
+        return Err(CliError::Usage(format!(
+            "merge attempt '{}' is not verified; run `aich preflight {}` again",
+            attempt.id, attempt.session_id
+        )));
+    }
+    if !attempt.checks_passed {
+        return Err(CliError::Usage(format!(
+            "merge attempt '{}' did not pass checks; fix the candidate and run preflight again",
+            attempt.id
+        )));
+    }
+    if attempt.verified_tree_id.as_deref().unwrap_or("").is_empty()
+        || attempt
+            .verified_commit_id
+            .as_deref()
+            .unwrap_or("")
+            .is_empty()
+    {
+        return Err(CliError::Usage(format!(
+            "merge attempt '{}' has no verified tree/commit; run `aich preflight {}` again",
+            attempt.id, attempt.session_id
+        )));
+    }
+
+    Ok(())
+}
+
+fn build_local_semantic_review_report(
+    manifest: &ChangeManifest,
+    manifest_content: Option<&str>,
+    manifest_hash_mismatch: bool,
+    attempt: &MergeAttempt,
+    changed_files: &[ChangedFile],
+    check_results: &[CheckResult],
+) -> LocalSemanticReviewReport {
+    let mut findings = Vec::new();
+    let mut required_actions = Vec::new();
+    let mut suggested_tests = Vec::new();
+    let mut uncertainty = vec![
+        "The MVP local reviewer does not build a call graph or run a remote LLM provider."
+            .to_string(),
+        "Clean Git merge and passing checks do not prove business-level correctness.".to_string(),
+    ];
+
+    if manifest_content.is_none() {
+        findings.push(SemanticConflictFinding {
+            conflict_type: "manifest_mismatch".to_string(),
+            files: vec![manifest.manifest_path.clone()],
+            explanation: "The Change Manifest artifact recorded in the ledger is missing."
+                .to_string(),
+            confidence: "high".to_string(),
+        });
+        required_actions
+            .push("Restore or regenerate the Change Manifest before approval.".to_string());
+    }
+
+    if manifest_hash_mismatch {
+        findings.push(SemanticConflictFinding {
+            conflict_type: "manifest_mismatch".to_string(),
+            files: vec![manifest.manifest_path.clone()],
+            explanation: "The Change Manifest artifact hash no longer matches the ledger record."
+                .to_string(),
+            confidence: "high".to_string(),
+        });
+        required_actions.push(
+            "Inspect the manifest artifact for drift and regenerate completion evidence if needed."
+                .to_string(),
+        );
+    }
+
+    let missing_manifest_files =
+        changed_files_missing_from_manifest(changed_files, manifest_content);
+    if !missing_manifest_files.is_empty() {
+        findings.push(SemanticConflictFinding {
+            conflict_type: "manifest_mismatch".to_string(),
+            files: missing_manifest_files.clone(),
+            explanation: "Actual changed files are not all represented in the Change Manifest."
+                .to_string(),
+            confidence: "high".to_string(),
+        });
+        required_actions.push(
+            "Update the Change Manifest so it matches the actual diff before approval.".to_string(),
+        );
+    }
+
+    if changed_files.is_empty() {
+        findings.push(SemanticConflictFinding {
+            conflict_type: "unknown".to_string(),
+            files: Vec::new(),
+            explanation: "No changed-file evidence is available for this candidate.".to_string(),
+            confidence: "high".to_string(),
+        });
+        required_actions
+            .push("Re-run session completion so changed-file evidence is recorded.".to_string());
+    }
+
+    let failed_checks: Vec<String> = check_results
+        .iter()
+        .filter(|check| check.result == CheckResultStatus::Failed)
+        .map(|check| check.name.clone())
+        .collect();
+    if !attempt.checks_passed || !failed_checks.is_empty() {
+        findings.push(SemanticConflictFinding {
+            conflict_type: "test_gap".to_string(),
+            files: Vec::new(),
+            explanation: format!(
+                "The verified candidate does not have a clean check gate: {}",
+                failed_checks.join(", ")
+            ),
+            confidence: "high".to_string(),
+        });
+        required_actions.push("Fix failing checks and run `aich preflight` again.".to_string());
+    }
+
+    if check_results.is_empty() {
+        findings.push(SemanticConflictFinding {
+            conflict_type: "test_gap".to_string(),
+            files: Vec::new(),
+            explanation: "No preflight check results are recorded for this merge attempt."
+                .to_string(),
+            confidence: "medium".to_string(),
+        });
+        required_actions.push("Run preflight with configured checks before approval.".to_string());
+    }
+
+    let shared_contract_files = shared_contract_files(changed_files);
+    if !shared_contract_files.is_empty() {
+        findings.push(SemanticConflictFinding {
+            conflict_type: "api_contract_change".to_string(),
+            files: shared_contract_files.clone(),
+            explanation:
+                "The candidate touches shared API, schema, dependency, config, or migration surfaces."
+                    .to_string(),
+            confidence: "medium".to_string(),
+        });
+        required_actions.push(
+            "Confirm compatibility assumptions and dependent call sites before approval."
+                .to_string(),
+        );
+        suggested_tests.push(
+            "Run targeted tests around the touched shared contract or config surface.".to_string(),
+        );
+    }
+
+    if manifest.validation_status == CHANGE_MANIFEST_VALIDATION_STATUS {
+        uncertainty.push(
+            "The Change Manifest was generated from diff metadata, so intent details may be incomplete."
+                .to_string(),
+        );
+    }
+
+    suggested_tests.extend(check_results.iter().map(|check| {
+        format!(
+            "Keep `{}` green for the verified sandbox tree.",
+            check.command
+        )
+    }));
+    if suggested_tests.is_empty() {
+        suggested_tests
+            .push("Run the target repo's configured test/typecheck/lint gate.".to_string());
+    }
+
+    let risk_level = if findings.iter().any(|finding| {
+        finding.confidence == "high"
+            && matches!(
+                finding.conflict_type.as_str(),
+                "manifest_mismatch" | "unknown"
+            )
+    }) || !failed_checks.is_empty()
+        || !attempt.checks_passed
+    {
+        SemanticRiskLevel::Blocked
+    } else if !shared_contract_files.is_empty() {
+        SemanticRiskLevel::High
+    } else if manifest.validation_status == CHANGE_MANIFEST_VALIDATION_STATUS
+        || check_results.is_empty()
+    {
+        SemanticRiskLevel::Medium
+    } else {
+        SemanticRiskLevel::Low
+    };
+
+    let summary = match risk_level {
+        SemanticRiskLevel::Blocked => {
+            "Semantic review found blocking evidence gaps or manifest/check mismatches.".to_string()
+        }
+        SemanticRiskLevel::High => {
+            "No blocking evidence gap was found, but the candidate touches shared contract surfaces."
+                .to_string()
+        }
+        SemanticRiskLevel::Medium => {
+            "No direct blocker was found; review remains conservative because intent is generated from diff evidence."
+                .to_string()
+        }
+        SemanticRiskLevel::Low => {
+            "No direct semantic conflict was found from recorded manifest, diff, and check evidence."
+                .to_string()
+        }
+    };
+
+    LocalSemanticReviewReport {
+        risk_level,
+        summary,
+        suspected_conflicts: findings,
+        required_actions,
+        suggested_tests,
+        uncertainty,
+    }
+}
+
+fn changed_files_missing_from_manifest(
+    changed_files: &[ChangedFile],
+    manifest_content: Option<&str>,
+) -> Vec<String> {
+    let Some(manifest_content) = manifest_content else {
+        return Vec::new();
+    };
+
+    changed_files
+        .iter()
+        .filter(|file| !manifest_content.contains(&file.path))
+        .map(|file| file.path.clone())
+        .collect()
+}
+
+fn shared_contract_files(changed_files: &[ChangedFile]) -> Vec<String> {
+    changed_files
+        .iter()
+        .filter(|file| is_shared_contract_path(&file.path))
+        .map(|file| file.path.clone())
+        .collect()
+}
+
+fn is_shared_contract_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower == "cargo.toml"
+        || lower == "cargo.lock"
+        || lower.ends_with("/cargo.toml")
+        || lower.ends_with("/cargo.lock")
+        || lower.contains("migration")
+        || lower.contains("schema")
+        || lower.contains("config")
+        || lower.contains("types")
+        || lower.ends_with("/lib.rs")
+        || lower.ends_with("/mod.rs")
+}
+
+struct SemanticReviewInput<'a> {
+    session: &'a Session,
+    attempt: &'a MergeAttempt,
+    manifest: &'a ChangeManifest,
+    manifest_content: Option<&'a str>,
+    patch_set: Option<&'a PatchSet>,
+    changed_files: &'a [ChangedFile],
+    check_results: &'a [CheckResult],
+    config_path: &'a Path,
+    prompt_path: &'a str,
+    prompt_content: Option<&'a str>,
+}
+
+fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> String {
+    let mut output = String::new();
+    output.push_str("# Semantic Review Input\n\n");
+    output.push_str(&format!("- reviewer: `{LOCAL_SEMANTIC_REVIEWER}`\n"));
+    output.push_str("- llm_executed: `false`\n");
+    output.push_str(&format!("- session_id: `{}`\n", input.session.id));
+    output.push_str(&format!("- goal: `{}`\n", input.session.goal));
+    output.push_str(&format!("- merge_attempt_id: `{}`\n", input.attempt.id));
+    output.push_str(&format!(
+        "- verified_tree_id: `{}`\n",
+        input.attempt.verified_tree_id.as_deref().unwrap_or("")
+    ));
+    output.push_str(&format!(
+        "- verified_commit_id: `{}`\n",
+        input.attempt.verified_commit_id.as_deref().unwrap_or("")
+    ));
+    output.push_str(&format!(
+        "- config_path: `{}`\n",
+        input.config_path.display()
+    ));
+    output.push_str(&format!("- prompt_path: `{}`\n", input.prompt_path));
+    output.push_str("\n## Change Manifest\n\n");
+    output.push_str(&format!("- id: `{}`\n", input.manifest.id));
+    output.push_str(&format!("- path: `{}`\n", input.manifest.manifest_path));
+    output.push_str(&format!(
+        "- validation_status: `{}`\n\n",
+        input.manifest.validation_status
+    ));
+    match input.manifest_content {
+        Some(content) => {
+            output.push_str("```yaml\n");
+            output.push_str(content);
+            if !content.ends_with('\n') {
+                output.push('\n');
+            }
+            output.push_str("```\n\n");
+        }
+        None => output.push_str("_Manifest artifact could not be read._\n\n"),
+    }
+
+    output.push_str("## Diff Evidence\n\n");
+    if let Some(patch_set) = input.patch_set {
+        output.push_str(&format!("- patch_set_id: `{}`\n", patch_set.id));
+        output.push_str(&format!("- base_commit: `{}`\n", patch_set.base_commit));
+        output.push_str(&format!(
+            "- head_commit: `{}`\n",
+            patch_set.head_commit.as_deref().unwrap_or("")
+        ));
+        if let Some(diff_stat) = patch_set.diff_stat.as_deref() {
+            output.push_str("\n```text\n");
+            output.push_str(diff_stat);
+            if !diff_stat.ends_with('\n') {
+                output.push('\n');
+            }
+            output.push_str("```\n");
+        }
+    } else {
+        output.push_str("_No patch set evidence is recorded._\n");
+    }
+
+    output.push_str("\n## Changed Files\n\n");
+    if input.changed_files.is_empty() {
+        output.push_str("- none recorded\n");
+    } else {
+        for file in input.changed_files {
+            output.push_str(&format!("- `{}` ({})\n", file.path, file.change_type));
+        }
+    }
+
+    output.push_str("\n## Check Results\n\n");
+    if input.check_results.is_empty() {
+        output.push_str("- none recorded\n");
+    } else {
+        for check in input.check_results {
+            output.push_str(&format!(
+                "- `{}`: {} via `{}`\n",
+                check.name,
+                check.result.as_str(),
+                check.command
+            ));
+        }
+    }
+
+    output.push_str("\n## Prompt\n\n");
+    match input.prompt_content {
+        Some(content) => {
+            output.push_str("```markdown\n");
+            output.push_str(content);
+            if !content.ends_with('\n') {
+                output.push('\n');
+            }
+            output.push_str("```\n");
+        }
+        None => output.push_str("_Semantic review prompt artifact could not be read._\n"),
+    }
+
+    output
+}
+
+fn render_semantic_review_yaml(
+    review_id: &str,
+    session: &Session,
+    attempt: &MergeAttempt,
+    operator: &Operator,
+    report: &LocalSemanticReviewReport,
+    input_artifact: &str,
+) -> String {
+    let mut output = String::new();
+    output.push_str("semantic_review:\n");
+    output.push_str(&format!("  id: {}\n", yaml_quote(review_id)));
+    output.push_str(&format!("  session_id: {}\n", yaml_quote(&session.id)));
+    output.push_str(&format!(
+        "  merge_attempt_id: {}\n",
+        yaml_quote(&attempt.id)
+    ));
+    output.push_str(&format!(
+        "  reviewer: {}\n",
+        yaml_quote(LOCAL_SEMANTIC_REVIEWER)
+    ));
+    output.push_str("  llm_executed: false\n");
+    output.push_str(&format!("  operator_id: {}\n", yaml_quote(&operator.id)));
+    output.push_str(&format!(
+        "  risk_level: {}\n",
+        yaml_quote(report.risk_level.as_str())
+    ));
+    output.push_str(&format!("  summary: {}\n", yaml_quote(&report.summary)));
+    output.push_str(&format!(
+        "  input_artifact: {}\n",
+        yaml_quote(input_artifact)
+    ));
+    output.push_str("  suspected_conflicts:\n");
+    append_semantic_conflicts_yaml(&mut output, &report.suspected_conflicts, 4);
+    output.push_str("  required_actions:\n");
+    append_string_list_yaml(&mut output, &report.required_actions, 4);
+    output.push_str("  suggested_tests:\n");
+    append_string_list_yaml(&mut output, &report.suggested_tests, 4);
+    output.push_str("  proposed_patch:\n");
+    output.push_str("    available: false\n");
+    output.push_str("    description: \"\"\n");
+    output.push_str("    patch_artifact: \"\"\n");
+    output.push_str("  uncertainty:\n");
+    append_string_list_yaml(&mut output, &report.uncertainty, 4);
+    output
+}
+
+fn append_semantic_conflicts_yaml(
+    output: &mut String,
+    findings: &[SemanticConflictFinding],
+    indent: usize,
+) {
+    if findings.is_empty() {
+        output.push_str(&format!("{}[]\n", " ".repeat(indent)));
+        return;
+    }
+
+    for finding in findings {
+        output.push_str(&format!(
+            "{}- type: {}\n",
+            " ".repeat(indent),
+            yaml_quote(&finding.conflict_type)
+        ));
+        output.push_str(&format!("{}  files:\n", " ".repeat(indent)));
+        append_string_list_yaml(output, &finding.files, indent + 4);
+        output.push_str(&format!("{}  symbols: []\n", " ".repeat(indent)));
+        output.push_str(&format!(
+            "{}  explanation: {}\n",
+            " ".repeat(indent),
+            yaml_quote(&finding.explanation)
+        ));
+        output.push_str(&format!(
+            "{}  confidence: {}\n",
+            " ".repeat(indent),
+            yaml_quote(&finding.confidence)
+        ));
+    }
+}
+
+fn append_string_list_yaml(output: &mut String, values: &[String], indent: usize) {
+    if values.is_empty() {
+        output.push_str(&format!("{}[]\n", " ".repeat(indent)));
+        return;
+    }
+
+    for value in values {
+        output.push_str(&format!("{}- {}\n", " ".repeat(indent), yaml_quote(value)));
+    }
+}
+
+fn semantic_review_prompt_path_from_config(config_path: &Path) -> String {
+    let Ok(config) = fs::read_to_string(config_path) else {
+        return ".aichestra/prompts/semantic-merge-review.md".to_string();
+    };
+    let mut in_semantic_review = false;
+
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if !line.starts_with(' ') && trimmed.ends_with(':') {
+            in_semantic_review = trimmed == "semantic_review:";
+            continue;
+        }
+
+        if in_semantic_review {
+            if let Some(value) = trimmed.strip_prefix("prompt_path:") {
+                let prompt_path = strip_yaml_scalar(value);
+                if !prompt_path.trim().is_empty() {
+                    return prompt_path;
+                }
+            }
+        }
+    }
+
+    ".aichestra/prompts/semantic-merge-review.md".to_string()
+}
+
+fn semantic_block_levels_from_config(
+    config_path: &Path,
+) -> Result<Vec<SemanticRiskLevel>, CliError> {
+    let config = fs::read_to_string(config_path)?;
+    let mut block_levels = Vec::new();
+    let mut in_semantic_review = false;
+    let mut in_block_levels = false;
+
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if !line.starts_with(' ') && trimmed.ends_with(':') {
+            in_semantic_review = trimmed == "semantic_review:";
+            in_block_levels = false;
+            continue;
+        }
+
+        if !in_semantic_review {
+            continue;
+        }
+
+        if trimmed == "risk_block_levels:" {
+            in_block_levels = true;
+            continue;
+        }
+
+        if in_block_levels {
+            if let Some(value) = trimmed.strip_prefix('-') {
+                block_levels.push(
+                    SemanticRiskLevel::parse(strip_yaml_scalar(value).as_str())
+                        .map_err(CliError::Usage)?,
+                );
+            } else if !line.starts_with("    ") {
+                in_block_levels = false;
+            }
+        }
+    }
+
+    if block_levels.is_empty() {
+        block_levels.push(SemanticRiskLevel::Blocked);
+    }
+
+    Ok(block_levels)
+}
+
+fn path_from_ledger(repo_root: &Path, path: &str) -> PathBuf {
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        path
+    } else {
+        repo_root.join(path)
+    }
+}
+
+fn read_optional_text(path: &Path) -> Result<Option<String>, CliError> {
+    match fs::read_to_string(path) {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CliError::Io(error)),
+    }
 }
 
 fn persist_preflight_checks(
@@ -2098,7 +2929,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]
@@ -2297,6 +3128,106 @@ mod tests {
     fn preflight_requires_session_id() {
         let err = parse_preflight_options(&[], Path::new(".")).unwrap_err();
         assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+    }
+
+    #[test]
+    fn review_requires_session_id() {
+        let err = parse_review_options(&[], Path::new(".")).unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+    }
+
+    fn seed_verified_review_candidate(
+        repo: &Path,
+        changed_file_path: &str,
+        write_manifest: bool,
+    ) -> (Session, MergeAttempt) {
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        let now = now_millis();
+        let mut session = Session::new(
+            "session-review",
+            "review candidate",
+            "codex",
+            "aich/session/session-review",
+            ".aichestra/worktrees/session-review",
+            "base-commit",
+            now,
+        );
+        session.status = SessionStatus::Enqueued;
+        session.head_commit = Some("head-commit".to_string());
+        session.updated_at_ms = now + 1;
+        ledger.insert_session(&session).expect("insert session");
+
+        let patch_set = PatchSet {
+            id: "patch-review".to_string(),
+            session_id: session.id.clone(),
+            base_commit: "base-commit".to_string(),
+            head_commit: Some("head-commit".to_string()),
+            patch_id: Some("head-commit".to_string()),
+            diff_stat: Some(format!(" {changed_file_path} | 1 +\n 1 file changed\n")),
+            created_at_ms: now + 2,
+        };
+        let changed_files = vec![ChangedFile::new(changed_file_path, "modified")];
+        ledger
+            .insert_patch_set(&patch_set, &changed_files)
+            .expect("insert patch set");
+
+        let artifact_dir = repo
+            .join(".aichestra/artifacts/sessions")
+            .join(&session.id)
+            .join("review-seed");
+        fs::create_dir_all(&artifact_dir).expect("artifact dir");
+        let manifest_path = artifact_dir.join("change-manifest.yaml");
+        let manifest_content = format!(
+            "change_manifest:\n  session_id: \"{}\"\n  changed_areas:\n    - file: \"{}\"\n",
+            session.id, changed_file_path
+        );
+        let manifest_hash = if write_manifest {
+            fs::write(&manifest_path, &manifest_content).expect("write manifest");
+            Some(sha256_hex(manifest_content.as_bytes()))
+        } else {
+            None
+        };
+        let manifest = ChangeManifest {
+            id: "manifest-review".to_string(),
+            session_id: session.id.clone(),
+            manifest_path: display_path_for_ledger(repo, &manifest_path),
+            manifest_hash,
+            validation_status: CHANGE_MANIFEST_VALIDATION_STATUS.to_string(),
+            created_at_ms: now + 3,
+        };
+        ledger
+            .insert_change_manifest(&manifest)
+            .expect("insert manifest");
+
+        let attempt = MergeAttempt {
+            id: "merge-review".to_string(),
+            session_id: session.id.clone(),
+            status: MergeAttemptStatus::Verified,
+            main_before_commit: "main-before".to_string(),
+            candidate_commit: "head-commit".to_string(),
+            apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+            verified_tree_id: Some("verified-tree".to_string()),
+            verified_commit_id: Some("verified-commit".to_string()),
+            checks_passed: true,
+            semantic_risk_level: None,
+        };
+        ledger
+            .insert_merge_attempt(&attempt, now + 4, now + 4)
+            .expect("insert merge attempt");
+        ledger
+            .insert_check_result(&CheckResult {
+                id: "check-review".to_string(),
+                merge_attempt_id: attempt.id.clone(),
+                name: "test".to_string(),
+                command: "cargo test --all".to_string(),
+                result: CheckResultStatus::Passed,
+                stdout_artifact: None,
+                stderr_artifact: None,
+                created_at_ms: now + 5,
+            })
+            .expect("insert check");
+
+        (session, attempt)
     }
 
     #[test]
@@ -2781,6 +3712,99 @@ mod tests {
             .any(
                 |event| event.name == "merge.blocked" && event.data_json.contains("checks_failed")
             ));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn review_records_semantic_report_for_verified_attempt() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, attempt) = seed_verified_review_candidate(&repo, "src/lib.rs", true);
+
+        let mut output = Vec::new();
+        run_with_cwd(["aich", "review", &session.id], &repo, &mut output).expect("review");
+        let output = String::from_utf8(output).expect("utf8 output");
+        assert!(output.contains("Review high"));
+        assert!(output.contains("Merge attempt: merge-review"));
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        let reviews = ledger
+            .list_semantic_reviews(&attempt.id)
+            .expect("semantic reviews");
+        assert_eq!(reviews.len(), 1);
+        assert_eq!(reviews[0].risk_level, SemanticRiskLevel::High);
+        let report_path = repo.join(reviews[0].report_path.as_deref().expect("report path"));
+        assert!(report_path.exists());
+        let report = fs::read_to_string(report_path).expect("read report");
+        assert!(report.contains("local_mvp_static_reviewer"));
+        assert!(report.contains("api_contract_change"));
+
+        let loaded_attempt = ledger
+            .get_merge_attempt(&attempt.id)
+            .expect("get attempt")
+            .expect("attempt exists");
+        assert_eq!(loaded_attempt.status, MergeAttemptStatus::Verified);
+        assert_eq!(loaded_attempt.semantic_risk_level.as_deref(), Some("high"));
+        assert!(ledger
+            .list_events()
+            .expect("events")
+            .iter()
+            .any(|event| event.name == "merge.semantic_review.completed"
+                && event.data_json.contains("\"risk_level\":\"high\"")));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn review_blocks_when_manifest_artifact_is_missing() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", false);
+
+        let review_options = ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        };
+        let result = run_review_with(&review_options).expect("review");
+
+        assert_eq!(
+            result.semantic_review.risk_level,
+            SemanticRiskLevel::Blocked
+        );
+        assert!(result.blocked);
+        assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Blocked);
+        assert_eq!(
+            result.merge_attempt.semantic_risk_level.as_deref(),
+            Some("blocked")
+        );
+        assert!(result.report_path.exists());
+        assert!(result
+            .required_actions
+            .iter()
+            .any(|action| action.contains("Change Manifest")));
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger.list_events().expect("events").iter().any(|event| {
+            event.name == "merge.blocked" && event.data_json.contains("semantic_review")
+        }));
+        assert_eq!(
+            ledger
+                .list_semantic_reviews(&attempt.id)
+                .expect("semantic reviews")
+                .len(),
+            1
+        );
 
         let _ = fs::remove_dir_all(repo);
     }

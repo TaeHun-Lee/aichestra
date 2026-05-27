@@ -92,6 +92,44 @@ pub struct CheckResult {
     pub created_at_ms: i64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SemanticRiskLevel {
+    Low,
+    Medium,
+    High,
+    Blocked,
+}
+
+impl SemanticRiskLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Blocked => "blocked",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            "blocked" => Ok(Self::Blocked),
+            other => Err(format!("unknown semantic risk level '{other}'")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SemanticReview {
+    pub id: String,
+    pub merge_attempt_id: String,
+    pub risk_level: SemanticRiskLevel,
+    pub report_path: Option<String>,
+    pub created_at_ms: i64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VerifiedTreeViolation {
     AttemptNotVerified {

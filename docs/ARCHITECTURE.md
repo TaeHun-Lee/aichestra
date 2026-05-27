@@ -110,7 +110,7 @@ flowchart TB
 7. Preflight creates a temporary sandbox from latest main.
 8. The candidate is mechanically merged using the same strategy that will be used to apply.
 9. Checks run in the sandbox and store stdout/stderr artifacts.
-10. The Semantic Merge LLM reviews manifests, diffs, and mechanical merge results.
+10. `aich review` writes a semantic review report from the manifest, diff evidence, mechanical merge result, and sandbox check results.
 11. The developer reviews the result.
 12. The exact verified tree/commit is applied to main only after approval.
 
@@ -122,6 +122,7 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - Main worktree is not handed to agents.
 - The merge queue is the only path to main.
 - Preflight and apply must use the same candidate result.
+- Semantic review is advisory evidence. It can block on explicit blocker risk, but it does not approve or apply changes.
 
 ## Local auth identity
 

@@ -8,7 +8,7 @@ use std::path::Path;
 use aich_core::{
     ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, ContextSnapshot, EventName,
     MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole, OperatorStatus, PatchSet,
-    Session, SessionStatus,
+    SemanticReview, SemanticRiskLevel, Session, SessionStatus,
 };
 use rusqlite::{params, types::Type, Connection, Row};
 
@@ -66,6 +66,13 @@ pub struct MergeAttemptResultUpdate<'a> {
     pub verified_commit_id: Option<&'a str>,
     pub checks_passed: bool,
     pub semantic_risk_level: Option<&'a str>,
+    pub updated_at_ms: i64,
+}
+
+pub struct MergeAttemptSemanticReviewUpdate<'a> {
+    pub id: &'a str,
+    pub status: MergeAttemptStatus,
+    pub semantic_risk_level: SemanticRiskLevel,
     pub updated_at_ms: i64,
 }
 
@@ -561,6 +568,36 @@ impl Ledger {
         Ok(())
     }
 
+    pub fn update_merge_attempt_semantic_review(
+        &self,
+        update: MergeAttemptSemanticReviewUpdate<'_>,
+    ) -> Result<()> {
+        let rows = self.conn.execute(
+            r#"
+            UPDATE merge_attempts
+            SET status = ?2,
+                semantic_risk_level = ?3,
+                updated_at_ms = ?4
+            WHERE id = ?1
+            "#,
+            params![
+                update.id,
+                update.status.as_str(),
+                update.semantic_risk_level.as_str(),
+                update.updated_at_ms,
+            ],
+        )?;
+
+        if rows == 0 {
+            return Err(LedgerError::Domain(format!(
+                "merge attempt '{}' does not exist",
+                update.id
+            )));
+        }
+
+        Ok(())
+    }
+
     pub fn get_merge_attempt(&self, id: &str) -> Result<Option<MergeAttempt>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -599,6 +636,44 @@ impl Ledger {
             attempts.push(row?);
         }
         Ok(attempts)
+    }
+
+    pub fn insert_semantic_review(&self, review: &SemanticReview) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO semantic_reviews (
+              id, merge_attempt_id, risk_level, report_path, created_at_ms
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+            params![
+                &review.id,
+                &review.merge_attempt_id,
+                review.risk_level.as_str(),
+                &review.report_path,
+                review.created_at_ms,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_semantic_reviews(&self, merge_attempt_id: &str) -> Result<Vec<SemanticReview>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, merge_attempt_id, risk_level, report_path, created_at_ms
+            FROM semantic_reviews
+            WHERE merge_attempt_id = ?1
+            ORDER BY created_at_ms ASC, id ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![merge_attempt_id], semantic_review_from_row)?;
+
+        let mut reviews = Vec::new();
+        for row in rows {
+            reviews.push(row?);
+        }
+        Ok(reviews)
     }
 
     pub fn insert_check_result(&self, check_result: &CheckResult) -> Result<()> {
@@ -808,6 +883,25 @@ fn merge_attempt_from_row(row: &Row<'_>) -> rusqlite::Result<MergeAttempt> {
         verified_commit_id: row.get(7)?,
         checks_passed: checks_passed != 0,
         semantic_risk_level: row.get(9)?,
+    })
+}
+
+fn semantic_review_from_row(row: &Row<'_>) -> rusqlite::Result<SemanticReview> {
+    let risk_value: String = row.get(2)?;
+    let risk_level = SemanticRiskLevel::parse(&risk_value).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            2,
+            Type::Text,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+        )
+    })?;
+
+    Ok(SemanticReview {
+        id: row.get(0)?,
+        merge_attempt_id: row.get(1)?,
+        risk_level,
+        report_path: row.get(3)?,
+        created_at_ms: row.get(4)?,
     })
 }
 
@@ -1050,6 +1144,25 @@ mod tests {
         ledger
             .insert_check_result(&check_result)
             .expect("insert check result");
+        let semantic_review = SemanticReview {
+            id: "review-1".to_string(),
+            merge_attempt_id: "merge-1".to_string(),
+            risk_level: SemanticRiskLevel::Medium,
+            report_path: Some(".aichestra/artifacts/review.yaml".to_string()),
+            created_at_ms: now + 8,
+        };
+        ledger
+            .insert_semantic_review(&semantic_review)
+            .expect("insert semantic review");
+        ledger
+            .update_merge_attempt_semantic_review(MergeAttemptSemanticReviewUpdate {
+                id: "merge-1",
+                status: MergeAttemptStatus::Verified,
+                semantic_risk_level: SemanticRiskLevel::Medium,
+                updated_at_ms: now + 9,
+            })
+            .expect("update semantic risk");
+        attempt.semantic_risk_level = Some("medium".to_string());
 
         assert_eq!(
             ledger
@@ -1068,6 +1181,12 @@ mod tests {
                 .list_check_results("merge-1")
                 .expect("list check results"),
             vec![check_result]
+        );
+        assert_eq!(
+            ledger
+                .list_semantic_reviews("merge-1")
+                .expect("list semantic reviews"),
+            vec![semantic_review]
         );
 
         drop(ledger);

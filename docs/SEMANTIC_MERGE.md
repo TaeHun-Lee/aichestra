@@ -101,9 +101,29 @@ semantic_review:
 
 ## MVP behavior
 
-MVP should start with semantic review report generation only.
+MVP starts with semantic review report generation only.
+
+`aich review <session-id>` currently uses a local deterministic reviewer rather than an external LLM adapter. It reads the latest verified merge attempt, Change Manifest artifact, changed-file evidence, patch summary, and sandbox check results, then writes:
+
+- a review input artifact for auditability
+- a YAML semantic review report
+- a `semantic_reviews` ledger row
+- `merge.semantic_review.completed` event data
+
+The report records `llm_executed: false` so the user can distinguish this MVP evidence from a later provider-backed Semantic Merge LLM review.
 
 Automatic patch application is optional and should remain behind explicit human approval. If a proposed patch is applied, the resulting tree becomes a new candidate and must go through checks again.
+
+## Local reviewer risk heuristics
+
+The local MVP reviewer is intentionally conservative:
+
+- `blocked`: missing manifest artifact, manifest hash drift, changed-file evidence missing from the manifest, missing changed-file evidence, or failed check evidence
+- `high`: shared API, schema, config, dependency, migration, type, `lib.rs`, or `mod.rs` surfaces changed
+- `medium`: no direct blocker found, but the Change Manifest is generated from diff metadata and semantic impact is not inferred
+- `low`: reserved for reviewed manifest evidence with no direct conflict or shared-surface risk
+
+Only configured block levels mark the merge attempt blocked. The default config blocks `blocked` only.
 
 ## Risk classification
 

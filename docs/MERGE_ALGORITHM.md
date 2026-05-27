@@ -102,6 +102,14 @@ If the merge fails, record conflict files and block.
 
 If the mechanical merge conflicts or any check fails, the merge attempt is marked `blocked`. If all configured checks pass, the merge attempt stores `verified_tree_id` and `verified_commit_id` and is marked `verified`.
 
+## Review implementation
+
+`aich review <session-id>` runs after a verified preflight attempt exists and before approval. The MVP command selects the latest verified merge attempt for the session, loads the Change Manifest, changed-file evidence, patch summary, verified tree/commit ids, and sandbox check results, then writes a semantic review report artifact under `.aichestra/artifacts/merge-attempts/<merge-attempt-id>/`.
+
+The current local MVP reviewer is deterministic and conservative. It does not call a remote LLM provider yet. It records `llm_executed: false`, flags missing or drifted manifest evidence as `blocked`, flags shared API/config/schema/dependency surfaces as `high`, and otherwise keeps generated-from-diff manifests at least `medium` risk because semantic intent is incomplete.
+
+If the configured `semantic_review.risk_block_levels` contains the produced risk level, the merge attempt is marked `blocked`. By default only `blocked` risk blocks the attempt. Non-blocking risks remain advisory evidence for the later human approval gate.
+
 ## Applying to main
 
 Before apply:
@@ -115,7 +123,7 @@ If main moved, do not apply. Re-run preflight on the new main.
 
 ## Semantic review position
 
-Semantic review runs after the mechanical merge result is available and before checks/approval are considered complete.
+Semantic review runs after the mechanical merge result is available and before approval. In the current CLI flow, `aich preflight` also runs the configured sandbox checks first, so `aich review` can include check evidence in the semantic report.
 
 The Semantic Merge LLM may produce a proposed patch. If accepted, that patch creates a new candidate result that must go through checks again.
 
