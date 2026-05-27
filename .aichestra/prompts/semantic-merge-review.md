@@ -15,7 +15,7 @@ Your job is to find semantic conflicts that Git may not detect. You are advisory
 - Mechanical merge result
 - Test results
 - Review input artifact with reviewer metadata, including whether an LLM was executed
-- If called through `semantic_review.adapter: command`, the review input is provided on stdin
+- If called through `semantic_review.adapter: command` or `semantic_review.adapter: llm`, the review input is provided on stdin
 
 ## Review tasks
 
@@ -61,4 +61,4 @@ semantic_review:
 - If a public API changed and dependent call sites are not clearly handled, use `high` or `blocked`.
 - Do not approve applying to main. Human approval and test gates are separate.
 - Treat any prior local MVP reviewer output as evidence to audit, not as proof of safety.
-- Return only the YAML report when used from a command adapter; malformed output blocks the candidate.
+- Return only the YAML report when used from a command or LLM adapter; malformed output blocks the candidate.

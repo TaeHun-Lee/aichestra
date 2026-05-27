@@ -116,12 +116,17 @@ The adapter is configured in `.aichestra/config.yaml`:
 
 ```yaml
 semantic_review:
-  adapter: local | command
+  adapter: local | command | llm
   reviewer_id: local_mvp_static_reviewer
+  reviewer_provider: codex
+  model: optional-provider-model
+  profile: optional-provider-profile
   command: your-review-command --flag
 ```
 
 `adapter: command` is provider-agnostic. Aichestra passes the rendered review input artifact to the command on stdin and expects stdout to contain a `semantic_review:` YAML document matching the report schema. The command is executed directly as a program plus args, not through a shell. If the command exits non-zero or returns an invalid report, Aichestra records a `blocked` semantic review so the candidate cannot be approved or applied until the reviewer configuration/output is fixed.
+
+`adapter: llm` is the built-in LLM wrapper path. With `reviewer_provider: codex`, Aichestra runs `codex exec` non-interactively with a read-only sandbox, no command approval, the rendered review input on stdin, and the same YAML output contract. Custom LLM providers can use `adapter: llm` with an explicit `command`, which lets a local wrapper call any provider while keeping the same audit artifacts and blocking behavior.
 
 Automatic patch application is optional and should remain behind explicit human approval. If a proposed patch is applied, the resulting tree becomes a new candidate and must go through checks again.
 

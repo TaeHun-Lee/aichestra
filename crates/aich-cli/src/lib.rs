@@ -41,6 +41,7 @@ const CHANGE_MANIFEST_VALIDATION_STATUS: &str = "generated_from_diff";
 const PREFLIGHT_APPLY_STRATEGY: &str = "merge_no_ff_commit";
 const LOCAL_SEMANTIC_REVIEWER: &str = "local_mvp_static_reviewer";
 const COMMAND_SEMANTIC_REVIEWER: &str = "command_semantic_review_adapter";
+const LLM_SEMANTIC_REVIEWER: &str = "llm_semantic_review_adapter";
 const MERGE_QUEUE_LOCK_NAME: &str = "merge-queue";
 const CONTEXT_SNAPSHOT_FILES: &[&str] = &[
     "AGENTS.md",
@@ -3418,6 +3419,7 @@ struct LocalSemanticReviewReport {
 }
 
 struct SemanticReviewAdapterRequest<'a> {
+    repo_root: &'a Path,
     session: &'a Session,
     attempt: &'a MergeAttempt,
     manifest: &'a ChangeManifest,
@@ -3486,12 +3488,16 @@ impl ProcessCommandSpec {
 enum SemanticReviewAdapterKind {
     Local,
     Command,
+    Llm,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SemanticReviewAdapterConfig {
     kind: SemanticReviewAdapterKind,
+    provider: Option<String>,
     reviewer_id: Option<String>,
+    model: Option<String>,
+    profile: Option<String>,
     command: Option<ProcessCommandSpec>,
 }
 
@@ -3536,16 +3542,17 @@ impl SemanticReviewAdapter for CommandSemanticReviewAdapter {
             prompt_path: request.prompt_path,
             prompt_content: request.prompt_content,
         });
-        let output = match run_semantic_review_command(&self.command, &review_input) {
-            Ok(output) => output,
-            Err(error) => {
-                return Ok(command_semantic_review_failure_report(
-                    "Semantic review command could not run.",
-                    error,
-                    &self.command,
-                ));
-            }
-        };
+        let output =
+            match run_semantic_review_command(&self.command, &review_input, request.repo_root) {
+                Ok(output) => output,
+                Err(error) => {
+                    return Ok(command_semantic_review_failure_report(
+                        "Semantic review command could not run.",
+                        error,
+                        &self.command,
+                    ));
+                }
+            };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -3576,6 +3583,94 @@ impl SemanticReviewAdapter for CommandSemanticReviewAdapter {
     }
 }
 
+struct LlmSemanticReviewAdapter {
+    reviewer_id: String,
+    provider: String,
+    command: ProcessCommandSpec,
+}
+
+impl LlmSemanticReviewAdapter {
+    fn new(reviewer_id: String, provider: String, command: ProcessCommandSpec) -> Self {
+        Self {
+            reviewer_id,
+            provider,
+            command,
+        }
+    }
+}
+
+impl SemanticReviewAdapter for LlmSemanticReviewAdapter {
+    fn reviewer_id(&self) -> &str {
+        &self.reviewer_id
+    }
+
+    fn llm_executed(&self) -> bool {
+        true
+    }
+
+    fn review(
+        &self,
+        request: &SemanticReviewAdapterRequest<'_>,
+    ) -> Result<LocalSemanticReviewReport, CliError> {
+        let review_input = render_semantic_review_input(SemanticReviewInput {
+            reviewer_id: self.reviewer_id(),
+            llm_executed: self.llm_executed(),
+            session: request.session,
+            attempt: request.attempt,
+            manifest: request.manifest,
+            manifest_content: request.manifest_content,
+            patch_set: request.patch_set,
+            changed_files: request.changed_files,
+            check_results: request.check_results,
+            config_path: request.config_path,
+            prompt_path: request.prompt_path,
+            prompt_content: request.prompt_content,
+        });
+        let output =
+            match run_semantic_review_command(&self.command, &review_input, request.repo_root) {
+                Ok(output) => output,
+                Err(error) => {
+                    return Ok(llm_semantic_review_failure_report(
+                        "Semantic review LLM adapter could not run.",
+                        error,
+                        &self.provider,
+                        &self.command,
+                    ));
+                }
+            };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Ok(llm_semantic_review_failure_report(
+                "Semantic review LLM adapter exited with a non-zero status.",
+                format!(
+                    "provider `{}` command `{}` exited with {}; stderr: {}",
+                    self.provider,
+                    self.command.display(),
+                    output.status,
+                    truncate_for_report(stderr.trim(), 1_000)
+                ),
+                &self.provider,
+                &self.command,
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        match parse_semantic_review_command_report(&stdout) {
+            Ok(report) => Ok(report),
+            Err(error) => Ok(llm_semantic_review_failure_report(
+                "Semantic review LLM adapter returned an invalid report.",
+                format!(
+                    "{error}; stdout: {}",
+                    truncate_for_report(stdout.trim(), 1_000)
+                ),
+                &self.provider,
+                &self.command,
+            )),
+        }
+    }
+}
+
 fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError> {
     let config_path = options.repo_root.join(".aichestra/config.yaml");
     if !config_path.exists() {
@@ -3594,6 +3689,7 @@ fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError>
             kind: SemanticReviewAdapterKind::Command,
             reviewer_id,
             command,
+            ..
         } => {
             let command = command.ok_or_else(|| {
                 CliError::Usage(
@@ -3603,6 +3699,21 @@ fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError>
             })?;
             let adapter = CommandSemanticReviewAdapter::new(
                 reviewer_id.unwrap_or_else(|| COMMAND_SEMANTIC_REVIEWER.to_string()),
+                command,
+            );
+            run_review_with_adapter(options, &adapter)
+        }
+        config @ SemanticReviewAdapterConfig {
+            kind: SemanticReviewAdapterKind::Llm,
+            ..
+        } => {
+            let provider = config.provider.as_deref().unwrap_or("codex").to_string();
+            let command = llm_semantic_review_command_from_config(&config)?;
+            let adapter = LlmSemanticReviewAdapter::new(
+                config
+                    .reviewer_id
+                    .unwrap_or_else(|| format!("{provider}_{LLM_SEMANTIC_REVIEWER}")),
+                provider,
                 command,
             );
             run_review_with_adapter(options, &adapter)
@@ -3678,6 +3789,7 @@ where
         prompt_content: prompt_content.as_deref(),
     });
     let adapter_request = SemanticReviewAdapterRequest {
+        repo_root: &options.repo_root,
         session: &session,
         attempt: &attempt,
         manifest: &manifest,
@@ -4433,9 +4545,11 @@ fn render_semantic_review_yaml(
 fn run_semantic_review_command(
     command_spec: &ProcessCommandSpec,
     review_input: &str,
+    working_dir: &Path,
 ) -> Result<Output, String> {
     let mut child = Command::new(&command_spec.program)
         .args(&command_spec.args)
+        .current_dir(working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -4728,6 +4842,30 @@ fn command_semantic_review_failure_report(
     }
 }
 
+fn llm_semantic_review_failure_report(
+    summary: &str,
+    detail: String,
+    provider: &str,
+    command_spec: &ProcessCommandSpec,
+) -> LocalSemanticReviewReport {
+    LocalSemanticReviewReport {
+        risk_level: SemanticRiskLevel::Blocked,
+        summary: summary.to_string(),
+        suspected_conflicts: vec![SemanticConflictFinding {
+            conflict_type: "llm_reviewer_failure".to_string(),
+            files: Vec::new(),
+            explanation: detail.clone(),
+            confidence: "high".to_string(),
+        }],
+        required_actions: vec![format!(
+            "Fix semantic_review LLM provider `{provider}` command `{}` or switch semantic_review.adapter back to local, then rerun `aich review`.",
+            command_spec.display()
+        )],
+        suggested_tests: Vec::new(),
+        uncertainty: vec![detail],
+    }
+}
+
 fn append_semantic_conflicts_yaml(
     output: &mut String,
     findings: &[SemanticConflictFinding],
@@ -4779,6 +4917,8 @@ fn semantic_review_adapter_config_from_config(
     let mut kind: Option<SemanticReviewAdapterKind> = None;
     let mut legacy_provider: Option<String> = None;
     let mut reviewer_id: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut profile: Option<String> = None;
     let mut command_line: Option<String> = None;
 
     for line in config.lines() {
@@ -4820,6 +4960,22 @@ fn semantic_review_adapter_config_from_config(
             continue;
         }
 
+        if let Some(value) = trimmed.strip_prefix("model:") {
+            let value = strip_yaml_scalar(value);
+            if !value.trim().is_empty() {
+                model = Some(value);
+            }
+            continue;
+        }
+
+        if let Some(value) = trimmed.strip_prefix("profile:") {
+            let value = strip_yaml_scalar(value);
+            if !value.trim().is_empty() {
+                profile = Some(value);
+            }
+            continue;
+        }
+
         if let Some(value) = trimmed.strip_prefix("command:") {
             let value = strip_yaml_scalar(value);
             if !value.trim().is_empty() {
@@ -4842,7 +4998,10 @@ fn semantic_review_adapter_config_from_config(
 
     Ok(SemanticReviewAdapterConfig {
         kind,
+        provider: legacy_provider,
         reviewer_id,
+        model,
+        profile,
         command,
     })
 }
@@ -4851,9 +5010,64 @@ fn parse_semantic_review_adapter_kind(value: &str) -> Result<SemanticReviewAdapt
     match value.trim() {
         "local" => Ok(SemanticReviewAdapterKind::Local),
         "command" => Ok(SemanticReviewAdapterKind::Command),
+        "llm" => Ok(SemanticReviewAdapterKind::Llm),
         other => Err(CliError::Usage(format!(
-            "semantic_review.adapter must be 'local' or 'command', got '{other}'"
+            "semantic_review.adapter must be 'local', 'command', or 'llm', got '{other}'"
         ))),
+    }
+}
+
+fn llm_semantic_review_command_from_config(
+    config: &SemanticReviewAdapterConfig,
+) -> Result<ProcessCommandSpec, CliError> {
+    if let Some(command) = config.command.clone() {
+        return Ok(command);
+    }
+
+    let provider = config.provider.as_deref().unwrap_or("codex");
+    match provider {
+        "codex" => Ok(codex_semantic_review_command(
+            config.model.as_deref(),
+            config.profile.as_deref(),
+        )),
+        "custom" => Err(CliError::Usage(
+            "semantic_review.command must be configured when semantic_review.adapter is llm and reviewer_provider is custom"
+                .to_string(),
+        )),
+        other => Err(CliError::Usage(format!(
+            "semantic_review.reviewer_provider '{other}' is not supported by the built-in LLM adapter; configure semantic_review.command or use adapter: command"
+        ))),
+    }
+}
+
+fn codex_semantic_review_command(model: Option<&str>, profile: Option<&str>) -> ProcessCommandSpec {
+    let mut args = vec![
+        "exec".to_string(),
+        "--sandbox".to_string(),
+        "read-only".to_string(),
+        "--ask-for-approval".to_string(),
+        "never".to_string(),
+        "--skip-git-repo-check".to_string(),
+        "--ephemeral".to_string(),
+        "--color".to_string(),
+        "never".to_string(),
+    ];
+
+    if let Some(model) = model.filter(|value| !value.trim().is_empty()) {
+        args.push("--model".to_string());
+        args.push(model.to_string());
+    }
+
+    if let Some(profile) = profile.filter(|value| !value.trim().is_empty()) {
+        args.push("--profile".to_string());
+        args.push(profile.to_string());
+    }
+
+    args.push("-".to_string());
+
+    ProcessCommandSpec {
+        program: "codex".to_string(),
+        args,
     }
 }
 
@@ -5786,6 +6000,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn codex_semantic_review_command_uses_safe_noninteractive_defaults() {
+        let command = codex_semantic_review_command(Some("model-x"), Some("semantic-review"));
+
+        assert_eq!(command.program, "codex");
+        assert_eq!(command.args[0], "exec");
+        assert!(command.args.contains(&"--sandbox".to_string()));
+        assert!(command.args.contains(&"read-only".to_string()));
+        assert!(command.args.contains(&"--ask-for-approval".to_string()));
+        assert!(command.args.contains(&"never".to_string()));
+        assert!(command.args.contains(&"--skip-git-repo-check".to_string()));
+        assert!(command.args.contains(&"--ephemeral".to_string()));
+        assert!(command.args.contains(&"--model".to_string()));
+        assert!(command.args.contains(&"model-x".to_string()));
+        assert!(command.args.contains(&"--profile".to_string()));
+        assert!(command.args.contains(&"semantic-review".to_string()));
+        assert_eq!(command.args.last().map(String::as_str), Some("-"));
+    }
+
     fn seed_verified_review_candidate(
         repo: &Path,
         changed_file_path: &str,
@@ -5888,6 +6121,21 @@ mod tests {
             ),
         )
         .expect("write semantic review config");
+    }
+
+    fn configure_semantic_review_llm(
+        repo: &Path,
+        reviewer_id: &str,
+        provider: &str,
+        command: &str,
+    ) {
+        fs::write(
+            repo.join(".aichestra/config.yaml"),
+            format!(
+                "semantic_review:\n  adapter: llm\n  reviewer_provider: {provider}\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  risk_block_levels:\n    - blocked\n"
+            ),
+        )
+        .expect("write semantic review llm config");
     }
 
     fn seed_enqueued_candidate(repo: &Path, id: &str) -> Session {
@@ -6763,6 +7011,88 @@ YAML
                 && event
                     .data_json
                     .contains("\"reviewer\":\"scripted_command_reviewer\"")
+                && event.data_json.contains("\"llm_executed\":true")
+        }));
+        assert_eq!(
+            ledger
+                .list_semantic_reviews(&attempt.id)
+                .expect("semantic reviews")
+                .len(),
+            1
+        );
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn review_runs_configured_llm_semantic_adapter_with_custom_command() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let script_path = repo.join("mock-llm-semantic-review.sh");
+        fs::write(
+            &script_path,
+            r#"input=$(cat)
+case "$input" in
+  *"reviewer: \`custom_llm_reviewer\`"*) ;;
+  *) echo "missing llm reviewer input" >&2; exit 2 ;;
+esac
+case "$(pwd)" in
+  *aich-cli-test-*) ;;
+  *) echo "command did not run from repo root" >&2; exit 3 ;;
+esac
+cat <<'YAML'
+semantic_review:
+  risk_level: low
+  summary: "Custom LLM reviewer accepted the candidate."
+  suspected_conflicts: []
+  required_actions: []
+  suggested_tests:
+    - "cargo test --all"
+  uncertainty:
+    - "Custom command stands in for a provider LLM in this test."
+YAML
+"#,
+        )
+        .expect("write script");
+        configure_semantic_review_llm(
+            &repo,
+            "custom_llm_reviewer",
+            "custom",
+            &format!("sh {}", script_path.display()),
+        );
+        let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        let result = run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+
+        assert_eq!(result.semantic_review.risk_level, SemanticRiskLevel::Low);
+        assert!(!result.blocked);
+        assert_eq!(
+            result.summary,
+            "Custom LLM reviewer accepted the candidate."
+        );
+        assert_eq!(result.suggested_tests, vec!["cargo test --all".to_string()]);
+
+        let report = fs::read_to_string(&result.report_path).expect("read report");
+        assert!(report.contains("reviewer: \"custom_llm_reviewer\""));
+        assert!(report.contains("llm_executed: true"));
+        assert!(report.contains("risk_level: \"low\""));
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger.list_events().expect("events").iter().any(|event| {
+            event.name == "merge.semantic_review.completed"
+                && event
+                    .data_json
+                    .contains("\"reviewer\":\"custom_llm_reviewer\"")
                 && event.data_json.contains("\"llm_executed\":true")
         }));
         assert_eq!(
