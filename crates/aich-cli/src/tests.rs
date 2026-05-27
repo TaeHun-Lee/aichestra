@@ -184,6 +184,30 @@ impl VerifiedCommitApplier for MockVerifiedCommitApplier {
     }
 }
 
+struct MockFailingVerifiedCommitApplier {
+    requests: RefCell<Vec<ApplyVerifiedCommitRequest>>,
+    message: String,
+}
+
+impl MockFailingVerifiedCommitApplier {
+    fn invalid_request(message: &str) -> Self {
+        Self {
+            requests: RefCell::new(Vec::new()),
+            message: message.to_string(),
+        }
+    }
+}
+
+impl VerifiedCommitApplier for MockFailingVerifiedCommitApplier {
+    fn apply_verified_commit(
+        &self,
+        request: &ApplyVerifiedCommitRequest,
+    ) -> Result<AppliedVerifiedCommit, WorktreeError> {
+        self.requests.borrow_mut().push(request.clone());
+        Err(WorktreeError::InvalidRequest(self.message.clone()))
+    }
+}
+
 struct MockSessionCleaner {
     requests: RefCell<Vec<CleanupSessionWorktreeRequest>>,
     outcome: CleanupSessionWorktreeOutcome,
@@ -566,6 +590,41 @@ fn configure_semantic_review_llm(repo: &Path, reviewer_id: &str, provider: &str,
         .expect("write semantic review llm config");
 }
 
+fn configure_provider_command(repo: &Path, provider: &str, command: &str) {
+    fs::write(
+        repo.join(".aichestra/config.yaml"),
+        format!(
+            "providers:\n  {provider}:\n    command: {}\n",
+            yaml_single_quote(command)
+        ),
+    )
+    .expect("write provider command config");
+}
+
+fn yaml_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn write_agent_test_command(
+    repo: &Path,
+    script_stem: &str,
+    powershell_script: &str,
+    shell_script: &str,
+) -> String {
+    if cfg!(windows) {
+        let script_path = repo.join(format!("{script_stem}.ps1"));
+        fs::write(&script_path, powershell_script).expect("write script");
+        format!(
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\"",
+            script_path.display()
+        )
+    } else {
+        let script_path = repo.join(format!("{script_stem}.sh"));
+        fs::write(&script_path, shell_script).expect("write script");
+        format!("sh \"{}\"", script_path.display())
+    }
+}
+
 fn configure_main_branch(repo: &Path, branch: &str) {
     let config_path = repo.join(".aichestra/config.yaml");
     let config = fs::read_to_string(&config_path).expect("read config");
@@ -617,6 +676,27 @@ fn seed_session_with_status(repo: &Path, id: &str, status: SessionStatus) -> Ses
         now,
     );
     session.status = status;
+    session.updated_at_ms = now + 1;
+    ledger.insert_session(&session).expect("insert session");
+    session
+}
+
+fn seed_running_agent_session(repo: &Path, id: &str, provider: &str) -> Session {
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let now = now_millis();
+    let worktree_path = repo.join(".aichestra/worktrees").join(id);
+    fs::create_dir_all(&worktree_path).expect("create session worktree");
+    let mut session = Session::new(
+        id,
+        format!("agent task {id}"),
+        provider,
+        format!("aich/session/{id}"),
+        display_path_for_ledger(repo, &worktree_path),
+        "base-commit",
+        now,
+    );
+    session.status = SessionStatus::Running;
+    session.target_path = Some("README.md".to_string());
     session.updated_at_ms = now + 1;
     ledger.insert_session(&session).expect("insert session");
     session
@@ -922,6 +1002,140 @@ fn session_start_records_requested_operator_in_events() {
         && event.data_json.contains("\"operator_id\":\"alice\"")));
     assert!(events.iter().any(|event| event.name == "session.started"
         && event.data_json.contains("\"operator_id\":\"alice\"")));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_run_executes_provider_in_session_worktree_and_records_artifacts() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let command = write_agent_test_command(
+        &repo,
+        "agent-success",
+        r#"$inputText = [Console]::In.ReadToEnd()
+Set-Content -LiteralPath "agent-input.txt" -Value $inputText -NoNewline -Encoding UTF8
+Set-Content -LiteralPath "agent-cwd.txt" -Value (Get-Location).Path -NoNewline -Encoding UTF8
+Set-Content -LiteralPath "agent-marker.txt" -Value "ran" -NoNewline -Encoding UTF8
+[Console]::Out.WriteLine("agent stdout")
+[Console]::Error.WriteLine("agent stderr")
+"#,
+        r#"cat > agent-input.txt
+pwd > agent-cwd.txt
+printf 'ran' > agent-marker.txt
+printf 'agent stdout\n'
+printf 'agent stderr\n' >&2
+"#,
+    );
+    configure_provider_command(&repo, "test-agent", &command);
+    let session = seed_running_agent_session(&repo, "session-agent-run", "test-agent");
+
+    let result = run_session_agent_with(&SessionRunOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("session run");
+
+    let worktree_path = repo.join(".aichestra/worktrees").join(&session.id);
+    assert!(result.success);
+    assert_eq!(result.provider, "test-agent");
+    assert_eq!(result.exit_code, Some(0));
+    assert!(result.artifact_dir.is_dir());
+    assert!(fs::read_to_string(&result.input_path)
+        .expect("input artifact")
+        .contains("Session ID: session-agent-run"));
+    assert!(fs::read_to_string(&result.stdout_path)
+        .expect("stdout artifact")
+        .contains("agent stdout"));
+    assert!(fs::read_to_string(&result.stderr_path)
+        .expect("stderr artifact")
+        .contains("agent stderr"));
+    assert!(fs::read_to_string(&result.metadata_path)
+        .expect("metadata artifact")
+        .contains("\"exit_code\":0"));
+    assert!(fs::read_to_string(worktree_path.join("agent-input.txt"))
+        .expect("agent input")
+        .contains("Goal: agent task session-agent-run"));
+    assert!(fs::read_to_string(worktree_path.join("agent-marker.txt"))
+        .expect("marker")
+        .contains("ran"));
+    assert!(!repo.join("agent-marker.txt").exists());
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let events = ledger.list_events().expect("events");
+    assert!(events
+        .iter()
+        .any(|event| event.name == "session.agent.started"));
+    assert!(events
+        .iter()
+        .any(|event| event.name == "session.agent.completed"));
+    assert!(!events
+        .iter()
+        .any(|event| event.name == "session.agent.failed"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_run_records_failed_provider_artifacts_and_event() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let command = write_agent_test_command(
+        &repo,
+        "agent-fail",
+        r#"[Console]::Error.WriteLine("agent failed")
+exit 7
+"#,
+        r#"printf 'agent failed\n' >&2
+exit 7
+"#,
+    );
+    configure_provider_command(&repo, "test-agent", &command);
+    let session = seed_running_agent_session(&repo, "session-agent-fail", "test-agent");
+
+    let err = run_session_agent_with(&SessionRunOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(message) if message.contains("session agent command exited"))
+    );
+    let runs_dir = repo
+        .join(".aichestra/artifacts/sessions")
+        .join(&session.id)
+        .join("runs");
+    let run_dirs: Vec<PathBuf> = fs::read_dir(&runs_dir)
+        .expect("runs dir")
+        .map(|entry| entry.expect("run dir").path())
+        .collect();
+    assert_eq!(run_dirs.len(), 1);
+    assert!(fs::read_to_string(run_dirs[0].join("stderr.txt"))
+        .expect("stderr artifact")
+        .contains("agent failed"));
+    assert!(fs::read_to_string(run_dirs[0].join("metadata.json"))
+        .expect("metadata artifact")
+        .contains("\"exit_code\":7"));
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    assert!(ledger
+        .list_events()
+        .expect("events")
+        .iter()
+        .any(|event| event.name == "session.agent.failed"));
 
     let _ = fs::remove_dir_all(repo);
 }
@@ -1308,7 +1522,7 @@ fn preflight_requires_queue_head() {
     .unwrap_err();
 
     assert!(
-        matches!(err, CliError::Usage(message) if message.contains("queue head") && message.contains(&head.id))
+        matches!(err, CliError::Usage(message) if message.contains("queue head") && message.contains(&format!("aich preflight {}", head.id)) && message.contains("aich queue"))
     );
     assert!(preflight_runner.requests.borrow().is_empty());
 
@@ -1352,7 +1566,7 @@ fn preflight_refuses_while_verified_candidate_is_pending() {
     .unwrap_err();
 
     assert!(
-        matches!(err, CliError::Usage(message) if message.contains("session-verified") && message.contains("verified"))
+        matches!(err, CliError::Usage(message) if message.contains("session-verified") && message.contains("verified") && message.contains("then re-run"))
     );
     assert!(preflight_runner.requests.borrow().is_empty());
 
@@ -2555,6 +2769,57 @@ fn apply_requires_approval_first() {
 }
 
 #[test]
+fn apply_wrong_branch_error_includes_recovery_hint() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    let applier = MockFailingVerifiedCommitApplier::invalid_request(
+        "main worktree is on branch 'feature', expected configured main branch 'main'",
+    );
+
+    let err = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+        &applier,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(message) if message.contains("git switch main") && message.contains("git.main_branch") && message.contains(&format!("aich apply {}", session.id)))
+    );
+    assert_eq!(applier.requests.borrow().len(), 1);
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn apply_rejects_when_main_moved_after_approval() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -2599,7 +2864,9 @@ fn apply_rejects_when_main_moved_after_approval() {
         &applier,
     )
     .unwrap_err();
-    assert!(matches!(err, CliError::Usage(message) if message.contains("main moved")));
+    assert!(
+        matches!(err, CliError::Usage(message) if message.contains("main moved") && message.contains("aich preflight") && message.contains("aich approve"))
+    );
     assert!(applier.requests.borrow().is_empty());
 
     let _ = fs::remove_dir_all(repo);

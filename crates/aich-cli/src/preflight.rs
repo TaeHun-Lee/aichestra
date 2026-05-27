@@ -63,8 +63,15 @@ where
     ensure_preflight_queue_position(&ledger, &session.id)?;
 
     let main_branch = main_branch_from_config(&config_path)?;
+    let main_ref = main_branch_ref(&main_branch);
     let main_before = git_repo
-        .ref_commit(&options.repo_root, &main_branch_ref(&main_branch))?
+        .ref_commit(&options.repo_root, &main_ref)
+        .map_err(|error| {
+            CliError::Usage(format!(
+                "cannot resolve configured main branch '{main_branch}' ({main_ref}) for preflight: {error}. Update `.aichestra/config.yaml` `git.main_branch` or create the local branch, then re-run `aich preflight {}`.",
+                session.id
+            ))
+        })?
         .commit_id;
     let created_at_ms = now_millis();
     let attempt_id = next_merge_attempt_id(created_at_ms);
@@ -130,7 +137,12 @@ where
                         json_escape(&error.to_string())
                     )),
             )?;
-            return Err(error.into());
+            return Err(CliError::Usage(format!(
+                "preflight failed for session '{}': {error}. Inspect artifacts under {} and run `aich queue`; after fixing the issue, re-run `aich preflight {}`.",
+                session.id,
+                artifact_dir.display(),
+                session.id
+            )));
         }
     };
 
@@ -178,11 +190,12 @@ fn ensure_preflight_queue_position(ledger: &Ledger, session_id: &str) -> Result<
             )
     }) {
         return Err(CliError::Usage(format!(
-            "cannot preflight session '{}' while session '{}' is {}; finish it first with `{}`",
+            "cannot preflight session '{}' while session '{}' is {}; run `{}` first, then re-run `aich preflight {}`. Inspect queue state with `aich queue`.",
             session_id,
             blocking.session.id,
             blocking.status,
-            queue_next_action(blocking)
+            queue_next_action(blocking),
+            session_id
         )));
     }
 
@@ -197,13 +210,13 @@ fn ensure_preflight_queue_position(ledger: &Ledger, session_id: &str) -> Result<
 
     if matches!(current_status, Some("preflight_running")) {
         return Err(CliError::Usage(format!(
-            "session '{session_id}' already has a preflight in progress"
+            "session '{session_id}' already has a preflight in progress. Inspect with `aich queue`; if the lock is stale, use `aich queue unlock --force --reason <text>`."
         )));
     }
 
     if !matches!(current_status, Some("enqueued")) {
         return Err(CliError::Usage(format!(
-            "session '{session_id}' is not preflightable; run `aich queue` to inspect candidate state"
+            "session '{session_id}' is not preflightable. If the session has new worktree changes, run `aich session complete {session_id}` first; otherwise inspect candidate state with `aich queue`."
         )));
     }
 
@@ -212,13 +225,13 @@ fn ensure_preflight_queue_position(ledger: &Ledger, session_id: &str) -> Result<
         .find(|entry| entry.status.as_str() == "enqueued")
     else {
         return Err(CliError::Usage(format!(
-            "session '{session_id}' is not preflightable; run `aich queue` to inspect candidate state"
+            "session '{session_id}' is not preflightable because the queue has no enqueued candidates. Inspect candidate state with `aich queue`."
         )));
     };
 
     if head.session.id != session_id {
         return Err(CliError::Usage(format!(
-            "session '{}' is not the queue head; preflight session '{}' first",
+            "session '{}' is not the queue head; run `aich preflight {}` first, or inspect ordering with `aich queue`.",
             session_id, head.session.id
         )));
     }
