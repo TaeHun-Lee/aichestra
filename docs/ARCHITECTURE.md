@@ -129,13 +129,14 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - `aich queue` reports candidate state from session, merge attempt, review, approval, and queue lock ledger records.
 - Blocked queue entries include recovery guidance, relevant artifact paths, and the exact rerun sequence for the session candidate.
 - `aich queue unlock --force` is the explicit local recovery path for stale queue locks and records `merge.queue_unlocked`.
-- `aich doctor` is a read-only local health check for initialization files, ledger access, default operator identity, queue entries, and stale queue lock suspicion.
+- `aich doctor` is a read-only local health check for initialization files, ledger access, default operator identity, queue entries, stale queue lock suspicion, and interrupted apply recovery hints.
 - `aich session abandon` records `session.abandoned`, refuses to run while the merge queue lock is held, and refuses sessions that are applying or already applied.
 - Session cleanup is allowed for applied sessions, no-op sessions, failed-start sessions without candidate merge state, and abandoned sessions. It refuses dirty registered worktrees, records `session.cleaned`, reports cleaned sessions in status, and skips already-cleaned sessions during prune.
 - Preflight and apply must use the same candidate result.
 - Semantic review is advisory evidence. The default local adapter is deterministic, the command adapter can delegate to any provider wrapper, and the LLM adapter can run provider CLIs such as Codex with stdin/YAML report contracts. Any path can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.
 - Apply refuses a dirty main worktree and refuses any verified commit whose tree does not match the approved tree id.
+- Apply can recover an interrupted `applying` transition only when configured main is still at `main_before` or already at the approved verified commit.
 
 ## Local auth identity
 

@@ -79,7 +79,8 @@ Choose one strategy and keep it consistent.
 `aich queue` is a read-only view of candidates that still need merge-queue attention. It combines session status, the latest merge attempt, semantic review evidence, and approval records into human-facing states:
 
 - `enqueued`: session completion produced a candidate, but preflight has not produced a merge attempt yet
-- `preflight_running`: the latest merge attempt is currently in preflight or applying transition state
+- `preflight_running`: the latest merge attempt is currently in preflight
+- `applying`: apply started and may still be running, or a prior apply was interrupted and should be retried/finalized with `aich apply <session-id>`
 - `verified`: preflight checks passed and a verified tree/commit exists, but approval has not been recorded
 - `approved`: a human approval exists for the verified tree/commit and the next step is apply
 - `blocked`: the latest merge attempt is blocked by conflict, failed checks, or blocking semantic review
@@ -174,6 +175,15 @@ git merge --ff-only <approved_verified_commit_id>
 
 Before running the Git update, the command records the merge attempt as `applying`. After success it records the merge attempt as `applied`, marks the session `completed`, and appends `merge.applied`. The applied commit id and tree id must still match the approved verified commit/tree, or the attempt is blocked.
 
+Apply is intentionally retryable around crash points:
+
+- If a crash leaves the merge attempt as `applying` and main is still at `main_before`, re-running `aich apply <session-id>` resets the attempt to `verified` and retries the same approved verified commit.
+- If a crash leaves the merge attempt as `applying` and main already equals the approved verified commit, re-running `aich apply <session-id>` does not run Git again. It marks the attempt `applied`, marks the session `completed`, and records `merge.applied` with `recovered: true`.
+- If a crash happens after the attempt was marked `applied` but before the session/event bookkeeping finished, re-running `aich apply <session-id>` finalizes the missing ledger state only when main is exactly the approved verified commit.
+- If main is neither `main_before` nor the approved verified commit, apply recovery refuses to proceed because the command cannot prove the tested tree is the applied tree.
+
+If the interrupted process left a stale queue lock, run `aich queue unlock --force --reason "stale apply recovery"` first, then retry `aich apply <session-id>`.
+
 ## Session abandon
 
 `aich session abandon <session-id>` withdraws a session that should not continue through the merge queue. It marks the session `abandoned`, records `session.abandoned`, and removes the candidate from `aich queue` output without applying anything to main.
@@ -219,6 +229,7 @@ Block the candidate when:
 A blocked candidate should remain in the ledger with its artifacts. The developer can:
 
 - inspect `aich queue` for `blocked_reason`, recovery guidance, and artifact paths
+- inspect `aich doctor` for stale queue locks and `applying` attempts that can be retried with `aich apply <session-id>`
 - inspect failed check stderr/stdout, semantic review reports, merge stderr/stdout, or `conflicts.txt`
 - follow preflight/apply error hints for the exact next command, such as switching to the configured main branch or re-running preflight/review/approval after main moved
 - ask a worker LLM to revise the session branch

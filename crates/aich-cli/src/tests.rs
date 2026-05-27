@@ -804,7 +804,7 @@ fn insert_queue_candidate(
 
     let needs_verified_ids = matches!(
         status,
-        MergeAttemptStatus::Verified | MergeAttemptStatus::Applied
+        MergeAttemptStatus::Verified | MergeAttemptStatus::Applying | MergeAttemptStatus::Applied
     );
     let attempt = MergeAttempt {
         id: format!("merge-{id}"),
@@ -2378,6 +2378,260 @@ fn apply_uses_approved_verified_commit_and_marks_applied() {
 }
 
 #[test]
+fn apply_recovers_when_verified_commit_is_already_on_main() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    ledger
+        .update_merge_attempt_status(&attempt.id, MergeAttemptStatus::Applying, now_millis())
+        .expect("mark applying");
+    let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+        applied_commit_id: "verified-commit".to_string(),
+        applied_tree_id: "verified-tree".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+
+    let result = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &RecordingGitRepository::new("verified-commit"),
+        &applier,
+    )
+    .expect("recover apply");
+
+    assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Applied);
+    assert!(applier.requests.borrow().is_empty());
+    let loaded_session = ledger
+        .get_session(&session.id)
+        .expect("get session")
+        .expect("session");
+    assert_eq!(loaded_session.status, SessionStatus::Completed);
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "merge.applied"
+            && event.subject_id.as_deref() == Some(attempt.id.as_str())
+            && event.data_json.contains("\"recovered\":true")
+    }));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn apply_retries_when_applying_but_main_has_not_moved() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    ledger
+        .update_merge_attempt_status(&attempt.id, MergeAttemptStatus::Applying, now_millis())
+        .expect("mark applying");
+    let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+        applied_commit_id: "verified-commit".to_string(),
+        applied_tree_id: "verified-tree".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+
+    let result = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+        &applier,
+    )
+    .expect("retry apply");
+
+    assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Applied);
+    assert_eq!(applier.requests.borrow().len(), 1);
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "merge.applied"
+            && event.subject_id.as_deref() == Some(attempt.id.as_str())
+            && event.data_json.contains("\"recovered\":false")
+    }));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn apply_recovery_rejects_unexpected_main_for_applying_attempt() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    Ledger::open(repo.join(".aichestra/aichestra.db"))
+        .expect("open ledger")
+        .update_merge_attempt_status(&attempt.id, MergeAttemptStatus::Applying, now_millis())
+        .expect("mark applying");
+    let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+        applied_commit_id: "verified-commit".to_string(),
+        applied_tree_id: "verified-tree".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+
+    let err = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockMovedGitRepository,
+        &applier,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(message) if message.contains("is applying") && message.contains("expected main_before"))
+    );
+    assert!(applier.requests.borrow().is_empty());
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn apply_finalizes_partially_recorded_applied_attempt() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    ledger
+        .update_merge_attempt_status(&attempt.id, MergeAttemptStatus::Applied, now_millis())
+        .expect("mark applied");
+    let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+        applied_commit_id: "verified-commit".to_string(),
+        applied_tree_id: "verified-tree".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+
+    let result = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &RecordingGitRepository::new("verified-commit"),
+        &applier,
+    )
+    .expect("finalize partially applied attempt");
+
+    assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Applied);
+    assert!(applier.requests.borrow().is_empty());
+    assert_eq!(
+        ledger
+            .get_session(&session.id)
+            .expect("get session")
+            .expect("session")
+            .status,
+        SessionStatus::Completed
+    );
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "merge.applied"
+            && event.subject_id.as_deref() == Some(attempt.id.as_str())
+            && event.data_json.contains("\"recovered\":true")
+    }));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn session_abandon_marks_candidate_abandoned_and_removes_from_queue() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -3186,6 +3440,13 @@ fn queue_shows_human_readable_candidate_states() {
     );
     insert_queue_candidate(
         &ledger,
+        "session-applying",
+        SessionStatus::Enqueued,
+        Some(MergeAttemptStatus::Applying),
+        true,
+    );
+    insert_queue_candidate(
+        &ledger,
         "session-applied",
         SessionStatus::Completed,
         Some(MergeAttemptStatus::Applied),
@@ -3202,17 +3463,19 @@ fn queue_shows_human_readable_candidate_states() {
 
     assert!(output.contains("Aichestra queue"));
     assert!(output.contains("Lock: free"));
-    assert!(
-        output.contains("Summary: enqueued=1 preflight_running=1 verified=1 approved=1 blocked=1")
-    );
+    assert!(output.contains(
+        "Summary: enqueued=1 preflight_running=1 applying=1 verified=1 approved=1 blocked=1"
+    ));
     assert!(output.contains("- session-enqueued [enqueued]"));
     assert!(output.contains("- session-preflight [preflight_running]"));
     assert!(output.contains("- session-verified [verified]"));
     assert!(output.contains("- session-blocked [blocked]"));
     assert!(output.contains("- session-approved [approved]"));
+    assert!(output.contains("- session-applying [applying]"));
     assert!(output.contains("next: aich preflight session-enqueued"));
     assert!(output.contains("next: aich review session-verified"));
     assert!(output.contains("next: aich apply session-approved"));
+    assert!(output.contains("next: aich apply session-applying"));
     assert!(!output.contains("session-applied ["));
 
     let _ = fs::remove_dir_all(repo);
@@ -3469,6 +3732,34 @@ fn doctor_warns_when_queue_lock_is_stale() {
     let output = String::from_utf8(output).expect("utf8 output");
 
     assert!(output.contains("[warning] queue lock: stale held by holder-1"));
+    assert!(output.contains("Result: warning"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn doctor_warns_when_apply_recovery_is_pending() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    insert_queue_candidate(
+        &ledger,
+        "session-applying",
+        SessionStatus::Enqueued,
+        Some(MergeAttemptStatus::Applying),
+        true,
+    );
+
+    let mut output = Vec::new();
+    run_with_cwd(["aich", "doctor"], &repo, &mut output).expect("doctor");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("[warning] apply recovery:"));
+    assert!(output.contains("aich apply session-applying"));
     assert!(output.contains("Result: warning"));
 
     let _ = fs::remove_dir_all(repo);

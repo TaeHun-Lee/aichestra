@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use aich_core::clock::now_millis;
+use aich_core::MergeAttemptStatus;
 use aich_ledger::Ledger;
 
 use crate::options::DoctorOptions;
@@ -164,12 +165,36 @@ pub(crate) fn run_doctor(options: &DoctorOptions) -> Result<DoctorRunResult, Cli
     }
 
     match queue_entries(&ledger) {
-        Ok(entries) => add_doctor_check(
-            &mut checks,
-            DoctorSeverity::Ok,
-            "queue",
-            format!("{} candidate(s) need queue attention", entries.len()),
-        ),
+        Ok(entries) => {
+            add_doctor_check(
+                &mut checks,
+                DoctorSeverity::Ok,
+                "queue",
+                format!("{} candidate(s) need queue attention", entries.len()),
+            );
+            for entry in entries.iter().filter(|entry| {
+                entry
+                    .latest_attempt
+                    .as_ref()
+                    .map(|attempt| attempt.status == MergeAttemptStatus::Applying)
+                    .unwrap_or(false)
+            }) {
+                let attempt_id = entry
+                    .latest_attempt
+                    .as_ref()
+                    .map(|attempt| attempt.id.as_str())
+                    .unwrap_or("-");
+                add_doctor_check(
+                    &mut checks,
+                    DoctorSeverity::Warning,
+                    "apply recovery",
+                    format!(
+                        "session {} merge attempt {} is applying; run `aich apply {}` to retry or finalize recovery. If a stale queue lock remains, run `aich queue unlock --force --reason \"stale apply recovery\"` first.",
+                        entry.session.id, attempt_id, entry.session.id
+                    ),
+                );
+            }
+        }
         Err(error) => add_doctor_check(
             &mut checks,
             DoctorSeverity::Error,

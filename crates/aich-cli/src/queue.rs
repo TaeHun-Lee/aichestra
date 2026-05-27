@@ -78,9 +78,10 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
     writeln!(out, "Entries: {}", entries.len())?;
     writeln!(
         out,
-        "Summary: enqueued={} preflight_running={} verified={} approved={} blocked={}",
+        "Summary: enqueued={} preflight_running={} applying={} verified={} approved={} blocked={}",
         summary.enqueued,
         summary.preflight_running,
+        summary.applying,
         summary.verified,
         summary.approved,
         summary.blocked
@@ -246,6 +247,7 @@ pub(crate) fn format_duration_ms(ms: i64) -> String {
 struct QueueStatusSummary {
     enqueued: usize,
     preflight_running: usize,
+    applying: usize,
     verified: usize,
     approved: usize,
     blocked: usize,
@@ -311,9 +313,8 @@ fn queue_entry_status(
 
     match latest_attempt {
         Some(attempt) => match attempt.status {
-            MergeAttemptStatus::PreflightRunning | MergeAttemptStatus::Applying => {
-                Some("preflight_running".to_string())
-            }
+            MergeAttemptStatus::PreflightRunning => Some("preflight_running".to_string()),
+            MergeAttemptStatus::Applying => Some("applying".to_string()),
             MergeAttemptStatus::Blocked => Some("blocked".to_string()),
             MergeAttemptStatus::Verified if latest_approval.is_some() => {
                 Some("approved".to_string())
@@ -336,6 +337,7 @@ fn queue_status_summary(entries: &[QueueEntry]) -> QueueStatusSummary {
         match entry.status.as_str() {
             "enqueued" => summary.enqueued += 1,
             "preflight_running" => summary.preflight_running += 1,
+            "applying" => summary.applying += 1,
             "verified" => summary.verified += 1,
             "approved" => summary.approved += 1,
             "blocked" => summary.blocked += 1,
@@ -498,6 +500,10 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
     match entry.status.as_str() {
         "enqueued" => format!("aich preflight {}", entry.session.id),
         "preflight_running" => "wait for preflight to finish or inspect artifacts".to_string(),
+        "applying" => format!(
+            "aich apply {} (retry or finalize interrupted apply; unlock a stale queue lock first if needed)",
+            entry.session.id
+        ),
         "verified" => format!("aich review {}", entry.session.id),
         "approved" => format!("aich apply {}", entry.session.id),
         "blocked" => format!(
