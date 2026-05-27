@@ -176,9 +176,15 @@ Before running the Git update, the command records the merge attempt as `applyin
 
 ## Session cleanup
 
-`aich session cleanup <session-id>` removes local execution resources for an applied session. It refuses cleanup unless the session is `completed` and its latest merge attempt is `applied`. Cleanup removes the registered session worktree, deletes the merged session branch with `git branch -d`, removes related sandbox worktrees, and records `session.cleaned`.
+`aich session cleanup <session-id>` removes local execution resources for sessions that no longer need merge-queue action. It allows:
 
-`aich session prune --applied` runs the same cleanup across all applied sessions and skips any session that is still active, enqueued, blocked, verified, approved, or noop. Cleanup refuses dirty registered worktrees rather than discarding local files.
+- `completed` sessions whose latest merge attempt is `applied`
+- `noop` sessions with no merge attempt
+- failed-start `blocked` sessions that have no candidate head and no merge attempt
+
+It refuses cleanup for active sessions, enqueued candidates, and blocked candidates with merge state because those may still need recovery. Cleanup removes the registered session worktree, deletes the session branch with `git branch -d`, removes related sandbox worktrees, and records `session.cleaned`.
+
+`aich session prune --applied` runs cleanup across applied sessions. `aich session prune --inactive` runs cleanup across no-op and failed-start sessions. The flags can be combined. Cleanup refuses dirty registered worktrees rather than discarding local files.
 
 ## Semantic review position
 

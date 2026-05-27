@@ -7,6 +7,7 @@ use serde::Deserialize;
 use crate::CliError;
 
 const DEFAULT_MAIN_BRANCH: &str = "main";
+const DEFAULT_SESSION_BRANCH_PREFIX: &str = "aich/session";
 
 pub(crate) const DEFAULT_CONFIG: &str = r#"project:
   name: aichestra-local-mvp
@@ -89,6 +90,7 @@ safety:
 struct AichestraConfig {
     git: Option<AichestraGitConfig>,
     providers: Option<HashMap<String, AichestraProviderConfig>>,
+    sessions: Option<AichestraSessionConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +101,26 @@ struct AichestraGitConfig {
 #[derive(Clone, Debug, Deserialize)]
 struct AichestraProviderConfig {
     command: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AichestraSessionConfig {
+    branch_prefix: Option<String>,
+}
+
+pub(crate) fn session_branch_prefix_from_config(config_path: &Path) -> Result<String, CliError> {
+    let config = fs::read_to_string(config_path)?;
+    let parsed: AichestraConfig = serde_yaml::from_str(&config).map_err(|error| {
+        CliError::Usage(format!(
+            "Aichestra config at {} is invalid YAML: {error}",
+            config_path.display()
+        ))
+    })?;
+    let configured = parsed
+        .sessions
+        .and_then(|sessions| sessions.branch_prefix)
+        .unwrap_or_else(|| DEFAULT_SESSION_BRANCH_PREFIX.to_string());
+    normalize_session_branch_prefix(&configured)
 }
 
 pub(crate) fn provider_command_from_config(
@@ -178,6 +200,26 @@ fn normalize_main_branch_name(value: &str) -> Result<String, CliError> {
     Ok(trimmed.to_string())
 }
 
+fn normalize_session_branch_prefix(value: &str) -> Result<String, CliError> {
+    let trimmed = value.trim().trim_matches('/');
+    if trimmed.is_empty() {
+        return Err(CliError::Usage(
+            "sessions.branch_prefix must not be empty".to_string(),
+        ));
+    }
+    if trimmed.starts_with("refs/") {
+        return Err(CliError::Usage(
+            "sessions.branch_prefix must be a branch-name prefix, not a full ref".to_string(),
+        ));
+    }
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err(CliError::Usage(
+            "sessions.branch_prefix must not contain whitespace".to_string(),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
 pub(crate) fn main_branch_ref(main_branch: &str) -> String {
     format!("refs/heads/{main_branch}")
 }
@@ -206,5 +248,19 @@ mod tests {
     fn rejects_non_heads_ref_for_main_branch() {
         let err = normalize_main_branch_name("refs/tags/v1").unwrap_err();
         assert!(matches!(err, CliError::Usage(message) if message.contains("local branch")));
+    }
+
+    #[test]
+    fn normalizes_session_branch_prefix() {
+        assert_eq!(
+            normalize_session_branch_prefix(" custom/session/ ").expect("normalize"),
+            "custom/session"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_session_branch_prefix() {
+        let err = normalize_session_branch_prefix("refs/heads/aich/session").unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("branch-name prefix")));
     }
 }

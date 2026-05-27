@@ -216,7 +216,7 @@ pub struct QueueUnlockResult {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SessionCleanupResult {
     pub session: Session,
-    pub latest_attempt: MergeAttempt,
+    pub latest_attempt: Option<MergeAttempt>,
     pub cleanup: CleanupSessionWorktreeOutcome,
 }
 
@@ -475,7 +475,15 @@ fn render_session_cleanup_result<W: Write>(
     out: &mut W,
 ) -> Result<(), CliError> {
     writeln!(out, "Cleaned session {}", result.session.id)?;
-    writeln!(out, "Merge attempt: {}", result.latest_attempt.id)?;
+    writeln!(
+        out,
+        "Merge attempt: {}",
+        result
+            .latest_attempt
+            .as_ref()
+            .map(|attempt| attempt.id.as_str())
+            .unwrap_or("-")
+    )?;
     writeln!(
         out,
         "Session worktree removed: {}",
@@ -567,7 +575,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 pub(crate) fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]

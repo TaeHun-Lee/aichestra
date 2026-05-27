@@ -75,6 +75,7 @@ pub(crate) struct SessionPruneOptions {
     pub(crate) repo_root: PathBuf,
     pub(crate) db_path: Option<PathBuf>,
     pub(crate) applied: bool,
+    pub(crate) inactive: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -657,6 +658,7 @@ pub(crate) fn parse_session_prune_options(
     let mut repo_root = cwd.to_path_buf();
     let mut db_path = None;
     let mut applied = false;
+    let mut inactive = false;
     let mut index = 0;
 
     while index < args.len() {
@@ -678,6 +680,9 @@ pub(crate) fn parse_session_prune_options(
             "--applied" => {
                 applied = true;
             }
+            "--inactive" => {
+                inactive = true;
+            }
             "-h" | "--help" => {
                 return Err(CliError::Usage(usage_text()));
             }
@@ -691,9 +696,9 @@ pub(crate) fn parse_session_prune_options(
         index += 1;
     }
 
-    if !applied {
+    if !applied && !inactive {
         return Err(CliError::Usage(
-            "session prune requires --applied to avoid removing active session worktrees"
+            "session prune requires --applied or --inactive to avoid removing active session worktrees"
                 .to_string(),
         ));
     }
@@ -702,6 +707,7 @@ pub(crate) fn parse_session_prune_options(
         repo_root,
         db_path,
         applied,
+        inactive,
     })
 }
 

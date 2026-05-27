@@ -587,6 +587,41 @@ fn configure_main_branch(repo: &Path, branch: &str) {
     fs::write(config_path, updated).expect("write main branch config");
 }
 
+fn configure_session_branch_prefix(repo: &Path, branch_prefix: &str) {
+    let config_path = repo.join(".aichestra/config.yaml");
+    let config = fs::read_to_string(&config_path).expect("read config");
+    let updated = config
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("branch_prefix:") {
+                format!("  branch_prefix: {branch_prefix}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(config_path, updated).expect("write session branch prefix config");
+}
+
+fn seed_session_with_status(repo: &Path, id: &str, status: SessionStatus) -> Session {
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let now = now_millis();
+    let mut session = Session::new(
+        id,
+        format!("session {id}"),
+        "codex",
+        format!("aich/session/{id}"),
+        format!(".aichestra/worktrees/{id}"),
+        "base-commit",
+        now,
+    );
+    session.status = status;
+    session.updated_at_ms = now + 1;
+    ledger.insert_session(&session).expect("insert session");
+    session
+}
+
 fn seed_enqueued_candidate(repo: &Path, id: &str) -> Session {
     let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
     let now = now_millis();
@@ -813,6 +848,38 @@ fn session_start_reads_base_from_configured_main_ref() {
         git.refs.borrow().as_slice(),
         &["refs/heads/trunk".to_string()]
     );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_start_reads_branch_prefix_from_config() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    configure_session_branch_prefix(&repo, "custom/sessions/");
+
+    let options = SessionStartOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        goal: "use configured branch prefix".to_string(),
+        provider: "codex".to_string(),
+        target_path: None,
+        operator_id: None,
+    };
+    let git = MockGitRepository;
+    let worktrees = MockWorktreeManager::new();
+
+    let result = start_session_with(&options, &git, &worktrees).expect("start session");
+
+    assert!(result
+        .session
+        .branch
+        .starts_with("custom/sessions/session-"));
+    assert_eq!(worktrees.requests.borrow()[0].branch, result.session.branch);
 
     let _ = fs::remove_dir_all(repo);
 }
@@ -2142,7 +2209,13 @@ fn session_cleanup_removes_applied_session_worktree_branch_and_sandboxes() {
     .expect("cleanup");
 
     assert_eq!(result.session.id, session.id);
-    assert_eq!(result.latest_attempt.status, MergeAttemptStatus::Applied);
+    assert_eq!(
+        result
+            .latest_attempt
+            .as_ref()
+            .map(|attempt| &attempt.status),
+        Some(&MergeAttemptStatus::Applied)
+    );
     let requests = cleaner.requests.borrow();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].session_id, session.id);
@@ -2191,10 +2264,77 @@ fn session_cleanup_rejects_unapplied_session() {
     )
     .unwrap_err();
 
-    assert!(
-        matches!(err, CliError::Usage(message) if message.contains("no applied merge attempt"))
-    );
+    assert!(matches!(err, CliError::Usage(message) if message.contains("cannot be cleaned")));
     assert!(cleaner.requests.borrow().is_empty());
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_cleanup_removes_noop_session_without_merge_attempt() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let session = seed_session_with_status(&repo, "session-noop", SessionStatus::Noop);
+    let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+        session_worktree_removed: false,
+        branch_deleted: true,
+        sandbox_worktrees_removed: Vec::new(),
+    });
+
+    let result = cleanup_session_with(
+        &SessionCleanupOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+        },
+        &cleaner,
+    )
+    .expect("cleanup noop");
+
+    assert_eq!(result.session.id, session.id);
+    assert!(result.latest_attempt.is_none());
+    assert_eq!(cleaner.requests.borrow().len(), 1);
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "session.cleaned" && event.data_json.contains("\"cleanup_kind\":\"noop\"")
+    }));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_cleanup_removes_failed_start_session_without_candidate() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let session = seed_session_with_status(&repo, "session-failed-start", SessionStatus::Blocked);
+    let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+        session_worktree_removed: false,
+        branch_deleted: false,
+        sandbox_worktrees_removed: Vec::new(),
+    });
+
+    let result = cleanup_session_with(
+        &SessionCleanupOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+        },
+        &cleaner,
+    )
+    .expect("cleanup failed start");
+
+    assert_eq!(result.session.id, session.id);
+    assert!(result.latest_attempt.is_none());
+    assert_eq!(cleaner.requests.borrow().len(), 1);
 
     let _ = fs::remove_dir_all(repo);
 }
@@ -2254,6 +2394,7 @@ fn session_prune_cleans_only_applied_sessions() {
             repo_root: repo.clone(),
             db_path: None,
             applied: true,
+            inactive: false,
         },
         &cleaner,
     )
@@ -2263,6 +2404,50 @@ fn session_prune_cleans_only_applied_sessions() {
     assert_eq!(result.cleaned[0].session.id, session.id);
     assert_eq!(result.skipped, 1);
     assert_eq!(cleaner.requests.borrow().len(), 1);
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_prune_inactive_cleans_noop_and_failed_start_sessions() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let noop = seed_session_with_status(&repo, "session-noop", SessionStatus::Noop);
+    let failed_start =
+        seed_session_with_status(&repo, "session-failed-start", SessionStatus::Blocked);
+    seed_enqueued_candidate(&repo, "session-open");
+
+    let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+        session_worktree_removed: false,
+        branch_deleted: false,
+        sandbox_worktrees_removed: Vec::new(),
+    });
+    let result = prune_sessions_with(
+        &SessionPruneOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            applied: false,
+            inactive: true,
+        },
+        &cleaner,
+    )
+    .expect("prune inactive");
+
+    let cleaned_ids: Vec<&str> = result
+        .cleaned
+        .iter()
+        .map(|cleaned| cleaned.session.id.as_str())
+        .collect();
+    assert_eq!(
+        cleaned_ids,
+        vec![noop.id.as_str(), failed_start.id.as_str()]
+    );
+    assert_eq!(result.skipped, 1);
+    assert_eq!(cleaner.requests.borrow().len(), 2);
 
     let _ = fs::remove_dir_all(repo);
 }

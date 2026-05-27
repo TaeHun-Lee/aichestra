@@ -14,7 +14,7 @@ use aich_git::{
 };
 use aich_ledger::Ledger;
 
-use crate::config::{main_branch_from_config, main_branch_ref};
+use crate::config::{main_branch_from_config, main_branch_ref, session_branch_prefix_from_config};
 use crate::formatting::{
     comparable_path, display_path_for_ledger, json_escape, path_from_ledger, sha256_hex,
 };
@@ -30,6 +30,13 @@ use crate::{
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 static ARTIFACT_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum CleanupEligibility {
+    Applied,
+    Noop,
+    FailedStart,
+}
 
 pub(crate) fn start_session_with<R, W>(
     options: &SessionStartOptions,
@@ -56,9 +63,10 @@ where
     let main_branch = main_branch_from_config(&config_path)?;
     let main_ref = main_branch_ref(&main_branch);
     let head = git_repo.ref_commit(&options.repo_root, &main_ref)?;
+    let branch_prefix = session_branch_prefix_from_config(&config_path)?;
     let created_at_ms = now_millis();
     let session_id = next_session_id(created_at_ms);
-    let branch = format!("aich/session/{session_id}");
+    let branch = format!("{branch_prefix}/{session_id}");
     let worktree_path = aichestra_dir.join("worktrees").join(&session_id);
 
     let mut session = Session::new(
@@ -351,9 +359,9 @@ pub(crate) fn prune_sessions_with<C>(
 where
     C: SessionWorktreeCleaner,
 {
-    if !options.applied {
+    if !options.applied && !options.inactive {
         return Err(CliError::Usage(
-            "session prune requires --applied to avoid removing active session worktrees"
+            "session prune requires --applied or --inactive to avoid removing active session worktrees"
                 .to_string(),
         ));
     }
@@ -364,12 +372,14 @@ where
 
     for session in ledger.list_sessions()? {
         let latest_attempt = latest_merge_attempt(&ledger, &session.id)?;
-        if session.status == SessionStatus::Completed
-            && latest_attempt
-                .as_ref()
-                .map(|attempt| attempt.status == MergeAttemptStatus::Applied)
-                .unwrap_or(false)
-        {
+        let eligibility = cleanup_eligibility(&session, latest_attempt.as_ref());
+        let should_clean = match eligibility {
+            Ok(CleanupEligibility::Applied) => options.applied,
+            Ok(CleanupEligibility::Noop | CleanupEligibility::FailedStart) => options.inactive,
+            Err(_) => false,
+        };
+
+        if should_clean {
             cleaned.push(cleanup_session_record(
                 &options.repo_root,
                 &ledger,
@@ -393,13 +403,8 @@ fn cleanup_session_record<C>(
 where
     C: SessionWorktreeCleaner,
 {
-    let latest_attempt = latest_merge_attempt(ledger, &session.id)?.ok_or_else(|| {
-        CliError::Usage(format!(
-            "session '{}' has no applied merge attempt; cleanup is only allowed after apply",
-            session.id
-        ))
-    })?;
-    ensure_session_can_cleanup(&session, &latest_attempt)?;
+    let latest_attempt = latest_merge_attempt(ledger, &session.id)?;
+    let eligibility = cleanup_eligibility(&session, latest_attempt.as_ref())?;
 
     let attempts = ledger.list_merge_attempts(&session.id)?;
     let sandbox_paths: Vec<PathBuf> = attempts
@@ -425,8 +430,12 @@ where
         &NewEvent::new(EventName::SessionCleaned)
             .with_subject("session", session.id.clone())
             .with_data_json(format!(
-                "{{\"merge_attempt_id\":\"{}\",\"session_worktree_removed\":{},\"branch_deleted\":{},\"sandbox_worktrees_removed\":{}}}",
-                json_escape(&latest_attempt.id),
+                "{{\"cleanup_kind\":\"{}\",\"merge_attempt_id\":{},\"session_worktree_removed\":{},\"branch_deleted\":{},\"sandbox_worktrees_removed\":{}}}",
+                cleanup_kind_label(eligibility),
+                latest_attempt
+                    .as_ref()
+                    .map(|attempt| format!("\"{}\"", json_escape(&attempt.id)))
+                    .unwrap_or_else(|| "null".to_string()),
                 cleanup.session_worktree_removed,
                 cleanup.branch_deleted,
                 cleanup.sandbox_worktrees_removed.len()
@@ -474,27 +483,48 @@ pub(crate) fn ensure_session_can_preflight(session: &Session) -> Result<(), CliE
     Ok(())
 }
 
-fn ensure_session_can_cleanup(
+fn cleanup_eligibility(
     session: &Session,
-    latest_attempt: &MergeAttempt,
-) -> Result<(), CliError> {
-    if session.status != SessionStatus::Completed {
-        return Err(CliError::Usage(format!(
-            "session '{}' cannot be cleaned from status '{}'; cleanup is only allowed after apply",
+    latest_attempt: Option<&MergeAttempt>,
+) -> Result<CleanupEligibility, CliError> {
+    match session.status {
+        SessionStatus::Completed
+            if latest_attempt
+                .map(|attempt| attempt.status == MergeAttemptStatus::Applied)
+                .unwrap_or(false) =>
+        {
+            Ok(CleanupEligibility::Applied)
+        }
+        SessionStatus::Completed => Err(CliError::Usage(format!(
+            "session '{}' cannot be cleaned because its latest merge attempt is not applied",
+            session.id
+        ))),
+        SessionStatus::Noop if latest_attempt.is_none() => Ok(CleanupEligibility::Noop),
+        SessionStatus::Noop => Err(CliError::Usage(format!(
+            "session '{}' is noop but has merge attempts; refusing cleanup",
+            session.id
+        ))),
+        SessionStatus::Blocked if latest_attempt.is_none() && session.head_commit.is_none() => {
+            Ok(CleanupEligibility::FailedStart)
+        }
+        SessionStatus::Blocked => Err(CliError::Usage(format!(
+            "session '{}' is blocked with candidate or merge state; keep it for recovery instead of cleanup",
+            session.id
+        ))),
+        _ => Err(CliError::Usage(format!(
+            "session '{}' cannot be cleaned from status '{}'; cleanup is allowed only for applied, noop, or failed-start sessions",
             session.id,
             session.status.as_str()
-        )));
+        ))),
     }
-    if latest_attempt.status != MergeAttemptStatus::Applied {
-        return Err(CliError::Usage(format!(
-            "session '{}' latest merge attempt '{}' is '{}'; cleanup is only allowed after apply",
-            session.id,
-            latest_attempt.id,
-            latest_attempt.status.as_str()
-        )));
-    }
+}
 
-    Ok(())
+fn cleanup_kind_label(eligibility: CleanupEligibility) -> &'static str {
+    match eligibility {
+        CleanupEligibility::Applied => "applied",
+        CleanupEligibility::Noop => "noop",
+        CleanupEligibility::FailedStart => "failed_start",
+    }
 }
 
 pub(crate) fn ensure_session_worktree_is_dedicated(
