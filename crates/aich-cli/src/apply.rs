@@ -10,6 +10,7 @@ use crate::config::{main_branch_from_config, main_branch_ref};
 use crate::formatting::json_escape;
 use crate::options::ApplyOptions;
 use crate::queue::acquire_merge_queue_lock;
+use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, open_existing_ledger, resolve_active_operator, ApplyRunResult, CliError,
 };
@@ -36,6 +37,7 @@ where
     let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
         CliError::Usage(format!("session '{}' does not exist", options.session_id))
     })?;
+    ensure_session_not_abandoned(&session, "applied")?;
     let attempt = latest_merge_attempt(&ledger, &session.id)?.ok_or_else(|| {
         CliError::Usage(format!(
             "session '{}' has no preflight attempt; run `aich preflight {}` first",
@@ -50,6 +52,10 @@ where
         ))
     })?;
     let _queue_lock = acquire_merge_queue_lock(&ledger, "apply", &session.id)?;
+    let locked_session = ledger
+        .get_session(&session.id)?
+        .ok_or_else(|| CliError::Usage(format!("session '{}' does not exist", session.id)))?;
+    ensure_session_not_abandoned(&locked_session, "applied")?;
 
     let main_branch = main_branch_from_config(&config_path)?;
     let main_ref = main_branch_ref(&main_branch);

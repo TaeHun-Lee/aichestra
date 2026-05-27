@@ -114,7 +114,8 @@ flowchart TB
 11. `aich review` calls the semantic review adapter, then writes a report from the manifest, diff evidence, mechanical merge result, configured prompt, and sandbox check results. The default MVP adapter is local and deterministic; provider-backed LLM adapters must preserve the same advisory boundary.
 12. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
 13. `aich apply` acquires the same local `merge-queue` lock, then fast-forwards main to the approved verified commit only after rechecking main has not moved.
-14. After apply, `aich session cleanup <session-id>` or `aich session prune --applied` can remove the completed session worktree, merged session branch, and related sandbox worktrees. No-op and failed-start sessions can also be cleaned explicitly, or pruned with `aich session prune --inactive`.
+14. A candidate that should not continue can be withdrawn with `aich session abandon <session-id>`, which marks the session `abandoned` and removes it from the queue view without touching main.
+15. After apply or abandon, `aich session cleanup <session-id>` or `aich session prune --applied|--inactive` can remove session worktrees, session branches, and related sandbox worktrees. No-op and failed-start sessions can also be cleaned explicitly, or pruned with `aich session prune --inactive`.
 
 ## Safety boundary
 
@@ -129,7 +130,8 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - Blocked queue entries include recovery guidance, relevant artifact paths, and the exact rerun sequence for the session candidate.
 - `aich queue unlock --force` is the explicit local recovery path for stale queue locks and records `merge.queue_unlocked`.
 - `aich doctor` is a read-only local health check for initialization files, ledger access, default operator identity, queue entries, and stale queue lock suspicion.
-- Session cleanup is allowed for applied sessions, no-op sessions, and failed-start sessions without candidate merge state. It refuses dirty registered worktrees.
+- `aich session abandon` records `session.abandoned`, refuses to run while the merge queue lock is held, and refuses sessions that are applying or already applied.
+- Session cleanup is allowed for applied sessions, no-op sessions, failed-start sessions without candidate merge state, and abandoned sessions. It refuses dirty registered worktrees, records `session.cleaned`, reports cleaned sessions in status, and skips already-cleaned sessions during prune.
 - Preflight and apply must use the same candidate result.
 - Semantic review is advisory evidence. The default local adapter is deterministic, the command adapter can delegate to any provider wrapper, and the LLM adapter can run provider CLIs such as Codex with stdin/YAML report contracts. Any path can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.

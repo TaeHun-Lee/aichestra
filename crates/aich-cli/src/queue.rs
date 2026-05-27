@@ -305,6 +305,10 @@ fn queue_entry_status(
     latest_attempt: Option<&MergeAttempt>,
     latest_approval: Option<&Approval>,
 ) -> Option<String> {
+    if session.status == SessionStatus::Abandoned {
+        return None;
+    }
+
     match latest_attempt {
         Some(attempt) => match attempt.status {
             MergeAttemptStatus::PreflightRunning | MergeAttemptStatus::Applying => {

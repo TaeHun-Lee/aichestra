@@ -2,6 +2,7 @@ use std::io::Write;
 
 use aich_ledger::Ledger;
 
+use crate::cleanup_state::cleaned_session_ids;
 use crate::formatting::short_hash;
 use crate::options::StatusOptions;
 use crate::{ledger_path, CliError};
@@ -20,6 +21,7 @@ pub(crate) fn render_status<W: Write>(
     let ledger = Ledger::open(&db_path)?;
     let operators = ledger.list_operators()?;
     let sessions = ledger.list_sessions()?;
+    let cleaned_sessions = cleaned_session_ids(&ledger)?;
     let event_count = ledger.event_count()?;
     let recent_events = ledger.recent_events(options.recent_events_limit)?;
 
@@ -37,6 +39,9 @@ pub(crate) fn render_status<W: Write>(
             writeln!(out, "  provider: {}", session.provider)?;
             writeln!(out, "  branch: {}", session.branch)?;
             writeln!(out, "  worktree: {}", session.worktree_path)?;
+            if cleaned_sessions.contains(&session.id) {
+                writeln!(out, "  cleanup: cleaned")?;
+            }
             writeln!(
                 out,
                 "  target: {}",

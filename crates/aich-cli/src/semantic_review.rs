@@ -19,6 +19,7 @@ use crate::manifest::{
     changed_files_missing_from_manifest, parse_manifest_diff_evidence, shared_contract_files,
 };
 use crate::options::ReviewOptions;
+use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, next_semantic_review_id, open_existing_ledger, resolve_active_operator,
     CliError, ReviewRunResult, CHANGE_MANIFEST_VALIDATION_STATUS, COMMAND_SEMANTIC_REVIEWER,
@@ -353,6 +354,7 @@ where
     let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
         CliError::Usage(format!("session '{}' does not exist", options.session_id))
     })?;
+    ensure_session_not_abandoned(&session, "reviewed")?;
     let manifest = ledger
         .list_change_manifests(&session.id)?
         .into_iter()

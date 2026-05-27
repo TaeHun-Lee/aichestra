@@ -67,6 +67,7 @@ pub struct CleanupSessionWorktreeRequest {
     pub branch: String,
     pub worktree_path: PathBuf,
     pub sandbox_paths: Vec<PathBuf>,
+    pub force_branch_delete: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -376,7 +377,11 @@ impl SessionWorktreeCleaner for NativeGitWorktreeManager {
             registered_paths = registered_worktree_paths(&request.repo_path)?;
         }
 
-        let branch_deleted = delete_branch_if_present(&request.repo_path, &request.branch)?;
+        let branch_deleted = delete_branch_if_present(
+            &request.repo_path,
+            &request.branch,
+            request.force_branch_delete,
+        )?;
 
         let mut sandbox_worktrees_removed = Vec::new();
         for sandbox_path in &request.sandbox_paths {
@@ -957,7 +962,7 @@ fn remove_registered_worktree(
     }
 
     if !worktree_path.exists() {
-        run_git_success(repo_path, &["worktree", "prune"])?;
+        run_git_success(repo_path, &["worktree", "prune", "--expire", "now"])?;
         return Ok(true);
     }
 
@@ -979,7 +984,11 @@ fn remove_registered_worktree(
     Ok(true)
 }
 
-fn delete_branch_if_present(repo_path: &Path, branch: &str) -> Result<bool, WorktreeError> {
+fn delete_branch_if_present(
+    repo_path: &Path,
+    branch: &str,
+    force: bool,
+) -> Result<bool, WorktreeError> {
     let verify = run_git_output(
         repo_path,
         &["rev-parse", "--verify", &format!("refs/heads/{branch}")],
@@ -988,7 +997,8 @@ fn delete_branch_if_present(repo_path: &Path, branch: &str) -> Result<bool, Work
         return Ok(false);
     }
 
-    run_git_success(repo_path, &["branch", "-d", branch])?;
+    let delete_flag = if force { "-D" } else { "-d" };
+    run_git_success(repo_path, &["branch", delete_flag, branch])?;
     Ok(true)
 }
 
@@ -1336,6 +1346,7 @@ mod tests {
                 branch: "aich/session/session-1".to_string(),
                 worktree_path: session_worktree.clone(),
                 sandbox_paths: vec![sandbox_worktree.clone()],
+                force_branch_delete: false,
             })
             .expect("cleanup");
 
@@ -1347,6 +1358,59 @@ mod tests {
         );
         assert!(!session_worktree.exists());
         assert!(!sandbox_worktree.exists());
+        let branch_verify = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["rev-parse", "--verify", "refs/heads/aich/session/session-1"])
+            .output()
+            .expect("verify branch");
+        assert!(!branch_verify.status.success());
+
+        fs::remove_dir_all(temp_dir).expect("remove temp repo");
+    }
+
+    #[test]
+    fn native_cleanup_force_deletes_unmerged_session_branch() {
+        let temp_dir = unique_temp_dir("aich-git-cleanup-force-session");
+        let repo = init_test_repo(&temp_dir);
+
+        fs::write(repo.join("file.txt"), "base\n").expect("write base file");
+        git(&repo, &["add", "file.txt"]);
+        git(&repo, &["commit", "-q", "-m", "initial"]);
+        git(&repo, &["branch", "-M", "main"]);
+        let base_commit = git(&repo, &["rev-parse", "HEAD"]);
+        let session_worktree = repo.join(".aichestra/worktrees/session-1");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "aich/session/session-1",
+                &session_worktree.display().to_string(),
+                &base_commit,
+            ],
+        );
+        fs::write(session_worktree.join("candidate.txt"), "candidate\n")
+            .expect("write candidate file");
+        git(&session_worktree, &["add", "candidate.txt"]);
+        git(&session_worktree, &["commit", "-q", "-m", "candidate"]);
+
+        let outcome = NativeGitWorktreeManager
+            .cleanup_session_worktree(&CleanupSessionWorktreeRequest {
+                repo_path: repo.clone(),
+                main_worktree_path: repo.clone(),
+                session_id: "session-1".to_string(),
+                branch: "aich/session/session-1".to_string(),
+                worktree_path: session_worktree.clone(),
+                sandbox_paths: Vec::new(),
+                force_branch_delete: true,
+            })
+            .expect("cleanup");
+
+        assert!(outcome.session_worktree_removed);
+        assert!(outcome.branch_deleted);
+        assert!(!session_worktree.exists());
         let branch_verify = Command::new("git")
             .arg("-C")
             .arg(&repo)
@@ -1390,6 +1454,7 @@ mod tests {
                 branch: "aich/session/session-1".to_string(),
                 worktree_path: session_worktree.clone(),
                 sandbox_paths: Vec::new(),
+                force_branch_delete: false,
             })
             .unwrap_err();
         assert!(matches!(err, WorktreeError::InvalidRequest(message) if message.contains("dirty")));
@@ -1438,6 +1503,7 @@ mod tests {
                 branch: "aich/session/session-1".to_string(),
                 worktree_path: session_worktree.clone(),
                 sandbox_paths: Vec::new(),
+                force_branch_delete: false,
             })
             .expect("cleanup");
 

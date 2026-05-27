@@ -174,6 +174,12 @@ git merge --ff-only <approved_verified_commit_id>
 
 Before running the Git update, the command records the merge attempt as `applying`. After success it records the merge attempt as `applied`, marks the session `completed`, and appends `merge.applied`. The applied commit id and tree id must still match the approved verified commit/tree, or the attempt is blocked.
 
+## Session abandon
+
+`aich session abandon <session-id>` withdraws a session that should not continue through the merge queue. It marks the session `abandoned`, records `session.abandoned`, and removes the candidate from `aich queue` output without applying anything to main.
+
+Abandon refuses to run while the merge queue lock is held, and refuses sessions whose latest merge attempt is `applying` or `applied`. Review, approval, and apply commands refuse abandoned sessions.
+
 ## Session cleanup
 
 `aich session cleanup <session-id>` removes local execution resources for sessions that no longer need merge-queue action. It allows:
@@ -181,10 +187,13 @@ Before running the Git update, the command records the merge attempt as `applyin
 - `completed` sessions whose latest merge attempt is `applied`
 - `noop` sessions with no merge attempt
 - failed-start `blocked` sessions that have no candidate head and no merge attempt
+- `abandoned` sessions
 
-It refuses cleanup for active sessions, enqueued candidates, and blocked candidates with merge state because those may still need recovery. Cleanup removes the registered session worktree, deletes the session branch with `git branch -d`, removes related sandbox worktrees, and records `session.cleaned`.
+It refuses cleanup for active sessions, enqueued candidates, and blocked candidates with merge state because those may still need recovery. Cleanup removes the registered session worktree, deletes the session branch, removes related sandbox worktrees, and records `session.cleaned`. Abandoned sessions use forced branch deletion after the registered worktree is verified clean, because abandoning is the explicit signal to discard that candidate branch.
 
-`aich session prune --applied` runs cleanup across applied sessions. `aich session prune --inactive` runs cleanup across no-op and failed-start sessions. The flags can be combined. Cleanup refuses dirty registered worktrees rather than discarding local files.
+`aich status` shows `cleanup: cleaned` for sessions that already have a `session.cleaned` event. A direct repeated cleanup refuses to run again, while prune skips already-cleaned sessions.
+
+`aich session prune --applied` runs cleanup across applied sessions. `aich session prune --inactive` runs cleanup across no-op, failed-start, and abandoned sessions. The flags can be combined. Cleanup refuses dirty registered worktrees rather than discarding local files.
 
 ## Semantic review position
 
@@ -215,6 +224,6 @@ A blocked candidate should remain in the ledger with its artifacts. The develope
 - ask a worker LLM to revise the session branch
 - create a conflict-resolution session
 - manually edit the session branch
-- abandon the candidate
+- run `aich session abandon <session-id>` to withdraw the candidate from the queue
 
 After revising the candidate, run `aich session complete <session-id>` to record the new candidate head and then run `aich preflight <session-id>` again. Every retry creates a new MergeAttempt.

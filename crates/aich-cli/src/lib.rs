@@ -31,6 +31,7 @@ mod apply;
 mod approval;
 mod auth;
 mod checks;
+mod cleanup_state;
 mod command_line;
 mod config;
 mod doctor;
@@ -67,7 +68,8 @@ use semantic_review::{
     LocalSemanticReviewReport, SemanticReviewAdapter, SemanticReviewAdapterRequest,
 };
 use session::{
-    cleanup_session_with, complete_session_with, prune_sessions_with, start_session_with,
+    abandon_session_with, cleanup_session_with, complete_session_with, prune_sessions_with,
+    start_session_with,
 };
 use status::render_status;
 
@@ -166,6 +168,14 @@ pub struct SessionAgentRunResult {
     pub metadata_path: PathBuf,
     pub exit_code: Option<i32>,
     pub success: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SessionAbandonResult {
+    pub session: Session,
+    pub previous_status: String,
+    pub latest_attempt: Option<MergeAttempt>,
+    pub operator: Operator,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -445,6 +455,29 @@ fn run_session_command<W: Write>(args: &[String], cwd: &Path, out: &mut W) -> Re
             )?;
             Ok(())
         }
+        Some("abandon") => {
+            let options = parse_session_abandon_options(&args[1..], cwd)?;
+            let result = abandon_session_with(&options)?;
+            writeln!(out, "Abandoned session {}", result.session.id)?;
+            writeln!(out, "Operator: {}", result.operator.id)?;
+            writeln!(out, "Previous status: {}", result.previous_status)?;
+            writeln!(out, "Status: {}", result.session.status.as_str())?;
+            writeln!(
+                out,
+                "Merge attempt: {}",
+                result
+                    .latest_attempt
+                    .as_ref()
+                    .map(|attempt| attempt.id.as_str())
+                    .unwrap_or("-")
+            )?;
+            writeln!(
+                out,
+                "Next: run `aich session cleanup {}` when the abandoned worktree can be removed",
+                result.session.id
+            )?;
+            Ok(())
+        }
         Some("cleanup") => {
             let options = parse_session_cleanup_options(&args[1..], cwd)?;
             let git = NativeGitWorktreeManager;
@@ -575,7 +608,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 pub(crate) fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session abandon <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]

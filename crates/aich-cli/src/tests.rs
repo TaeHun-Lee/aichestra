@@ -336,6 +336,12 @@ fn session_complete_requires_session_id() {
 }
 
 #[test]
+fn session_abandon_requires_session_id() {
+    let err = parse_session_abandon_options(&[], Path::new(".")).unwrap_err();
+    assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+}
+
+#[test]
 fn preflight_requires_session_id() {
     let err = parse_preflight_options(&[], Path::new(".")).unwrap_err();
     assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
@@ -679,6 +685,17 @@ fn seed_session_with_status(repo: &Path, id: &str, status: SessionStatus) -> Ses
     session.updated_at_ms = now + 1;
     ledger.insert_session(&session).expect("insert session");
     session
+}
+
+fn mark_session_cleaned(repo: &Path, session_id: &str) {
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    ledger
+        .append_event(
+            &NewEvent::new(EventName::SessionCleaned)
+                .with_subject("session", session_id)
+                .with_data_json("{\"cleanup_kind\":\"test\"}"),
+        )
+        .expect("append cleanup event");
 }
 
 fn seed_running_agent_session(repo: &Path, id: &str, provider: &str) -> Session {
@@ -2361,6 +2378,143 @@ fn apply_uses_approved_verified_commit_and_marks_applied() {
 }
 
 #[test]
+fn session_abandon_marks_candidate_abandoned_and_removes_from_queue() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let session = seed_enqueued_candidate(&repo, "session-abandon");
+
+    let result = abandon_session_with(&SessionAbandonOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("abandon");
+
+    assert_eq!(result.session.id, session.id);
+    assert_eq!(result.previous_status, "enqueued");
+    assert_eq!(result.session.status, SessionStatus::Abandoned);
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    assert_eq!(
+        ledger
+            .get_session(&session.id)
+            .expect("load session")
+            .expect("session")
+            .status,
+        SessionStatus::Abandoned
+    );
+    assert!(ledger
+        .list_events()
+        .expect("events")
+        .iter()
+        .any(|event| event.name == "session.abandoned"
+            && event.subject_id.as_deref() == Some(session.id.as_str())));
+
+    let mut output = Vec::new();
+    run_with_cwd(["aich", "queue"], &repo, &mut output).expect("queue");
+    let output = String::from_utf8(output).expect("utf8 output");
+    assert!(output.contains("No queued candidates."));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_abandon_refuses_when_queue_lock_is_held() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let session = seed_enqueued_candidate(&repo, "session-lock");
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    assert!(ledger
+        .try_acquire_queue_lock(&QueueLock {
+            name: MERGE_QUEUE_LOCK_NAME.to_string(),
+            holder_id: "holder-1".to_string(),
+            operation: "preflight".to_string(),
+            session_id: Some(session.id.clone()),
+            acquired_at_ms: now_millis(),
+        })
+        .expect("acquire lock"));
+
+    let err = abandon_session_with(&SessionAbandonOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id,
+        operator_id: None,
+    })
+    .unwrap_err();
+
+    assert!(matches!(err, CliError::Usage(message) if message.contains("merge queue is locked")));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_abandon_prevents_applying_approved_candidate() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    abandon_session_with(&SessionAbandonOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("abandon");
+
+    let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+        applied_commit_id: "verified-commit".to_string(),
+        applied_tree_id: "verified-tree".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+    let err = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id,
+            operator_id: None,
+        },
+        &MockGitRepository,
+        &applier,
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, CliError::Usage(message) if message.contains("abandoned")));
+    assert!(applier.requests.borrow().is_empty());
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn session_cleanup_removes_applied_session_worktree_branch_and_sandboxes() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -2554,6 +2708,83 @@ fn session_cleanup_removes_failed_start_session_without_candidate() {
 }
 
 #[test]
+fn session_cleanup_rejects_already_cleaned_session() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let session = seed_session_with_status(&repo, "session-noop", SessionStatus::Noop);
+    mark_session_cleaned(&repo, &session.id);
+    let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+        session_worktree_removed: false,
+        branch_deleted: false,
+        sandbox_worktrees_removed: Vec::new(),
+    });
+
+    let err = cleanup_session_with(
+        &SessionCleanupOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id,
+        },
+        &cleaner,
+    )
+    .unwrap_err();
+
+    assert!(matches!(err, CliError::Usage(message) if message.contains("already been cleaned")));
+    assert!(cleaner.requests.borrow().is_empty());
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_cleanup_removes_abandoned_session_with_forced_branch_delete() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let session = seed_enqueued_candidate(&repo, "session-abandoned-cleanup");
+    abandon_session_with(&SessionAbandonOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("abandon");
+    let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+        session_worktree_removed: true,
+        branch_deleted: true,
+        sandbox_worktrees_removed: Vec::new(),
+    });
+
+    let result = cleanup_session_with(
+        &SessionCleanupOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+        },
+        &cleaner,
+    )
+    .expect("cleanup abandoned");
+
+    assert_eq!(result.session.id, session.id);
+    assert_eq!(cleaner.requests.borrow().len(), 1);
+    assert!(cleaner.requests.borrow()[0].force_branch_delete);
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "session.cleaned"
+            && event.data_json.contains("\"cleanup_kind\":\"abandoned\"")
+    }));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn session_prune_cleans_only_applied_sessions() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -2662,6 +2893,42 @@ fn session_prune_inactive_cleans_noop_and_failed_start_sessions() {
     );
     assert_eq!(result.skipped, 1);
     assert_eq!(cleaner.requests.borrow().len(), 2);
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_prune_skips_already_cleaned_sessions() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let cleaned_noop = seed_session_with_status(&repo, "session-cleaned", SessionStatus::Noop);
+    let pending_noop = seed_session_with_status(&repo, "session-pending", SessionStatus::Noop);
+    mark_session_cleaned(&repo, &cleaned_noop.id);
+
+    let cleaner = MockSessionCleaner::new(CleanupSessionWorktreeOutcome {
+        session_worktree_removed: false,
+        branch_deleted: false,
+        sandbox_worktrees_removed: Vec::new(),
+    });
+    let result = prune_sessions_with(
+        &SessionPruneOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            applied: false,
+            inactive: true,
+        },
+        &cleaner,
+    )
+    .expect("prune inactive");
+
+    assert_eq!(result.cleaned.len(), 1);
+    assert_eq!(result.cleaned[0].session.id, pending_noop.id);
+    assert_eq!(result.skipped, 1);
+    assert_eq!(cleaner.requests.borrow().len(), 1);
 
     let _ = fs::remove_dir_all(repo);
 }
@@ -3251,6 +3518,32 @@ fn status_lists_sessions_and_recent_events() {
     assert!(output.contains("Events: 4"));
     assert!(output.contains("Recent events:"));
     assert!(output.contains("session.started"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn status_marks_cleaned_sessions() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let session = seed_session_with_status(&repo, "session-cleaned", SessionStatus::Noop);
+    mark_session_cleaned(&repo, &session.id);
+
+    let status_options = StatusOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        recent_events_limit: 0,
+    };
+    let mut output = Vec::new();
+    render_status(&status_options, &mut output).expect("render status");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains(&format!("- {} [noop]", session.id)));
+    assert!(output.contains("cleanup: cleaned"));
 
     let _ = fs::remove_dir_all(repo);
 }

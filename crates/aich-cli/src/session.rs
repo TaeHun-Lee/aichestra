@@ -14,18 +14,21 @@ use aich_git::{
 };
 use aich_ledger::Ledger;
 
+use crate::cleanup_state::{cleaned_session_ids, session_is_cleaned};
 use crate::config::{main_branch_from_config, main_branch_ref, session_branch_prefix_from_config};
 use crate::formatting::{
     comparable_path, display_path_for_ledger, json_escape, path_from_ledger, sha256_hex,
 };
 use crate::manifest::{context_snapshot_hash, render_change_manifest};
 use crate::options::{
-    SessionCleanupOptions, SessionCompleteOptions, SessionPruneOptions, SessionStartOptions,
+    SessionAbandonOptions, SessionCleanupOptions, SessionCompleteOptions, SessionPruneOptions,
+    SessionStartOptions,
 };
+use crate::queue::acquire_merge_queue_lock;
 use crate::{
     latest_merge_attempt, ledger_path, open_existing_ledger, resolve_active_operator, CliError,
-    SessionCleanupResult, SessionCompleteResult, SessionPruneResult, SessionStartResult,
-    CHANGE_MANIFEST_VALIDATION_STATUS,
+    SessionAbandonResult, SessionCleanupResult, SessionCompleteResult, SessionPruneResult,
+    SessionStartResult, CHANGE_MANIFEST_VALIDATION_STATUS,
 };
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -36,6 +39,7 @@ enum CleanupEligibility {
     Applied,
     Noop,
     FailedStart,
+    Abandoned,
 }
 
 pub(crate) fn start_session_with<R, W>(
@@ -352,6 +356,57 @@ where
     cleanup_session_record(&options.repo_root, &ledger, session, cleaner)
 }
 
+pub(crate) fn abandon_session_with(
+    options: &SessionAbandonOptions,
+) -> Result<SessionAbandonResult, CliError> {
+    let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
+    let operator = resolve_active_operator(&ledger, options.operator_id.as_deref())?;
+    let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
+        CliError::Usage(format!("session '{}' does not exist", options.session_id))
+    })?;
+    if session_is_cleaned(&ledger, &session.id)? {
+        return Err(CliError::Usage(format!(
+            "session '{}' has already been cleaned and cannot be abandoned",
+            session.id
+        )));
+    }
+    let latest_attempt = latest_merge_attempt(&ledger, &session.id)?;
+    ensure_session_can_abandon(&session, latest_attempt.as_ref())?;
+    let _queue_lock = acquire_merge_queue_lock(&ledger, "abandon", &session.id)?;
+
+    let previous_status = session.status.as_str().to_string();
+    let updated_at_ms = now_millis();
+    ledger.update_session_status(&session.id, SessionStatus::Abandoned, updated_at_ms)?;
+    ledger.append_event(
+        &NewEvent::new(EventName::SessionAbandoned)
+            .with_subject("session", session.id.clone())
+            .with_data_json(format!(
+                "{{\"operator_id\":\"{}\",\"previous_status\":\"{}\",\"merge_attempt_id\":{},\"merge_attempt_status\":{}}}",
+                json_escape(&operator.id),
+                json_escape(&previous_status),
+                latest_attempt
+                    .as_ref()
+                    .map(|attempt| format!("\"{}\"", json_escape(&attempt.id)))
+                    .unwrap_or_else(|| "null".to_string()),
+                latest_attempt
+                    .as_ref()
+                    .map(|attempt| format!("\"{}\"", attempt.status.as_str()))
+                    .unwrap_or_else(|| "null".to_string())
+            )),
+    )?;
+
+    let session = ledger
+        .get_session(&session.id)?
+        .ok_or_else(|| CliError::Usage("abandoned session disappeared from ledger".to_string()))?;
+
+    Ok(SessionAbandonResult {
+        session,
+        previous_status,
+        latest_attempt,
+        operator,
+    })
+}
+
 pub(crate) fn prune_sessions_with<C>(
     options: &SessionPruneOptions,
     cleaner: &C,
@@ -369,13 +424,23 @@ where
     let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
     let mut cleaned = Vec::new();
     let mut skipped = 0;
+    let already_cleaned = cleaned_session_ids(&ledger)?;
 
     for session in ledger.list_sessions()? {
+        if already_cleaned.contains(&session.id) {
+            skipped += 1;
+            continue;
+        }
+
         let latest_attempt = latest_merge_attempt(&ledger, &session.id)?;
         let eligibility = cleanup_eligibility(&session, latest_attempt.as_ref());
         let should_clean = match eligibility {
             Ok(CleanupEligibility::Applied) => options.applied,
-            Ok(CleanupEligibility::Noop | CleanupEligibility::FailedStart) => options.inactive,
+            Ok(
+                CleanupEligibility::Noop
+                | CleanupEligibility::FailedStart
+                | CleanupEligibility::Abandoned,
+            ) => options.inactive,
             Err(_) => false,
         };
 
@@ -403,6 +468,13 @@ fn cleanup_session_record<C>(
 where
     C: SessionWorktreeCleaner,
 {
+    if session_is_cleaned(ledger, &session.id)? {
+        return Err(CliError::Usage(format!(
+            "session '{}' has already been cleaned; repeated cleanup is skipped to avoid deleting unrelated paths",
+            session.id
+        )));
+    }
+
     let latest_attempt = latest_merge_attempt(ledger, &session.id)?;
     let eligibility = cleanup_eligibility(&session, latest_attempt.as_ref())?;
 
@@ -423,6 +495,7 @@ where
         branch: session.branch.clone(),
         worktree_path: path_from_ledger(repo_root, &session.worktree_path),
         sandbox_paths,
+        force_branch_delete: eligibility == CleanupEligibility::Abandoned,
     };
     let cleanup = cleaner.cleanup_session_worktree(&request)?;
 
@@ -483,6 +556,60 @@ pub(crate) fn ensure_session_can_preflight(session: &Session) -> Result<(), CliE
     Ok(())
 }
 
+pub(crate) fn ensure_session_not_abandoned(
+    session: &Session,
+    action: &str,
+) -> Result<(), CliError> {
+    if session.status == SessionStatus::Abandoned {
+        return Err(CliError::Usage(format!(
+            "session '{}' is abandoned and cannot be {}; start a new session for further work",
+            session.id, action
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_session_can_abandon(
+    session: &Session,
+    latest_attempt: Option<&MergeAttempt>,
+) -> Result<(), CliError> {
+    match session.status {
+        SessionStatus::Completed => {
+            return Err(CliError::Usage(format!(
+                "session '{}' is completed and cannot be abandoned; use cleanup after apply",
+                session.id
+            )));
+        }
+        SessionStatus::Abandoned => {
+            return Err(CliError::Usage(format!(
+                "session '{}' is already abandoned",
+                session.id
+            )));
+        }
+        _ => {}
+    }
+
+    if let Some(attempt) = latest_attempt {
+        match attempt.status {
+            MergeAttemptStatus::Applied => {
+                return Err(CliError::Usage(format!(
+                    "session '{}' has already been applied and cannot be abandoned",
+                    session.id
+                )));
+            }
+            MergeAttemptStatus::Applying => {
+                return Err(CliError::Usage(format!(
+                    "session '{}' is currently applying and cannot be abandoned",
+                    session.id
+                )));
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
 fn cleanup_eligibility(
     session: &Session,
     latest_attempt: Option<&MergeAttempt>,
@@ -511,8 +638,9 @@ fn cleanup_eligibility(
             "session '{}' is blocked with candidate or merge state; keep it for recovery instead of cleanup",
             session.id
         ))),
+        SessionStatus::Abandoned => Ok(CleanupEligibility::Abandoned),
         _ => Err(CliError::Usage(format!(
-            "session '{}' cannot be cleaned from status '{}'; cleanup is allowed only for applied, noop, or failed-start sessions",
+            "session '{}' cannot be cleaned from status '{}'; cleanup is allowed only for applied, noop, failed-start, or abandoned sessions",
             session.id,
             session.status.as_str()
         ))),
@@ -524,6 +652,7 @@ fn cleanup_kind_label(eligibility: CleanupEligibility) -> &'static str {
         CleanupEligibility::Applied => "applied",
         CleanupEligibility::Noop => "noop",
         CleanupEligibility::FailedStart => "failed_start",
+        CleanupEligibility::Abandoned => "abandoned",
     }
 }
 
