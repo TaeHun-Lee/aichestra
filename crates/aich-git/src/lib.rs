@@ -876,6 +876,11 @@ fn remove_registered_worktree(
         return Ok(false);
     }
 
+    if !worktree_path.exists() {
+        run_git_success(repo_path, &["worktree", "prune"])?;
+        return Ok(true);
+    }
+
     let status = run_git_stdout(
         worktree_path,
         &["status", "--porcelain", "--untracked-files=all"],
@@ -1242,6 +1247,48 @@ mod tests {
                 &session_worktree.display().to_string(),
             ],
         );
+        fs::remove_dir_all(temp_dir).expect("remove temp repo");
+    }
+
+    #[test]
+    fn native_cleanup_prunes_registered_worktree_when_directory_is_missing() {
+        let temp_dir = unique_temp_dir("aich-git-cleanup-stale-session");
+        let repo = init_test_repo(&temp_dir);
+
+        fs::write(repo.join("file.txt"), "base\n").expect("write base file");
+        git(&repo, &["add", "file.txt"]);
+        git(&repo, &["commit", "-q", "-m", "initial"]);
+        git(&repo, &["branch", "-M", "main"]);
+        let base_commit = git(&repo, &["rev-parse", "HEAD"]);
+        let session_worktree = repo.join(".aichestra/worktrees/session-1");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "aich/session/session-1",
+                &session_worktree.display().to_string(),
+                &base_commit,
+            ],
+        );
+        fs::remove_dir_all(&session_worktree).expect("remove worktree dir");
+
+        let outcome = NativeGitWorktreeManager
+            .cleanup_session_worktree(&CleanupSessionWorktreeRequest {
+                repo_path: repo.clone(),
+                main_worktree_path: repo.clone(),
+                session_id: "session-1".to_string(),
+                branch: "aich/session/session-1".to_string(),
+                worktree_path: session_worktree.clone(),
+                sandbox_paths: Vec::new(),
+            })
+            .expect("cleanup");
+
+        assert!(outcome.session_worktree_removed);
+        assert!(outcome.branch_deleted);
+        assert!(!git(&repo, &["worktree", "list", "--porcelain"]).contains("session-1"));
+
         fs::remove_dir_all(temp_dir).expect("remove temp repo");
     }
 
