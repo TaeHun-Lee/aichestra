@@ -20,6 +20,17 @@ impl MergeAttemptStatus {
             Self::Applied => "applied",
         }
     }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "preflight_running" => Ok(Self::PreflightRunning),
+            "verified" => Ok(Self::Verified),
+            "blocked" => Ok(Self::Blocked),
+            "applied" => Ok(Self::Applied),
+            other => Err(format!("unknown merge attempt status '{other}'")),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,6 +54,41 @@ pub struct Approval {
     pub approved_by: String,
     pub approved_verified_tree_id: String,
     pub approved_verified_commit_id: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CheckResultStatus {
+    Passed,
+    Failed,
+}
+
+impl CheckResultStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "passed" => Ok(Self::Passed),
+            "failed" => Ok(Self::Failed),
+            other => Err(format!("unknown check result status '{other}'")),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckResult {
+    pub id: String,
+    pub merge_attempt_id: String,
+    pub name: String,
+    pub command: String,
+    pub result: CheckResultStatus,
+    pub stdout_artifact: Option<String>,
+    pub stderr_artifact: Option<String>,
     pub created_at_ms: i64,
 }
 

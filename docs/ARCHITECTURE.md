@@ -104,13 +104,13 @@ flowchart TB
 1. The developer starts one or more sessions.
 2. Aichestra creates one branch and one worktree per session.
 3. Each LLM runs only in its own session worktree.
-4. On completion, Aichestra records actual diffs and asks for a Change Manifest.
-5. The manifest is validated against the actual diff.
+4. On completion, Aichestra records actual diffs, creates a candidate patch set, and writes a generated Change Manifest draft.
+5. The generated manifest records diff-derived file evidence and remains subject to human/semantic review.
 6. A candidate enters the local merge queue.
-7. The queue creates a temporary sandbox from latest main.
+7. Preflight creates a temporary sandbox from latest main.
 8. The candidate is mechanically merged using the same strategy that will be used to apply.
-9. The Semantic Merge LLM reviews manifests, diffs, and mechanical merge results.
-10. Checks run in the sandbox.
+9. Checks run in the sandbox and store stdout/stderr artifacts.
+10. The Semantic Merge LLM reviews manifests, diffs, and mechanical merge results.
 11. The developer reviews the result.
 12. The exact verified tree/commit is applied to main only after approval.
 
@@ -122,6 +122,12 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - Main worktree is not handed to agents.
 - The merge queue is the only path to main.
 - Preflight and apply must use the same candidate result.
+
+## Local auth identity
+
+The MVP uses local operator identity, not a remote login server. `aich init` creates a default `local-user` owner in the SQLite ledger. Additional operators can be added with the auth CLI and referenced when starting sessions.
+
+Operator identity exists to make local review and future approval records attributable. It does not provide an adversarial security boundary, token broker, or enterprise permission model.
 
 ## Main guarantee
 

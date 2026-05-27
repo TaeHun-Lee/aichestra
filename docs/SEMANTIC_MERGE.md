@@ -26,6 +26,12 @@ The Change Intent Ledger combines:
 
 The manifest is useful but not authoritative. Actual diff data always wins.
 
+## MVP manifest generation
+
+`aich session complete <session-id>` creates a generated Change Manifest draft from the session goal and actual Git diff metadata. It records the base commit, head commit, changed files, diff artifacts, and context snapshot hash with `validation_status: generated_from_diff`.
+
+This generated manifest is evidence, not final proof of intent. It does not infer changed symbols or semantic impact in the MVP path, so human review or a later LLM manifest-edit step must fill in intent details before relying on it for semantic merge decisions.
+
 ## Semantic Merge LLM role
 
 The Semantic Merge LLM is an advisory reviewer and patch planner.

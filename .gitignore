@@ -8,3 +8,4 @@
 /.aichestra/worktrees/
 
 *.log
+node_modules

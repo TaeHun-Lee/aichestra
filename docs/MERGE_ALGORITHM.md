@@ -69,6 +69,10 @@ apply: fast-forward main to R
 
 Choose one strategy and keep it consistent.
 
+## Candidate creation
+
+`aich session complete <session-id>` is the candidate creation boundary. It inspects the session worktree, commits any dirty tracked or unignored untracked changes on the session branch, records the patch set and generated Change Manifest, and marks sessions with real diffs as `enqueued`. If the session branch has no diff from its recorded base commit, the session is marked `noop` and does not enter the merge queue.
+
 ## Conflict detection
 
 MVP may use normal Git operations in a temporary sandbox because this is easiest to reason about:
@@ -84,6 +88,19 @@ git merge --no-commit --no-ff <session-branch>
 If the merge fails, record conflict files and block.
 
 `git merge-tree --write-tree` can be added later for working-tree-free simulation, but it must use semantics equivalent to the apply path.
+
+## Preflight implementation
+
+`aich preflight <session-id>` creates a merge attempt for an `enqueued` session and uses `merge_no_ff_commit` as the apply strategy for the verified candidate. The command:
+
+1. Reads current main as `main_before_commit`.
+2. Creates a detached sandbox worktree under `.aichestra/sandboxes/<merge-attempt-id>`.
+3. Runs `git merge --no-ff --no-commit <candidate_commit>` in the sandbox.
+4. Commits the merged sandbox result as the verified candidate commit.
+5. Runs configured checks from `.aichestra/config.yaml` inside the sandbox.
+6. Stores check stdout/stderr artifacts and the resulting merge attempt status.
+
+If the mechanical merge conflicts or any check fails, the merge attempt is marked `blocked`. If all configured checks pass, the merge attempt stores `verified_tree_id` and `verified_commit_id` and is marked `verified`.
 
 ## Applying to main
 

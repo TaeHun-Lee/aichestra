@@ -7,8 +7,21 @@ CREATE TABLE IF NOT EXISTS schema_metadata (
 );
 
 INSERT INTO schema_metadata (key, value)
-VALUES ('schema_version', '1')
+VALUES ('schema_version', '2')
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+
+CREATE TABLE IF NOT EXISTS operators (
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  CHECK (length(id) > 0),
+  CHECK (length(display_name) > 0),
+  CHECK (role IN ('owner', 'maintainer', 'reviewer')),
+  CHECK (status IN ('active', 'disabled'))
+);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -130,5 +143,5 @@ CREATE INDEX IF NOT EXISTS idx_event_log_subject
 CREATE INDEX IF NOT EXISTS idx_merge_attempts_session
   ON merge_attempts(session_id, created_at_ms);
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 "#;
