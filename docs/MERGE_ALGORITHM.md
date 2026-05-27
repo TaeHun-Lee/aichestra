@@ -127,12 +127,20 @@ The approval row stores the operator id, merge attempt id, `approved_verified_tr
 
 Before apply:
 
-- ensure the queue lock is still held
 - ensure main has not moved since `main_before`
-- ensure human approval refers to the verified candidate id
-- ensure the verified tree/commit id matches the preflight record
+- ensure human approval refers to the verified merge attempt
+- ensure the approved tree/commit ids match the preflight record
+- ensure the main worktree is clean
 
 If main moved, do not apply. Re-run preflight on the new main.
+
+`aich apply <session-id>` currently applies the approved candidate by fast-forwarding the main worktree to the verified commit:
+
+```bash
+git merge --ff-only <approved_verified_commit_id>
+```
+
+Before running the Git update, the command records the merge attempt as `applying`. After success it records the merge attempt as `applied`, marks the session `completed`, and appends `merge.applied`. The applied commit id and tree id must still match the approved verified commit/tree, or the attempt is blocked.
 
 ## Semantic review position
 

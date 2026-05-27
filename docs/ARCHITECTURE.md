@@ -112,7 +112,7 @@ flowchart TB
 9. Checks run in the sandbox and store stdout/stderr artifacts.
 10. `aich review` writes a semantic review report from the manifest, diff evidence, mechanical merge result, and sandbox check results.
 11. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
-12. The exact verified tree/commit is applied to main only after approval.
+12. `aich apply` fast-forwards main to the approved verified commit only after rechecking main has not moved.
 
 ## Safety boundary
 
@@ -124,6 +124,7 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - Preflight and apply must use the same candidate result.
 - Semantic review is advisory evidence. It can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.
+- Apply refuses a dirty main worktree and refuses any verified commit whose tree does not match the approved tree id.
 
 ## Local auth identity
 

@@ -12,10 +12,11 @@ use aich_core::{
     Operator, OperatorRole, PatchSet, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
 };
 use aich_git::{
-    CheckCommand, CompleteSessionWorktreeOutcome, CompleteSessionWorktreeRequest,
-    CreateWorktreeRequest, GitRepository, NativeGitWorktreeManager, PreflightBlocked,
-    PreflightCheckOutput, PreflightOutcome, PreflightRequest, PreflightRunner, PreflightVerified,
-    SessionWorktreeCompleter, WorktreeError, WorktreeManager,
+    ApplyVerifiedCommitRequest, CheckCommand, CompleteSessionWorktreeOutcome,
+    CompleteSessionWorktreeRequest, CreateWorktreeRequest, GitRepository, NativeGitWorktreeManager,
+    PreflightBlocked, PreflightCheckOutput, PreflightOutcome, PreflightRequest, PreflightRunner,
+    PreflightVerified, SessionWorktreeCompleter, VerifiedCommitApplier, WorktreeError,
+    WorktreeManager,
 };
 use aich_ledger::{Ledger, MergeAttemptResultUpdate, MergeAttemptSemanticReviewUpdate};
 use sha2::{Digest, Sha256};
@@ -207,6 +208,15 @@ pub struct ApproveRunResult {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ApplyRunResult {
+    pub merge_attempt: MergeAttempt,
+    pub approval: Approval,
+    pub operator: Operator,
+    pub applied_commit_id: String,
+    pub applied_tree_id: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct StatusOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
@@ -249,6 +259,14 @@ struct ReviewOptions {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct ApproveOptions {
+    repo_root: PathBuf,
+    db_path: Option<PathBuf>,
+    session_id: String,
+    operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ApplyOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
     session_id: String,
@@ -373,6 +391,18 @@ where
                     .as_deref()
                     .unwrap_or("unknown")
             )?;
+            Ok(())
+        }
+        Some("apply") => {
+            let options = parse_apply_options(&args[1..], cwd)?;
+            let git = NativeGitWorktreeManager;
+            let result = run_apply_with(&options, &git, &git)?;
+            writeln!(out, "Applied {}", result.merge_attempt.session_id)?;
+            writeln!(out, "Merge attempt: {}", result.merge_attempt.id)?;
+            writeln!(out, "Approval: {}", result.approval.id)?;
+            writeln!(out, "Operator: {}", result.operator.id)?;
+            writeln!(out, "Applied commit: {}", result.applied_commit_id)?;
+            writeln!(out, "Applied tree: {}", result.applied_tree_id)?;
             Ok(())
         }
         Some("status") => {
@@ -943,6 +973,69 @@ fn parse_approve_options(args: &[String], cwd: &Path) -> Result<ApproveOptions, 
     };
 
     Ok(ApproveOptions {
+        repo_root,
+        db_path,
+        session_id,
+        operator_id,
+    })
+}
+
+fn parse_apply_options(args: &[String], cwd: &Path) -> Result<ApplyOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut operator_id = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown apply option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "apply accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage("apply requires <session-id>".to_string()));
+    };
+
+    Ok(ApplyOptions {
         repo_root,
         db_path,
         session_id,
@@ -2218,6 +2311,118 @@ where
     })
 }
 
+fn run_apply_with<R, A>(
+    options: &ApplyOptions,
+    git_repo: &R,
+    applier: &A,
+) -> Result<ApplyRunResult, CliError>
+where
+    R: GitRepository,
+    A: VerifiedCommitApplier,
+{
+    let aichestra_dir = options.repo_root.join(".aichestra");
+    let config_path = aichestra_dir.join("config.yaml");
+    if !config_path.exists() {
+        return Err(CliError::Usage(format!(
+            "Aichestra config not found at {}; run `aich init` first",
+            config_path.display()
+        )));
+    }
+
+    let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
+    let operator = resolve_active_operator(&ledger, options.operator_id.as_deref())?;
+    let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
+        CliError::Usage(format!("session '{}' does not exist", options.session_id))
+    })?;
+    let attempt = latest_merge_attempt(&ledger, &session.id)?.ok_or_else(|| {
+        CliError::Usage(format!(
+            "session '{}' has no preflight attempt; run `aich preflight {}` first",
+            session.id, session.id
+        ))
+    })?;
+    ensure_attempt_can_be_approved(&attempt)?;
+    let approval = latest_approval(&ledger, &attempt.id)?.ok_or_else(|| {
+        CliError::Usage(format!(
+            "merge attempt '{}' has no approval; run `aich approve {}` first",
+            attempt.id, session.id
+        ))
+    })?;
+
+    let current_main = git_repo.head_commit(&options.repo_root)?.commit_id;
+    assert_verified_candidate_can_apply(&attempt, &approval, &current_main)
+        .map_err(|error| CliError::Usage(format!("candidate cannot be applied: {error}")))?;
+
+    ledger.update_merge_attempt_status(&attempt.id, MergeAttemptStatus::Applying, now_millis())?;
+    let applied = match applier.apply_verified_commit(&ApplyVerifiedCommitRequest {
+        repo_path: options.repo_root.clone(),
+        verified_commit_id: approval.approved_verified_commit_id.clone(),
+        verified_tree_id: approval.approved_verified_tree_id.clone(),
+    }) {
+        Ok(applied) => applied,
+        Err(error) => {
+            let _ = ledger.update_merge_attempt_status(
+                &attempt.id,
+                MergeAttemptStatus::Verified,
+                now_millis(),
+            );
+            return Err(error.into());
+        }
+    };
+
+    if applied.applied_commit_id != approval.approved_verified_commit_id
+        || applied.applied_tree_id != approval.approved_verified_tree_id
+    {
+        ledger.update_merge_attempt_status(
+            &attempt.id,
+            MergeAttemptStatus::Blocked,
+            now_millis(),
+        )?;
+        ledger.append_event(
+            &NewEvent::new(EventName::MergeBlocked)
+                .with_subject("merge_attempt", attempt.id.clone())
+                .with_data_json(format!(
+                    "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"reason\":\"applied_tree_mismatch\"}}",
+                    json_escape(&operator.id),
+                    json_escape(&session.id)
+                )),
+        )?;
+        return Err(CliError::Usage(
+            "applied commit/tree did not match the approved verified candidate".to_string(),
+        ));
+    }
+
+    ledger.update_merge_attempt_status(&attempt.id, MergeAttemptStatus::Applied, now_millis())?;
+    ledger.update_session_status(&session.id, SessionStatus::Completed, now_millis())?;
+    ledger.append_event(
+        &NewEvent::new(EventName::MergeApplied)
+            .with_subject("merge_attempt", attempt.id.clone())
+            .with_data_json(format!(
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"approval_id\":\"{}\",\"applied_commit_id\":\"{}\",\"applied_tree_id\":\"{}\"}}",
+                json_escape(&operator.id),
+                json_escape(&session.id),
+                json_escape(&approval.id),
+                json_escape(&applied.applied_commit_id),
+                json_escape(&applied.applied_tree_id)
+            )),
+    )?;
+
+    let merge_attempt = ledger
+        .get_merge_attempt(&attempt.id)?
+        .ok_or_else(|| CliError::Usage(format!("merge attempt '{}' does not exist", attempt.id)))?;
+
+    Ok(ApplyRunResult {
+        merge_attempt,
+        approval,
+        operator,
+        applied_commit_id: applied.applied_commit_id,
+        applied_tree_id: applied.applied_tree_id,
+    })
+}
+
+fn latest_approval(ledger: &Ledger, merge_attempt_id: &str) -> Result<Option<Approval>, CliError> {
+    Ok(ledger.list_approvals(merge_attempt_id)?.into_iter().last())
+}
+
 fn ensure_attempt_can_be_reviewed(attempt: &MergeAttempt) -> Result<(), CliError> {
     if attempt.status != MergeAttemptStatus::Verified {
         return Err(CliError::Usage(format!(
@@ -3155,13 +3360,13 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aich_git::{validate_worktree_request, HeadCommit, SessionWorktree};
+    use aich_git::{validate_worktree_request, AppliedVerifiedCommit, HeadCommit, SessionWorktree};
     use aich_ledger::Ledger;
     use std::cell::RefCell;
     use std::env;
@@ -3176,6 +3381,16 @@ mod tests {
         fn head_commit(&self, _repo_path: &Path) -> Result<HeadCommit, WorktreeError> {
             Ok(HeadCommit {
                 commit_id: "base-commit".to_string(),
+            })
+        }
+    }
+
+    struct MockMovedGitRepository;
+
+    impl GitRepository for MockMovedGitRepository {
+        fn head_commit(&self, _repo_path: &Path) -> Result<HeadCommit, WorktreeError> {
+            Ok(HeadCommit {
+                commit_id: "other-main".to_string(),
             })
         }
     }
@@ -3243,6 +3458,30 @@ mod tests {
         ) -> Result<PreflightOutcome, WorktreeError> {
             self.requests.borrow_mut().push(request.clone());
             Ok(self.outcome.clone())
+        }
+    }
+
+    struct MockVerifiedCommitApplier {
+        requests: RefCell<Vec<ApplyVerifiedCommitRequest>>,
+        result: AppliedVerifiedCommit,
+    }
+
+    impl MockVerifiedCommitApplier {
+        fn new(result: AppliedVerifiedCommit) -> Self {
+            Self {
+                requests: RefCell::new(Vec::new()),
+                result,
+            }
+        }
+    }
+
+    impl VerifiedCommitApplier for MockVerifiedCommitApplier {
+        fn apply_verified_commit(
+            &self,
+            request: &ApplyVerifiedCommitRequest,
+        ) -> Result<AppliedVerifiedCommit, WorktreeError> {
+            self.requests.borrow_mut().push(request.clone());
+            Ok(self.result.clone())
         }
     }
 
@@ -3365,6 +3604,12 @@ mod tests {
     #[test]
     fn approve_requires_session_id() {
         let err = parse_approve_options(&[], Path::new(".")).unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+    }
+
+    #[test]
+    fn apply_requires_session_id() {
+        let err = parse_apply_options(&[], Path::new(".")).unwrap_err();
         assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
     }
 
@@ -4122,6 +4367,172 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, CliError::Usage(message) if message.contains("aich review")));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn apply_uses_approved_verified_commit_and_marks_applied() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+        let approval = run_approve_with(
+            &ApproveOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+        )
+        .expect("approve")
+        .approval;
+        let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+            applied_commit_id: "verified-commit".to_string(),
+            applied_tree_id: "verified-tree".to_string(),
+            stdout: "fast-forward\n".to_string(),
+            stderr: String::new(),
+        });
+
+        let result = run_apply_with(
+            &ApplyOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &applier,
+        )
+        .expect("apply");
+
+        assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Applied);
+        assert_eq!(result.approval, approval);
+        assert_eq!(result.applied_commit_id, "verified-commit");
+        assert_eq!(result.applied_tree_id, "verified-tree");
+        let requests = applier.requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].verified_commit_id, "verified-commit");
+        assert_eq!(requests[0].verified_tree_id, "verified-tree");
+
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        let loaded_session = ledger
+            .get_session(&session.id)
+            .expect("get session")
+            .expect("session");
+        assert_eq!(loaded_session.status, SessionStatus::Completed);
+        let loaded_attempt = ledger
+            .get_merge_attempt(&attempt.id)
+            .expect("get attempt")
+            .expect("attempt");
+        assert_eq!(loaded_attempt.status, MergeAttemptStatus::Applied);
+        assert!(ledger
+            .list_events()
+            .expect("events")
+            .iter()
+            .any(|event| event.name == "merge.applied"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn apply_requires_approval_first() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+        let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+            applied_commit_id: "verified-commit".to_string(),
+            applied_tree_id: "verified-tree".to_string(),
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+        let err = run_apply_with(
+            &ApplyOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+            &applier,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("aich approve")));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn apply_rejects_when_main_moved_after_approval() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+        run_review_with(&ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        })
+        .expect("review");
+        run_approve_with(
+            &ApproveOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockGitRepository,
+        )
+        .expect("approve");
+        let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+            applied_commit_id: "verified-commit".to_string(),
+            applied_tree_id: "verified-tree".to_string(),
+            stdout: String::new(),
+            stderr: String::new(),
+        });
+
+        let err = run_apply_with(
+            &ApplyOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+                session_id: session.id.clone(),
+                operator_id: None,
+            },
+            &MockMovedGitRepository,
+            &applier,
+        )
+        .unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("main moved")));
+        assert!(applier.requests.borrow().is_empty());
 
         let _ = fs::remove_dir_all(repo);
     }

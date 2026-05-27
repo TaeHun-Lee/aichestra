@@ -7,6 +7,7 @@ pub enum MergeAttemptStatus {
     PreflightRunning,
     Verified,
     Blocked,
+    Applying,
     Applied,
 }
 
@@ -17,6 +18,7 @@ impl MergeAttemptStatus {
             Self::PreflightRunning => "preflight_running",
             Self::Verified => "verified",
             Self::Blocked => "blocked",
+            Self::Applying => "applying",
             Self::Applied => "applied",
         }
     }
@@ -27,6 +29,7 @@ impl MergeAttemptStatus {
             "preflight_running" => Ok(Self::PreflightRunning),
             "verified" => Ok(Self::Verified),
             "blocked" => Ok(Self::Blocked),
+            "applying" => Ok(Self::Applying),
             "applied" => Ok(Self::Applied),
             other => Err(format!("unknown merge attempt status '{other}'")),
         }

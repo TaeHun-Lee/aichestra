@@ -115,6 +115,28 @@ pub trait PreflightRunner {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ApplyVerifiedCommitRequest {
+    pub repo_path: PathBuf,
+    pub verified_commit_id: String,
+    pub verified_tree_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppliedVerifiedCommit {
+    pub applied_commit_id: String,
+    pub applied_tree_id: String,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+pub trait VerifiedCommitApplier {
+    fn apply_verified_commit(
+        &self,
+        request: &ApplyVerifiedCommitRequest,
+    ) -> Result<AppliedVerifiedCommit, WorktreeError>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreateWorktreeRequest {
     pub repo_path: PathBuf,
     pub main_worktree_path: PathBuf,
@@ -395,6 +417,95 @@ impl PreflightRunner for NativeGitWorktreeManager {
     }
 }
 
+impl VerifiedCommitApplier for NativeGitWorktreeManager {
+    fn apply_verified_commit(
+        &self,
+        request: &ApplyVerifiedCommitRequest,
+    ) -> Result<AppliedVerifiedCommit, WorktreeError> {
+        validate_apply_verified_commit_request(request)?;
+
+        let status = run_git_stdout(&request.repo_path, &["status", "--porcelain"])?;
+        if !status.trim().is_empty() {
+            return Err(WorktreeError::InvalidRequest(
+                "main worktree is dirty; refuse to apply verified candidate".to_string(),
+            ));
+        }
+
+        let actual_tree = run_git_stdout(
+            &request.repo_path,
+            &[
+                "rev-parse",
+                &format!("{}^{{tree}}", request.verified_commit_id),
+            ],
+        )?
+        .trim()
+        .to_string();
+        if actual_tree != request.verified_tree_id {
+            return Err(WorktreeError::InvalidRequest(format!(
+                "verified commit tree {actual_tree} does not match approved tree {}",
+                request.verified_tree_id
+            )));
+        }
+
+        let ancestry = run_git_output(
+            &request.repo_path,
+            &[
+                "merge-base",
+                "--is-ancestor",
+                "HEAD",
+                &request.verified_commit_id,
+            ],
+        )?;
+        if !ancestry.success {
+            return Err(WorktreeError::InvalidRequest(
+                "verified commit is not a descendant of current HEAD; re-run preflight".to_string(),
+            ));
+        }
+
+        let merge_output = run_git_output(
+            &request.repo_path,
+            &["merge", "--ff-only", &request.verified_commit_id],
+        )?;
+        if !merge_output.success {
+            return Err(WorktreeError::GitCommandFailed {
+                args: vec![
+                    "merge".to_string(),
+                    "--ff-only".to_string(),
+                    request.verified_commit_id.clone(),
+                ],
+                code: merge_output.code,
+                stderr: merge_output.stderr,
+            });
+        }
+
+        let applied_commit_id = run_git_stdout(&request.repo_path, &["rev-parse", "HEAD"])?
+            .trim()
+            .to_string();
+        let applied_tree_id = run_git_stdout(&request.repo_path, &["rev-parse", "HEAD^{tree}"])?
+            .trim()
+            .to_string();
+        if applied_commit_id != request.verified_commit_id {
+            return Err(WorktreeError::InvalidRequest(format!(
+                "applied commit {applied_commit_id} does not match approved commit {}",
+                request.verified_commit_id
+            )));
+        }
+        if applied_tree_id != request.verified_tree_id {
+            return Err(WorktreeError::InvalidRequest(format!(
+                "applied tree {applied_tree_id} does not match approved tree {}",
+                request.verified_tree_id
+            )));
+        }
+
+        Ok(AppliedVerifiedCommit {
+            applied_commit_id,
+            applied_tree_id,
+            stdout: merge_output.stdout,
+            stderr: merge_output.stderr,
+        })
+    }
+}
+
 pub fn validate_worktree_request(request: &CreateWorktreeRequest) -> Result<(), WorktreeError> {
     if request.session_id.trim().is_empty() {
         return Err(WorktreeError::InvalidRequest(
@@ -494,9 +605,32 @@ pub fn validate_preflight_request(request: &PreflightRequest) -> Result<(), Work
     Ok(())
 }
 
+pub fn validate_apply_verified_commit_request(
+    request: &ApplyVerifiedCommitRequest,
+) -> Result<(), WorktreeError> {
+    if request.repo_path.as_os_str().is_empty() {
+        return Err(WorktreeError::InvalidRequest(
+            "repo path is required".to_string(),
+        ));
+    }
+    if request.verified_commit_id.trim().is_empty() {
+        return Err(WorktreeError::InvalidRequest(
+            "verified commit id is required".to_string(),
+        ));
+    }
+    if request.verified_tree_id.trim().is_empty() {
+        return Err(WorktreeError::InvalidRequest(
+            "verified tree id is required".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct GitCommandOutput {
     success: bool,
+    code: Option<i32>,
     stdout: String,
     stderr: String,
 }
@@ -510,6 +644,7 @@ fn run_git_output(repo_path: &Path, args: &[&str]) -> Result<GitCommandOutput, W
 
     Ok(GitCommandOutput {
         success: output.status.success(),
+        code: output.status.code(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     })
@@ -779,6 +914,63 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(sandbox_path.join("file.txt")).expect("read sandbox file"),
+            "base\ncandidate\n"
+        );
+
+        fs::remove_dir_all(temp_dir).expect("remove temp repo");
+    }
+
+    #[test]
+    fn native_apply_fast_forwards_to_verified_commit() {
+        let temp_dir = unique_temp_dir("aich-git-apply-verified");
+        let repo = init_test_repo(&temp_dir);
+
+        fs::write(repo.join(".gitignore"), ".aichestra/\n").expect("write gitignore");
+        fs::write(repo.join("file.txt"), "base\n").expect("write base file");
+        git(&repo, &["add", ".gitignore", "file.txt"]);
+        git(&repo, &["commit", "-q", "-m", "initial"]);
+        git(&repo, &["branch", "-M", "main"]);
+        let main_before = git(&repo, &["rev-parse", "HEAD"]);
+
+        git(&repo, &["checkout", "-q", "-b", "candidate"]);
+        fs::write(repo.join("file.txt"), "base\ncandidate\n").expect("write candidate file");
+        git(&repo, &["add", "file.txt"]);
+        git(&repo, &["commit", "-q", "-m", "candidate"]);
+        let candidate_commit = git(&repo, &["rev-parse", "HEAD"]);
+        git(&repo, &["checkout", "-q", "main"]);
+
+        let sandbox_path = repo.join(".aichestra/sandboxes/preflight-apply");
+        let outcome = NativeGitWorktreeManager
+            .run_preflight(&PreflightRequest {
+                repo_path: repo.clone(),
+                sandbox_path,
+                session_id: "session-1".to_string(),
+                main_before_commit: main_before,
+                candidate_commit,
+                check_commands: vec![CheckCommand {
+                    name: "status".to_string(),
+                    program: "git".to_string(),
+                    args: vec!["status".to_string(), "--short".to_string()],
+                }],
+            })
+            .expect("preflight");
+        let verified = match outcome {
+            PreflightOutcome::Verified(verified) => verified,
+            PreflightOutcome::Blocked(blocked) => panic!("unexpected block: {blocked:?}"),
+        };
+
+        let applied = NativeGitWorktreeManager
+            .apply_verified_commit(&ApplyVerifiedCommitRequest {
+                repo_path: repo.clone(),
+                verified_commit_id: verified.verified_commit_id.clone(),
+                verified_tree_id: verified.verified_tree_id.clone(),
+            })
+            .expect("apply verified commit");
+
+        assert_eq!(applied.applied_commit_id, verified.verified_commit_id);
+        assert_eq!(applied.applied_tree_id, verified.verified_tree_id);
+        assert_eq!(
+            fs::read_to_string(repo.join("file.txt")).expect("read main file"),
             "base\ncandidate\n"
         );
 

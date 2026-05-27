@@ -598,6 +598,31 @@ impl Ledger {
         Ok(())
     }
 
+    pub fn update_merge_attempt_status(
+        &self,
+        id: &str,
+        status: MergeAttemptStatus,
+        updated_at_ms: i64,
+    ) -> Result<()> {
+        let rows = self.conn.execute(
+            r#"
+            UPDATE merge_attempts
+            SET status = ?2,
+                updated_at_ms = ?3
+            WHERE id = ?1
+            "#,
+            params![id, status.as_str(), updated_at_ms],
+        )?;
+
+        if rows == 0 {
+            return Err(LedgerError::Domain(format!(
+                "merge attempt '{id}' does not exist"
+            )));
+        }
+
+        Ok(())
+    }
+
     pub fn get_merge_attempt(&self, id: &str) -> Result<Option<MergeAttempt>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -1225,7 +1250,7 @@ mod tests {
             ledger
                 .list_merge_attempts("session-2")
                 .expect("list merge attempts"),
-            vec![attempt]
+            vec![attempt.clone()]
         );
         assert_eq!(
             ledger
@@ -1252,6 +1277,17 @@ mod tests {
         assert_eq!(
             ledger.list_approvals("merge-1").expect("list approvals"),
             vec![approval]
+        );
+
+        ledger
+            .update_merge_attempt_status("merge-1", MergeAttemptStatus::Applied, now + 11)
+            .expect("mark applied");
+        attempt.status = MergeAttemptStatus::Applied;
+        assert_eq!(
+            ledger
+                .get_merge_attempt("merge-1")
+                .expect("get applied attempt"),
+            Some(attempt)
         );
 
         drop(ledger);
