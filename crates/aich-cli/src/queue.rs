@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use aich_core::clock::now_millis;
 use aich_core::{
@@ -501,4 +502,61 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
         ),
         _ => "-".to_string(),
     }
+}
+
+static QUEUE_LOCK_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn next_queue_lock_holder_id(acquired_at_ms: i64) -> String {
+    let counter = QUEUE_LOCK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("queue-lock-{acquired_at_ms}-{counter}")
+}
+
+pub(crate) struct QueueLockGuard<'a> {
+    ledger: &'a Ledger,
+    lock: QueueLock,
+}
+
+impl Drop for QueueLockGuard<'_> {
+    fn drop(&mut self) {
+        let _ = self
+            .ledger
+            .release_queue_lock(&self.lock.name, &self.lock.holder_id);
+    }
+}
+
+pub(crate) fn acquire_merge_queue_lock<'a>(
+    ledger: &'a Ledger,
+    operation: &str,
+    session_id: &str,
+) -> Result<QueueLockGuard<'a>, CliError> {
+    let acquired_at_ms = now_millis();
+    let lock = QueueLock {
+        name: MERGE_QUEUE_LOCK_NAME.to_string(),
+        holder_id: next_queue_lock_holder_id(acquired_at_ms),
+        operation: operation.to_string(),
+        session_id: Some(session_id.to_string()),
+        acquired_at_ms,
+    };
+
+    if ledger.try_acquire_queue_lock(&lock)? {
+        return Ok(QueueLockGuard { ledger, lock });
+    }
+
+    let held_by = match ledger.get_queue_lock(MERGE_QUEUE_LOCK_NAME)? {
+        Some(existing) => format!(
+            " by {} for {}{}",
+            existing.holder_id,
+            existing.operation,
+            existing
+                .session_id
+                .as_deref()
+                .map(|id| format!(" on session {id}"))
+                .unwrap_or_default()
+        ),
+        None => String::new(),
+    };
+
+    Err(CliError::Usage(format!(
+        "merge queue is locked{held_by}; run `aich queue` to inspect the active lock"
+    )))
 }
