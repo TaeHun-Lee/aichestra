@@ -29,6 +29,8 @@ static SEMANTIC_REVIEW_COUNTER: AtomicU64 = AtomicU64::new(1);
 static APPROVAL_COUNTER: AtomicU64 = AtomicU64::new(1);
 static QUEUE_LOCK_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+const MILLIS_PER_SECOND: i64 = 1_000;
+const QUEUE_LOCK_STALE_AFTER_MS: i64 = 30 * 60 * MILLIS_PER_SECOND;
 const DEFAULT_OPERATOR_ID: &str = "local-user";
 const DEFAULT_OPERATOR_NAME: &str = "Local User";
 const CHANGE_MANIFEST_VALIDATION_STATUS: &str = "generated_from_diff";
@@ -220,6 +222,13 @@ pub struct ApplyRunResult {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct QueueUnlockResult {
+    pub released_lock: Option<QueueLock>,
+    pub stale: bool,
+    pub age_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct StatusOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
@@ -230,6 +239,14 @@ struct StatusOptions {
 struct QueueOptions {
     repo_root: PathBuf,
     db_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct QueueUnlockOptions {
+    repo_root: PathBuf,
+    db_path: Option<PathBuf>,
+    force: bool,
+    reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -428,10 +445,7 @@ where
             let options = parse_status_options(&args[1..], cwd)?;
             render_status(&options, out)
         }
-        Some("queue") => {
-            let options = parse_queue_options(&args[1..], cwd)?;
-            render_queue(&options, out)
-        }
+        Some("queue") => run_queue_command(&args[1..], cwd, out),
         Some("-h") | Some("--help") | None => {
             write_usage(out)?;
             Ok(())
@@ -440,6 +454,39 @@ where
             "unknown command '{command}'\n\n{}",
             usage_text()
         ))),
+    }
+}
+
+fn run_queue_command<W: Write>(args: &[String], cwd: &Path, out: &mut W) -> Result<(), CliError> {
+    match args.first().map(String::as_str) {
+        Some("unlock") => {
+            let options = parse_queue_unlock_options(&args[1..], cwd)?;
+            let result = run_queue_unlock(&options)?;
+            match result.released_lock {
+                Some(lock) => {
+                    writeln!(out, "Unlocked queue lock {}", lock.name)?;
+                    writeln!(out, "Holder: {}", lock.holder_id)?;
+                    writeln!(out, "Operation: {}", lock.operation)?;
+                    writeln!(
+                        out,
+                        "Session: {}",
+                        lock.session_id.as_deref().unwrap_or("-")
+                    )?;
+                    if let Some(age_ms) = result.age_ms {
+                        writeln!(out, "Age: {}", format_duration_ms(age_ms))?;
+                    }
+                    writeln!(out, "Stale: {}", if result.stale { "yes" } else { "no" })?;
+                }
+                None => {
+                    writeln!(out, "Queue lock already free")?;
+                }
+            }
+            Ok(())
+        }
+        _ => {
+            let options = parse_queue_options(args, cwd)?;
+            render_queue(&options, out)
+        }
     }
 }
 
@@ -694,6 +741,67 @@ fn parse_queue_options(args: &[String], cwd: &Path) -> Result<QueueOptions, CliE
     }
 
     Ok(QueueOptions { repo_root, db_path })
+}
+
+fn parse_queue_unlock_options(args: &[String], cwd: &Path) -> Result<QueueUnlockOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut force = false;
+    let mut reason = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--reason" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--reason requires text".to_string()));
+                };
+                reason = Some(value.clone());
+            }
+            "--force" => {
+                force = true;
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            other => {
+                return Err(CliError::Usage(format!(
+                    "unknown queue unlock option '{other}'\n\n{}",
+                    usage_text()
+                )));
+            }
+        }
+        index += 1;
+    }
+
+    if !force {
+        return Err(CliError::Usage(
+            "queue unlock requires --force because it can release an active merge queue lock"
+                .to_string(),
+        ));
+    }
+
+    Ok(QueueUnlockOptions {
+        repo_root,
+        db_path,
+        force,
+        reason,
+    })
 }
 
 fn parse_session_start_options(
@@ -1444,6 +1552,7 @@ fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Result<(), Cli
     let entries = queue_entries(&ledger)?;
     let summary = queue_status_summary(&entries);
     let queue_lock = ledger.get_queue_lock(MERGE_QUEUE_LOCK_NAME)?;
+    let now = now_millis();
 
     writeln!(out, "Aichestra queue")?;
     writeln!(out, "Repo: {}", options.repo_root.display())?;
@@ -1456,6 +1565,17 @@ fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Result<(), Cli
                 lock.holder_id,
                 lock.operation,
                 lock.session_id.as_deref().unwrap_or("-")
+            )?;
+            let age_ms = queue_lock_age_ms(lock, now);
+            writeln!(out, "Lock age: {}", format_duration_ms(age_ms))?;
+            writeln!(
+                out,
+                "Lock stale: {}",
+                if is_queue_lock_stale(lock, now) {
+                    "yes"
+                } else {
+                    "no"
+                }
             )?;
         }
         None => writeln!(out, "Lock: free")?,
@@ -1538,6 +1658,75 @@ fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Result<(), Cli
     }
 
     Ok(())
+}
+
+fn run_queue_unlock(options: &QueueUnlockOptions) -> Result<QueueUnlockResult, CliError> {
+    let db_path = ledger_path(&options.repo_root, &options.db_path);
+    if !db_path.exists() {
+        return Err(CliError::Usage(format!(
+            "Aichestra ledger not found at {}; run `aich init` first",
+            db_path.display()
+        )));
+    }
+
+    let ledger = Ledger::open(&db_path)?;
+    let now = now_millis();
+    let Some(lock) = ledger.get_queue_lock(MERGE_QUEUE_LOCK_NAME)? else {
+        return Ok(QueueUnlockResult {
+            released_lock: None,
+            stale: false,
+            age_ms: None,
+        });
+    };
+
+    let age_ms = queue_lock_age_ms(&lock, now);
+    let stale = is_queue_lock_stale(&lock, now);
+    let released = ledger.release_queue_lock(&lock.name, &lock.holder_id)?;
+    if !released {
+        return Err(CliError::Usage(
+            "queue lock changed while unlocking; run `aich queue` and retry if needed".to_string(),
+        ));
+    }
+
+    ledger.append_event(
+        &NewEvent::new(EventName::MergeQueueUnlocked)
+            .with_subject("queue_lock", lock.name.clone())
+            .with_data_json(format!(
+                "{{\"holder_id\":\"{}\",\"operation\":\"{}\",\"session_id\":\"{}\",\"force\":{},\"stale\":{},\"age_ms\":{},\"reason\":\"{}\"}}",
+                json_escape(&lock.holder_id),
+                json_escape(&lock.operation),
+                json_escape(lock.session_id.as_deref().unwrap_or("")),
+                options.force,
+                stale,
+                age_ms,
+                json_escape(options.reason.as_deref().unwrap_or(""))
+            )),
+    )?;
+
+    Ok(QueueUnlockResult {
+        released_lock: Some(lock),
+        stale,
+        age_ms: Some(age_ms),
+    })
+}
+
+fn queue_lock_age_ms(lock: &QueueLock, now_ms: i64) -> i64 {
+    now_ms.saturating_sub(lock.acquired_at_ms)
+}
+
+fn is_queue_lock_stale(lock: &QueueLock, now_ms: i64) -> bool {
+    queue_lock_age_ms(lock, now_ms) >= QUEUE_LOCK_STALE_AFTER_MS
+}
+
+fn format_duration_ms(ms: i64) -> String {
+    let seconds = ms.max(0) / MILLIS_PER_SECOND;
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 60 * 60 {
+        format!("{}m {}s", seconds / 60, seconds % 60)
+    } else {
+        format!("{}h {}m", seconds / 3600, (seconds % 3600) / 60)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -3695,7 +3884,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich queue [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]
@@ -3946,6 +4135,12 @@ mod tests {
     fn apply_requires_session_id() {
         let err = parse_apply_options(&[], Path::new(".")).unwrap_err();
         assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+    }
+
+    #[test]
+    fn queue_unlock_requires_force() {
+        let err = parse_queue_unlock_options(&[], Path::new(".")).unwrap_err();
+        assert!(matches!(err, CliError::Usage(message) if message.contains("--force")));
     }
 
     fn seed_verified_review_candidate(
@@ -5226,6 +5421,89 @@ mod tests {
         let output = String::from_utf8(output).expect("utf8 output");
 
         assert!(output.contains("Lock: held by holder-1 (preflight, session session-1)"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn queue_marks_old_lock_as_stale() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger
+            .try_acquire_queue_lock(&QueueLock {
+                name: MERGE_QUEUE_LOCK_NAME.to_string(),
+                holder_id: "holder-1".to_string(),
+                operation: "preflight".to_string(),
+                session_id: Some("session-1".to_string()),
+                acquired_at_ms: now_millis() - QUEUE_LOCK_STALE_AFTER_MS - MILLIS_PER_SECOND,
+            })
+            .expect("acquire lock"));
+
+        let mut output = Vec::new();
+        render_queue(
+            &QueueOptions {
+                repo_root: repo.clone(),
+                db_path: None,
+            },
+            &mut output,
+        )
+        .expect("render queue");
+        let output = String::from_utf8(output).expect("utf8 output");
+
+        assert!(output.contains("Lock stale: yes"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn queue_unlock_releases_lock_and_records_event() {
+        let repo = unique_temp_dir();
+        init_repo(&InitOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        })
+        .expect("init");
+        let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+        assert!(ledger
+            .try_acquire_queue_lock(&QueueLock {
+                name: MERGE_QUEUE_LOCK_NAME.to_string(),
+                holder_id: "holder-1".to_string(),
+                operation: "preflight".to_string(),
+                session_id: Some("session-1".to_string()),
+                acquired_at_ms: now_millis() - QUEUE_LOCK_STALE_AFTER_MS - MILLIS_PER_SECOND,
+            })
+            .expect("acquire lock"));
+
+        let result = run_queue_unlock(&QueueUnlockOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            force: true,
+            reason: Some("stale process".to_string()),
+        })
+        .expect("unlock");
+
+        assert_eq!(
+            result
+                .released_lock
+                .as_ref()
+                .map(|lock| lock.holder_id.as_str()),
+            Some("holder-1")
+        );
+        assert!(result.stale);
+        assert_eq!(
+            ledger
+                .get_queue_lock(MERGE_QUEUE_LOCK_NAME)
+                .expect("queue lock"),
+            None
+        );
+        assert!(ledger.list_events().expect("events").iter().any(|event| {
+            event.name == "merge.queue_unlocked" && event.data_json.contains("stale process")
+        }));
 
         let _ = fs::remove_dir_all(repo);
     }

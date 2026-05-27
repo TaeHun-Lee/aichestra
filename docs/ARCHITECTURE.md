@@ -122,7 +122,8 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - Main worktree is not handed to agents.
 - The merge queue is the only path to main.
 - `preflight` and `apply` serialize queue activity through a durable SQLite `merge-queue` lock.
-- `aich queue` is read-only and reports candidate state from session, merge attempt, review, approval, and queue lock ledger records.
+- `aich queue` reports candidate state from session, merge attempt, review, approval, and queue lock ledger records.
+- `aich queue unlock --force` is the explicit local recovery path for stale queue locks and records `merge.queue_unlocked`.
 - Preflight and apply must use the same candidate result.
 - Semantic review is advisory evidence. It can block on explicit blocker risk, but it does not approve or apply changes.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.

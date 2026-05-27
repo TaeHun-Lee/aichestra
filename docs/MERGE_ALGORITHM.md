@@ -89,7 +89,15 @@ Applied candidates are omitted from the queue view because they no longer requir
 
 `aich preflight <session-id>` and `aich apply <session-id>` acquire the durable local `merge-queue` lock before reading or mutating merge-queue state. The lock is stored in SQLite under `queue_locks` with the holder id, operation, optional session id, and acquisition timestamp.
 
-If another preflight or apply command already holds the lock, the command refuses to run and points the user to `aich queue`. The queue view reports whether the lock is free or held. Normal command completion and ordinary error paths release the lock automatically; a process crash may leave a stale lock for inspection rather than silently allowing concurrent queue activity.
+If another preflight or apply command already holds the lock, the command refuses to run and points the user to `aich queue`. The queue view reports whether the lock is free or held, how old the lock is, and whether it is stale by the MVP age heuristic. Normal command completion and ordinary error paths release the lock automatically.
+
+If a process crash leaves a stale lock behind, the user can run:
+
+```bash
+aich queue unlock --force --reason "stale preflight process"
+```
+
+Unlocking is explicit and evented as `merge.queue_unlocked`. The command requires `--force` because the MVP cannot prove from age alone that a lock is safe to release.
 
 ## Conflict detection
 

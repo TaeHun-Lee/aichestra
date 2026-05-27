@@ -21,6 +21,7 @@ pub enum EventName {
     ApprovalRejected,
     MergeApplied,
     MergeBlocked,
+    MergeQueueUnlocked,
 }
 
 impl EventName {
@@ -45,6 +46,7 @@ impl EventName {
             Self::ApprovalRejected => "approval.rejected",
             Self::MergeApplied => "merge.applied",
             Self::MergeBlocked => "merge.blocked",
+            Self::MergeQueueUnlocked => "merge.queue_unlocked",
         }
     }
 }
