@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS semantic_reviews (
   merge_attempt_id TEXT NOT NULL REFERENCES merge_attempts(id) ON DELETE CASCADE,
   risk_level TEXT NOT NULL,
   report_path TEXT,
+  change_manifest_id TEXT,
+  change_manifest_hash TEXT,
   proposed_patch_available INTEGER NOT NULL DEFAULT 0,
   fix_plan_artifact TEXT,
   patch_artifact TEXT,
@@ -162,5 +164,5 @@ CREATE INDEX IF NOT EXISTS idx_event_log_subject
 CREATE INDEX IF NOT EXISTS idx_merge_attempts_session
   ON merge_attempts(session_id, created_at_ms);
 
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;
 "#;

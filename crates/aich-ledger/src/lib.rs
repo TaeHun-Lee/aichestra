@@ -145,6 +145,16 @@ impl Ledger {
             "ALTER TABLE semantic_reviews ADD COLUMN patch_artifact TEXT",
         )?;
         self.ensure_column(
+            "semantic_reviews",
+            "change_manifest_id",
+            "ALTER TABLE semantic_reviews ADD COLUMN change_manifest_id TEXT",
+        )?;
+        self.ensure_column(
+            "semantic_reviews",
+            "change_manifest_hash",
+            "ALTER TABLE semantic_reviews ADD COLUMN change_manifest_hash TEXT",
+        )?;
+        self.ensure_column(
             "approvals",
             "reason",
             "ALTER TABLE approvals ADD COLUMN reason TEXT",
@@ -765,9 +775,10 @@ impl Ledger {
             r#"
             INSERT INTO semantic_reviews (
               id, merge_attempt_id, risk_level, report_path, proposed_patch_available,
-              fix_plan_artifact, patch_artifact, created_at_ms
+              fix_plan_artifact, patch_artifact, change_manifest_id, change_manifest_hash,
+              created_at_ms
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             "#,
             params![
                 &review.id,
@@ -781,6 +792,8 @@ impl Ledger {
                 },
                 &review.fix_plan_artifact,
                 &review.patch_artifact,
+                &review.change_manifest_id,
+                &review.change_manifest_hash,
                 review.created_at_ms,
             ],
         )?;
@@ -791,7 +804,8 @@ impl Ledger {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT id, merge_attempt_id, risk_level, report_path, created_at_ms,
-                   proposed_patch_available, fix_plan_artifact, patch_artifact
+                   proposed_patch_available, fix_plan_artifact, patch_artifact,
+                   change_manifest_id, change_manifest_hash
             FROM semantic_reviews
             WHERE merge_attempt_id = ?1
             ORDER BY created_at_ms ASC, id ASC
@@ -1203,6 +1217,8 @@ fn semantic_review_from_row(row: &Row<'_>) -> rusqlite::Result<SemanticReview> {
         proposed_patch_available: proposed_patch_available != 0,
         fix_plan_artifact: row.get(6)?,
         patch_artifact: row.get(7)?,
+        change_manifest_id: row.get(8)?,
+        change_manifest_hash: row.get(9)?,
     })
 }
 
@@ -1346,6 +1362,8 @@ mod tests {
         assert!(columns.contains(&"proposed_patch_available".to_string()));
         assert!(columns.contains(&"fix_plan_artifact".to_string()));
         assert!(columns.contains(&"patch_artifact".to_string()));
+        assert!(columns.contains(&"change_manifest_id".to_string()));
+        assert!(columns.contains(&"change_manifest_hash".to_string()));
 
         drop(ledger);
         let _ = fs::remove_file(db_path);
@@ -1611,6 +1629,8 @@ mod tests {
             merge_attempt_id: "merge-1".to_string(),
             risk_level: SemanticRiskLevel::Medium,
             report_path: Some(".aichestra/artifacts/review.yaml".to_string()),
+            change_manifest_id: Some("manifest-1".to_string()),
+            change_manifest_hash: Some("reviewed-hash".to_string()),
             proposed_patch_available: true,
             fix_plan_artifact: Some(".aichestra/artifacts/review-fix-plan.md".to_string()),
             patch_artifact: Some(".aichestra/artifacts/review.patch".to_string()),

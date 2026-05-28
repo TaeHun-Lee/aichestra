@@ -305,6 +305,8 @@ mod tests {
             merge_attempt_id: "merge-1".to_string(),
             risk_level,
             report_path: None,
+            change_manifest_id: None,
+            change_manifest_hash: None,
             proposed_patch_available: false,
             fix_plan_artifact: None,
             patch_artifact: None,

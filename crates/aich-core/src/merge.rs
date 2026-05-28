@@ -152,6 +152,8 @@ pub struct SemanticReview {
     pub merge_attempt_id: String,
     pub risk_level: SemanticRiskLevel,
     pub report_path: Option<String>,
+    pub change_manifest_id: Option<String>,
+    pub change_manifest_hash: Option<String>,
     pub proposed_patch_available: bool,
     pub fix_plan_artifact: Option<String>,
     pub patch_artifact: Option<String>,

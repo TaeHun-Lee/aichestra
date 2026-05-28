@@ -221,6 +221,8 @@ where
         merge_attempt_id: attempt.id.clone(),
         risk_level: report.risk_level,
         report_path: Some(display_path_for_ledger(&options.repo_root, &report_path)),
+        change_manifest_id: Some(manifest.id.clone()),
+        change_manifest_hash: manifest.manifest_hash.clone(),
         proposed_patch_available: report.proposed_patch.available,
         fix_plan_artifact: report.proposed_patch.fix_plan_artifact.clone(),
         patch_artifact: report.proposed_patch.patch_artifact.clone(),
@@ -245,7 +247,7 @@ where
         &NewEvent::new(EventName::MergeSemanticReviewCompleted)
             .with_subject("merge_attempt", attempt.id.clone())
             .with_data_json(format!(
-                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{},\"proposed_patch_available\":{}}}",
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{},\"proposed_patch_available\":{},\"change_manifest_id\":\"{}\",\"change_manifest_hash\":\"{}\"}}",
                 json_escape(&operator.id),
                 json_escape(&session.id),
                 json_escape(&semantic_review.id),
@@ -253,7 +255,9 @@ where
                 adapter.llm_executed(),
                 report.risk_level.as_str(),
                 blocked,
-                semantic_review.proposed_patch_available
+                semantic_review.proposed_patch_available,
+                json_escape(&manifest.id),
+                json_escape(manifest.manifest_hash.as_deref().unwrap_or(""))
             )),
     )?;
     if blocked {

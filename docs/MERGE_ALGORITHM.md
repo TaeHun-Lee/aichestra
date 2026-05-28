@@ -139,6 +139,8 @@ If the mechanical merge conflicts, or any required check fails or times out, the
 
 `aich review <session-id>` runs after a verified preflight attempt exists and before approval. The MVP command selects the latest verified merge attempt for the session, loads the Change Manifest, changed-file evidence, patch summary, bounded patch hunk context from the recorded diff patch artifact, verified tree/commit ids, and sandbox check results, then writes a semantic review report artifact under `.aichestra/artifacts/merge-attempts/<merge-attempt-id>/`.
 
+Each semantic review row stores the Change Manifest id and hash that the reviewer saw. If the manifest artifact is edited after review, the existing review is stale evidence. Approval refuses until `aich review <session-id>` is rerun against the current manifest.
+
 The default local MVP reviewer is deterministic and conservative. It records `llm_executed: false`, flags missing or drifted manifest evidence as `blocked`, flags shared API/config/schema/dependency surfaces as `high`, and otherwise keeps generated-from-diff manifests at least `medium` risk because semantic intent is incomplete.
 
 `semantic_review.adapter: command` delegates review to a configured command that reads the rendered review input from stdin and returns `semantic_review:` YAML on stdout. `semantic_review.adapter: llm` uses the same contract for LLM providers; the built-in `codex` provider runs `codex exec` non-interactively in read-only mode, while custom providers can supply an explicit command. If a command or LLM adapter fails, exits non-zero, times out via `timeout_ms` or `timeout_seconds`, or returns an invalid report, the review result is recorded as `blocked`.
@@ -155,6 +157,7 @@ If the review includes `proposed_patch.available: true`, Aichestra writes a fix-
 - sandbox checks passed
 - verified tree and commit ids are present
 - semantic review has been recorded
+- semantic review was run against the current Change Manifest id/hash
 - semantic review did not block the attempt
 - current main still matches the preflight `main_before_commit`
 - no unresolved proposed patch exists, unless the operator passed `--accept-current`

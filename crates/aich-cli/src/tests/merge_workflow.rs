@@ -88,6 +88,76 @@ fn approve_requires_semantic_review_first() {
 }
 
 #[test]
+fn approve_refuses_stale_semantic_review_after_manifest_edit() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_manifest_edit(&ManifestEditOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+        set_intent_summary: Some("README wording was reviewed by a human.".to_string()),
+        set_risk_level: Some("low".to_string()),
+        add_risks: Vec::new(),
+        add_tests: vec!["cargo test --all".to_string()],
+        content_file: None,
+    })
+    .expect("edit manifest");
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("Change Manifest changed after semantic review") && message.contains("aich review")),
+        "{err}"
+    );
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("rerun review");
+    let result = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve after fresh review");
+
+    assert_eq!(result.approval.merge_attempt_id, result.merge_attempt.id);
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn approve_requires_explicit_accept_current_when_review_has_proposed_patch() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {

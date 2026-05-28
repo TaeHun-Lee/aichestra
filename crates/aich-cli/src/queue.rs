@@ -10,6 +10,7 @@ use aich_ledger::{EventRecord, Ledger};
 use aich_merge::{infer_queue_blocked_reason, queue_candidate_status};
 
 use crate::formatting::{json_escape, json_string_field, short_hash};
+use crate::manifest::{latest_change_manifest, semantic_review_is_stale_for_manifest};
 use crate::options::{QueueOptions, QueueUnlockOptions};
 use crate::{
     ledger_path, CliError, QueueUnlockResult, MERGE_QUEUE_LOCK_NAME, MILLIS_PER_SECOND,
@@ -23,6 +24,7 @@ pub(crate) struct QueueEntry {
     pub(crate) latest_attempt: Option<MergeAttempt>,
     pub(crate) latest_approval: Option<Approval>,
     pub(crate) latest_review: Option<SemanticReview>,
+    pub(crate) review_stale: bool,
     pub(crate) check_results: Vec<CheckResult>,
     pub(crate) blocked_recovery: Option<BlockedRecovery>,
 }
@@ -143,6 +145,12 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
                 review.id,
                 review.risk_level.as_str()
             )?;
+            if entry.review_stale {
+                writeln!(
+                    out,
+                    "  review_stale: yes (Change Manifest changed after review)"
+                )?;
+            }
             if review.proposed_patch_available {
                 writeln!(out, "  proposed_patch: available")?;
                 if let Some(path) = review.fix_plan_artifact.as_deref() {
@@ -274,6 +282,7 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
         let latest_attempt = attempts.into_iter().last();
         let mut latest_approval = None;
         let mut latest_review = None;
+        let latest_manifest = latest_change_manifest(ledger, &session.id)?;
         let mut check_results = Vec::new();
 
         if let Some(attempt) = latest_attempt.as_ref() {
@@ -284,6 +293,12 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
                 .last();
             check_results = ledger.list_check_results(&attempt.id)?;
         }
+        let review_stale = latest_review
+            .as_ref()
+            .zip(latest_manifest.as_ref())
+            .is_some_and(|(review, manifest)| {
+                semantic_review_is_stale_for_manifest(review, manifest)
+            });
 
         let Some(status) =
             queue_candidate_status(&session, latest_attempt.as_ref(), latest_approval.as_ref())
@@ -311,6 +326,7 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
             latest_attempt,
             latest_approval,
             latest_review,
+            review_stale,
             check_results,
             blocked_recovery,
         });
@@ -523,6 +539,7 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
             "aich apply {} (retry or finalize interrupted apply; unlock a stale queue lock first if needed)",
             entry.session.id
         ),
+        "verified" if entry.review_stale => format!("aich review {}", entry.session.id),
         "verified"
             if entry
                 .latest_review

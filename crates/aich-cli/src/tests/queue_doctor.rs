@@ -37,6 +37,8 @@ fn queue_shows_human_readable_candidate_states() {
             merge_attempt_id: "merge-session-verified".to_string(),
             risk_level: SemanticRiskLevel::Low,
             report_path: Some(".aichestra/artifacts/review-session-verified.yaml".to_string()),
+            change_manifest_id: None,
+            change_manifest_hash: None,
             proposed_patch_available: false,
             fix_plan_artifact: None,
             patch_artifact: None,
@@ -97,6 +99,49 @@ fn queue_shows_human_readable_candidate_states() {
     assert!(output.contains("next: aich apply session-approved"));
     assert!(output.contains("next: aich apply session-applying"));
     assert!(!output.contains("session-applied ["));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn queue_points_stale_semantic_review_back_to_review() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_manifest_edit(&ManifestEditOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+        set_intent_summary: Some("Manifest was refined after review.".to_string()),
+        set_risk_level: Some("low".to_string()),
+        add_risks: Vec::new(),
+        add_tests: Vec::new(),
+        content_file: None,
+    })
+    .expect("edit manifest");
+
+    let options = QueueOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    };
+    let mut output = Vec::new();
+    render_queue(&options, &mut output).expect("render queue");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("review_stale: yes (Change Manifest changed after review)"));
+    assert!(output.contains("next: aich review session-review"));
 
     let _ = fs::remove_dir_all(repo);
 }
@@ -190,6 +235,8 @@ fn queue_shows_rejected_recovery_guidance() {
             merge_attempt_id: "merge-session-rejected".to_string(),
             risk_level: SemanticRiskLevel::Medium,
             report_path: Some(".aichestra/artifacts/rejected-review.yaml".to_string()),
+            change_manifest_id: None,
+            change_manifest_hash: None,
             proposed_patch_available: false,
             fix_plan_artifact: None,
             patch_artifact: None,

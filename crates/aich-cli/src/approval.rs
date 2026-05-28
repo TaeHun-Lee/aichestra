@@ -11,6 +11,7 @@ use aich_merge::ensure_attempt_can_be_approved as merge_ensure_attempt_can_be_ap
 
 use crate::config::{main_branch_from_config, main_branch_ref};
 use crate::formatting::json_escape;
+use crate::manifest::{latest_change_manifest, semantic_review_is_stale_for_manifest};
 use crate::options::ApproveOptions;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
@@ -65,6 +66,18 @@ where
         return Err(CliError::Usage(format!(
             "merge attempt '{}' has blocked semantic risk; revise the candidate and run preflight/review again",
             attempt.id
+        )));
+    }
+    let latest_manifest = latest_change_manifest(&ledger, &session.id)?.ok_or_else(|| {
+        CliError::Usage(format!(
+            "session '{}' has no Change Manifest; run `aich session complete {}` first",
+            session.id, session.id
+        ))
+    })?;
+    if semantic_review_is_stale_for_manifest(latest_review, &latest_manifest) {
+        return Err(CliError::Usage(format!(
+            "Change Manifest changed after semantic review '{}'. Run `aich review {}` again before approval.",
+            latest_review.id, session.id
         )));
     }
     if latest_review.proposed_patch_available && !options.accept_current {

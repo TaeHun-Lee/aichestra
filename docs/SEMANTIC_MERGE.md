@@ -52,6 +52,8 @@ The edit command parses the manifest as YAML, changes structured fields, writes 
 
 Editing a Change Manifest does not change the candidate patch, verified commit, verified tree, or approval state. It is evidence for the next semantic review. Already approved, applying, applied, or abandoned sessions cannot have their current manifest edited because that would mutate evidence after a downstream decision.
 
+Every semantic review stores the Change Manifest id and hash it reviewed. If the manifest is edited after review, the previous review becomes stale. `aich approve <session-id>` refuses stale review evidence and asks the operator to rerun `aich review <session-id>`. `aich queue` also points the candidate back to review instead of approval when it detects stale review evidence.
+
 ## Semantic Merge LLM role
 
 The Semantic Merge LLM is an advisory reviewer and patch planner.
@@ -136,6 +138,8 @@ MVP starts with semantic review report generation only.
 - `merge.semantic_review.completed` event data
 
 The review input artifact includes the candidate manifest separately from the related manifest bundle. It also includes a `Patch Context` section sourced from `change_manifest.evidence.diff_patch_artifact`; small patches are included in full, while large patches are capped and retain the artifact path for manual inspection. Related manifests are labeled as `applied` or `queued`, include session and latest-attempt metadata when available, and are evidence for stale assumptions or cross-session conflicts; they do not by themselves approve, block, or reorder the queue.
+
+The `semantic_reviews` ledger row records `change_manifest_id` and `change_manifest_hash` so later approval can verify that the report still corresponds to the current manifest artifact.
 
 The report records the adapter reviewer id and `llm_executed` flag so the user can distinguish local deterministic evidence from a provider-backed Semantic Merge LLM review. If the adapter returns `proposed_patch.available: true`, Aichestra stores a generated fix-plan artifact and, when inline `proposed_patch.patch` is present, a generated patch artifact under the merge-attempt artifact directory. Future LLM adapters should consume the same evidence bundle and return the same risk/report shape. They remain advisory and cannot approve, apply, reorder the queue, or bypass the integration-sandbox checks.
 

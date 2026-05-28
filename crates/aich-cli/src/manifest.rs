@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use aich_core::{ChangedFile, ContextSnapshot, PatchSet, Session};
+use aich_core::{ChangeManifest, ChangedFile, ContextSnapshot, PatchSet, SemanticReview, Session};
+use aich_ledger::Ledger;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -104,6 +105,30 @@ pub(crate) fn changed_files_missing_from_manifest(
         })
         .map(|file| file.path.clone())
         .collect()
+}
+
+pub(crate) fn latest_change_manifest(
+    ledger: &Ledger,
+    session_id: &str,
+) -> Result<Option<ChangeManifest>, CliError> {
+    Ok(ledger.list_change_manifests(session_id)?.into_iter().last())
+}
+
+pub(crate) fn semantic_review_is_stale_for_manifest(
+    review: &SemanticReview,
+    manifest: &ChangeManifest,
+) -> bool {
+    if review.change_manifest_id.as_deref() != Some(manifest.id.as_str()) {
+        return true;
+    }
+
+    match (
+        review.change_manifest_hash.as_deref(),
+        manifest.manifest_hash.as_deref(),
+    ) {
+        (Some(review_hash), Some(manifest_hash)) => review_hash != manifest_hash,
+        _ => true,
+    }
 }
 
 pub(crate) fn shared_contract_files(changed_files: &[ChangedFile]) -> Vec<String> {
