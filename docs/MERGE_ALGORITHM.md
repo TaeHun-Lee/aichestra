@@ -193,6 +193,7 @@ Before apply:
 - ensure the approved tree/commit ids match the preflight record
 - ensure the check policy used by preflight still matches the current `.aichestra/config.yaml`
 - ensure the semantic review policy still matches the current `.aichestra/config.yaml` and prompt file
+- ensure semantic review was run against the current Change Manifest id/hash, verified candidate, changed files, and sandbox check evidence
 - ensure the main worktree is checked out to configured `git.main_branch`
 - ensure the main worktree is clean
 

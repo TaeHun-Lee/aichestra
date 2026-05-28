@@ -228,6 +228,33 @@ pub(crate) fn semantic_review_stale_reasons(
     reasons
 }
 
+pub(crate) fn ensure_semantic_review_evidence_current(
+    review: &SemanticReview,
+    manifest: &ChangeManifest,
+    attempt: &MergeAttempt,
+    changed_files: &[ChangedFile],
+    check_results: &[CheckResult],
+    session_id: &str,
+    before_action: &str,
+) -> Result<(), CliError> {
+    let fingerprint =
+        semantic_review_evidence_fingerprint(manifest, attempt, changed_files, check_results);
+    let stale_reasons = semantic_review_stale_reasons(review, manifest, &fingerprint);
+    if stale_reasons.is_empty() {
+        return Ok(());
+    }
+
+    let reasons = stale_reasons
+        .iter()
+        .map(|reason| reason.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(CliError::Usage(format!(
+        "Semantic review '{}' is stale ({reasons}). Run `aich review {}` again before {before_action}.",
+        review.id, session_id
+    )))
+}
+
 pub(crate) fn shared_contract_files(changed_files: &[ChangedFile]) -> Vec<String> {
     changed_files
         .iter()

@@ -875,6 +875,77 @@ fn apply_refuses_when_semantic_review_policy_changes_after_approval() {
 }
 
 #[test]
+fn apply_refuses_when_semantic_review_evidence_changes_after_approval() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    Ledger::open(repo.join(".aichestra/aichestra.db"))
+        .expect("open ledger")
+        .insert_check_result(&CheckResult {
+            id: "check-after-approval".to_string(),
+            merge_attempt_id: attempt.id.clone(),
+            name: "extra".to_string(),
+            command: "cargo clippy --all-targets".to_string(),
+            required: false,
+            timed_out: false,
+            result: CheckResultStatus::Passed,
+            stdout_artifact: None,
+            stderr_artifact: None,
+            created_at_ms: now_millis(),
+        })
+        .expect("insert check after approval");
+    let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+        applied_commit_id: "verified-commit".to_string(),
+        applied_tree_id: "verified-tree".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+
+    let err = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+        &applier,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("checks_changed") && message.contains("aich review")),
+        "{err}"
+    );
+    assert!(applier.requests.borrow().is_empty());
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn apply_recovers_when_verified_commit_is_already_on_main() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {

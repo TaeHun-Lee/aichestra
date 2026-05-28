@@ -9,6 +9,7 @@ use aich_ledger::Ledger;
 use crate::approval::{ensure_attempt_can_be_approved, latest_approval};
 use crate::config::{main_branch_from_config, main_branch_ref};
 use crate::formatting::json_escape;
+use crate::manifest::{ensure_semantic_review_evidence_current, latest_change_manifest};
 use crate::options::ApplyOptions;
 use crate::preflight::ensure_preflight_check_policy_current;
 use crate::queue::acquire_merge_queue_lock;
@@ -119,6 +120,24 @@ where
         &options.repo_root,
         &config_path,
         &locked_session.id,
+    )?;
+    let latest_manifest =
+        latest_change_manifest(&ledger, &locked_session.id)?.ok_or_else(|| {
+            CliError::Usage(format!(
+                "session '{}' has no Change Manifest; run `aich session complete {}` first",
+                locked_session.id, locked_session.id
+            ))
+        })?;
+    let candidate_summary =
+        load_verified_candidate_summary(&ledger, &locked_session.id, &attempt.id)?;
+    ensure_semantic_review_evidence_current(
+        latest_review,
+        &latest_manifest,
+        &attempt,
+        &candidate_summary.changed_files,
+        &candidate_summary.check_results,
+        &locked_session.id,
+        "apply",
     )?;
     assert_verified_candidate_can_apply(&attempt, &approval, &current_main)
         .map_err(|error| CliError::Usage(apply_violation_message(&session.id, &error)))?;
