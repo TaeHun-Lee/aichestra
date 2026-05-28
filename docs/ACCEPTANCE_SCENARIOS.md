@@ -48,6 +48,7 @@ Acceptance criteria:
 - Session 2 completes `review -> approve -> apply`.
 - Final main `tmp.md` contains both session changes.
 - The queue is empty and the main worktree is clean.
+- Dogfood note B: the second real Codex worker was validated after the first apply.
 
 Reproducible test:
 
