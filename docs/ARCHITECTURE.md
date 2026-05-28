@@ -131,7 +131,7 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - `aich queue` reports candidate state from session, merge attempt, review, approval, and queue lock ledger records.
 - Blocked queue entries include recovery guidance, relevant artifact paths, and the exact rerun sequence for the session candidate.
 - `aich queue unlock --force` is the explicit local recovery path for stale queue locks and records `merge.queue_unlocked`.
-- `aich doctor` is a read-only local health check for initialization files, ledger access, default operator identity, queue entries, stale queue lock suspicion, and interrupted apply recovery hints.
+- `aich doctor` is a read-only local health check for initialization files, ledger access, default operator identity, queue entries, stale preflight/review evidence, stale queue lock suspicion, and interrupted apply recovery hints.
 - `aich session abandon` records `session.abandoned`, refuses to run while the merge queue lock is held, and refuses sessions that are applying or already applied.
 - Session cleanup is allowed for applied sessions, no-op sessions, failed-start sessions without candidate merge state, and abandoned sessions. It refuses dirty registered worktrees, records `session.cleaned`, reports cleaned sessions in status, and skips already-cleaned sessions during prune.
 - Preflight and apply must use the same candidate result.

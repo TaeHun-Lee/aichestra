@@ -5,8 +5,12 @@ use aich_core::clock::now_millis;
 use aich_core::MergeAttemptStatus;
 use aich_ledger::Ledger;
 
+use crate::checks::check_policy_fingerprint_from_config;
 use crate::options::DoctorOptions;
-use crate::queue::{format_duration_ms, is_queue_lock_stale, queue_entries, queue_lock_age_ms};
+use crate::queue::{
+    format_duration_ms, is_queue_lock_stale, queue_entries, queue_lock_age_ms, queue_next_action,
+};
+use crate::semantic_review::semantic_review_policy_fingerprint_from_config;
 use crate::{ledger_path, CliError, DEFAULT_OPERATOR_ID, MERGE_QUEUE_LOCK_NAME};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DoctorSeverity {
@@ -68,14 +72,10 @@ impl DoctorRunResult {
 pub(crate) fn run_doctor(options: &DoctorOptions) -> Result<DoctorRunResult, CliError> {
     let db_path = ledger_path(&options.repo_root, &options.db_path);
     let aichestra_dir = options.repo_root.join(".aichestra");
+    let config_path = aichestra_dir.join("config.yaml");
     let mut checks = Vec::new();
 
-    add_doctor_path_check(
-        &mut checks,
-        "config",
-        &aichestra_dir.join("config.yaml"),
-        "file",
-    );
+    add_doctor_path_check(&mut checks, "config", &config_path, "file");
     add_doctor_path_check(
         &mut checks,
         "artifacts",
@@ -164,7 +164,44 @@ pub(crate) fn run_doctor(options: &DoctorOptions) -> Result<DoctorRunResult, Cli
         ),
     }
 
-    match queue_entries(&ledger, None, None) {
+    let current_check_policy_fingerprint = if config_path.exists() {
+        match check_policy_fingerprint_from_config(&config_path) {
+            Ok(fingerprint) => Some(fingerprint),
+            Err(error) => {
+                add_doctor_check(
+                    &mut checks,
+                    DoctorSeverity::Error,
+                    "check policy",
+                    format!("failed to read current check policy: {error}"),
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let current_semantic_review_policy_fingerprint = if config_path.exists() {
+        match semantic_review_policy_fingerprint_from_config(&options.repo_root, &config_path) {
+            Ok(fingerprint) => Some(fingerprint),
+            Err(error) => {
+                add_doctor_check(
+                    &mut checks,
+                    DoctorSeverity::Error,
+                    "semantic review policy",
+                    format!("failed to read current semantic review policy: {error}"),
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    match queue_entries(
+        &ledger,
+        current_check_policy_fingerprint.as_deref(),
+        current_semantic_review_policy_fingerprint.as_deref(),
+    ) {
         Ok(entries) => {
             add_doctor_check(
                 &mut checks,
@@ -172,6 +209,46 @@ pub(crate) fn run_doctor(options: &DoctorOptions) -> Result<DoctorRunResult, Cli
                 "queue",
                 format!("{} candidate(s) need queue attention", entries.len()),
             );
+            for entry in &entries {
+                if !entry.preflight_stale_reasons.is_empty() {
+                    let attempt_id = entry
+                        .latest_attempt
+                        .as_ref()
+                        .map(|attempt| attempt.id.as_str())
+                        .unwrap_or("-");
+                    add_doctor_check(
+                        &mut checks,
+                        DoctorSeverity::Warning,
+                        "preflight stale",
+                        format!(
+                            "session {session_id} merge attempt {attempt_id} is stale ({reason}); next: {next_action}",
+                            session_id = entry.session.id,
+                            attempt_id = attempt_id,
+                            reason = entry.preflight_stale_reasons.join(", "),
+                            next_action = queue_next_action(entry),
+                        ),
+                    );
+                }
+                if !entry.review_stale_reasons.is_empty() {
+                    let review_id = entry
+                        .latest_review
+                        .as_ref()
+                        .map(|review| review.id.as_str())
+                        .unwrap_or("-");
+                    add_doctor_check(
+                        &mut checks,
+                        DoctorSeverity::Warning,
+                        "review stale",
+                        format!(
+                            "session {session_id} semantic review {review_id} is stale ({reason}); next: {next_action}",
+                            session_id = entry.session.id,
+                            review_id = review_id,
+                            reason = entry.review_stale_reasons.join(", "),
+                            next_action = queue_next_action(entry),
+                        ),
+                    );
+                }
+            }
             for entry in entries.iter().filter(|entry| {
                 entry
                     .latest_attempt

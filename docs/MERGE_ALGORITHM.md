@@ -263,7 +263,7 @@ Block the candidate when:
 A blocked candidate should remain in the ledger with its artifacts. The developer can:
 
 - inspect `aich queue` for `blocked_reason`, recovery guidance, and artifact paths
-- inspect `aich doctor` for stale queue locks and `applying` attempts that can be retried with `aich apply <session-id>`
+- inspect `aich doctor` for stale preflight/review evidence, stale queue locks, and `applying` attempts that can be retried with `aich apply <session-id>`
 - inspect failed check stderr/stdout, semantic review reports, merge stderr/stdout, or `conflicts.txt`
 - follow preflight/apply error hints for the exact next command, such as switching to the configured main branch or re-running preflight/review/approval after main moved
 - ask a worker LLM to revise the session branch

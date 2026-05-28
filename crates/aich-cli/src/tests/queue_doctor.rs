@@ -657,6 +657,115 @@ fn doctor_warns_when_apply_recovery_is_pending() {
 }
 
 #[test]
+fn doctor_warns_when_preflight_policy_is_stale() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    configure_single_check(
+        &repo,
+        "new-required-check",
+        "cargo test --all --locked",
+        true,
+    );
+
+    let mut output = Vec::new();
+    run_with_cwd(["aich", "doctor"], &repo, &mut output).expect("doctor");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("[warning] preflight stale:"));
+    assert!(output.contains(&format!("session {}", session.id)));
+    assert!(output.contains("check_policy_changed"));
+    assert!(output.contains(&format!("next: aich preflight {}", session.id)));
+    assert!(output.contains("Result: warning"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn doctor_warns_when_semantic_review_evidence_is_stale() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    Ledger::open(repo.join(".aichestra/aichestra.db"))
+        .expect("open ledger")
+        .insert_check_result(&CheckResult {
+            id: "check-after-review".to_string(),
+            merge_attempt_id: attempt.id.clone(),
+            name: "extra".to_string(),
+            command: "cargo clippy --all-targets".to_string(),
+            required: false,
+            timed_out: false,
+            result: CheckResultStatus::Passed,
+            stdout_artifact: None,
+            stderr_artifact: None,
+            created_at_ms: now_millis(),
+        })
+        .expect("insert check after review");
+
+    let mut output = Vec::new();
+    run_with_cwd(["aich", "doctor"], &repo, &mut output).expect("doctor");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("[warning] review stale:"));
+    assert!(output.contains(&format!("session {}", session.id)));
+    assert!(output.contains("checks_changed"));
+    assert!(output.contains(&format!("next: aich review {}", session.id)));
+    assert!(output.contains("Result: warning"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn doctor_warns_when_semantic_review_policy_is_stale() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    fs::write(
+        repo.join(".aichestra/prompts/semantic-merge-review.md"),
+        "Updated semantic review prompt for doctor stale testing.\n",
+    )
+    .expect("update semantic review prompt");
+
+    let mut output = Vec::new();
+    run_with_cwd(["aich", "doctor"], &repo, &mut output).expect("doctor");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("[warning] review stale:"));
+    assert!(output.contains(&format!("session {}", session.id)));
+    assert!(output.contains("semantic_review_policy_changed"));
+    assert!(output.contains(&format!("next: aich review {}", session.id)));
+    assert!(output.contains("Result: warning"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn status_lists_sessions_and_recent_events() {
     let repo = unique_temp_dir();
     let init_options = InitOptions {
