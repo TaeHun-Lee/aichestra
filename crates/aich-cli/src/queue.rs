@@ -15,6 +15,9 @@ use crate::manifest::{
     latest_change_manifest, semantic_review_evidence_fingerprint, semantic_review_stale_reasons,
 };
 use crate::options::{QueueOptions, QueueUnlockOptions};
+use crate::semantic_review::{
+    semantic_review_policy_fingerprint_from_config, semantic_review_policy_stale_reasons,
+};
 use crate::{
     ledger_path, CliError, QueueUnlockResult, MERGE_QUEUE_LOCK_NAME, MILLIS_PER_SECOND,
     QUEUE_LOCK_STALE_AFTER_MS,
@@ -57,7 +60,19 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
     } else {
         None
     };
-    let entries = queue_entries(&ledger, current_check_policy_fingerprint.as_deref())?;
+    let current_semantic_review_policy_fingerprint = if config_path.exists() {
+        Some(semantic_review_policy_fingerprint_from_config(
+            &options.repo_root,
+            &config_path,
+        )?)
+    } else {
+        None
+    };
+    let entries = queue_entries(
+        &ledger,
+        current_check_policy_fingerprint.as_deref(),
+        current_semantic_review_policy_fingerprint.as_deref(),
+    )?;
     let summary = queue_status_summary(&entries);
     let queue_lock = ledger.get_queue_lock(MERGE_QUEUE_LOCK_NAME)?;
     let now = now_millis();
@@ -294,6 +309,7 @@ struct QueueStatusSummary {
 pub(crate) fn queue_entries(
     ledger: &Ledger,
     current_check_policy_fingerprint: Option<&str>,
+    current_semantic_review_policy_fingerprint: Option<&str>,
 ) -> Result<Vec<QueueEntry>, CliError> {
     let mut entries = Vec::new();
     let events = ledger.list_events()?;
@@ -332,7 +348,7 @@ pub(crate) fn queue_entries(
                 .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let review_stale_reasons = latest_review
+        let mut review_stale_reasons = latest_review
             .as_ref()
             .zip(latest_manifest.as_ref())
             .zip(latest_attempt.as_ref())
@@ -349,6 +365,18 @@ pub(crate) fn queue_entries(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        if let Some((review, current_fingerprint)) = latest_review
+            .as_ref()
+            .zip(current_semantic_review_policy_fingerprint)
+        {
+            review_stale_reasons.extend(
+                semantic_review_policy_stale_reasons(review, current_fingerprint)
+                    .into_iter()
+                    .map(|reason| reason.as_str().to_string()),
+            );
+            review_stale_reasons.sort();
+            review_stale_reasons.dedup();
+        }
 
         let Some(status) =
             queue_candidate_status(&session, latest_attempt.as_ref(), latest_approval.as_ref())

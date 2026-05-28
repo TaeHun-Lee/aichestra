@@ -194,7 +194,7 @@ fn ensure_preflight_queue_position(
     session_id: &str,
     current_check_policy_fingerprint: &str,
 ) -> Result<(), CliError> {
-    let entries = queue_entries(ledger, Some(current_check_policy_fingerprint))?;
+    let entries = queue_entries(ledger, Some(current_check_policy_fingerprint), None)?;
 
     if let Some(blocking) = entries.iter().find(|entry| {
         entry.session.id != session_id

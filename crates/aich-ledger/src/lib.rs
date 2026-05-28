@@ -175,6 +175,11 @@ impl Ledger {
             "ALTER TABLE semantic_reviews ADD COLUMN review_evidence_fingerprint TEXT",
         )?;
         self.ensure_column(
+            "semantic_reviews",
+            "semantic_review_policy_fingerprint",
+            "ALTER TABLE semantic_reviews ADD COLUMN semantic_review_policy_fingerprint TEXT",
+        )?;
+        self.ensure_column(
             "merge_attempts",
             "check_policy_fingerprint",
             "ALTER TABLE merge_attempts ADD COLUMN check_policy_fingerprint TEXT",
@@ -805,9 +810,10 @@ impl Ledger {
               id, merge_attempt_id, risk_level, report_path, proposed_patch_available,
               fix_plan_artifact, patch_artifact, change_manifest_id, change_manifest_hash,
               verified_candidate_fingerprint, changed_files_fingerprint,
-              check_results_fingerprint, review_evidence_fingerprint, created_at_ms
+              check_results_fingerprint, review_evidence_fingerprint,
+              semantic_review_policy_fingerprint, created_at_ms
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             "#,
             params![
                 &review.id,
@@ -827,6 +833,7 @@ impl Ledger {
                 &review.changed_files_fingerprint,
                 &review.check_results_fingerprint,
                 &review.review_evidence_fingerprint,
+                &review.semantic_review_policy_fingerprint,
                 review.created_at_ms,
             ],
         )?;
@@ -840,7 +847,7 @@ impl Ledger {
                    proposed_patch_available, fix_plan_artifact, patch_artifact,
                    change_manifest_id, change_manifest_hash, verified_candidate_fingerprint,
                    changed_files_fingerprint, check_results_fingerprint,
-                   review_evidence_fingerprint
+                   review_evidence_fingerprint, semantic_review_policy_fingerprint
             FROM semantic_reviews
             WHERE merge_attempt_id = ?1
             ORDER BY created_at_ms ASC, id ASC
@@ -1259,6 +1266,7 @@ fn semantic_review_from_row(row: &Row<'_>) -> rusqlite::Result<SemanticReview> {
         changed_files_fingerprint: row.get(11)?,
         check_results_fingerprint: row.get(12)?,
         review_evidence_fingerprint: row.get(13)?,
+        semantic_review_policy_fingerprint: row.get(14)?,
     })
 }
 
@@ -1442,6 +1450,7 @@ mod tests {
         assert!(columns.contains(&"changed_files_fingerprint".to_string()));
         assert!(columns.contains(&"check_results_fingerprint".to_string()));
         assert!(columns.contains(&"review_evidence_fingerprint".to_string()));
+        assert!(columns.contains(&"semantic_review_policy_fingerprint".to_string()));
 
         drop(ledger);
         let _ = fs::remove_file(db_path);
@@ -1714,6 +1723,7 @@ mod tests {
             changed_files_fingerprint: Some("changed-files-fingerprint".to_string()),
             check_results_fingerprint: Some("check-results-fingerprint".to_string()),
             review_evidence_fingerprint: Some("review-evidence-fingerprint".to_string()),
+            semantic_review_policy_fingerprint: Some("review-policy-fingerprint".to_string()),
             proposed_patch_available: true,
             fix_plan_artifact: Some(".aichestra/artifacts/review-fix-plan.md".to_string()),
             patch_artifact: Some(".aichestra/artifacts/review.patch".to_string()),

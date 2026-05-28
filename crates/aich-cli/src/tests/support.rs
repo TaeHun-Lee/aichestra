@@ -882,6 +882,14 @@ fn current_check_policy_fingerprint(repo: &Path) -> String {
         .expect("check policy fingerprint")
 }
 
+fn current_semantic_review_policy_fingerprint(repo: &Path) -> String {
+    crate::semantic_review::semantic_review_policy_fingerprint_from_config(
+        repo,
+        &repo.join(".aichestra/config.yaml"),
+    )
+    .expect("semantic review policy fingerprint")
+}
+
 fn write_semantic_review_test_command(
     repo: &Path,
     script_stem: &str,

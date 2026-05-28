@@ -12,6 +12,7 @@ use crate::formatting::json_escape;
 use crate::options::ApplyOptions;
 use crate::preflight::ensure_preflight_check_policy_current;
 use crate::queue::acquire_merge_queue_lock;
+use crate::semantic_review::ensure_semantic_review_policy_current;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, load_verified_candidate_summary, open_existing_ledger,
@@ -106,6 +107,19 @@ where
 
     ensure_attempt_can_be_approved(&attempt)?;
     ensure_preflight_check_policy_current(&attempt, &config_path, &locked_session.id)?;
+    let semantic_reviews = ledger.list_semantic_reviews(&attempt.id)?;
+    let latest_review = semantic_reviews.last().ok_or_else(|| {
+        CliError::Usage(format!(
+            "merge attempt '{}' has no semantic review; run `aich review {}` first",
+            attempt.id, locked_session.id
+        ))
+    })?;
+    ensure_semantic_review_policy_current(
+        latest_review,
+        &options.repo_root,
+        &config_path,
+        &locked_session.id,
+    )?;
     assert_verified_candidate_can_apply(&attempt, &approval, &current_main)
         .map_err(|error| CliError::Usage(apply_violation_message(&session.id, &error)))?;
 

@@ -306,6 +306,69 @@ fn approve_refuses_stale_semantic_review_after_verified_candidate_changes() {
 }
 
 #[test]
+fn approve_refuses_stale_semantic_review_after_review_policy_changes() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    fs::write(
+        repo.join(".aichestra/prompts/semantic-merge-review.md"),
+        "Updated semantic review prompt for policy stale testing.\n",
+    )
+    .expect("update semantic review prompt");
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("semantic_review_policy_changed") && message.contains("aich review")),
+        "{err}"
+    );
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("rerun review");
+    let result = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve after fresh review policy");
+
+    assert_eq!(result.approval.merge_attempt_id, result.merge_attempt.id);
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn review_refuses_stale_preflight_after_check_policy_changes() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -743,6 +806,67 @@ fn apply_refuses_when_check_policy_changes_after_approval() {
 
     assert!(
         matches!(err, CliError::Usage(ref message) if message.contains("check_policy_changed") && message.contains("aich preflight")),
+        "{err}"
+    );
+    assert!(applier.requests.borrow().is_empty());
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn apply_refuses_when_semantic_review_policy_changes_after_approval() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    fs::write(
+        repo.join(".aichestra/prompts/semantic-merge-review.md"),
+        "Updated semantic review prompt after approval.\n",
+    )
+    .expect("update semantic review prompt");
+    let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+        applied_commit_id: "verified-commit".to_string(),
+        applied_tree_id: "verified-tree".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+
+    let err = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+        &applier,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("semantic_review_policy_changed") && message.contains("aich review")),
         "{err}"
     );
     assert!(applier.requests.borrow().is_empty());

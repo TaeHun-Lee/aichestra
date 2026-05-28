@@ -159,6 +159,7 @@ pub struct SemanticReview {
     pub changed_files_fingerprint: Option<String>,
     pub check_results_fingerprint: Option<String>,
     pub review_evidence_fingerprint: Option<String>,
+    pub semantic_review_policy_fingerprint: Option<String>,
     pub proposed_patch_available: bool,
     pub fix_plan_artifact: Option<String>,
     pub patch_artifact: Option<String>,

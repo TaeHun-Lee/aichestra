@@ -46,6 +46,7 @@ Core behavior:
 - queue-head preflight with a durable SQLite queue lock
 - integration sandbox checks before approval
 - preflight check policy fingerprints that force re-preflight when required check settings change
+- semantic review policy fingerprints that force re-review when reviewer settings or prompts change
 - semantic review through `local`, `command`, or `llm` adapters
 - review, approval, and apply summaries that show the exact verified commit/tree, checks, changed files, and next command
 - human approval for the exact verified tree/commit
@@ -109,6 +110,8 @@ Semantic review records the evidence fingerprint it reviewed, including the mani
 
 Preflight also records the check policy fingerprint from `.aichestra/config.yaml`. If check commands, `required`, timeout, or explicit environment settings change after preflight, `aich review`, `aich approve`, and `aich apply` refuse the stale candidate and `aich queue` points back to `aich preflight <session-id>`.
 
+Semantic review also records the reviewer policy fingerprint. If the semantic review adapter, reviewer/provider/model/profile/command, timeout, block levels, prompt path, or prompt file content changes after review, `aich approve` and `aich apply` refuse until `aich review <session-id>` is rerun.
+
 Reject and revise a verified candidate instead of applying it:
 
 ```bash
@@ -168,6 +171,8 @@ semantic_review:
 - `llm`: provider wrapper path; the built-in `codex` provider uses non-interactive read-only `codex exec`
 
 Use `semantic_review.timeout_seconds` or `semantic_review.timeout_ms` to bound command and LLM reviewer execution. Non-zero exit, timeout, or invalid YAML records a blocked semantic review.
+
+Semantic review settings and the prompt file content are part of the review policy fingerprint. Changing them after a review makes that review stale, so rerun `aich review <session-id>` before approval or apply.
 
 ## Recovery
 

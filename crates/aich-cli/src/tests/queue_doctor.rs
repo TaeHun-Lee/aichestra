@@ -46,6 +46,9 @@ fn queue_shows_human_readable_candidate_states() {
             changed_files_fingerprint: None,
             check_results_fingerprint: None,
             review_evidence_fingerprint: None,
+            semantic_review_policy_fingerprint: Some(current_semantic_review_policy_fingerprint(
+                &repo,
+            )),
             proposed_patch_available: false,
             fix_plan_artifact: None,
             patch_artifact: None,
@@ -195,6 +198,42 @@ fn queue_points_stale_preflight_check_policy_back_to_preflight() {
 }
 
 #[test]
+fn queue_points_stale_semantic_review_policy_back_to_review() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    fs::write(
+        repo.join(".aichestra/prompts/semantic-merge-review.md"),
+        "Updated semantic review prompt for queue stale testing.\n",
+    )
+    .expect("update semantic review prompt");
+
+    let options = QueueOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    };
+    let mut output = Vec::new();
+    render_queue(&options, &mut output).expect("render queue");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("review_stale: yes (semantic_review_policy_changed)"));
+    assert!(output.contains("next: aich review session-review"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn queue_shows_blocked_check_recovery_guidance() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -291,6 +330,9 @@ fn queue_shows_rejected_recovery_guidance() {
             changed_files_fingerprint: None,
             check_results_fingerprint: None,
             review_evidence_fingerprint: None,
+            semantic_review_policy_fingerprint: Some(current_semantic_review_policy_fingerprint(
+                &repo,
+            )),
             proposed_patch_available: false,
             fix_plan_artifact: None,
             patch_artifact: None,

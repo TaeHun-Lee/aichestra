@@ -46,6 +46,10 @@ pub(crate) use aich_llm::ProposedPatch;
 pub(crate) use aich_llm::SemanticReviewAdapterRequest;
 #[cfg(test)]
 pub(crate) use config::codex_semantic_review_command;
+pub(crate) use config::{
+    ensure_semantic_review_policy_current, semantic_review_policy_fingerprint_from_config,
+    semantic_review_policy_stale_reasons,
+};
 #[cfg(test)]
 pub(crate) use report::build_local_semantic_review_report;
 
@@ -199,6 +203,8 @@ where
         .join("merge-attempts")
         .join(&attempt.id);
     fs::create_dir_all(&artifact_dir)?;
+    let policy_fingerprint =
+        semantic_review_policy_fingerprint_from_config(&options.repo_root, &config_path)?;
     let mut report = adapter.review(&adapter_request)?;
     let input_path = artifact_dir.join(format!("{review_id}-input.md"));
     let report_path = artifact_dir.join(format!("{review_id}.yaml"));
@@ -233,6 +239,7 @@ where
         changed_files_fingerprint: Some(evidence_fingerprint.changed_files_fingerprint.clone()),
         check_results_fingerprint: Some(evidence_fingerprint.check_results_fingerprint.clone()),
         review_evidence_fingerprint: Some(evidence_fingerprint.review_evidence_fingerprint.clone()),
+        semantic_review_policy_fingerprint: Some(policy_fingerprint.clone()),
         proposed_patch_available: report.proposed_patch.available,
         fix_plan_artifact: report.proposed_patch.fix_plan_artifact.clone(),
         patch_artifact: report.proposed_patch.patch_artifact.clone(),
@@ -257,7 +264,7 @@ where
         &NewEvent::new(EventName::MergeSemanticReviewCompleted)
             .with_subject("merge_attempt", attempt.id.clone())
             .with_data_json(format!(
-                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{},\"proposed_patch_available\":{},\"change_manifest_id\":\"{}\",\"change_manifest_hash\":\"{}\",\"review_evidence_fingerprint\":\"{}\"}}",
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{},\"proposed_patch_available\":{},\"change_manifest_id\":\"{}\",\"change_manifest_hash\":\"{}\",\"review_evidence_fingerprint\":\"{}\",\"semantic_review_policy_fingerprint\":\"{}\"}}",
                 json_escape(&operator.id),
                 json_escape(&session.id),
                 json_escape(&semantic_review.id),
@@ -268,7 +275,8 @@ where
                 semantic_review.proposed_patch_available,
                 json_escape(&manifest.id),
                 json_escape(manifest.manifest_hash.as_deref().unwrap_or("")),
-                json_escape(&evidence_fingerprint.review_evidence_fingerprint)
+                json_escape(&evidence_fingerprint.review_evidence_fingerprint),
+                json_escape(&policy_fingerprint)
             )),
     )?;
     if blocked {

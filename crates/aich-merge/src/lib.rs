@@ -312,6 +312,7 @@ mod tests {
             changed_files_fingerprint: None,
             check_results_fingerprint: None,
             review_evidence_fingerprint: None,
+            semantic_review_policy_fingerprint: None,
             proposed_patch_available: false,
             fix_plan_artifact: None,
             patch_artifact: None,

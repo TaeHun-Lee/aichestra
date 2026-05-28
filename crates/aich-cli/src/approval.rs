@@ -16,6 +16,7 @@ use crate::manifest::{
 };
 use crate::options::ApproveOptions;
 use crate::preflight::ensure_preflight_check_policy_current;
+use crate::semantic_review::ensure_semantic_review_policy_current;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, load_verified_candidate_summary, open_existing_ledger,
@@ -72,6 +73,12 @@ where
             attempt.id
         )));
     }
+    ensure_semantic_review_policy_current(
+        latest_review,
+        &options.repo_root,
+        &config_path,
+        &session.id,
+    )?;
     let latest_manifest = latest_change_manifest(&ledger, &session.id)?.ok_or_else(|| {
         CliError::Usage(format!(
             "session '{}' has no Change Manifest; run `aich session complete {}` first",

@@ -92,6 +92,8 @@ Pure blocked-reason inference from merge evidence, such as blocker semantic revi
 
 When a verified or approved candidate was created under an older check policy, `aich queue` keeps the candidate visible but reports `preflight_stale` and points the next action back to `aich preflight <session-id>`. This prevents an approval or apply from using a tree that never passed the current required-check policy.
 
+When the latest semantic review was produced under an older review policy, `aich queue` reports `review_stale` and points the next action back to `aich review <session-id>`. This covers adapter settings, reviewer/provider/model/profile/command, timeout, risk block levels, prompt path, and prompt file content.
+
 ## Queue lock
 
 `aich preflight <session-id>` and `aich apply <session-id>` acquire the durable local `merge-queue` lock before reading or mutating merge-queue state. The lock is stored in SQLite under `queue_locks` with the holder id, operation, optional session id, and acquisition timestamp.
@@ -143,7 +145,7 @@ The check policy fingerprint covers the configured check order, name, command pr
 
 `aich review <session-id>` runs after a verified preflight attempt exists and before approval. The MVP command selects the latest verified merge attempt for the session, loads the Change Manifest, changed-file evidence, patch summary, bounded patch hunk context from the recorded diff patch artifact, verified tree/commit ids, and sandbox check results, then writes a semantic review report artifact under `.aichestra/artifacts/merge-attempts/<merge-attempt-id>/`.
 
-Each semantic review row stores fingerprints for the evidence the reviewer saw: Change Manifest id/hash, verified candidate fields, changed-file evidence, sandbox check evidence, and an aggregate review-evidence fingerprint. If any of that evidence changes after review, the existing review is stale. Approval refuses until `aich review <session-id>` is rerun against the current evidence.
+Each semantic review row stores fingerprints for the evidence the reviewer saw: Change Manifest id/hash, verified candidate fields, changed-file evidence, sandbox check evidence, and an aggregate review-evidence fingerprint. It also stores a semantic review policy fingerprint covering adapter settings, reviewer identity/provider/model/profile/command, timeout, risk block levels, prompt path, and prompt file content hash. If any evidence or review policy changes after review, the existing review is stale. Approval refuses until `aich review <session-id>` is rerun against the current evidence and policy.
 
 Review also requires the preflight check policy to still match the current config. If the gate policy changed, semantic review is not run against old check evidence; the candidate must be preflighted again first.
 
@@ -164,6 +166,7 @@ If the review includes `proposed_patch.available: true`, Aichestra writes a fix-
 - verified tree and commit ids are present
 - the check policy used by preflight still matches the current `.aichestra/config.yaml`
 - semantic review has been recorded
+- semantic review policy still matches the current `.aichestra/config.yaml` and prompt file
 - semantic review was run against the current Change Manifest id/hash, verified candidate, changed files, and sandbox check evidence
 - semantic review did not block the attempt
 - current main still matches the preflight `main_before_commit`
@@ -189,6 +192,7 @@ Before apply:
 - ensure human approval refers to the verified merge attempt
 - ensure the approved tree/commit ids match the preflight record
 - ensure the check policy used by preflight still matches the current `.aichestra/config.yaml`
+- ensure the semantic review policy still matches the current `.aichestra/config.yaml` and prompt file
 - ensure the main worktree is checked out to configured `git.main_branch`
 - ensure the main worktree is clean
 
