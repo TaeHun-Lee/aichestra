@@ -58,7 +58,10 @@ use formatting::yes_no;
 #[cfg(test)]
 use formatting::{display_path_for_ledger, sha256_hex};
 #[cfg(test)]
-use manifest::{changed_files_missing_from_manifest, parse_manifest_diff_evidence};
+use manifest::{
+    changed_files_missing_from_manifest, parse_manifest_diff_evidence,
+    parse_manifest_diff_patch_artifact,
+};
 use options::*;
 use preflight::run_preflight_with;
 #[cfg(test)]

@@ -22,11 +22,18 @@ struct ParsedChangeManifest {
     newly_created_files: Vec<String>,
     #[serde(default)]
     deleted_or_renamed_files: Vec<String>,
+    #[serde(default)]
+    evidence: ParsedManifestEvidence,
 }
 
 #[derive(Debug, Deserialize)]
 struct ParsedChangedArea {
     file: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ParsedManifestEvidence {
+    diff_patch_artifact: Option<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -50,6 +57,23 @@ pub(crate) fn parse_manifest_diff_evidence(content: &str) -> Result<ManifestDiff
     }
 
     Ok(ManifestDiffEvidence { changed_files })
+}
+
+pub(crate) fn parse_manifest_diff_patch_artifact(content: &str) -> Result<Option<String>, String> {
+    let document: ChangeManifestDocument =
+        serde_yaml::from_str(content).map_err(|error| error.to_string())?;
+    Ok(document
+        .change_manifest
+        .evidence
+        .diff_patch_artifact
+        .and_then(|path| {
+            let path = normalize_manifest_file_path(&path);
+            if path.is_empty() {
+                None
+            } else {
+                Some(path)
+            }
+        }))
 }
 
 fn insert_manifest_file_path(changed_files: &mut BTreeSet<String>, path: &str) {

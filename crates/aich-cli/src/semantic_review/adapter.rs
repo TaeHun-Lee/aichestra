@@ -11,8 +11,8 @@ use crate::{CliError, LOCAL_SEMANTIC_REVIEWER};
 use super::parser::parse_semantic_review_command_report;
 use super::report::{
     build_local_semantic_review_report, command_semantic_review_failure_report,
-    llm_semantic_review_failure_report, render_semantic_review_input, LocalSemanticReviewReport,
-    RelatedChangeManifest, SemanticReviewInput,
+    llm_semantic_review_failure_report, render_semantic_review_input, DiffPatchContext,
+    LocalSemanticReviewReport, RelatedChangeManifest, SemanticReviewInput,
 };
 
 pub(crate) struct SemanticReviewAdapterRequest<'a> {
@@ -23,6 +23,7 @@ pub(crate) struct SemanticReviewAdapterRequest<'a> {
     pub(crate) manifest_content: Option<&'a str>,
     pub(crate) manifest_hash_mismatch: bool,
     pub(crate) patch_set: Option<&'a PatchSet>,
+    pub(crate) diff_patch_context: Option<&'a DiffPatchContext>,
     pub(crate) changed_files: &'a [ChangedFile],
     pub(crate) check_results: &'a [CheckResult],
     pub(crate) related_manifests: &'a [RelatedChangeManifest],
@@ -103,6 +104,7 @@ impl SemanticReviewAdapter for CommandSemanticReviewAdapter {
             manifest: request.manifest,
             manifest_content: request.manifest_content,
             patch_set: request.patch_set,
+            diff_patch_context: request.diff_patch_context,
             changed_files: request.changed_files,
             check_results: request.check_results,
             related_manifests: request.related_manifests,
@@ -188,6 +190,7 @@ impl SemanticReviewAdapter for LlmSemanticReviewAdapter {
             manifest: request.manifest,
             manifest_content: request.manifest_content,
             patch_set: request.patch_set,
+            diff_patch_context: request.diff_patch_context,
             changed_files: request.changed_files,
             check_results: request.check_results,
             related_manifests: request.related_manifests,

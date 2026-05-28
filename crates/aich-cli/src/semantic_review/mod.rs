@@ -4,6 +4,7 @@ mod parser;
 mod report;
 
 use std::fs;
+use std::path::Path;
 
 use aich_core::clock::now_millis;
 use aich_core::{
@@ -15,6 +16,7 @@ use aich_ledger::MergeAttemptSemanticReviewUpdate;
 use crate::formatting::{
     display_path_for_ledger, json_escape, path_from_ledger, read_optional_text, sha256_hex,
 };
+use crate::manifest::parse_manifest_diff_patch_artifact;
 use crate::options::ReviewOptions;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
@@ -29,8 +31,8 @@ use config::{
     SemanticReviewAdapterConfig, SemanticReviewAdapterKind,
 };
 use report::{
-    render_semantic_review_input, render_semantic_review_yaml, RelatedChangeManifest,
-    RelatedChangeManifestRelation,
+    render_semantic_review_input, render_semantic_review_yaml, DiffPatchContext,
+    RelatedChangeManifest, RelatedChangeManifestRelation,
 };
 
 pub(crate) use adapter::{SemanticReviewAdapter, SemanticReviewAdapterRequest};
@@ -142,6 +144,8 @@ where
         .as_ref()
         .zip(manifest.manifest_hash.as_ref())
         .is_some_and(|(content, expected)| sha256_hex(content.as_bytes()) != *expected);
+    let diff_patch_context =
+        diff_patch_context_from_manifest(&options.repo_root, manifest_content.as_deref())?;
     let related_manifests = related_change_manifests(&ledger, &options.repo_root, &session.id)?;
     let prompt_path = semantic_review_prompt_path_from_config(&config_path);
     let prompt_content = read_optional_text(&path_from_ledger(&options.repo_root, &prompt_path))?;
@@ -153,6 +157,7 @@ where
         manifest: &manifest,
         manifest_content: manifest_content.as_deref(),
         patch_set: patch_set.as_ref(),
+        diff_patch_context: diff_patch_context.as_ref(),
         changed_files: &changed_files,
         check_results: &check_results,
         related_manifests: &related_manifests,
@@ -168,6 +173,7 @@ where
         manifest_content: manifest_content.as_deref(),
         manifest_hash_mismatch,
         patch_set: patch_set.as_ref(),
+        diff_patch_context: diff_patch_context.as_ref(),
         changed_files: &changed_files,
         check_results: &check_results,
         related_manifests: &related_manifests,
@@ -264,6 +270,36 @@ where
         suggested_tests: report.suggested_tests,
         blocked,
     })
+}
+
+fn diff_patch_context_from_manifest(
+    repo_root: &Path,
+    manifest_content: Option<&str>,
+) -> Result<Option<DiffPatchContext>, CliError> {
+    let Some(manifest_content) = manifest_content else {
+        return Ok(None);
+    };
+    let artifact_path = match parse_manifest_diff_patch_artifact(manifest_content) {
+        Ok(Some(path)) => path,
+        Ok(None) => return Ok(None),
+        Err(error) => {
+            return Ok(Some(DiffPatchContext::unavailable(
+                "(unresolved from Change Manifest)",
+                format!(
+                    "Change Manifest YAML could not be parsed for diff_patch_artifact: {error}"
+                ),
+            )));
+        }
+    };
+    let artifact_fs_path = path_from_ledger(repo_root, &artifact_path);
+
+    match read_optional_text(&artifact_fs_path)? {
+        Some(content) => Ok(Some(DiffPatchContext::from_content(artifact_path, content))),
+        None => Ok(Some(DiffPatchContext::unavailable(
+            artifact_path,
+            "Diff patch artifact could not be read from the recorded path.",
+        ))),
+    }
 }
 
 fn related_change_manifests(

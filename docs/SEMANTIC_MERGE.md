@@ -66,6 +66,7 @@ The reviewer should receive:
 - Relevant previous manifests already applied after the candidate base commit
 - Relevant manifests from other queued candidates
 - Actual diff summary
+- Actual patch hunk context from the recorded diff patch artifact, included fully when small enough and truncated with an artifact pointer when large
 - Changed file list
 - Changed symbol summary if available
 - Mechanical merge result
@@ -106,14 +107,14 @@ semantic_review:
 
 MVP starts with semantic review report generation only.
 
-`aich review <session-id>` runs semantic review through a `SemanticReviewAdapter` boundary. The current default adapter is a local deterministic reviewer rather than an external LLM provider. It reads the latest verified merge attempt, Change Manifest artifact, related applied and queued Change Manifest artifacts, changed-file and MVP changed-symbol evidence, patch summary, configured semantic-review prompt, and sandbox check results, then writes:
+`aich review <session-id>` runs semantic review through a `SemanticReviewAdapter` boundary. The current default adapter is a local deterministic reviewer rather than an external LLM provider. It reads the latest verified merge attempt, Change Manifest artifact, related applied and queued Change Manifest artifacts, changed-file and MVP changed-symbol evidence, patch summary, bounded patch hunk context from the recorded diff patch artifact, configured semantic-review prompt, and sandbox check results, then writes:
 
 - a review input artifact for auditability
 - a YAML semantic review report
 - a `semantic_reviews` ledger row
 - `merge.semantic_review.completed` event data
 
-The review input artifact includes the candidate manifest separately from the related manifest bundle. Related manifests are labeled as `applied` or `queued`, include session and latest-attempt metadata when available, and are evidence for stale assumptions or cross-session conflicts; they do not by themselves approve, block, or reorder the queue.
+The review input artifact includes the candidate manifest separately from the related manifest bundle. It also includes a `Patch Context` section sourced from `change_manifest.evidence.diff_patch_artifact`; small patches are included in full, while large patches are capped and retain the artifact path for manual inspection. Related manifests are labeled as `applied` or `queued`, include session and latest-attempt metadata when available, and are evidence for stale assumptions or cross-session conflicts; they do not by themselves approve, block, or reorder the queue.
 
 The report records the adapter reviewer id and `llm_executed` flag so the user can distinguish local deterministic evidence from a provider-backed Semantic Merge LLM review. Future LLM adapters should consume the same evidence bundle and return the same risk/report shape. They remain advisory and cannot approve, apply, reorder the queue, or bypass the integration-sandbox checks.
 

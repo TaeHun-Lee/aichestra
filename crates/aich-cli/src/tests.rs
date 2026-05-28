@@ -149,6 +149,14 @@ impl SemanticReviewAdapter for MockSemanticReviewAdapter {
         assert_eq!(request.changed_files.len(), 1);
         assert_eq!(request.check_results.len(), 1);
         assert!(request.related_manifests.is_empty());
+        let diff_patch_context = request.diff_patch_context.expect("diff patch context");
+        assert!(diff_patch_context.artifact_path.ends_with("diff.patch"));
+        assert!(diff_patch_context
+            .content
+            .as_deref()
+            .expect("patch content")
+            .contains("+review candidate change"));
+        assert!(!diff_patch_context.truncated);
 
         Ok(LocalSemanticReviewReport {
             risk_level: SemanticRiskLevel::Low,
@@ -494,6 +502,17 @@ fn structured_manifest_validation_normalizes_windows_separators() {
 }
 
 #[test]
+fn manifest_diff_patch_artifact_is_structured_evidence() {
+    let artifact = parse_manifest_diff_patch_artifact(
+        "change_manifest:\n  evidence:\n    diff_patch_artifact: \".aichestra\\\\artifacts\\\\sessions\\\\s1\\\\diff.patch\"\n",
+    )
+    .expect("parse manifest")
+    .expect("diff patch artifact");
+
+    assert_eq!(artifact, ".aichestra/artifacts/sessions/s1/diff.patch");
+}
+
+#[test]
 fn local_review_blocks_invalid_change_manifest_yaml() {
     let manifest = ChangeManifest {
         id: "manifest-1".to_string(),
@@ -584,9 +603,16 @@ fn seed_verified_review_candidate(
         .join("review-seed");
     fs::create_dir_all(&artifact_dir).expect("artifact dir");
     let manifest_path = artifact_dir.join("change-manifest.yaml");
+    let diff_patch_path = artifact_dir.join("diff.patch");
+    let diff_patch_content = format!(
+        "diff --git a/{changed_file_path} b/{changed_file_path}\n@@ -1 +1 @@\n+review candidate change\n"
+    );
+    fs::write(&diff_patch_path, diff_patch_content).expect("write diff patch");
     let manifest_content = format!(
-        "change_manifest:\n  session_id: \"{}\"\n  changed_areas:\n    - file: \"{}\"\n",
-        session.id, changed_file_path
+        "change_manifest:\n  session_id: \"{}\"\n  changed_areas:\n    - file: \"{}\"\n  evidence:\n    diff_patch_artifact: \"{}\"\n",
+        session.id,
+        changed_file_path,
+        display_path_for_ledger(repo, &diff_patch_path)
     );
     let manifest_hash = if write_manifest {
         fs::write(&manifest_path, &manifest_content).expect("write manifest");
@@ -2043,6 +2069,9 @@ fn review_uses_injected_semantic_review_adapter() {
     assert!(input.contains("semantic_review:"));
     assert!(input.contains("- reviewer: `mock_llm_reviewer`"));
     assert!(input.contains("- llm_executed: `true`"));
+    assert!(input.contains("## Patch Context"));
+    assert!(input.contains("- included: `full`"));
+    assert!(input.contains("+review candidate change"));
 
     let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
     assert!(ledger.list_events().expect("events").iter().any(|event| {
@@ -2120,6 +2149,14 @@ if (-not $inputText.Contains('Semantic Review Input')) {
   [Console]::Error.WriteLine('missing semantic review input')
   exit 2
 }
+if (-not $inputText.Contains('## Patch Context')) {
+  [Console]::Error.WriteLine('missing patch context')
+  exit 3
+}
+if (-not $inputText.Contains('+review candidate change')) {
+  [Console]::Error.WriteLine('missing patch hunk')
+  exit 4
+}
 @'
 semantic_review:
   risk_level: low
@@ -2131,10 +2168,18 @@ semantic_review:
   uncertainty: []
 '@
 "#,
-        r#"input=$(cat)
+        r###"input=$(cat)
 case "$input" in
   *"Semantic Review Input"*) ;;
   *) echo "missing semantic review input" >&2; exit 2 ;;
+esac
+case "$input" in
+  *"## Patch Context"*) ;;
+  *) echo "missing patch context" >&2; exit 3 ;;
+esac
+case "$input" in
+  *"+review candidate change"*) ;;
+  *) echo "missing patch hunk" >&2; exit 4 ;;
 esac
 cat <<'YAML'
 semantic_review:
@@ -2146,7 +2191,7 @@ semantic_review:
     - "cargo test --all"
   uncertainty: []
 YAML
-"#,
+"###,
     );
     configure_semantic_review_command(&repo, "scripted_command_reviewer", &command);
     let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);

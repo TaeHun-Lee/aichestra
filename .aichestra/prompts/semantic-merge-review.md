@@ -11,6 +11,7 @@ Your job is to find semantic conflicts that Git may not detect. You are advisory
 - Relevant previously applied Change Manifests
 - Relevant queued candidate Change Manifests
 - Actual diff summary
+- Actual patch hunk context when available. Large patches may be truncated; use the artifact path in the input if you need the full diff before making a high-confidence claim.
 - Changed files
 - Changed symbols if available. These are MVP heuristics from diff hunks and declaration lines, not a complete call graph.
 - Mechanical merge result
@@ -65,6 +66,8 @@ semantic_review:
 - If tests were not run in the latest-main sandbox, treat that as a risk.
 - Required check failures or timeouts are blocker evidence. Optional check failures are review evidence, but they do not by themselves prove the verified tree failed the required gate.
 - If the manifest contradicts the diff, report `manifest_mismatch`.
+- Compare the Change Manifest against the patch hunk context, not only the diff summary.
+- If the patch context is missing or truncated in a way that limits confidence, say so in `uncertainty`.
 - Treat Change Manifest file evidence as structured YAML evidence, not substring evidence. Changed files should be declared in fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, or `deleted_or_renamed_files`.
 - If a public API changed and dependent call sites are not clearly handled, use `high` or `blocked`.
 - Do not approve applying to main. Human approval and test gates are separate.

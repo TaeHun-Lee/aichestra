@@ -12,6 +12,8 @@ use crate::manifest::{
 };
 use crate::CHANGE_MANIFEST_VALIDATION_STATUS;
 
+pub(crate) const SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS: usize = 60_000;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SemanticConflictFinding {
     pub(crate) conflict_type: String,
@@ -68,6 +70,59 @@ pub(crate) struct RelatedChangeManifest {
     pub(crate) manifest_path: String,
     pub(crate) manifest_hash_mismatch: bool,
     pub(crate) manifest_content: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DiffPatchContext {
+    pub(crate) artifact_path: String,
+    pub(crate) content: Option<String>,
+    pub(crate) truncated: bool,
+    pub(crate) included_chars: usize,
+    pub(crate) original_chars: Option<usize>,
+    pub(crate) max_chars: usize,
+    pub(crate) unavailable_reason: Option<String>,
+}
+
+impl DiffPatchContext {
+    pub(crate) fn from_content(artifact_path: impl Into<String>, content: String) -> Self {
+        let original_chars = content.chars().count();
+        let truncated = original_chars > SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS;
+        let included = if truncated {
+            content
+                .chars()
+                .take(SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS)
+                .collect()
+        } else {
+            content
+        };
+        let included_chars = if truncated {
+            SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS
+        } else {
+            original_chars
+        };
+
+        Self {
+            artifact_path: artifact_path.into(),
+            content: Some(included),
+            truncated,
+            included_chars,
+            original_chars: Some(original_chars),
+            max_chars: SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS,
+            unavailable_reason: None,
+        }
+    }
+
+    pub(crate) fn unavailable(artifact_path: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            artifact_path: artifact_path.into(),
+            content: None,
+            truncated: false,
+            included_chars: 0,
+            original_chars: None,
+            max_chars: SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS,
+            unavailable_reason: Some(reason.into()),
+        }
+    }
 }
 
 pub(crate) fn build_local_semantic_review_report(
@@ -301,6 +356,7 @@ pub(crate) struct SemanticReviewInput<'a> {
     pub(crate) manifest: &'a ChangeManifest,
     pub(crate) manifest_content: Option<&'a str>,
     pub(crate) patch_set: Option<&'a PatchSet>,
+    pub(crate) diff_patch_context: Option<&'a DiffPatchContext>,
     pub(crate) changed_files: &'a [ChangedFile],
     pub(crate) check_results: &'a [CheckResult],
     pub(crate) related_manifests: &'a [RelatedChangeManifest],
@@ -382,6 +438,8 @@ pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> St
         output.push_str("_No patch set evidence is recorded._\n");
     }
 
+    append_diff_patch_context(&mut output, input.diff_patch_context);
+
     output.push_str("\n## Changed Files\n\n");
     if input.changed_files.is_empty() {
         output.push_str("- none recorded\n");
@@ -424,6 +482,53 @@ pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> St
     }
 
     output
+}
+
+fn append_diff_patch_context(output: &mut String, context: Option<&DiffPatchContext>) {
+    output.push_str("\n## Patch Context\n\n");
+    output.push_str(
+        "Actual candidate patch hunks from the session completion artifact. Use this as diff evidence alongside the Change Manifest; if it is truncated, inspect the artifact path before making a high-confidence claim.\n\n",
+    );
+
+    let Some(context) = context else {
+        output.push_str("_No diff patch artifact path is recorded in the Change Manifest._\n");
+        return;
+    };
+
+    output.push_str(&format!("- artifact: `{}`\n", context.artifact_path));
+    output.push_str(&format!("- max_chars: `{}`\n", context.max_chars));
+
+    match context.content.as_deref() {
+        Some(content) => {
+            output.push_str(&format!(
+                "- included: `{}`\n",
+                if context.truncated {
+                    "truncated"
+                } else {
+                    "full"
+                }
+            ));
+            output.push_str(&format!("- included_chars: `{}`\n", context.included_chars));
+            if let Some(original_chars) = context.original_chars {
+                output.push_str(&format!("- original_chars: `{original_chars}`\n"));
+            }
+            output.push_str("\n```diff\n");
+            output.push_str(content);
+            if !content.ends_with('\n') {
+                output.push('\n');
+            }
+            if context.truncated {
+                output.push_str("\n# ... patch context truncated; inspect the artifact above for the full diff.\n");
+            }
+            output.push_str("```\n");
+        }
+        None => {
+            output.push_str(&format!(
+                "- unavailable: `{}`\n",
+                context.unavailable_reason.as_deref().unwrap_or("unknown")
+            ));
+        }
+    }
 }
 
 fn append_adapter_output_contract(output: &mut String, session: &Session, attempt: &MergeAttempt) {
