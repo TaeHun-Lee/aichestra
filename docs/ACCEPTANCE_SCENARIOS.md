@@ -38,6 +38,7 @@ Acceptance criteria:
 
 - `aich session start` creates two distinct session ids, branches, and worktree paths.
 - Both sessions start from the same configured main commit.
+- Dogfood note A: this scenario has been run with a real Codex worker session.
 - The session worktrees diverge independently: session 1 sees only its `alpha` change, while session 2 sees only its `beta` change.
 - `aich session complete` enqueues both candidates and records `tmp.md` in each Change Manifest.
 - `aich preflight <session-2>` refuses before session 1 is handled because session 2 is not queue head.
