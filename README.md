@@ -65,6 +65,7 @@ crates/
   aich-llm/      # semantic review report contract, parser, and input models
   aich-merge/    # merge queue status and review/approval readiness rules
 docs/
+  ACCEPTANCE_SCENARIOS.md
   ARCHITECTURE.md
   MERGE_ALGORITHM.md
   SEMANTIC_MERGE.md
@@ -193,6 +194,26 @@ cargo run -p aich-cli -- apply <session-id>
 ```
 
 Aichestra will only recover when configured main is still at the preflight `main_before` commit or already at the approved verified commit.
+
+## Acceptance Scenario
+
+The core MVP proof scenario is documented in `docs/ACCEPTANCE_SCENARIOS.md`.
+
+Run the reproducible `tmp.md` two-session acceptance test with:
+
+```bash
+cargo test -p aich-cli command_adapter_cli_e2e_parallel_tmp_md_sessions_are_sequentially_verified
+```
+
+Or use the wrapper scripts:
+
+```powershell
+.\scripts\acceptance-tmp-md.ps1
+```
+
+```bash
+./scripts/acceptance-tmp-md.sh
+```
 
 ## Checks
 

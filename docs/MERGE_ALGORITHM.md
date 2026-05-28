@@ -70,6 +70,18 @@ apply: fast-forward main to R
 
 Choose one strategy and keep it consistent.
 
+## Acceptance scenario
+
+The MVP verified-tree rule is pinned by an executable two-session scenario in `docs/ACCEPTANCE_SCENARIOS.md`.
+
+The scenario creates `tmp.md`, starts two sessions from the same configured main commit, changes different lines in the same file from separate worktrees, refuses out-of-order preflight for the second session, applies the first verified candidate, then preflights the second candidate against the new main. The test asserts that the second sandbox contains both session changes and that the second `main_before_commit` equals the commit produced by applying the first candidate.
+
+Run it with:
+
+```bash
+cargo test -p aich-cli command_adapter_cli_e2e_parallel_tmp_md_sessions_are_sequentially_verified
+```
+
 ## Candidate creation
 
 `aich session complete <session-id>` is the candidate creation boundary. It inspects the session worktree, commits any dirty tracked or unignored untracked changes on the session branch, records the patch set and generated Change Manifest, and marks sessions with real diffs as `enqueued`. Changed symbols are captured with MVP diff heuristics from hunk headers and changed declaration lines, then stored as `changed_files.symbols_json` and rendered into the generated manifest. If the session branch has no diff from its recorded base commit, the session is marked `noop` and does not enter the merge queue.
