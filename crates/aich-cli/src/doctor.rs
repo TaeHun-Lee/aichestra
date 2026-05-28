@@ -8,7 +8,8 @@ use aich_ledger::Ledger;
 use crate::checks::check_policy_fingerprint_from_config;
 use crate::options::DoctorOptions;
 use crate::queue::{
-    format_duration_ms, is_queue_lock_stale, queue_entries, queue_lock_age_ms, queue_next_action,
+    format_duration_ms, is_queue_lock_stale, legacy_stale_hint, queue_entries, queue_lock_age_ms,
+    queue_next_action,
 };
 use crate::semantic_review::semantic_review_policy_fingerprint_from_config;
 use crate::{ledger_path, CliError, DEFAULT_OPERATOR_ID, MERGE_QUEUE_LOCK_NAME};
@@ -216,16 +217,22 @@ pub(crate) fn run_doctor(options: &DoctorOptions) -> Result<DoctorRunResult, Cli
                         .as_ref()
                         .map(|attempt| attempt.id.as_str())
                         .unwrap_or("-");
+                    let next_action = queue_next_action(entry);
+                    let legacy_hint =
+                        legacy_stale_hint(&entry.preflight_stale_reasons, &next_action)
+                            .map(|hint| format!(" {hint}"))
+                            .unwrap_or_default();
                     add_doctor_check(
                         &mut checks,
                         DoctorSeverity::Warning,
                         "preflight stale",
                         format!(
-                            "session {session_id} merge attempt {attempt_id} is stale ({reason}); next: {next_action}",
+                            "session {session_id} merge attempt {attempt_id} is stale ({reason}).{legacy_hint} next: {next_action}",
                             session_id = entry.session.id,
                             attempt_id = attempt_id,
                             reason = entry.preflight_stale_reasons.join(", "),
-                            next_action = queue_next_action(entry),
+                            legacy_hint = legacy_hint,
+                            next_action = next_action,
                         ),
                     );
                 }
@@ -235,16 +242,21 @@ pub(crate) fn run_doctor(options: &DoctorOptions) -> Result<DoctorRunResult, Cli
                         .as_ref()
                         .map(|review| review.id.as_str())
                         .unwrap_or("-");
+                    let next_action = queue_next_action(entry);
+                    let legacy_hint = legacy_stale_hint(&entry.review_stale_reasons, &next_action)
+                        .map(|hint| format!(" {hint}"))
+                        .unwrap_or_default();
                     add_doctor_check(
                         &mut checks,
                         DoctorSeverity::Warning,
                         "review stale",
                         format!(
-                            "session {session_id} semantic review {review_id} is stale ({reason}); next: {next_action}",
+                            "session {session_id} semantic review {review_id} is stale ({reason}).{legacy_hint} next: {next_action}",
                             session_id = entry.session.id,
                             review_id = review_id,
                             reason = entry.review_stale_reasons.join(", "),
-                            next_action = queue_next_action(entry),
+                            legacy_hint = legacy_hint,
+                            next_action = next_action,
                         ),
                     );
                 }

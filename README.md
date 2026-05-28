@@ -177,6 +177,7 @@ Semantic review settings and the prompt file content are part of the review poli
 ## Recovery
 
 Use `aich doctor` to check for stale preflight/review evidence, stale queue locks, and interrupted apply recovery hints.
+If a stale reason starts with `legacy_`, the candidate was created before that fingerprint type existed; rerun the command shown by `aich queue` or `aich doctor` to refresh the evidence.
 
 If preflight or apply leaves a stale queue lock:
 

@@ -48,6 +48,15 @@ impl SemanticReviewPolicyStaleReason {
             Self::SemanticReviewPolicyChanged => "semantic_review_policy_changed",
         }
     }
+
+    pub(crate) fn legacy_hint(self) -> Option<&'static str> {
+        match self {
+            Self::LegacySemanticReviewPolicyEvidence => Some(
+                "This semantic review was created before review policy fingerprints were recorded.",
+            ),
+            Self::SemanticReviewPolicyChanged => None,
+        }
+    }
 }
 
 pub(super) fn semantic_review_adapter_config_from_config(
@@ -176,9 +185,15 @@ pub(crate) fn ensure_semantic_review_policy_current(
         .map(|reason| reason.as_str())
         .collect::<Vec<_>>()
         .join(", ");
+    let legacy_hint = stale_reasons
+        .iter()
+        .find_map(|reason| reason.legacy_hint())
+        .map(|hint| format!(" {hint}"));
     Err(CliError::Usage(format!(
-        "Semantic review '{}' policy is stale ({reasons}). Run `aich review {}` again before approval or apply.",
-        review.id, session_id
+        "Semantic review '{}' policy is stale ({reasons}).{} Run `aich review {}` again before approval or apply.",
+        review.id,
+        legacy_hint.unwrap_or_default(),
+        session_id
     )))
 }
 

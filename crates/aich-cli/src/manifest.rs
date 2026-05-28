@@ -146,6 +146,19 @@ impl SemanticReviewStaleReason {
             Self::ReviewEvidenceChanged => "review_evidence_changed",
         }
     }
+
+    pub(crate) fn legacy_hint(self) -> Option<&'static str> {
+        match self {
+            Self::LegacyReviewEvidence => Some(
+                "This semantic review was created before review evidence fingerprints were recorded.",
+            ),
+            Self::ManifestChanged
+            | Self::VerifiedCandidateChanged
+            | Self::ChangedFilesChanged
+            | Self::CheckResultsChanged
+            | Self::ReviewEvidenceChanged => None,
+        }
+    }
 }
 
 pub(crate) fn semantic_review_evidence_fingerprint(
@@ -249,9 +262,15 @@ pub(crate) fn ensure_semantic_review_evidence_current(
         .map(|reason| reason.as_str())
         .collect::<Vec<_>>()
         .join(", ");
+    let legacy_hint = stale_reasons
+        .iter()
+        .find_map(|reason| reason.legacy_hint())
+        .map(|hint| format!(" {hint}"));
     Err(CliError::Usage(format!(
-        "Semantic review '{}' is stale ({reasons}). Run `aich review {}` again before {before_action}.",
-        review.id, session_id
+        "Semantic review '{}' is stale ({reasons}).{} Run `aich review {}` again before {before_action}.",
+        review.id,
+        legacy_hint.unwrap_or_default(),
+        session_id
     )))
 }
 

@@ -92,6 +92,15 @@ impl CheckPolicyStaleReason {
             Self::CheckPolicyChanged => "check_policy_changed",
         }
     }
+
+    pub(crate) fn legacy_hint(self) -> Option<&'static str> {
+        match self {
+            Self::LegacyCheckPolicyEvidence => Some(
+                "This merge attempt was created before check policy fingerprints were recorded.",
+            ),
+            Self::CheckPolicyChanged => None,
+        }
+    }
 }
 
 pub(crate) fn check_policy_fingerprint_from_config(config_path: &Path) -> Result<String, CliError> {

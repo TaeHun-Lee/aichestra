@@ -293,6 +293,54 @@ fn queue_points_approved_stale_semantic_review_back_to_review() {
 }
 
 #[test]
+fn queue_explains_legacy_semantic_review_evidence() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (_session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    Ledger::open(repo.join(".aichestra/aichestra.db"))
+        .expect("open ledger")
+        .insert_semantic_review(&SemanticReview {
+            id: "legacy-review".to_string(),
+            merge_attempt_id: attempt.id,
+            risk_level: SemanticRiskLevel::Low,
+            report_path: Some(".aichestra/artifacts/legacy-review.yaml".to_string()),
+            change_manifest_id: None,
+            change_manifest_hash: None,
+            verified_candidate_fingerprint: None,
+            changed_files_fingerprint: None,
+            check_results_fingerprint: None,
+            review_evidence_fingerprint: None,
+            semantic_review_policy_fingerprint: Some(current_semantic_review_policy_fingerprint(
+                &repo,
+            )),
+            proposed_patch_available: false,
+            fix_plan_artifact: None,
+            patch_artifact: None,
+            created_at_ms: now_millis(),
+        })
+        .expect("insert legacy review");
+
+    let options = QueueOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    };
+    let mut output = Vec::new();
+    render_queue(&options, &mut output).expect("render queue");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("legacy_review_evidence"));
+    assert!(output.contains("review_stale_hint:"));
+    assert!(output.contains("created before review fingerprints were recorded"));
+    assert!(output.contains("run `aich review session-review`"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn queue_shows_blocked_check_recovery_guidance() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -761,6 +809,50 @@ fn doctor_warns_when_semantic_review_policy_is_stale() {
     assert!(output.contains("semantic_review_policy_changed"));
     assert!(output.contains(&format!("next: aich review {}", session.id)));
     assert!(output.contains("Result: warning"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn doctor_explains_legacy_semantic_review_evidence() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (_session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    Ledger::open(repo.join(".aichestra/aichestra.db"))
+        .expect("open ledger")
+        .insert_semantic_review(&SemanticReview {
+            id: "legacy-review".to_string(),
+            merge_attempt_id: attempt.id,
+            risk_level: SemanticRiskLevel::Low,
+            report_path: Some(".aichestra/artifacts/legacy-review.yaml".to_string()),
+            change_manifest_id: None,
+            change_manifest_hash: None,
+            verified_candidate_fingerprint: None,
+            changed_files_fingerprint: None,
+            check_results_fingerprint: None,
+            review_evidence_fingerprint: None,
+            semantic_review_policy_fingerprint: Some(current_semantic_review_policy_fingerprint(
+                &repo,
+            )),
+            proposed_patch_available: false,
+            fix_plan_artifact: None,
+            patch_artifact: None,
+            created_at_ms: now_millis(),
+        })
+        .expect("insert legacy review");
+
+    let mut output = Vec::new();
+    run_with_cwd(["aich", "doctor"], &repo, &mut output).expect("doctor");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("[warning] review stale:"));
+    assert!(output.contains("legacy_review_evidence"));
+    assert!(output.contains("created before review fingerprints were recorded"));
+    assert!(output.contains("run `aich review session-review`"));
 
     let _ = fs::remove_dir_all(repo);
 }

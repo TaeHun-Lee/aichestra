@@ -272,9 +272,15 @@ pub(crate) fn ensure_preflight_check_policy_current(
         .map(|reason| reason.as_str())
         .collect::<Vec<_>>()
         .join(", ");
+    let legacy_hint = stale_reasons
+        .iter()
+        .find_map(|reason| reason.legacy_hint())
+        .map(|hint| format!(" {hint}"));
     Err(CliError::Usage(format!(
-        "Preflight check policy for merge attempt '{}' is stale ({reasons}). Run `aich preflight {}` again, then rerun review/approval before applying.",
-        attempt.id, session_id
+        "Preflight check policy for merge attempt '{}' is stale ({reasons}).{} Run `aich preflight {}` again, then rerun review/approval before applying.",
+        attempt.id,
+        legacy_hint.unwrap_or_default(),
+        session_id
     )))
 }
 

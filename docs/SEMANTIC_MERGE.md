@@ -58,6 +58,8 @@ The merge attempt separately stores the preflight check policy fingerprint. If `
 
 Each semantic review also stores the semantic review policy fingerprint. If adapter settings, reviewer/provider/model/profile/command, timeout, risk block levels, prompt path, or prompt file content change after review, Aichestra treats that review as stale and asks the operator to rerun `aich review <session-id>` before approval or apply.
 
+If stale output includes `legacy_review_evidence` or `legacy_semantic_review_policy_evidence`, the review was created before that fingerprint type existed. Aichestra still treats it as stale because it cannot prove what evidence or policy the old review saw; rerun `aich review <session-id>` to refresh the review.
+
 ## Semantic Merge LLM role
 
 The Semantic Merge LLM is an advisory reviewer and patch planner.

@@ -176,6 +176,11 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
                     "  review_stale: yes ({})",
                     entry.review_stale_reasons.join(", ")
                 )?;
+                if let Some(hint) =
+                    legacy_stale_hint(&entry.review_stale_reasons, &queue_next_action(&entry))
+                {
+                    writeln!(out, "  review_stale_hint: {hint}")?;
+                }
             }
             if review.proposed_patch_available {
                 writeln!(out, "  proposed_patch: available")?;
@@ -193,6 +198,11 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
                 "  preflight_stale: yes ({})",
                 entry.preflight_stale_reasons.join(", ")
             )?;
+            if let Some(hint) =
+                legacy_stale_hint(&entry.preflight_stale_reasons, &queue_next_action(&entry))
+            {
+                writeln!(out, "  preflight_stale_hint: {hint}")?;
+            }
         }
         if let Some(approval) = entry.latest_approval.as_ref() {
             writeln!(
@@ -648,6 +658,26 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
         "blocked" => format!("aich session reopen {}", entry.session.id),
         _ => "-".to_string(),
     }
+}
+
+pub(crate) fn legacy_stale_hint(reasons: &[String], refresh_command: &str) -> Option<String> {
+    if reasons
+        .iter()
+        .any(|reason| reason == "legacy_check_policy_evidence")
+    {
+        return Some(format!(
+            "legacy_check_policy_evidence means this merge attempt was created before check policy fingerprints were recorded; run `{refresh_command}` to refresh it."
+        ));
+    }
+    if reasons.iter().any(|reason| {
+        reason == "legacy_review_evidence" || reason == "legacy_semantic_review_policy_evidence"
+    }) {
+        return Some(format!(
+            "legacy review evidence means this semantic review was created before review fingerprints were recorded; run `{refresh_command}` to refresh it."
+        ));
+    }
+
+    None
 }
 
 static QUEUE_LOCK_COUNTER: AtomicU64 = AtomicU64::new(1);

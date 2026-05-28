@@ -141,6 +141,8 @@ If the mechanical merge conflicts, or any required check fails or times out, the
 
 The check policy fingerprint covers the configured check order, name, command program/args, `required`, timeout, and explicit `env` values after config normalization. If this fingerprint differs from the current `.aichestra/config.yaml`, the verified candidate is stale. `aich review`, `aich approve`, and `aich apply` refuse it and point back to `aich preflight <session-id>`. `aich queue` reports this as `preflight_stale: yes (check_policy_changed)` or `legacy_check_policy_evidence` for attempts created before the fingerprint existed.
 
+Legacy stale reasons mean the candidate or review was recorded by an older Aichestra version before that fingerprint was stored. They are treated as stale on purpose; rerunning the command shown by `aich queue` or `aich doctor` refreshes the missing evidence.
+
 ## Review implementation
 
 `aich review <session-id>` runs after a verified preflight attempt exists and before approval. The MVP command selects the latest verified merge attempt for the session, loads the Change Manifest, changed-file evidence, patch summary, bounded patch hunk context from the recorded diff patch artifact, verified tree/commit ids, and sandbox check results, then writes a semantic review report artifact under `.aichestra/artifacts/merge-attempts/<merge-attempt-id>/`.

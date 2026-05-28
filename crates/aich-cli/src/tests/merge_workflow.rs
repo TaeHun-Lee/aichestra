@@ -369,6 +369,66 @@ fn approve_refuses_stale_semantic_review_after_review_policy_changes() {
 }
 
 #[test]
+fn approve_explains_legacy_semantic_review_evidence() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    ledger
+        .insert_semantic_review(&SemanticReview {
+            id: "legacy-review".to_string(),
+            merge_attempt_id: attempt.id.clone(),
+            risk_level: SemanticRiskLevel::Low,
+            report_path: Some(".aichestra/artifacts/legacy-review.yaml".to_string()),
+            change_manifest_id: None,
+            change_manifest_hash: None,
+            verified_candidate_fingerprint: None,
+            changed_files_fingerprint: None,
+            check_results_fingerprint: None,
+            review_evidence_fingerprint: None,
+            semantic_review_policy_fingerprint: Some(current_semantic_review_policy_fingerprint(
+                &repo,
+            )),
+            proposed_patch_available: false,
+            fix_plan_artifact: None,
+            patch_artifact: None,
+            created_at_ms: now_millis(),
+        })
+        .expect("insert legacy review");
+    ledger
+        .update_merge_attempt_semantic_review(aich_ledger::MergeAttemptSemanticReviewUpdate {
+            id: &attempt.id,
+            status: MergeAttemptStatus::Verified,
+            semantic_risk_level: SemanticRiskLevel::Low,
+            updated_at_ms: now_millis(),
+        })
+        .expect("record semantic risk");
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("legacy_review_evidence") && message.contains("created before review evidence fingerprints were recorded") && message.contains("aich review")),
+        "{err}"
+    );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn review_refuses_stale_preflight_after_check_policy_changes() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
