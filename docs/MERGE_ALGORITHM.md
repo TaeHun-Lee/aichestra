@@ -163,6 +163,8 @@ The approval row stores the operator id, merge attempt id, `approved_verified_tr
 
 The pure review/approval readiness checks live in `aich-merge`; `aich-cli` still handles ledger reads, main-ref verification, approval event recording, and user-facing errors.
 
+The approval output repeats the verified candidate summary before pointing to `aich apply <session-id>`. This is deliberately redundant with review output: the operator should see the main-before commit, candidate commit, verified commit/tree, check summary, changed files, semantic review id/risk, and proposed-patch status at the moment the approval is recorded.
+
 `aich session rework <session-id> --review <semantic-review-id>` runs the configured provider command in the existing session worktree with the reviewer fix-plan and patch artifacts as input. Starting rework marks the old verified attempt `blocked` so it cannot be approved accidentally. After the provider finishes, the session is `running`; the user must run `aich session complete`, then `preflight`, `review`, `approve`, and `apply` again for the new candidate.
 
 `aich reject <session-id> --reason TEXT` is the negative human decision for a verified candidate. It records a `rejected` approval decision with the verified tree/commit ids, appends `approval.rejected`, marks the merge attempt `blocked`, and records `merge.blocked` with reason `rejected`. A rejected attempt cannot be approved or applied.
@@ -188,6 +190,8 @@ git merge --ff-only <approved_verified_commit_id>
 ```
 
 Before running the Git update, the command records the merge attempt as `applying`. After success it records the merge attempt as `applied`, marks the session `completed`, and appends `merge.applied`. The applied commit id and tree id must still match the approved verified commit/tree, or the attempt is blocked.
+
+The apply output reports the approved commit/tree next to the applied commit/tree and explicitly states that the applied result matched the approved verified candidate.
 
 Apply is intentionally retryable around crash points:
 

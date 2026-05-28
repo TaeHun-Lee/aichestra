@@ -43,6 +43,7 @@ Core behavior:
 - queue-head preflight with a durable SQLite queue lock
 - integration sandbox checks before approval
 - semantic review through `local`, `command`, or `llm` adapters
+- review, approval, and apply summaries that show the exact verified commit/tree, checks, changed files, and next command
 - human approval for the exact verified tree/commit
 - human rejection and reopen recovery for candidates that need another pass
 - apply guards for configured main branch/ref, clean main worktree, and main-not-moved checks

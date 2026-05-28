@@ -162,6 +162,10 @@ grep -q 'agent change' app.txt
     );
     assert!(review_output.contains("Review low"));
     assert!(review_output.contains("Command adapter reviewed the verified candidate."));
+    assert!(review_output.contains("Candidate summary:"));
+    assert!(review_output.contains("Changed files: 1"));
+    assert!(review_output.contains("- modified app.txt"));
+    assert!(review_output.contains(&format!("Approve verified tree: aich approve {session_id}")));
 
     let approve_output = run_cli(
         &repo,
@@ -173,12 +177,19 @@ grep -q 'agent change' app.txt
     );
     assert!(approve_output.contains("Approved "));
     assert!(approve_output.contains("Semantic risk: low"));
+    assert!(approve_output.contains("Approval summary:"));
+    assert!(approve_output.contains("This approval targets the verified tree"));
+    assert!(approve_output.contains(&format!("Apply command: aich apply {session_id}")));
 
     let apply_output = run_cli(
         &repo,
         vec!["aich".to_string(), "apply".to_string(), session_id.clone()],
     );
     assert!(apply_output.contains("Applied "));
+    assert!(apply_output.contains("Apply summary:"));
+    assert!(apply_output.contains(
+        "Verified tree rule: applied commit/tree matched the approved verified candidate"
+    ));
     assert!(fs::read_to_string(repo.join("app.txt"))
         .expect("main app")
         .contains("agent change"));
@@ -517,6 +528,8 @@ grep -q 'agent change' app.txt
     );
     assert!(second_review_output.contains("Review low"));
     assert!(second_review_output.contains("Reworked candidate accepted."));
+    assert!(second_review_output.contains("Candidate summary:"));
+    assert!(second_review_output.contains("- modified app.txt"));
     assert!(!second_review_output.contains("Proposed patch: available"));
 
     let approve_output = run_cli(
@@ -528,11 +541,14 @@ grep -q 'agent change' app.txt
         ],
     );
     assert!(approve_output.contains("Approved "));
+    assert!(approve_output.contains("Approval summary:"));
+    assert!(approve_output.contains(&format!("Apply command: aich apply {session_id}")));
     let apply_output = run_cli(
         &repo,
         vec!["aich".to_string(), "apply".to_string(), session_id.clone()],
     );
     assert!(apply_output.contains("Applied "));
+    assert!(apply_output.contains("Apply summary:"));
     assert!(fs::read_to_string(repo.join("app.txt"))
         .expect("main app")
         .contains("reworked change"));

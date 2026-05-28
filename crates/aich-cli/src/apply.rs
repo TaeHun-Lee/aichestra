@@ -13,7 +13,8 @@ use crate::options::ApplyOptions;
 use crate::queue::acquire_merge_queue_lock;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
-    latest_merge_attempt, open_existing_ledger, resolve_active_operator, ApplyRunResult, CliError,
+    latest_merge_attempt, load_verified_candidate_summary, open_existing_ledger,
+    resolve_active_operator, ApplyRunResult, CliError,
 };
 pub(crate) fn run_apply_with<R, A>(
     options: &ApplyOptions,
@@ -351,11 +352,13 @@ fn finish_applied_attempt(
     let merge_attempt = ledger
         .get_merge_attempt(&attempt.id)?
         .ok_or_else(|| CliError::Usage(format!("merge attempt '{}' does not exist", attempt.id)))?;
+    let candidate_summary = load_verified_candidate_summary(ledger, &session.id, &attempt.id)?;
 
     Ok(ApplyRunResult {
         merge_attempt,
         approval: approval.clone(),
         operator: operator.clone(),
+        candidate_summary,
         applied_commit_id: applied.commit_id.to_string(),
         applied_tree_id: applied.tree_id.to_string(),
     })

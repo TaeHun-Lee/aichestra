@@ -201,6 +201,8 @@ Human review should show:
 - suggested tests
 - whether the exact candidate tree passed checks
 - unresolved uncertainty
+- exact verified commit/tree that approval would target
+- changed files and check summary for the verified candidate
 
 The user should approve with awareness of semantic risk.
 

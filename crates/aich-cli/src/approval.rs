@@ -14,7 +14,8 @@ use crate::formatting::json_escape;
 use crate::options::ApproveOptions;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
-    latest_merge_attempt, open_existing_ledger, resolve_active_operator, ApproveRunResult, CliError,
+    latest_merge_attempt, load_verified_candidate_summary, open_existing_ledger,
+    resolve_active_operator, ApproveRunResult, CliError,
 };
 
 static APPROVAL_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -124,11 +125,14 @@ where
     )?;
     tx.commit()?;
 
+    let candidate_summary = load_verified_candidate_summary(&ledger, &session.id, &attempt.id)?;
+
     Ok(ApproveRunResult {
         approval,
         merge_attempt: attempt,
         operator,
         semantic_reviews,
+        candidate_summary,
     })
 }
 

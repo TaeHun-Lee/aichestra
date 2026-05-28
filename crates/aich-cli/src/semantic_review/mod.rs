@@ -27,7 +27,8 @@ use crate::options::ReviewOptions;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, next_semantic_review_id, open_existing_ledger, resolve_active_operator,
-    CliError, ReviewRunResult, COMMAND_SEMANTIC_REVIEWER, LLM_SEMANTIC_REVIEWER,
+    CliError, ReviewRunResult, VerifiedCandidateSummary, COMMAND_SEMANTIC_REVIEWER,
+    LLM_SEMANTIC_REVIEWER,
 };
 
 use adapter::{CommandSemanticReviewAdapter, LlmSemanticReviewAdapter, LocalSemanticReviewAdapter};
@@ -277,6 +278,11 @@ where
         semantic_review,
         merge_attempt,
         operator,
+        candidate_summary: VerifiedCandidateSummary {
+            patch_set,
+            changed_files,
+            check_results,
+        },
         report_path,
         summary: report.summary,
         required_actions: report.required_actions,

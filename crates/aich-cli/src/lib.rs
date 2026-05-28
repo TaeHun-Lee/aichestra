@@ -8,13 +8,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(test)]
 use aich_core::clock::now_millis;
 use aich_core::{
-    Approval, ApprovalRejection, ChangeManifest, ChangedFile, CheckResult, ContextSnapshot,
-    MergeAttempt, Operator, PatchSet, QueueLock, SemanticReview, Session,
+    Approval, ApprovalRejection, ChangeManifest, ChangedFile, CheckResult, CheckResultStatus,
+    ContextSnapshot, MergeAttempt, Operator, PatchSet, QueueLock, SemanticReview, Session,
 };
 #[cfg(test)]
 use aich_core::{
-    CheckResultStatus, EventName, MergeAttemptStatus, NewEvent, OperatorRole, SemanticRiskLevel,
-    SessionStatus,
+    EventName, MergeAttemptStatus, NewEvent, OperatorRole, SemanticRiskLevel, SessionStatus,
 };
 #[cfg(test)]
 use aich_git::{
@@ -225,6 +224,7 @@ pub struct ReviewRunResult {
     pub semantic_review: SemanticReview,
     pub merge_attempt: MergeAttempt,
     pub operator: Operator,
+    pub candidate_summary: VerifiedCandidateSummary,
     pub report_path: PathBuf,
     pub summary: String,
     pub required_actions: Vec<String>,
@@ -241,6 +241,7 @@ pub struct ApproveRunResult {
     pub merge_attempt: MergeAttempt,
     pub operator: Operator,
     pub semantic_reviews: Vec<SemanticReview>,
+    pub candidate_summary: VerifiedCandidateSummary,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -255,8 +256,16 @@ pub struct ApplyRunResult {
     pub merge_attempt: MergeAttempt,
     pub approval: Approval,
     pub operator: Operator,
+    pub candidate_summary: VerifiedCandidateSummary,
     pub applied_commit_id: String,
     pub applied_tree_id: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct VerifiedCandidateSummary {
+    pub patch_set: Option<PatchSet>,
+    pub changed_files: Vec<ChangedFile>,
+    pub check_results: Vec<CheckResult>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -343,6 +352,7 @@ where
             writeln!(out, "Summary: {}", result.summary)?;
             writeln!(out, "Required actions: {}", result.required_actions.len())?;
             writeln!(out, "Suggested tests: {}", result.suggested_tests.len())?;
+            render_candidate_summary(out, &result.merge_attempt, &result.candidate_summary)?;
             if result.proposed_patch_available {
                 writeln!(out, "Proposed patch: available")?;
                 if let Some(path) = result.fix_plan_artifact.as_deref() {
@@ -362,6 +372,7 @@ where
                     result.merge_attempt.session_id
                 )?;
             }
+            render_review_next_action(out, &result)?;
             if result.blocked {
                 writeln!(out, "Blocked: semantic_review")?;
             }
@@ -394,6 +405,7 @@ where
                     .as_deref()
                     .unwrap_or("unknown")
             )?;
+            render_approval_summary(out, &result)?;
             Ok(())
         }
         Some("reject") => {
@@ -431,6 +443,7 @@ where
             writeln!(out, "Operator: {}", result.operator.id)?;
             writeln!(out, "Applied commit: {}", result.applied_commit_id)?;
             writeln!(out, "Applied tree: {}", result.applied_tree_id)?;
+            render_apply_summary(out, &result)?;
             Ok(())
         }
         Some("status") => {
@@ -452,6 +465,209 @@ where
             usage_text()
         ))),
     }
+}
+
+pub(crate) fn load_verified_candidate_summary(
+    ledger: &Ledger,
+    session_id: &str,
+    merge_attempt_id: &str,
+) -> Result<VerifiedCandidateSummary, CliError> {
+    let patch_set = ledger.list_patch_sets(session_id)?.into_iter().last();
+    let changed_files = match patch_set.as_ref() {
+        Some(patch_set) => ledger.list_changed_files(&patch_set.id)?,
+        None => Vec::new(),
+    };
+    let check_results = ledger.list_check_results(merge_attempt_id)?;
+
+    Ok(VerifiedCandidateSummary {
+        patch_set,
+        changed_files,
+        check_results,
+    })
+}
+
+fn render_candidate_summary<W: Write>(
+    out: &mut W,
+    attempt: &MergeAttempt,
+    summary: &VerifiedCandidateSummary,
+) -> Result<(), CliError> {
+    writeln!(out, "Candidate summary:")?;
+    writeln!(out, "  Main before: {}", attempt.main_before_commit)?;
+    writeln!(out, "  Candidate commit: {}", attempt.candidate_commit)?;
+    writeln!(out, "  Apply strategy: {}", attempt.apply_strategy)?;
+    writeln!(
+        out,
+        "  Verified commit: {}",
+        attempt.verified_commit_id.as_deref().unwrap_or("-")
+    )?;
+    writeln!(
+        out,
+        "  Verified tree: {}",
+        attempt.verified_tree_id.as_deref().unwrap_or("-")
+    )?;
+    render_check_summary(out, &summary.check_results)?;
+    render_changed_files_summary(out, summary)?;
+    render_diff_stat(out, summary.patch_set.as_ref())?;
+    Ok(())
+}
+
+fn render_check_summary<W: Write>(
+    out: &mut W,
+    check_results: &[CheckResult],
+) -> Result<(), CliError> {
+    let required_total = check_results.iter().filter(|check| check.required).count();
+    let required_passed = check_results
+        .iter()
+        .filter(|check| check.required && check.result == CheckResultStatus::Passed)
+        .count();
+    let optional_total = check_results.iter().filter(|check| !check.required).count();
+    let optional_passed = check_results
+        .iter()
+        .filter(|check| !check.required && check.result == CheckResultStatus::Passed)
+        .count();
+    writeln!(
+        out,
+        "  Checks: {required_passed}/{required_total} required passed, {optional_passed}/{optional_total} optional passed"
+    )?;
+    for check in check_results.iter().take(6) {
+        let required = if check.required {
+            "required"
+        } else {
+            "optional"
+        };
+        let timeout = if check.timed_out { ", timed out" } else { "" };
+        writeln!(
+            out,
+            "    - {}: {} ({required}{timeout})",
+            check.name,
+            check.result.as_str()
+        )?;
+    }
+    if check_results.len() > 6 {
+        writeln!(out, "    - ... {} more checks", check_results.len() - 6)?;
+    }
+    Ok(())
+}
+
+fn render_changed_files_summary<W: Write>(
+    out: &mut W,
+    summary: &VerifiedCandidateSummary,
+) -> Result<(), CliError> {
+    writeln!(out, "  Changed files: {}", summary.changed_files.len())?;
+    for changed_file in summary.changed_files.iter().take(10) {
+        writeln!(
+            out,
+            "    - {} {}",
+            changed_file.change_type, changed_file.path
+        )?;
+    }
+    if summary.changed_files.len() > 10 {
+        writeln!(
+            out,
+            "    - ... {} more files",
+            summary.changed_files.len() - 10
+        )?;
+    }
+    Ok(())
+}
+
+fn render_diff_stat<W: Write>(out: &mut W, patch_set: Option<&PatchSet>) -> Result<(), CliError> {
+    let Some(diff_stat) = patch_set.and_then(|patch_set| patch_set.diff_stat.as_deref()) else {
+        return Ok(());
+    };
+    let lines: Vec<&str> = diff_stat
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if lines.is_empty() {
+        return Ok(());
+    }
+    writeln!(out, "  Diff stat:")?;
+    for line in lines.iter().take(8) {
+        writeln!(out, "    {}", line.trim_end())?;
+    }
+    if lines.len() > 8 {
+        writeln!(out, "    ... {} more lines", lines.len() - 8)?;
+    }
+    Ok(())
+}
+
+fn render_review_next_action<W: Write>(
+    out: &mut W,
+    result: &ReviewRunResult,
+) -> Result<(), CliError> {
+    writeln!(out, "Human decision:")?;
+    if result.blocked {
+        writeln!(
+            out,
+            "  Resolve the semantic review blocker, then rerun `aich preflight {}` and `aich review {}`.",
+            result.merge_attempt.session_id, result.merge_attempt.session_id
+        )?;
+    } else if result.proposed_patch_available {
+        writeln!(
+            out,
+            "  Choose rework or explicit current-tree approval before apply."
+        )?;
+    } else {
+        writeln!(
+            out,
+            "  Approve verified tree: aich approve {}",
+            result.merge_attempt.session_id
+        )?;
+    }
+    Ok(())
+}
+
+fn render_approval_summary<W: Write>(
+    out: &mut W,
+    result: &ApproveRunResult,
+) -> Result<(), CliError> {
+    writeln!(out, "Approval summary:")?;
+    writeln!(
+        out,
+        "  This approval targets the verified tree, not the session branch."
+    )?;
+    render_candidate_summary(out, &result.merge_attempt, &result.candidate_summary)?;
+    if let Some(review) = result.semantic_reviews.last() {
+        writeln!(
+            out,
+            "  Semantic review: {} ({})",
+            review.id,
+            review.risk_level.as_str()
+        )?;
+        let proposed_patch = if review.proposed_patch_available {
+            "accepted current tree despite proposed patch"
+        } else {
+            "none"
+        };
+        writeln!(out, "  Proposed patch: {proposed_patch}")?;
+    }
+    writeln!(
+        out,
+        "  Apply command: aich apply {}",
+        result.merge_attempt.session_id
+    )?;
+    Ok(())
+}
+
+fn render_apply_summary<W: Write>(out: &mut W, result: &ApplyRunResult) -> Result<(), CliError> {
+    writeln!(out, "Apply summary:")?;
+    writeln!(
+        out,
+        "  Approved commit: {}",
+        result.approval.approved_verified_commit_id
+    )?;
+    writeln!(
+        out,
+        "  Approved tree: {}",
+        result.approval.approved_verified_tree_id
+    )?;
+    render_candidate_summary(out, &result.merge_attempt, &result.candidate_summary)?;
+    writeln!(
+        out,
+        "  Verified tree rule: applied commit/tree matched the approved verified candidate"
+    )?;
+    Ok(())
 }
 
 fn run_queue_command<W: Write>(args: &[String], cwd: &Path, out: &mut W) -> Result<(), CliError> {
