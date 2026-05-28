@@ -234,6 +234,65 @@ fn queue_points_stale_semantic_review_policy_back_to_review() {
 }
 
 #[test]
+fn queue_points_approved_stale_semantic_review_back_to_review() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    Ledger::open(repo.join(".aichestra/aichestra.db"))
+        .expect("open ledger")
+        .insert_check_result(&CheckResult {
+            id: "check-after-approval".to_string(),
+            merge_attempt_id: attempt.id.clone(),
+            name: "extra".to_string(),
+            command: "cargo clippy --all-targets".to_string(),
+            required: false,
+            timed_out: false,
+            result: CheckResultStatus::Passed,
+            stdout_artifact: None,
+            stderr_artifact: None,
+            created_at_ms: now_millis(),
+        })
+        .expect("insert check after approval");
+
+    let options = QueueOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    };
+    let mut output = Vec::new();
+    render_queue(&options, &mut output).expect("render queue");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("- session-review [approved]"));
+    assert!(output.contains("review_stale: yes (checks_changed"));
+    assert!(output.contains("next: aich review session-review"));
+    assert!(!output.contains("next: aich apply session-review"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn queue_shows_blocked_check_recovery_guidance() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {

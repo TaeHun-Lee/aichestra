@@ -621,7 +621,7 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
         "verified" | "approved" if !entry.preflight_stale_reasons.is_empty() => {
             format!("aich preflight {}", entry.session.id)
         }
-        "verified" if !entry.review_stale_reasons.is_empty() => {
+        "verified" | "approved" if !entry.review_stale_reasons.is_empty() => {
             format!("aich review {}", entry.session.id)
         }
         "verified"
