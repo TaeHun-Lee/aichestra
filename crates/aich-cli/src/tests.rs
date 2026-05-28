@@ -428,6 +428,238 @@ fn auth_commands_show_default_operator_and_add_operator() {
 }
 
 #[test]
+fn command_adapter_cli_e2e_runs_init_to_apply() {
+    let repo = unique_temp_dir();
+    let scripts = unique_temp_dir();
+    initialize_e2e_git_repo(&repo);
+    fs::create_dir_all(&scripts).expect("create scripts dir");
+
+    let init_output = run_cli(&repo, ["aich", "init"]);
+    assert!(init_output.contains("Initialized Aichestra repository"));
+
+    let provider_command = write_agent_test_command(
+        &scripts,
+        "e2e-provider",
+        r#"$inputText = [Console]::In.ReadToEnd()
+if (-not $inputText.Contains('Goal: E2E command adapter flow')) {
+  [Console]::Error.WriteLine('missing goal')
+  exit 2
+}
+Set-Content -LiteralPath 'app.txt' -Value "base`nagent change`n" -NoNewline -Encoding UTF8
+[Console]::Out.WriteLine('provider completed')
+"#,
+        r#"input=$(cat)
+case "$input" in
+  *"Goal: E2E command adapter flow"*) ;;
+  *) printf 'missing goal\n' >&2; exit 2 ;;
+esac
+printf 'base\nagent change\n' > app.txt
+printf 'provider completed\n'
+"#,
+    );
+    let review_command = write_agent_test_command(
+        &scripts,
+        "e2e-reviewer",
+        r#"$inputText = [Console]::In.ReadToEnd()
+foreach ($needle in @('Semantic Review Input', '## Patch Context', '+agent change', 'e2e_command_reviewer')) {
+  if (-not $inputText.Contains($needle)) {
+    [Console]::Error.WriteLine("missing $needle")
+    exit 2
+  }
+}
+$report = @'
+semantic_review:
+  risk_level: low
+  summary: "Command adapter reviewed the verified candidate."
+  suspected_conflicts: []
+  required_actions: []
+  suggested_tests:
+    - "e2e-check"
+  proposed_patch:
+    available: false
+    description: ""
+    patch_artifact: ""
+    patch: ""
+  uncertainty: []
+'@
+[Console]::Out.WriteLine($report)
+"#,
+        r###"input=$(cat)
+case "$input" in *"Semantic Review Input"*) ;; *) printf 'missing review input\n' >&2; exit 2 ;; esac
+case "$input" in *"## Patch Context"*) ;; *) printf 'missing patch context\n' >&2; exit 2 ;; esac
+case "$input" in *"+agent change"*) ;; *) printf 'missing patch hunk\n' >&2; exit 2 ;; esac
+case "$input" in *"e2e_command_reviewer"*) ;; *) printf 'missing reviewer id\n' >&2; exit 2 ;; esac
+cat <<'YAML'
+semantic_review:
+  risk_level: low
+  summary: "Command adapter reviewed the verified candidate."
+  suspected_conflicts: []
+  required_actions: []
+  suggested_tests:
+    - "e2e-check"
+  proposed_patch:
+    available: false
+    description: ""
+    patch_artifact: ""
+    patch: ""
+  uncertainty: []
+YAML
+"###,
+    );
+    let check_command = write_agent_test_command(
+        &scripts,
+        "e2e-check",
+        r#"if (-not (Test-Path -LiteralPath 'app.txt')) {
+  [Console]::Error.WriteLine('missing app.txt')
+  exit 2
+}
+if (-not (Get-Content -LiteralPath 'app.txt' -Raw).Contains('agent change')) {
+  [Console]::Error.WriteLine('missing agent change')
+  exit 2
+}
+"#,
+        r#"test -f app.txt
+grep -q 'agent change' app.txt
+"#,
+    );
+    write_e2e_config(&repo, &provider_command, &review_command, &check_command);
+    commit_e2e_aichestra_project_files(&repo);
+
+    let start_output = run_cli(
+        &repo,
+        [
+            "aich",
+            "session",
+            "start",
+            "--goal",
+            "E2E command adapter flow",
+            "--provider",
+            "e2e-agent",
+            "--target",
+            "app.txt",
+        ],
+    );
+    let session_id = parse_started_session_id(&start_output);
+    assert!(start_output.contains("Worktree:"));
+
+    let run_output = run_cli(
+        &repo,
+        vec![
+            "aich".to_string(),
+            "session".to_string(),
+            "run".to_string(),
+            session_id.clone(),
+        ],
+    );
+    assert!(run_output.contains("Ran session agent"));
+    assert!(fs::read_to_string(
+        repo.join(".aichestra/worktrees")
+            .join(&session_id)
+            .join("app.txt")
+    )
+    .expect("worktree app")
+    .contains("agent change"));
+
+    let complete_output = run_cli(
+        &repo,
+        vec![
+            "aich".to_string(),
+            "session".to_string(),
+            "complete".to_string(),
+            session_id.clone(),
+        ],
+    );
+    assert!(complete_output.contains("Status: enqueued"));
+    assert!(complete_output.contains("Changed files: 1"));
+
+    let preflight_output = run_cli(
+        &repo,
+        vec![
+            "aich".to_string(),
+            "preflight".to_string(),
+            session_id.clone(),
+        ],
+    );
+    assert!(preflight_output.contains("Preflight verified"));
+    assert!(preflight_output.contains("Checks: 1"));
+
+    let review_output = run_cli(
+        &repo,
+        vec!["aich".to_string(), "review".to_string(), session_id.clone()],
+    );
+    assert!(review_output.contains("Review low"));
+    assert!(review_output.contains("Command adapter reviewed the verified candidate."));
+
+    let approve_output = run_cli(
+        &repo,
+        vec![
+            "aich".to_string(),
+            "approve".to_string(),
+            session_id.clone(),
+        ],
+    );
+    assert!(approve_output.contains("Approved "));
+    assert!(approve_output.contains("Semantic risk: low"));
+
+    let apply_output = run_cli(
+        &repo,
+        vec!["aich".to_string(), "apply".to_string(), session_id.clone()],
+    );
+    assert!(apply_output.contains("Applied "));
+    assert!(fs::read_to_string(repo.join("app.txt"))
+        .expect("main app")
+        .contains("agent change"));
+
+    let status = run_test_git(&repo, &["status", "--porcelain"]);
+    assert!(status.trim().is_empty(), "main worktree dirty:\n{status}");
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let session = ledger
+        .get_session(&session_id)
+        .expect("get session")
+        .expect("session");
+    assert_eq!(session.status, SessionStatus::Completed);
+    let attempts = ledger
+        .list_merge_attempts(&session_id)
+        .expect("merge attempts");
+    let attempt = attempts.last().expect("latest attempt");
+    assert_eq!(attempt.status, MergeAttemptStatus::Applied);
+    assert!(attempt.checks_passed);
+    assert_eq!(attempt.semantic_risk_level.as_deref(), Some("low"));
+    assert_eq!(
+        ledger
+            .list_semantic_reviews(&attempt.id)
+            .expect("semantic reviews")
+            .len(),
+        1
+    );
+    let event_names: Vec<String> = ledger
+        .list_events()
+        .expect("events")
+        .into_iter()
+        .map(|event| event.name)
+        .collect();
+    for expected in [
+        "repo.initialized",
+        "session.started",
+        "session.agent.completed",
+        "session.completed",
+        "merge.preflight.started",
+        "merge.semantic_review.completed",
+        "approval.approved",
+        "merge.applied",
+    ] {
+        assert!(
+            event_names.contains(&expected.to_string()),
+            "missing event {expected}; events: {event_names:?}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(repo);
+    let _ = fs::remove_dir_all(scripts);
+}
+
+#[test]
 fn session_start_requires_goal() {
     let err = parse_session_start_options(&[], Path::new(".")).unwrap_err();
     assert!(matches!(err, CliError::Usage(message) if message.contains("--goal")));
@@ -770,6 +1002,111 @@ fn write_agent_test_command(
         fs::write(&script_path, shell_script).expect("write script");
         format!("sh \"{}\"", script_path.display())
     }
+}
+
+fn run_cli<I, S>(repo: &Path, args: I) -> String
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let args: Vec<String> = args.into_iter().map(Into::into).collect();
+    let command = args.join(" ");
+    let mut output = Vec::new();
+    run_with_cwd(args, repo, &mut output).unwrap_or_else(|error| {
+        panic!(
+            "CLI command `{command}` failed: {error}\n{}",
+            String::from_utf8_lossy(&output)
+        )
+    });
+    String::from_utf8(output).expect("utf8 CLI output")
+}
+
+fn run_test_git(repo: &Path, args: &[&str]) -> String {
+    let output = process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("failed to run git {:?}: {error}", args));
+    if !output.status.success() {
+        panic!(
+            "git {:?} failed with {}\nstdout:\n{}\nstderr:\n{}",
+            args,
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    String::from_utf8(output.stdout).expect("utf8 git stdout")
+}
+
+fn initialize_e2e_git_repo(repo: &Path) {
+    fs::create_dir_all(repo).expect("create e2e repo");
+    run_test_git(repo, &["init", "-q"]);
+    run_test_git(repo, &["checkout", "-q", "-B", "main"]);
+    run_test_git(repo, &["config", "user.name", "Aichestra Test"]);
+    run_test_git(
+        repo,
+        &["config", "user.email", "aichestra-test@example.invalid"],
+    );
+    fs::write(repo.join("README.md"), "# E2E fixture\n").expect("write readme");
+    fs::write(repo.join("app.txt"), "base\n").expect("write app");
+    fs::write(
+        repo.join(".gitignore"),
+        "/.aichestra/aichestra.db\n\
+         /.aichestra/aichestra.db-*\n\
+         /.aichestra/artifacts/\n\
+         /.aichestra/sandboxes/\n\
+         /.aichestra/worktrees/\n",
+    )
+    .expect("write gitignore");
+    run_test_git(repo, &["add", "README.md", "app.txt", ".gitignore"]);
+    run_test_git(repo, &["commit", "-q", "-m", "initial"]);
+}
+
+fn commit_e2e_aichestra_project_files(repo: &Path) {
+    run_test_git(
+        repo,
+        &[
+            "add",
+            ".aichestra/config.yaml",
+            ".aichestra/prompts/change-manifest.md",
+            ".aichestra/prompts/semantic-merge-review.md",
+            ".aichestra/templates/change-manifest.yaml",
+            ".aichestra/schemas/change-manifest.schema.yaml",
+        ],
+    );
+    run_test_git(repo, &["commit", "-q", "-m", "configure aichestra"]);
+}
+
+fn write_e2e_config(
+    repo: &Path,
+    provider_command: &str,
+    review_command: &str,
+    check_command: &str,
+) {
+    fs::write(
+        repo.join(".aichestra/config.yaml"),
+        format!(
+            "providers:\n  e2e-agent:\n    command: {}\n\
+             git:\n  main_branch: main\n\
+             checks:\n  commands:\n    - name: e2e-check\n      command: {}\n      required: true\n      timeout_seconds: 30\n\
+             semantic_review:\n  adapter: command\n  reviewer_id: e2e_command_reviewer\n  command: {}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  risk_block_levels:\n    - blocked\n",
+            yaml_single_quote(provider_command),
+            yaml_single_quote(check_command),
+            yaml_single_quote(review_command)
+        ),
+    )
+    .expect("write e2e config");
+}
+
+fn parse_started_session_id(output: &str) -> String {
+    output
+        .lines()
+        .find_map(|line| line.strip_prefix("Started session "))
+        .expect("started session line")
+        .to_string()
 }
 
 fn configure_main_branch(repo: &Path, branch: &str) {
