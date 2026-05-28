@@ -547,6 +547,30 @@ impl Ledger {
         Ok(())
     }
 
+    pub fn update_change_manifest(
+        &self,
+        id: &str,
+        manifest_hash: Option<&str>,
+        validation_status: &str,
+    ) -> Result<()> {
+        let rows = self.conn.execute(
+            r#"
+            UPDATE change_manifests
+            SET manifest_hash = ?2, validation_status = ?3
+            WHERE id = ?1
+            "#,
+            params![id, manifest_hash, validation_status],
+        )?;
+
+        if rows == 0 {
+            return Err(LedgerError::Domain(format!(
+                "change manifest '{id}' does not exist"
+            )));
+        }
+
+        Ok(())
+    }
+
     pub fn list_change_manifests(&self, session_id: &str) -> Result<Vec<ChangeManifest>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -1520,8 +1544,21 @@ mod tests {
             ledger
                 .list_change_manifests("session-2")
                 .expect("list manifests"),
-            vec![manifest]
+            vec![manifest.clone()]
         );
+        ledger
+            .update_change_manifest("manifest-1", Some("reviewed-hash"), "reviewed_by_operator")
+            .expect("update manifest");
+        let updated_manifest = ledger
+            .list_change_manifests("session-2")
+            .expect("list updated manifests")
+            .pop()
+            .expect("updated manifest");
+        assert_eq!(
+            updated_manifest.manifest_hash.as_deref(),
+            Some("reviewed-hash")
+        );
+        assert_eq!(updated_manifest.validation_status, "reviewed_by_operator");
 
         let mut attempt = MergeAttempt {
             id: "merge-1".to_string(),

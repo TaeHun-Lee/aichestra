@@ -36,6 +36,7 @@ mod config;
 mod doctor;
 mod formatting;
 mod manifest;
+mod manifest_command;
 mod options;
 mod preflight;
 mod queue;
@@ -63,6 +64,9 @@ use manifest::{
     changed_files_missing_from_manifest, parse_manifest_diff_evidence,
     parse_manifest_diff_patch_artifact,
 };
+use manifest_command::{
+    run_manifest_edit, run_manifest_show, write_manifest_edit, write_manifest_show,
+};
 use options::*;
 use preflight::run_preflight_with;
 #[cfg(test)]
@@ -89,6 +93,7 @@ pub(crate) const QUEUE_LOCK_STALE_AFTER_MS: i64 = 30 * 60 * MILLIS_PER_SECOND;
 pub(crate) const DEFAULT_OPERATOR_ID: &str = "local-user";
 pub(crate) const DEFAULT_OPERATOR_NAME: &str = "Local User";
 pub(crate) const CHANGE_MANIFEST_VALIDATION_STATUS: &str = "generated_from_diff";
+pub(crate) const CHANGE_MANIFEST_REVIEWED_STATUS: &str = "reviewed_by_operator";
 pub(crate) const LOCAL_SEMANTIC_REVIEWER: &str = "local_mvp_static_reviewer";
 pub(crate) const COMMAND_SEMANTIC_REVIEWER: &str = "command_semantic_review_adapter";
 pub(crate) const LLM_SEMANTIC_REVIEWER: &str = "llm_semantic_review_adapter";
@@ -378,6 +383,7 @@ where
             }
             Ok(())
         }
+        Some("manifest") => run_manifest_command(&args[1..], cwd, out),
         Some("approve") => {
             let options = parse_approve_options(&args[1..], cwd)?;
             let git = NativeGitWorktreeManager;
@@ -840,6 +846,30 @@ fn run_session_command<W: Write>(args: &[String], cwd: &Path, out: &mut W) -> Re
     }
 }
 
+fn run_manifest_command<W: Write>(
+    args: &[String],
+    cwd: &Path,
+    out: &mut W,
+) -> Result<(), CliError> {
+    match args.first().map(String::as_str) {
+        Some("show") => {
+            let options = parse_manifest_show_options(&args[1..], cwd)?;
+            let result = run_manifest_show(&options)?;
+            write_manifest_show(&result, out)
+        }
+        Some("edit") => {
+            let options = parse_manifest_edit_options(&args[1..], cwd)?;
+            let result = run_manifest_edit(&options)?;
+            write_manifest_edit(&result, out)
+        }
+        Some("-h") | Some("--help") | None => Err(CliError::Usage(usage_text())),
+        Some(command) => Err(CliError::Usage(format!(
+            "unknown manifest command '{command}'\n\n{}",
+            usage_text()
+        ))),
+    }
+}
+
 fn render_session_cleanup_result<W: Write>(
     result: &SessionCleanupResult,
     out: &mut W,
@@ -975,7 +1005,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 pub(crate) fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session rework <session-id> --review REVIEW_ID [--operator ID] [--repo PATH] [--db PATH]\n  aich session reopen <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session abandon <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--accept-current] [--operator ID] [--repo PATH] [--db PATH]\n  aich reject <session-id> --reason TEXT [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session rework <session-id> --review REVIEW_ID [--operator ID] [--repo PATH] [--db PATH]\n  aich session reopen <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session abandon <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich manifest show <session-id> [--content] [--repo PATH] [--db PATH]\n  aich manifest edit <session-id> [--set-intent-summary TEXT] [--set-risk-level low|medium|high|blocked|unknown] [--add-risk TEXT] [--add-test TEXT] [--from-file PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--accept-current] [--operator ID] [--repo PATH] [--db PATH]\n  aich reject <session-id> --reason TEXT [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]

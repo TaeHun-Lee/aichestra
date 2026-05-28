@@ -70,6 +70,7 @@ semantic_review:
 - Compare the Change Manifest against the patch hunk context, not only the diff summary.
 - If the patch context is missing or truncated in a way that limits confidence, say so in `uncertainty`.
 - Treat Change Manifest file evidence as structured YAML evidence, not substring evidence. Changed files should be declared in fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, or `deleted_or_renamed_files`.
+- Treat `change_manifest.evidence.validation_status: reviewed_by_operator` as a signal that a human refined the manifest, not as proof that the change is correct.
 - If a public API changed and dependent call sites are not clearly handled, use `high` or `blocked`.
 - Do not approve applying to main. Human approval and test gates are separate.
 - Proposed patches are advisory only. If you provide one, put a short fix plan in `description` and, when practical, a unified diff in `patch`; Aichestra stores those as artifacts and will not auto-apply them.

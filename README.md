@@ -31,6 +31,8 @@ The current MVP provides:
 - `aich session prune --inactive`
 - `aich preflight <session-id>`
 - `aich review <session-id>`
+- `aich manifest show <session-id>`
+- `aich manifest edit <session-id>`
 - `aich approve <session-id>`
 - `aich reject <session-id> --reason ...`
 - `aich apply <session-id>`
@@ -40,6 +42,7 @@ Core behavior:
 - one branch and worktree per session
 - configured provider command execution from the session worktree
 - generated Change Manifest artifacts validated against actual diff evidence
+- Change Manifest review/edit UX before semantic review
 - queue-head preflight with a durable SQLite queue lock
 - integration sandbox checks before approval
 - semantic review through `local`, `command`, or `llm` adapters
@@ -92,10 +95,14 @@ Validate and apply through the queue:
 ```bash
 cargo run -p aich-cli -- queue
 cargo run -p aich-cli -- preflight <session-id>
+cargo run -p aich-cli -- manifest show <session-id>
+cargo run -p aich-cli -- manifest edit <session-id> --set-intent-summary "What changed and why"
 cargo run -p aich-cli -- review <session-id>
 cargo run -p aich-cli -- approve <session-id>
 cargo run -p aich-cli -- apply <session-id>
 ```
+
+`aich manifest show` reports the latest Change Manifest artifact, ledger hash status, YAML parse status, changed files, manifest-vs-diff evidence, intent summary, and risk level. `aich manifest edit` updates the YAML artifact through structured fields such as `--set-intent-summary`, `--set-risk-level`, `--add-risk`, and `--add-test`, then records the new artifact hash and `manifest.updated` event. Editing the manifest does not change the candidate patch or verified tree; rerun `aich review <session-id>` before approval.
 
 Reject and revise a verified candidate instead of applying it:
 

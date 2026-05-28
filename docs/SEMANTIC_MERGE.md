@@ -34,6 +34,24 @@ This generated manifest is evidence, not final proof of intent. It includes MVP 
 
 Manifest-vs-diff validation parses the Change Manifest as YAML and compares actual changed files against structured fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, and `deleted_or_renamed_files`. It does not treat arbitrary string containment as proof that a file was declared. Invalid YAML or missing structured file evidence is a manifest mismatch.
 
+## Change Manifest review/edit UX
+
+`aich manifest show <session-id>` is the human inspection step for the latest Change Manifest. It reports the artifact path, ledger validation status, hash status, YAML parse status, changed-file evidence, manifest-vs-diff mismatches, intent summary, and risk level. `--content` also prints the YAML artifact.
+
+`aich manifest edit <session-id>` lets the operator update reviewable intent fields without hand-editing ledger metadata:
+
+```bash
+aich manifest edit <session-id> \
+  --set-intent-summary "What changed and why" \
+  --set-risk-level low \
+  --add-risk "Known residual risk" \
+  --add-test "cargo test --all"
+```
+
+The edit command parses the manifest as YAML, changes structured fields, writes the artifact back, updates the ledger hash to match the artifact, marks the manifest as `reviewed_by_operator`, and records `manifest.updated`. `--from-file PATH` can replace the YAML artifact when the operator wants to edit externally first.
+
+Editing a Change Manifest does not change the candidate patch, verified commit, verified tree, or approval state. It is evidence for the next semantic review. Already approved, applying, applied, or abandoned sessions cannot have their current manifest edited because that would mutate evidence after a downstream decision.
+
 ## Semantic Merge LLM role
 
 The Semantic Merge LLM is an advisory reviewer and patch planner.

@@ -9,6 +9,7 @@ use std::env;
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 mod e2e;
+mod manifest;
 mod merge_workflow;
 mod preflight;
 mod queue_doctor;

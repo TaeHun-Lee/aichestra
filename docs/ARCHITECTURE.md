@@ -106,7 +106,7 @@ flowchart TB
 3. `aich session run <session-id>` can launch the configured provider command with the session worktree as `cwd`; the run input, stdout, stderr, and metadata are stored as artifacts.
 4. Each LLM runs only in its own session worktree.
 5. On completion, Aichestra records actual diffs, creates a candidate patch set, extracts MVP changed-symbol evidence from diff hunks, and writes a generated Change Manifest draft.
-6. The generated manifest records diff-derived file and symbol evidence and remains subject to human/semantic review.
+6. The generated manifest records diff-derived file and symbol evidence and remains subject to human/semantic review. `aich manifest show` and `aich manifest edit` let the operator inspect and refine the intent/risk/test evidence before semantic review; edits update the artifact hash and record `manifest.updated`.
 7. A candidate enters the local merge queue and appears in `aich queue` as `enqueued`.
 8. Preflight acquires the local `merge-queue` lock, then creates a temporary sandbox from latest main.
 9. The candidate is mechanically merged using the same strategy that will be used to apply.

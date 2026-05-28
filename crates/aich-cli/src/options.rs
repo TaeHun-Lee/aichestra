@@ -120,6 +120,37 @@ pub(crate) struct ReviewOptions {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ManifestShowOptions {
+    pub(crate) repo_root: PathBuf,
+    pub(crate) db_path: Option<PathBuf>,
+    pub(crate) session_id: String,
+    pub(crate) include_content: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ManifestEditOptions {
+    pub(crate) repo_root: PathBuf,
+    pub(crate) db_path: Option<PathBuf>,
+    pub(crate) session_id: String,
+    pub(crate) operator_id: Option<String>,
+    pub(crate) set_intent_summary: Option<String>,
+    pub(crate) set_risk_level: Option<String>,
+    pub(crate) add_risks: Vec<String>,
+    pub(crate) add_tests: Vec<String>,
+    pub(crate) content_file: Option<PathBuf>,
+}
+
+impl ManifestEditOptions {
+    pub(crate) fn has_edit(&self) -> bool {
+        self.set_intent_summary.is_some()
+            || self.set_risk_level.is_some()
+            || !self.add_risks.is_empty()
+            || !self.add_tests.is_empty()
+            || self.content_file.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ApproveOptions {
     pub(crate) repo_root: PathBuf,
     pub(crate) db_path: Option<PathBuf>,
@@ -1090,6 +1121,203 @@ pub(crate) fn parse_review_options(args: &[String], cwd: &Path) -> Result<Review
         session_id,
         operator_id,
     })
+}
+
+pub(crate) fn parse_manifest_show_options(
+    args: &[String],
+    cwd: &Path,
+) -> Result<ManifestShowOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut include_content = false;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--content" => {
+                include_content = true;
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown manifest show option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "manifest show accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage(
+            "manifest show requires <session-id>".to_string(),
+        ));
+    };
+
+    Ok(ManifestShowOptions {
+        repo_root,
+        db_path,
+        session_id,
+        include_content,
+    })
+}
+
+pub(crate) fn parse_manifest_edit_options(
+    args: &[String],
+    cwd: &Path,
+) -> Result<ManifestEditOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut operator_id = None;
+    let mut set_intent_summary = None;
+    let mut set_risk_level = None;
+    let mut add_risks = Vec::new();
+    let mut add_tests = Vec::new();
+    let mut content_file = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "--set-intent-summary" => {
+                index += 1;
+                let Some(value) = args.get(index).filter(|value| !value.trim().is_empty()) else {
+                    return Err(CliError::Usage(
+                        "--set-intent-summary requires text".to_string(),
+                    ));
+                };
+                set_intent_summary = Some(value.clone());
+            }
+            "--set-risk-level" => {
+                index += 1;
+                let Some(value) = args.get(index).filter(|value| !value.trim().is_empty()) else {
+                    return Err(CliError::Usage(
+                        "--set-risk-level requires low|medium|high|blocked|unknown".to_string(),
+                    ));
+                };
+                let normalized = value.trim().to_ascii_lowercase();
+                if !matches!(
+                    normalized.as_str(),
+                    "low" | "medium" | "high" | "blocked" | "unknown"
+                ) {
+                    return Err(CliError::Usage(
+                        "--set-risk-level requires low|medium|high|blocked|unknown".to_string(),
+                    ));
+                }
+                set_risk_level = Some(normalized);
+            }
+            "--add-risk" => {
+                index += 1;
+                let Some(value) = args.get(index).filter(|value| !value.trim().is_empty()) else {
+                    return Err(CliError::Usage("--add-risk requires text".to_string()));
+                };
+                add_risks.push(value.clone());
+            }
+            "--add-test" => {
+                index += 1;
+                let Some(value) = args.get(index).filter(|value| !value.trim().is_empty()) else {
+                    return Err(CliError::Usage("--add-test requires text".to_string()));
+                };
+                add_tests.push(value.clone());
+            }
+            "--from-file" => {
+                index += 1;
+                let Some(value) = args.get(index).filter(|value| !value.trim().is_empty()) else {
+                    return Err(CliError::Usage("--from-file requires a path".to_string()));
+                };
+                content_file = Some(PathBuf::from(value));
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown manifest edit option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "manifest edit accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage(
+            "manifest edit requires <session-id>".to_string(),
+        ));
+    };
+
+    let options = ManifestEditOptions {
+        repo_root,
+        db_path,
+        session_id,
+        operator_id,
+        set_intent_summary,
+        set_risk_level,
+        add_risks,
+        add_tests,
+        content_file,
+    };
+    if !options.has_edit() {
+        return Err(CliError::Usage(
+            "manifest edit requires --set-intent-summary, --set-risk-level, --add-risk, --add-test, or --from-file".to_string(),
+        ));
+    }
+
+    Ok(options)
 }
 
 pub(crate) fn parse_approve_options(
