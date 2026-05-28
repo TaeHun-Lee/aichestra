@@ -6,9 +6,9 @@ use std::fs;
 use std::path::Path;
 
 use aich_core::{
-    Approval, ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, ContextSnapshot,
-    EventName, MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole, OperatorStatus,
-    PatchSet, QueueLock, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
+    Approval, ApprovalRejection, ChangeManifest, ChangedFile, CheckResult, CheckResultStatus,
+    ContextSnapshot, EventName, MergeAttempt, MergeAttemptStatus, NewEvent, Operator, OperatorRole,
+    OperatorStatus, PatchSet, QueueLock, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
 };
 use rusqlite::{params, types::Type, Connection, Row};
 
@@ -128,6 +128,26 @@ impl Ledger {
             "check_results",
             "timed_out",
             "ALTER TABLE check_results ADD COLUMN timed_out INTEGER NOT NULL DEFAULT 0",
+        )?;
+        self.ensure_column(
+            "semantic_reviews",
+            "proposed_patch_available",
+            "ALTER TABLE semantic_reviews ADD COLUMN proposed_patch_available INTEGER NOT NULL DEFAULT 0",
+        )?;
+        self.ensure_column(
+            "semantic_reviews",
+            "fix_plan_artifact",
+            "ALTER TABLE semantic_reviews ADD COLUMN fix_plan_artifact TEXT",
+        )?;
+        self.ensure_column(
+            "semantic_reviews",
+            "patch_artifact",
+            "ALTER TABLE semantic_reviews ADD COLUMN patch_artifact TEXT",
+        )?;
+        self.ensure_column(
+            "approvals",
+            "reason",
+            "ALTER TABLE approvals ADD COLUMN reason TEXT",
         )?;
         Ok(())
     }
@@ -720,15 +740,23 @@ impl Ledger {
         self.conn.execute(
             r#"
             INSERT INTO semantic_reviews (
-              id, merge_attempt_id, risk_level, report_path, created_at_ms
+              id, merge_attempt_id, risk_level, report_path, proposed_patch_available,
+              fix_plan_artifact, patch_artifact, created_at_ms
             )
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
                 &review.id,
                 &review.merge_attempt_id,
                 review.risk_level.as_str(),
                 &review.report_path,
+                if review.proposed_patch_available {
+                    1_i64
+                } else {
+                    0_i64
+                },
+                &review.fix_plan_artifact,
+                &review.patch_artifact,
                 review.created_at_ms,
             ],
         )?;
@@ -738,7 +766,8 @@ impl Ledger {
     pub fn list_semantic_reviews(&self, merge_attempt_id: &str) -> Result<Vec<SemanticReview>> {
         let mut stmt = self.conn.prepare(
             r#"
-            SELECT id, merge_attempt_id, risk_level, report_path, created_at_ms
+            SELECT id, merge_attempt_id, risk_level, report_path, created_at_ms,
+                   proposed_patch_available, fix_plan_artifact, patch_artifact
             FROM semantic_reviews
             WHERE merge_attempt_id = ?1
             ORDER BY created_at_ms ASC, id ASC
@@ -872,6 +901,59 @@ impl Ledger {
             approvals.push(row?);
         }
         Ok(approvals)
+    }
+
+    pub fn insert_rejection(&self, rejection: &ApprovalRejection) -> Result<()> {
+        self.conn.execute(
+            r#"
+            INSERT INTO approvals (
+              id, merge_attempt_id, approved_by, approved_verified_tree_id,
+              approved_verified_commit_id, decision, reason, created_at_ms
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, 'rejected', ?6, ?7)
+            "#,
+            params![
+                &rejection.id,
+                &rejection.merge_attempt_id,
+                &rejection.rejected_by,
+                &rejection.rejected_verified_tree_id,
+                &rejection.rejected_verified_commit_id,
+                &rejection.reason,
+                rejection.created_at_ms,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_rejections(&self, merge_attempt_id: &str) -> Result<Vec<ApprovalRejection>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT id, merge_attempt_id, approved_by, approved_verified_tree_id,
+                   approved_verified_commit_id, reason, created_at_ms
+            FROM approvals
+            WHERE merge_attempt_id = ?1
+              AND decision = 'rejected'
+            ORDER BY created_at_ms ASC, id ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![merge_attempt_id], |row| {
+            Ok(ApprovalRejection {
+                id: row.get(0)?,
+                merge_attempt_id: row.get(1)?,
+                rejected_by: row.get(2)?,
+                rejected_verified_tree_id: row.get(3)?,
+                rejected_verified_commit_id: row.get(4)?,
+                reason: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                created_at_ms: row.get(6)?,
+            })
+        })?;
+
+        let mut rejections = Vec::new();
+        for row in rows {
+            rejections.push(row?);
+        }
+        Ok(rejections)
     }
 
     pub fn try_acquire_queue_lock(&self, lock: &QueueLock) -> Result<bool> {
@@ -1079,6 +1161,7 @@ fn merge_attempt_from_row(row: &Row<'_>) -> rusqlite::Result<MergeAttempt> {
 
 fn semantic_review_from_row(row: &Row<'_>) -> rusqlite::Result<SemanticReview> {
     let risk_value: String = row.get(2)?;
+    let proposed_patch_available: i64 = row.get(5)?;
     let risk_level = SemanticRiskLevel::parse(&risk_value).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(
             2,
@@ -1093,6 +1176,9 @@ fn semantic_review_from_row(row: &Row<'_>) -> rusqlite::Result<SemanticReview> {
         risk_level,
         report_path: row.get(3)?,
         created_at_ms: row.get(4)?,
+        proposed_patch_available: proposed_patch_available != 0,
+        fix_plan_artifact: row.get(6)?,
+        patch_artifact: row.get(7)?,
     })
 }
 
@@ -1207,6 +1293,64 @@ mod tests {
 
         assert!(columns.contains(&"required".to_string()));
         assert!(columns.contains(&"timed_out".to_string()));
+
+        drop(ledger);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migrates_existing_semantic_review_proposed_patch_columns() {
+        let db_path = unique_db_path();
+        let conn = Connection::open(&db_path).expect("open raw db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE semantic_reviews (
+              id TEXT PRIMARY KEY,
+              merge_attempt_id TEXT NOT NULL,
+              risk_level TEXT NOT NULL,
+              report_path TEXT,
+              created_at_ms INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("create old semantic_reviews table");
+        drop(conn);
+
+        let ledger = Ledger::open(&db_path).expect("open ledger");
+        let columns = table_columns(&ledger, "semantic_reviews");
+
+        assert!(columns.contains(&"proposed_patch_available".to_string()));
+        assert!(columns.contains(&"fix_plan_artifact".to_string()));
+        assert!(columns.contains(&"patch_artifact".to_string()));
+
+        drop(ledger);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migrates_existing_approval_reason_column() {
+        let db_path = unique_db_path();
+        let conn = Connection::open(&db_path).expect("open raw db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE approvals (
+              id TEXT PRIMARY KEY,
+              merge_attempt_id TEXT NOT NULL,
+              approved_by TEXT NOT NULL,
+              approved_verified_tree_id TEXT NOT NULL,
+              approved_verified_commit_id TEXT NOT NULL,
+              decision TEXT NOT NULL,
+              created_at_ms INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("create old approvals table");
+        drop(conn);
+
+        let ledger = Ledger::open(&db_path).expect("open ledger");
+        let columns = table_columns(&ledger, "approvals");
+
+        assert!(columns.contains(&"reason".to_string()));
 
         drop(ledger);
         let _ = fs::remove_file(db_path);
@@ -1430,6 +1574,9 @@ mod tests {
             merge_attempt_id: "merge-1".to_string(),
             risk_level: SemanticRiskLevel::Medium,
             report_path: Some(".aichestra/artifacts/review.yaml".to_string()),
+            proposed_patch_available: true,
+            fix_plan_artifact: Some(".aichestra/artifacts/review-fix-plan.md".to_string()),
+            patch_artifact: Some(".aichestra/artifacts/review.patch".to_string()),
             created_at_ms: now + 8,
         };
         ledger
@@ -1482,6 +1629,22 @@ mod tests {
         assert_eq!(
             ledger.list_approvals("merge-1").expect("list approvals"),
             vec![approval]
+        );
+        let rejection = ApprovalRejection {
+            id: "rejection-1".to_string(),
+            merge_attempt_id: "merge-1".to_string(),
+            rejected_by: "local-user".to_string(),
+            rejected_verified_tree_id: "tree-1".to_string(),
+            rejected_verified_commit_id: "verified-commit".to_string(),
+            reason: "needs follow-up".to_string(),
+            created_at_ms: now + 10,
+        };
+        ledger
+            .insert_rejection(&rejection)
+            .expect("insert rejection");
+        assert_eq!(
+            ledger.list_rejections("merge-1").expect("list rejections"),
+            vec![rejection]
         );
 
         ledger

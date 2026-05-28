@@ -22,13 +22,13 @@ use crate::formatting::{
 use crate::manifest::{context_snapshot_hash, render_change_manifest};
 use crate::options::{
     SessionAbandonOptions, SessionCleanupOptions, SessionCompleteOptions, SessionPruneOptions,
-    SessionStartOptions,
+    SessionReopenOptions, SessionStartOptions,
 };
 use crate::queue::acquire_merge_queue_lock;
 use crate::{
     latest_merge_attempt, ledger_path, open_existing_ledger, resolve_active_operator, CliError,
     SessionAbandonResult, SessionCleanupResult, SessionCompleteResult, SessionPruneResult,
-    SessionStartResult, CHANGE_MANIFEST_VALIDATION_STATUS,
+    SessionReopenResult, SessionStartResult, CHANGE_MANIFEST_VALIDATION_STATUS,
 };
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -421,6 +421,82 @@ pub(crate) fn abandon_session_with(
     })
 }
 
+pub(crate) fn reopen_session_with(
+    options: &SessionReopenOptions,
+) -> Result<SessionReopenResult, CliError> {
+    let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
+    let operator = resolve_active_operator(&ledger, options.operator_id.as_deref())?;
+    let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
+        CliError::Usage(format!("session '{}' does not exist", options.session_id))
+    })?;
+    if session_is_cleaned(&ledger, &session.id)? {
+        return Err(CliError::Usage(format!(
+            "session '{}' has already been cleaned and cannot be reopened",
+            session.id
+        )));
+    }
+    ensure_session_can_reopen(&session)?;
+
+    let latest_attempt = latest_merge_attempt(&ledger, &session.id)?.ok_or_else(|| {
+        CliError::Usage(format!(
+            "session '{}' has no blocked merge attempt to reopen",
+            session.id
+        ))
+    })?;
+    if latest_attempt.status != MergeAttemptStatus::Blocked {
+        return Err(CliError::Usage(format!(
+            "session '{}' latest merge attempt '{}' is {}, not blocked",
+            session.id,
+            latest_attempt.id,
+            latest_attempt.status.as_str()
+        )));
+    }
+    if ledger.list_approvals(&latest_attempt.id)?.last().is_some() {
+        return Err(CliError::Usage(format!(
+            "merge attempt '{}' is already approved; create a new session for additional work",
+            latest_attempt.id
+        )));
+    }
+
+    let worktree_path = path_from_ledger(&options.repo_root, &session.worktree_path);
+    ensure_session_worktree_is_dedicated(&options.repo_root, &worktree_path)?;
+    if !worktree_path.is_dir() {
+        return Err(CliError::Usage(format!(
+            "session '{}' worktree does not exist at {}",
+            session.id,
+            worktree_path.display()
+        )));
+    }
+
+    let previous_status = session.status.as_str().to_string();
+    let updated_at_ms = now_millis();
+    let tx = ledger.begin_immediate_transaction()?;
+    ledger.update_session_status(&session.id, SessionStatus::Running, updated_at_ms)?;
+    ledger.append_event(
+        &NewEvent::new(EventName::SessionReopened)
+            .with_subject("session", session.id.clone())
+            .with_data_json(format!(
+                "{{\"operator_id\":\"{}\",\"previous_status\":\"{}\",\"merge_attempt_id\":\"{}\",\"merge_attempt_status\":\"{}\"}}",
+                json_escape(&operator.id),
+                json_escape(&previous_status),
+                json_escape(&latest_attempt.id),
+                latest_attempt.status.as_str()
+            )),
+    )?;
+    tx.commit()?;
+
+    let session = ledger
+        .get_session(&session.id)?
+        .ok_or_else(|| CliError::Usage("reopened session disappeared from ledger".to_string()))?;
+
+    Ok(SessionReopenResult {
+        session,
+        previous_status,
+        latest_attempt,
+        operator,
+    })
+}
+
 pub(crate) fn prune_sessions_with<C>(
     options: &SessionPruneOptions,
     cleaner: &C,
@@ -622,6 +698,24 @@ fn ensure_session_can_abandon(
     }
 
     Ok(())
+}
+
+fn ensure_session_can_reopen(session: &Session) -> Result<(), CliError> {
+    match session.status {
+        SessionStatus::Abandoned => Err(CliError::Usage(format!(
+            "session '{}' is abandoned and cannot be reopened; start a new session for further work",
+            session.id
+        ))),
+        SessionStatus::Completed => Err(CliError::Usage(format!(
+            "session '{}' is completed and cannot be reopened",
+            session.id
+        ))),
+        SessionStatus::Running => Err(CliError::Usage(format!(
+            "session '{}' is already running",
+            session.id
+        ))),
+        _ => Ok(()),
+    }
 }
 
 fn cleanup_eligibility(

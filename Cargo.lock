@@ -25,6 +25,8 @@ dependencies = [
  "aich-core",
  "aich-git",
  "aich-ledger",
+ "aich-llm",
+ "aich-merge",
  "serde",
  "serde_yaml",
  "sha2",
@@ -47,6 +49,22 @@ version = "0.1.0"
 dependencies = [
  "aich-core",
  "rusqlite",
+]
+
+[[package]]
+name = "aich-llm"
+version = "0.1.0"
+dependencies = [
+ "aich-core",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
+name = "aich-merge"
+version = "0.1.0"
+dependencies = [
+ "aich-core",
 ]
 
 [[package]]

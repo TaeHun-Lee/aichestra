@@ -5,6 +5,8 @@ members = [
   "crates/aich-core",
   "crates/aich-git",
   "crates/aich-ledger",
+  "crates/aich-llm",
+  "crates/aich-merge",
 ]
 resolver = "2"
 
@@ -18,6 +20,8 @@ aich-check = { path = "crates/aich-check" }
 aich-core = { path = "crates/aich-core" }
 aich-git = { path = "crates/aich-git" }
 aich-ledger = { path = "crates/aich-ledger" }
+aich-llm = { path = "crates/aich-llm" }
+aich-merge = { path = "crates/aich-merge" }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 serde = { version = "1.0.203", features = ["derive"] }
 serde_yaml = "0.9.34"

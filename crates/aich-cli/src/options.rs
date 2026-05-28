@@ -64,6 +64,23 @@ pub(crate) struct SessionRunOptions {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct SessionReworkOptions {
+    pub(crate) repo_root: PathBuf,
+    pub(crate) db_path: Option<PathBuf>,
+    pub(crate) session_id: String,
+    pub(crate) review_id: String,
+    pub(crate) operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct SessionReopenOptions {
+    pub(crate) repo_root: PathBuf,
+    pub(crate) db_path: Option<PathBuf>,
+    pub(crate) session_id: String,
+    pub(crate) operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct SessionAbandonOptions {
     pub(crate) repo_root: PathBuf,
     pub(crate) db_path: Option<PathBuf>,
@@ -108,6 +125,16 @@ pub(crate) struct ApproveOptions {
     pub(crate) db_path: Option<PathBuf>,
     pub(crate) session_id: String,
     pub(crate) operator_id: Option<String>,
+    pub(crate) accept_current: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct RejectOptions {
+    pub(crate) repo_root: PathBuf,
+    pub(crate) db_path: Option<PathBuf>,
+    pub(crate) session_id: String,
+    pub(crate) operator_id: Option<String>,
+    pub(crate) reason: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -600,6 +627,153 @@ pub(crate) fn parse_session_run_options(
     })
 }
 
+pub(crate) fn parse_session_rework_options(
+    args: &[String],
+    cwd: &Path,
+) -> Result<SessionReworkOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut review_id = None;
+    let mut operator_id = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "--review" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage(
+                        "--review requires a semantic review id".to_string(),
+                    ));
+                };
+                review_id = Some(value.clone());
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if !value.starts_with('-') && session_id.is_none() => {
+                session_id = Some(value.to_string());
+            }
+            other => {
+                return Err(CliError::Usage(format!(
+                    "unknown session rework option '{other}'\n\n{}",
+                    usage_text()
+                )));
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage(
+            "session rework requires <session-id>".to_string(),
+        ));
+    };
+    let Some(review_id) = review_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage(
+            "session rework requires --review <semantic-review-id>".to_string(),
+        ));
+    };
+
+    Ok(SessionReworkOptions {
+        repo_root,
+        db_path,
+        session_id,
+        review_id,
+        operator_id,
+    })
+}
+
+pub(crate) fn parse_session_reopen_options(
+    args: &[String],
+    cwd: &Path,
+) -> Result<SessionReopenOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut operator_id = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown session reopen option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "session reopen accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage(
+            "session reopen requires <session-id>".to_string(),
+        ));
+    };
+
+    Ok(SessionReopenOptions {
+        repo_root,
+        db_path,
+        session_id,
+        operator_id,
+    })
+}
+
 pub(crate) fn parse_session_abandon_options(
     args: &[String],
     cwd: &Path,
@@ -926,6 +1100,7 @@ pub(crate) fn parse_approve_options(
     let mut db_path = None;
     let mut session_id = None;
     let mut operator_id = None;
+    let mut accept_current = false;
     let mut index = 0;
 
     while index < args.len() {
@@ -950,6 +1125,9 @@ pub(crate) fn parse_approve_options(
                     return Err(CliError::Usage("--operator requires an id".to_string()));
                 };
                 operator_id = Some(value.clone());
+            }
+            "--accept-current" => {
+                accept_current = true;
             }
             "-h" | "--help" => {
                 return Err(CliError::Usage(usage_text()));
@@ -981,6 +1159,85 @@ pub(crate) fn parse_approve_options(
         db_path,
         session_id,
         operator_id,
+        accept_current,
+    })
+}
+
+pub(crate) fn parse_reject_options(args: &[String], cwd: &Path) -> Result<RejectOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut operator_id = None;
+    let mut reason = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "--reason" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--reason requires text".to_string()));
+                };
+                reason = Some(value.clone());
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown reject option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "reject accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage("reject requires <session-id>".to_string()));
+    };
+    let Some(reason) = reason.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage(
+            "reject requires --reason TEXT so the blocked candidate has recovery context"
+                .to_string(),
+        ));
+    };
+
+    Ok(RejectOptions {
+        repo_root,
+        db_path,
+        session_id,
+        operator_id,
+        reason,
     })
 }
 

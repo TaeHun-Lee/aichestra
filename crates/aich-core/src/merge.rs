@@ -70,6 +70,17 @@ pub struct Approval {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ApprovalRejection {
+    pub id: String,
+    pub merge_attempt_id: String,
+    pub rejected_by: String,
+    pub rejected_verified_tree_id: String,
+    pub rejected_verified_commit_id: String,
+    pub reason: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CheckResultStatus {
     Passed,
     Failed,
@@ -141,6 +152,9 @@ pub struct SemanticReview {
     pub merge_attempt_id: String,
     pub risk_level: SemanticRiskLevel,
     pub report_path: Option<String>,
+    pub proposed_patch_available: bool,
+    pub fix_plan_artifact: Option<String>,
+    pub patch_artifact: Option<String>,
     pub created_at_ms: i64,
 }
 

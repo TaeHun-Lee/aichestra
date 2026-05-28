@@ -172,7 +172,7 @@ fn ensure_session_can_run_agent(session: &Session) -> Result<(), CliError> {
     Ok(())
 }
 
-fn run_agent_command(
+pub(crate) fn run_agent_command(
     command_spec: &ProcessCommandSpec,
     input: &str,
     worktree_path: &Path,

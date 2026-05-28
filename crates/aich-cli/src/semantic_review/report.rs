@@ -1,8 +1,10 @@
-use std::path::Path;
-
 use aich_core::{
-    ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, MergeAttempt, Operator, PatchSet,
+    ChangeManifest, ChangedFile, CheckResult, CheckResultStatus, MergeAttempt, Operator,
     SemanticRiskLevel, Session,
+};
+use aich_llm::{
+    DiffPatchContext, LocalSemanticReviewReport, ProposedPatch, RelatedChangeManifest,
+    SemanticConflictFinding, SemanticReviewInput,
 };
 
 use crate::command_line::ProcessCommandSpec;
@@ -11,119 +13,6 @@ use crate::manifest::{
     changed_files_missing_from_manifest, parse_manifest_diff_evidence, shared_contract_files,
 };
 use crate::CHANGE_MANIFEST_VALIDATION_STATUS;
-
-pub(crate) const SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS: usize = 60_000;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SemanticConflictFinding {
-    pub(crate) conflict_type: String,
-    pub(crate) files: Vec<String>,
-    pub(crate) explanation: String,
-    pub(crate) confidence: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LocalSemanticReviewReport {
-    pub(crate) risk_level: SemanticRiskLevel,
-    pub(crate) summary: String,
-    pub(crate) suspected_conflicts: Vec<SemanticConflictFinding>,
-    pub(crate) required_actions: Vec<String>,
-    pub(crate) suggested_tests: Vec<String>,
-    pub(crate) uncertainty: Vec<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RelatedChangeManifestRelation {
-    Applied,
-    Queued,
-}
-
-impl RelatedChangeManifestRelation {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            Self::Applied => "applied",
-            Self::Queued => "queued",
-        }
-    }
-
-    fn title(&self) -> &'static str {
-        match self {
-            Self::Applied => "Applied",
-            Self::Queued => "Queued",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct RelatedChangeManifest {
-    pub(crate) relation: RelatedChangeManifestRelation,
-    pub(crate) session_id: String,
-    pub(crate) session_status: String,
-    pub(crate) goal: String,
-    pub(crate) base_commit: String,
-    pub(crate) head_commit: Option<String>,
-    pub(crate) latest_attempt_id: Option<String>,
-    pub(crate) latest_attempt_status: Option<String>,
-    pub(crate) latest_attempt_main_before_commit: Option<String>,
-    pub(crate) latest_attempt_verified_commit_id: Option<String>,
-    pub(crate) manifest_id: String,
-    pub(crate) manifest_path: String,
-    pub(crate) manifest_hash_mismatch: bool,
-    pub(crate) manifest_content: Option<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct DiffPatchContext {
-    pub(crate) artifact_path: String,
-    pub(crate) content: Option<String>,
-    pub(crate) truncated: bool,
-    pub(crate) included_chars: usize,
-    pub(crate) original_chars: Option<usize>,
-    pub(crate) max_chars: usize,
-    pub(crate) unavailable_reason: Option<String>,
-}
-
-impl DiffPatchContext {
-    pub(crate) fn from_content(artifact_path: impl Into<String>, content: String) -> Self {
-        let original_chars = content.chars().count();
-        let truncated = original_chars > SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS;
-        let included = if truncated {
-            content
-                .chars()
-                .take(SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS)
-                .collect()
-        } else {
-            content
-        };
-        let included_chars = if truncated {
-            SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS
-        } else {
-            original_chars
-        };
-
-        Self {
-            artifact_path: artifact_path.into(),
-            content: Some(included),
-            truncated,
-            included_chars,
-            original_chars: Some(original_chars),
-            max_chars: SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS,
-            unavailable_reason: None,
-        }
-    }
-
-    pub(crate) fn unavailable(artifact_path: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self {
-            artifact_path: artifact_path.into(),
-            content: None,
-            truncated: false,
-            included_chars: 0,
-            original_chars: None,
-            max_chars: SEMANTIC_REVIEW_PATCH_CONTEXT_MAX_CHARS,
-            unavailable_reason: Some(reason.into()),
-        }
-    }
-}
 
 pub(crate) fn build_local_semantic_review_report(
     manifest: &ChangeManifest,
@@ -344,25 +233,9 @@ pub(crate) fn build_local_semantic_review_report(
         suspected_conflicts: findings,
         required_actions,
         suggested_tests,
+        proposed_patch: ProposedPatch::unavailable(),
         uncertainty,
     }
-}
-
-pub(crate) struct SemanticReviewInput<'a> {
-    pub(crate) reviewer_id: &'a str,
-    pub(crate) llm_executed: bool,
-    pub(crate) session: &'a Session,
-    pub(crate) attempt: &'a MergeAttempt,
-    pub(crate) manifest: &'a ChangeManifest,
-    pub(crate) manifest_content: Option<&'a str>,
-    pub(crate) patch_set: Option<&'a PatchSet>,
-    pub(crate) diff_patch_context: Option<&'a DiffPatchContext>,
-    pub(crate) changed_files: &'a [ChangedFile],
-    pub(crate) check_results: &'a [CheckResult],
-    pub(crate) related_manifests: &'a [RelatedChangeManifest],
-    pub(crate) config_path: &'a Path,
-    pub(crate) prompt_path: &'a str,
-    pub(crate) prompt_content: Option<&'a str>,
 }
 
 pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> String {
@@ -554,6 +427,7 @@ fn append_adapter_output_contract(output: &mut String, session: &Session, attemp
     output.push_str("    available: false\n");
     output.push_str("    description: \"\"\n");
     output.push_str("    patch_artifact: \"\"\n");
+    output.push_str("    patch: \"\"\n");
     output.push_str("  uncertainty: []\n");
     output.push_str("```\n\n");
 }
@@ -656,10 +530,7 @@ pub(super) fn render_semantic_review_yaml(
     append_string_list_yaml(&mut output, &report.required_actions, 4);
     output.push_str("  suggested_tests:\n");
     append_string_list_yaml(&mut output, &report.suggested_tests, 4);
-    output.push_str("  proposed_patch:\n");
-    output.push_str("    available: false\n");
-    output.push_str("    description: \"\"\n");
-    output.push_str("    patch_artifact: \"\"\n");
+    append_proposed_patch_yaml(&mut output, &report.proposed_patch, 2);
     output.push_str("  uncertainty:\n");
     append_string_list_yaml(&mut output, &report.uncertainty, 4);
     output
@@ -684,6 +555,7 @@ pub(super) fn command_semantic_review_failure_report(
             command_spec.display()
         )],
         suggested_tests: Vec::new(),
+        proposed_patch: ProposedPatch::unavailable(),
         uncertainty: vec![detail],
     }
 }
@@ -708,8 +580,30 @@ pub(super) fn llm_semantic_review_failure_report(
             command_spec.display()
         )],
         suggested_tests: Vec::new(),
+        proposed_patch: ProposedPatch::unavailable(),
         uncertainty: vec![detail],
     }
+}
+
+fn append_proposed_patch_yaml(output: &mut String, proposed_patch: &ProposedPatch, indent: usize) {
+    let padding = " ".repeat(indent);
+    output.push_str(&format!("{padding}proposed_patch:\n"));
+    output.push_str(&format!(
+        "{padding}  available: {}\n",
+        proposed_patch.available
+    ));
+    output.push_str(&format!(
+        "{padding}  description: {}\n",
+        yaml_quote(proposed_patch.description.as_deref().unwrap_or(""))
+    ));
+    output.push_str(&format!(
+        "{padding}  fix_plan_artifact: {}\n",
+        yaml_quote(proposed_patch.fix_plan_artifact.as_deref().unwrap_or(""))
+    ));
+    output.push_str(&format!(
+        "{padding}  patch_artifact: {}\n",
+        yaml_quote(proposed_patch.patch_artifact.as_deref().unwrap_or(""))
+    ));
 }
 
 fn append_semantic_conflicts_yaml(

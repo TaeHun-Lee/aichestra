@@ -83,9 +83,11 @@ Choose one strategy and keep it consistent.
 - `applying`: apply started and may still be running, or a prior apply was interrupted and should be retried/finalized with `aich apply <session-id>`
 - `verified`: preflight checks passed and a verified tree/commit exists, but approval has not been recorded
 - `approved`: a human approval exists for the verified tree/commit and the next step is apply
-- `blocked`: the latest merge attempt is blocked by conflict, failed checks, or blocking semantic review
+- `blocked`: the latest merge attempt is blocked by conflict, failed checks, blocking semantic review, rework, or human rejection
 
 Applied candidates are omitted from the queue view because they no longer require merge-queue action.
+
+The pure state classification for these labels lives in `aich-merge`; `aich-cli` renders the labels and recovery guidance.
 
 ## Queue lock
 
@@ -142,6 +144,8 @@ The default local MVP reviewer is deterministic and conservative. It records `ll
 
 If the configured `semantic_review.risk_block_levels` contains the produced risk level, the merge attempt is marked `blocked`. By default only `blocked` risk blocks the attempt. Non-blocking risks remain advisory evidence for the later human approval gate.
 
+If the review includes `proposed_patch.available: true`, Aichestra writes a fix-plan artifact and, when inline patch text is present, a proposed patch artifact. The artifacts do not change the verified tree. Approval refuses by default until the operator either runs `aich session rework <session-id> --review <semantic-review-id>` or explicitly approves the current verified tree with `aich approve <session-id> --accept-current`.
+
 ## Approval implementation
 
 `aich approve <session-id>` records human approval for the latest merge attempt only. The command refuses approval unless:
@@ -152,8 +156,17 @@ If the configured `semantic_review.risk_block_levels` contains the produced risk
 - semantic review has been recorded
 - semantic review did not block the attempt
 - current main still matches the preflight `main_before_commit`
+- no unresolved proposed patch exists, unless the operator passed `--accept-current`
 
 The approval row stores the operator id, merge attempt id, `approved_verified_tree_id`, and `approved_verified_commit_id`. This intentionally approves the verified candidate result, not the original session branch. Re-running preflight creates a new merge attempt and therefore requires a new review/approval path.
+
+The pure review/approval readiness checks live in `aich-merge`; `aich-cli` still handles ledger reads, main-ref verification, approval event recording, and user-facing errors.
+
+`aich session rework <session-id> --review <semantic-review-id>` runs the configured provider command in the existing session worktree with the reviewer fix-plan and patch artifacts as input. Starting rework marks the old verified attempt `blocked` so it cannot be approved accidentally. After the provider finishes, the session is `running`; the user must run `aich session complete`, then `preflight`, `review`, `approve`, and `apply` again for the new candidate.
+
+`aich reject <session-id> --reason TEXT` is the negative human decision for a verified candidate. It records a `rejected` approval decision with the verified tree/commit ids, appends `approval.rejected`, marks the merge attempt `blocked`, and records `merge.blocked` with reason `rejected`. A rejected attempt cannot be approved or applied.
+
+`aich session reopen <session-id>` is the recovery path for rejected or otherwise blocked candidates. It requires a blocked latest merge attempt, refuses abandoned/completed sessions and already approved attempts, verifies that the session worktree still exists and is not the main worktree, then sets the session back to `running`. Reopen does not change main and does not reuse the old verified tree. The user must revise the session worktree, run `aich session complete <session-id>`, then run `preflight`, `review`, `approve`, and `apply` again. The next preflight creates a new MergeAttempt.
 
 ## Applying to main
 
@@ -209,7 +222,7 @@ It refuses cleanup for active sessions, enqueued candidates, and blocked candida
 
 Semantic review runs after the mechanical merge result is available and before approval. In the current CLI flow, `aich preflight` also runs the configured sandbox checks first, so `aich review` can include check evidence in the semantic report.
 
-The Semantic Merge LLM may produce a proposed patch. If accepted, that patch creates a new candidate result that must go through checks again.
+The Semantic Merge LLM may produce a proposed patch. It is stored as advisory evidence only. If the operator chooses to rework from it, the resulting session changes create a new candidate result that must go through checks again.
 
 ## Failure modes
 
@@ -235,6 +248,7 @@ A blocked candidate should remain in the ledger with its artifacts. The develope
 - ask a worker LLM to revise the session branch
 - create a conflict-resolution session
 - manually edit the session branch
+- run `aich session reopen <session-id>` when the latest blocked attempt should be revised in the existing session worktree
 - run `aich session abandon <session-id>` to withdraw the candidate from the queue
 
 After revising the candidate, run `aich session complete <session-id>` to record the new candidate head and then run `aich preflight <session-id>` again. Every retry creates a new MergeAttempt.

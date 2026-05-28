@@ -7,6 +7,7 @@ use aich_core::{
     NewEvent, QueueLock, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
 };
 use aich_ledger::{EventRecord, Ledger};
+use aich_merge::queue_candidate_status;
 
 use crate::formatting::{json_escape, json_string_field, short_hash};
 use crate::options::{QueueOptions, QueueUnlockOptions};
@@ -142,6 +143,15 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
                 review.id,
                 review.risk_level.as_str()
             )?;
+            if review.proposed_patch_available {
+                writeln!(out, "  proposed_patch: available")?;
+                if let Some(path) = review.fix_plan_artifact.as_deref() {
+                    writeln!(out, "  fix_plan: {path}")?;
+                }
+                if let Some(path) = review.patch_artifact.as_deref() {
+                    writeln!(out, "  patch_artifact: {path}")?;
+                }
+            }
         }
         if let Some(approval) = entry.latest_approval.as_ref() {
             writeln!(
@@ -276,19 +286,24 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
         }
 
         let Some(status) =
-            queue_entry_status(&session, latest_attempt.as_ref(), latest_approval.as_ref())
+            queue_candidate_status(&session, latest_attempt.as_ref(), latest_approval.as_ref())
         else {
             continue;
         };
-        let blocked_recovery = latest_attempt.as_ref().and_then(|attempt| {
-            blocked_recovery_for_queue_entry(
-                &session,
-                attempt,
-                latest_review.as_ref(),
-                &check_results,
-                &events,
-            )
-        });
+        let status = status.as_str().to_string();
+        let blocked_recovery = if status == "blocked" {
+            latest_attempt.as_ref().and_then(|attempt| {
+                blocked_recovery_for_queue_entry(
+                    &session,
+                    attempt,
+                    latest_review.as_ref(),
+                    &check_results,
+                    &events,
+                )
+            })
+        } else {
+            None
+        };
 
         entries.push(QueueEntry {
             session,
@@ -302,35 +317,6 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
     }
 
     Ok(entries)
-}
-
-fn queue_entry_status(
-    session: &Session,
-    latest_attempt: Option<&MergeAttempt>,
-    latest_approval: Option<&Approval>,
-) -> Option<String> {
-    if session.status == SessionStatus::Abandoned {
-        return None;
-    }
-
-    match latest_attempt {
-        Some(attempt) => match attempt.status {
-            MergeAttemptStatus::PreflightRunning => Some("preflight_running".to_string()),
-            MergeAttemptStatus::Applying => Some("applying".to_string()),
-            MergeAttemptStatus::Blocked => Some("blocked".to_string()),
-            MergeAttemptStatus::Verified if latest_approval.is_some() => {
-                Some("approved".to_string())
-            }
-            MergeAttemptStatus::Verified => Some("verified".to_string()),
-            MergeAttemptStatus::Pending if session.status == SessionStatus::Enqueued => {
-                Some("enqueued".to_string())
-            }
-            MergeAttemptStatus::Applied => None,
-            MergeAttemptStatus::Pending => None,
-        },
-        None if session.status == SessionStatus::Enqueued => Some("enqueued".to_string()),
-        None => None,
-    }
 }
 
 fn queue_status_summary(entries: &[QueueEntry]) -> QueueStatusSummary {
@@ -406,17 +392,7 @@ fn blocked_recovery_for_queue_entry(
         .filter(|check| check.required && check.result == CheckResultStatus::Failed)
         .collect();
     let mut artifacts = Vec::new();
-    let mut next_steps = vec![
-        format!(
-            "Fix the candidate in its session worktree: {}",
-            session.worktree_path
-        ),
-        format!("Run `aich session complete {}` after the fix", session.id),
-        format!(
-            "Run `aich preflight {}` to create a new verified attempt",
-            session.id
-        ),
-    ];
+    let mut next_steps = blocked_next_steps(session);
 
     let summary = match reason.as_str() {
         "mechanical_conflict" => {
@@ -459,6 +435,14 @@ fn blocked_recovery_for_queue_entry(
             );
             "Semantic review found blocker-level risk.".to_string()
         }
+        "rejected" => {
+            if let Some(review) = latest_review {
+                if let Some(report_path) = review.report_path.as_deref() {
+                    artifacts.push(format!("semantic review: {report_path}"));
+                }
+            }
+            "A human rejected the verified candidate before apply.".to_string()
+        }
         "applied_tree_mismatch" => {
             artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stdout"));
             artifacts.push(merge_attempt_artifact(&attempt.id, "merge.stderr"));
@@ -486,6 +470,29 @@ fn blocked_recovery_for_queue_entry(
         artifacts,
         next_steps,
     })
+}
+
+fn blocked_next_steps(session: &Session) -> Vec<String> {
+    let mut steps = Vec::new();
+    if session.status != SessionStatus::Running {
+        steps.push(format!(
+            "Run `aich session reopen {}` to make the session worktree editable again",
+            session.id
+        ));
+    }
+    steps.push(format!(
+        "Fix the candidate in its session worktree: {}",
+        session.worktree_path
+    ));
+    steps.push(format!(
+        "Run `aich session complete {}` after the fix",
+        session.id
+    ));
+    steps.push(format!(
+        "Run `aich preflight {}` to create a new verified attempt",
+        session.id
+    ));
+    steps
 }
 
 fn latest_blocked_reason(attempt: &MergeAttempt, events: &[EventRecord]) -> Option<String> {
@@ -535,13 +542,28 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
             "aich apply {} (retry or finalize interrupted apply; unlock a stale queue lock first if needed)",
             entry.session.id
         ),
+        "verified"
+            if entry
+                .latest_review
+                .as_ref()
+                .map(|review| review.proposed_patch_available)
+                .unwrap_or(false) =>
+        {
+            format!(
+                "aich session rework {} --review {} OR aich approve {} --accept-current",
+                entry.session.id,
+                entry.latest_review.as_ref().map(|review| review.id.as_str()).unwrap_or(""),
+                entry.session.id
+            )
+        }
         "verified" if entry.latest_review.is_some() => format!("aich approve {}", entry.session.id),
         "verified" => format!("aich review {}", entry.session.id),
         "approved" => format!("aich apply {}", entry.session.id),
-        "blocked" => format!(
-            "follow recovery steps, then run aich session complete {}, then aich preflight {}",
+        "blocked" if entry.session.status == SessionStatus::Running => format!(
+            "aich session complete {} after revising, then aich preflight {}",
             entry.session.id, entry.session.id
         ),
+        "blocked" => format!("aich session reopen {}", entry.session.id),
         _ => "-".to_string(),
     }
 }

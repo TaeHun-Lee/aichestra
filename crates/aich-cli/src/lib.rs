@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(test)]
 use aich_core::clock::now_millis;
 use aich_core::{
-    Approval, ChangeManifest, ChangedFile, CheckResult, ContextSnapshot, MergeAttempt, Operator,
-    PatchSet, QueueLock, SemanticReview, Session,
+    Approval, ApprovalRejection, ChangeManifest, ChangedFile, CheckResult, ContextSnapshot,
+    MergeAttempt, Operator, PatchSet, QueueLock, SemanticReview, Session,
 };
 #[cfg(test)]
 use aich_core::{
@@ -40,6 +40,8 @@ mod manifest;
 mod options;
 mod preflight;
 mod queue;
+mod reject;
+mod rework;
 mod semantic_review;
 mod session;
 mod status;
@@ -67,15 +69,17 @@ use preflight::run_preflight_with;
 #[cfg(test)]
 use preflight::PREFLIGHT_APPLY_STRATEGY;
 use queue::{format_duration_ms, render_queue, run_queue_unlock};
+use reject::run_reject_with;
+use rework::run_session_rework_with;
 use semantic_review::run_review_with;
 #[cfg(test)]
 use semantic_review::{
     build_local_semantic_review_report, codex_semantic_review_command, run_review_with_adapter,
-    LocalSemanticReviewReport, SemanticReviewAdapter, SemanticReviewAdapterRequest,
+    LocalSemanticReviewReport, ProposedPatch, SemanticReviewAdapter, SemanticReviewAdapterRequest,
 };
 use session::{
     abandon_session_with, cleanup_session_with, complete_session_with, prune_sessions_with,
-    start_session_with,
+    reopen_session_with, start_session_with,
 };
 use status::render_status;
 
@@ -177,10 +181,33 @@ pub struct SessionAgentRunResult {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SessionReworkResult {
+    pub session: Session,
+    pub operator: Operator,
+    pub merge_attempt: MergeAttempt,
+    pub semantic_review: SemanticReview,
+    pub artifact_dir: PathBuf,
+    pub input_path: PathBuf,
+    pub stdout_path: PathBuf,
+    pub stderr_path: PathBuf,
+    pub metadata_path: PathBuf,
+    pub exit_code: Option<i32>,
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SessionAbandonResult {
     pub session: Session,
     pub previous_status: String,
     pub latest_attempt: Option<MergeAttempt>,
+    pub operator: Operator,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SessionReopenResult {
+    pub session: Session,
+    pub previous_status: String,
+    pub latest_attempt: MergeAttempt,
     pub operator: Operator,
 }
 
@@ -202,6 +229,9 @@ pub struct ReviewRunResult {
     pub summary: String,
     pub required_actions: Vec<String>,
     pub suggested_tests: Vec<String>,
+    pub proposed_patch_available: bool,
+    pub fix_plan_artifact: Option<String>,
+    pub patch_artifact: Option<String>,
     pub blocked: bool,
 }
 
@@ -211,6 +241,13 @@ pub struct ApproveRunResult {
     pub merge_attempt: MergeAttempt,
     pub operator: Operator,
     pub semantic_reviews: Vec<SemanticReview>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RejectRunResult {
+    pub rejection: ApprovalRejection,
+    pub merge_attempt: MergeAttempt,
+    pub operator: Operator,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -306,6 +343,25 @@ where
             writeln!(out, "Summary: {}", result.summary)?;
             writeln!(out, "Required actions: {}", result.required_actions.len())?;
             writeln!(out, "Suggested tests: {}", result.suggested_tests.len())?;
+            if result.proposed_patch_available {
+                writeln!(out, "Proposed patch: available")?;
+                if let Some(path) = result.fix_plan_artifact.as_deref() {
+                    writeln!(out, "Fix plan: {path}")?;
+                }
+                if let Some(path) = result.patch_artifact.as_deref() {
+                    writeln!(out, "Patch artifact: {path}")?;
+                }
+                writeln!(
+                    out,
+                    "Next: aich session rework {} --review {}",
+                    result.merge_attempt.session_id, result.semantic_review.id
+                )?;
+                writeln!(
+                    out,
+                    "Or approve current verified tree: aich approve {} --accept-current",
+                    result.merge_attempt.session_id
+                )?;
+            }
             if result.blocked {
                 writeln!(out, "Blocked: semantic_review")?;
             }
@@ -337,6 +393,31 @@ where
                     .semantic_risk_level
                     .as_deref()
                     .unwrap_or("unknown")
+            )?;
+            Ok(())
+        }
+        Some("reject") => {
+            let options = parse_reject_options(&args[1..], cwd)?;
+            let result = run_reject_with(&options)?;
+            writeln!(out, "Rejected {}", result.merge_attempt.session_id)?;
+            writeln!(out, "Rejection: {}", result.rejection.id)?;
+            writeln!(out, "Merge attempt: {}", result.merge_attempt.id)?;
+            writeln!(out, "Operator: {}", result.operator.id)?;
+            writeln!(
+                out,
+                "Rejected tree: {}",
+                result.rejection.rejected_verified_tree_id
+            )?;
+            writeln!(
+                out,
+                "Rejected commit: {}",
+                result.rejection.rejected_verified_commit_id
+            )?;
+            writeln!(out, "Reason: {}", result.rejection.reason)?;
+            writeln!(
+                out,
+                "Next: aich session reopen {}",
+                result.merge_attempt.session_id
             )?;
             Ok(())
         }
@@ -457,6 +538,40 @@ fn run_session_command<W: Write>(args: &[String], cwd: &Path, out: &mut W) -> Re
             writeln!(
                 out,
                 "Next: inspect the worktree, then run `aich session complete {}`",
+                result.session.id
+            )?;
+            Ok(())
+        }
+        Some("rework") => {
+            let options = parse_session_rework_options(&args[1..], cwd)?;
+            let result = run_session_rework_with(&options)?;
+            writeln!(out, "Reworked session {}", result.session.id)?;
+            writeln!(out, "Operator: {}", result.operator.id)?;
+            writeln!(out, "Merge attempt blocked: {}", result.merge_attempt.id)?;
+            writeln!(out, "Semantic review: {}", result.semantic_review.id)?;
+            writeln!(out, "Exit code: {}", result.exit_code.unwrap_or(-1))?;
+            writeln!(out, "Artifacts: {}", result.artifact_dir.display())?;
+            writeln!(out, "Input: {}", result.input_path.display())?;
+            writeln!(out, "Stdout: {}", result.stdout_path.display())?;
+            writeln!(out, "Stderr: {}", result.stderr_path.display())?;
+            writeln!(
+                out,
+                "Next: inspect the worktree, then run `aich session complete {}`",
+                result.session.id
+            )?;
+            Ok(())
+        }
+        Some("reopen") => {
+            let options = parse_session_reopen_options(&args[1..], cwd)?;
+            let result = reopen_session_with(&options)?;
+            writeln!(out, "Reopened session {}", result.session.id)?;
+            writeln!(out, "Operator: {}", result.operator.id)?;
+            writeln!(out, "Previous status: {}", result.previous_status)?;
+            writeln!(out, "Status: {}", result.session.status.as_str())?;
+            writeln!(out, "Blocked merge attempt: {}", result.latest_attempt.id)?;
+            writeln!(
+                out,
+                "Next: revise the session worktree, then run `aich session complete {}`",
                 result.session.id
             )?;
             Ok(())
@@ -644,7 +759,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 pub(crate) fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session abandon <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session rework <session-id> --review REVIEW_ID [--operator ID] [--repo PATH] [--db PATH]\n  aich session reopen <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session abandon <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--accept-current] [--operator ID] [--repo PATH] [--db PATH]\n  aich reject <session-id> --reason TEXT [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]

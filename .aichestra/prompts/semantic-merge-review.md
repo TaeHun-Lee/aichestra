@@ -56,6 +56,7 @@ semantic_review:
     available: false
     description: ""
     patch_artifact: ""
+    patch: ""
   uncertainty: []
 ```
 
@@ -71,6 +72,7 @@ semantic_review:
 - Treat Change Manifest file evidence as structured YAML evidence, not substring evidence. Changed files should be declared in fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, or `deleted_or_renamed_files`.
 - If a public API changed and dependent call sites are not clearly handled, use `high` or `blocked`.
 - Do not approve applying to main. Human approval and test gates are separate.
+- Proposed patches are advisory only. If you provide one, put a short fix plan in `description` and, when practical, a unified diff in `patch`; Aichestra stores those as artifacts and will not auto-apply them.
 - Treat related applied and queued manifests as evidence for stale assumptions or cross-session conflict, not as permission to reorder or apply candidates.
 - Treat any prior local MVP reviewer output as evidence to audit, not as proof of safety.
 - Return only the YAML report when used from a command or LLM adapter; malformed output blocks the candidate.

@@ -24,6 +24,7 @@ The current MVP provides:
 - `aich session start --goal ...`
 - `aich session run <session-id>`
 - `aich session complete <session-id>`
+- `aich session reopen <session-id>`
 - `aich session abandon <session-id>`
 - `aich session cleanup <session-id>`
 - `aich session prune --applied`
@@ -31,6 +32,7 @@ The current MVP provides:
 - `aich preflight <session-id>`
 - `aich review <session-id>`
 - `aich approve <session-id>`
+- `aich reject <session-id> --reason ...`
 - `aich apply <session-id>`
 
 Core behavior:
@@ -42,6 +44,7 @@ Core behavior:
 - integration sandbox checks before approval
 - semantic review through `local`, `command`, or `llm` adapters
 - human approval for the exact verified tree/commit
+- human rejection and reopen recovery for candidates that need another pass
 - apply guards for configured main branch/ref, clean main worktree, and main-not-moved checks
 - apply crash recovery for interrupted `applying` transitions
 
@@ -53,6 +56,8 @@ crates/
   aich-core/     # session, event, merge invariant domain models
   aich-git/      # worktree manager interface and native git adapter
   aich-ledger/   # SQLite schema and repository helpers
+  aich-llm/      # semantic review report contract, parser, and input models
+  aich-merge/    # merge queue status and review/approval readiness rules
 docs/
   ARCHITECTURE.md
   MERGE_ALGORITHM.md
@@ -89,6 +94,14 @@ cargo run -p aich-cli -- preflight <session-id>
 cargo run -p aich-cli -- review <session-id>
 cargo run -p aich-cli -- approve <session-id>
 cargo run -p aich-cli -- apply <session-id>
+```
+
+Reject and revise a verified candidate instead of applying it:
+
+```bash
+cargo run -p aich-cli -- reject <session-id> --reason "Needs another pass"
+cargo run -p aich-cli -- session reopen <session-id>
+cargo run -p aich-cli -- session complete <session-id>
 ```
 
 Clean up applied or inactive session resources:

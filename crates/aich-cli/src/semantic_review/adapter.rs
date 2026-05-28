@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use aich_core::{ChangeManifest, ChangedFile, CheckResult, MergeAttempt, PatchSet, Session};
+use aich_llm::{LocalSemanticReviewReport, SemanticReviewAdapterRequest, SemanticReviewInput};
 
 use crate::command_line::ProcessCommandSpec;
 use crate::formatting::truncate_for_report;
@@ -11,26 +11,8 @@ use crate::{CliError, LOCAL_SEMANTIC_REVIEWER};
 use super::parser::parse_semantic_review_command_report;
 use super::report::{
     build_local_semantic_review_report, command_semantic_review_failure_report,
-    llm_semantic_review_failure_report, render_semantic_review_input, DiffPatchContext,
-    LocalSemanticReviewReport, RelatedChangeManifest, SemanticReviewInput,
+    llm_semantic_review_failure_report, render_semantic_review_input,
 };
-
-pub(crate) struct SemanticReviewAdapterRequest<'a> {
-    pub(crate) repo_root: &'a Path,
-    pub(crate) session: &'a Session,
-    pub(crate) attempt: &'a MergeAttempt,
-    pub(crate) manifest: &'a ChangeManifest,
-    pub(crate) manifest_content: Option<&'a str>,
-    pub(crate) manifest_hash_mismatch: bool,
-    pub(crate) patch_set: Option<&'a PatchSet>,
-    pub(crate) diff_patch_context: Option<&'a DiffPatchContext>,
-    pub(crate) changed_files: &'a [ChangedFile],
-    pub(crate) check_results: &'a [CheckResult],
-    pub(crate) related_manifests: &'a [RelatedChangeManifest],
-    pub(crate) config_path: &'a Path,
-    pub(crate) prompt_path: &'a str,
-    pub(crate) prompt_content: Option<&'a str>,
-}
 
 pub(crate) trait SemanticReviewAdapter {
     fn reviewer_id(&self) -> &str;

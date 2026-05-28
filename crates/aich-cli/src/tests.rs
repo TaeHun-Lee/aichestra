@@ -164,6 +164,7 @@ impl SemanticReviewAdapter for MockSemanticReviewAdapter {
             suspected_conflicts: Vec::new(),
             required_actions: Vec::new(),
             suggested_tests: vec!["cargo test --all".to_string()],
+            proposed_patch: ProposedPatch::unavailable(),
             uncertainty: vec!["Mock adapter output is test-only.".to_string()],
         })
     }
@@ -212,7 +213,43 @@ impl SemanticReviewAdapter for RelatedManifestSemanticReviewAdapter {
             suspected_conflicts: Vec::new(),
             required_actions: Vec::new(),
             suggested_tests: Vec::new(),
+            proposed_patch: ProposedPatch::unavailable(),
             uncertainty: Vec::new(),
+        })
+    }
+}
+
+struct ProposedPatchSemanticReviewAdapter;
+
+impl SemanticReviewAdapter for ProposedPatchSemanticReviewAdapter {
+    fn reviewer_id(&self) -> &str {
+        "proposed_patch_reviewer"
+    }
+
+    fn llm_executed(&self) -> bool {
+        true
+    }
+
+    fn review(
+        &self,
+        _request: &SemanticReviewAdapterRequest<'_>,
+    ) -> Result<LocalSemanticReviewReport, CliError> {
+        Ok(LocalSemanticReviewReport {
+            risk_level: SemanticRiskLevel::Low,
+            summary: "Reviewer proposed a follow-up fix.".to_string(),
+            suspected_conflicts: Vec::new(),
+            required_actions: vec!["Apply the proposed README wording fix.".to_string()],
+            suggested_tests: vec!["cargo test --all".to_string()],
+            proposed_patch: ProposedPatch {
+                available: true,
+                description: Some("Update README wording from the review.".to_string()),
+                patch: Some(
+                    "diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
+                ),
+                fix_plan_artifact: None,
+                patch_artifact: None,
+            },
+            uncertainty: vec!["Proposed patch is advisory.".to_string()],
         })
     }
 }
@@ -409,6 +446,12 @@ fn session_abandon_requires_session_id() {
 }
 
 #[test]
+fn session_reopen_requires_session_id() {
+    let err = parse_session_reopen_options(&[], Path::new(".")).unwrap_err();
+    assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+}
+
+#[test]
 fn preflight_requires_session_id() {
     let err = parse_preflight_options(&[], Path::new(".")).unwrap_err();
     assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
@@ -424,6 +467,15 @@ fn review_requires_session_id() {
 fn approve_requires_session_id() {
     let err = parse_approve_options(&[], Path::new(".")).unwrap_err();
     assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+}
+
+#[test]
+fn reject_requires_session_id_and_reason() {
+    let err = parse_reject_options(&[], Path::new(".")).unwrap_err();
+    assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+
+    let err = parse_reject_options(&["session-1".to_string()], Path::new(".")).unwrap_err();
+    assert!(matches!(err, CliError::Usage(message) if message.contains("--reason")));
 }
 
 #[test]
@@ -2093,6 +2145,60 @@ fn review_uses_injected_semantic_review_adapter() {
 }
 
 #[test]
+fn review_persists_proposed_patch_artifacts() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    let result = run_review_with_adapter(
+        &ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &ProposedPatchSemanticReviewAdapter,
+    )
+    .expect("review");
+
+    assert!(result.proposed_patch_available);
+    let fix_plan_artifact = result.fix_plan_artifact.expect("fix plan artifact");
+    let patch_artifact = result.patch_artifact.expect("patch artifact");
+    let fix_plan = fs::read_to_string(repo.join(&fix_plan_artifact)).expect("read fix plan");
+    let patch = fs::read_to_string(repo.join(&patch_artifact)).expect("read patch");
+    assert!(fix_plan.contains("Update README wording from the review."));
+    assert!(fix_plan.contains("Apply the proposed README wording fix."));
+    assert!(patch.contains("+new"));
+
+    let report = fs::read_to_string(&result.report_path).expect("read report");
+    assert!(report.contains("proposed_patch:"));
+    assert!(report.contains("available: true"));
+    assert!(report.contains(&fix_plan_artifact));
+    assert!(report.contains(&patch_artifact));
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let reviews = ledger
+        .list_semantic_reviews(&attempt.id)
+        .expect("semantic reviews");
+    assert_eq!(reviews.len(), 1);
+    assert!(reviews[0].proposed_patch_available);
+    assert_eq!(
+        reviews[0].fix_plan_artifact.as_deref(),
+        Some(fix_plan_artifact.as_str())
+    );
+    assert_eq!(
+        reviews[0].patch_artifact.as_deref(),
+        Some(patch_artifact.as_str())
+    );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn review_input_includes_applied_and_queued_manifests() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -2232,6 +2338,80 @@ YAML
             .len(),
         1
     );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn review_cli_shows_proposed_patch_next_actions() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let command = write_semantic_review_test_command(
+        &repo,
+        "proposed-semantic-review",
+        r#"[Console]::In.ReadToEnd() | Out-Null
+@'
+semantic_review:
+  risk_level: low
+  summary: "Proposed patch is available."
+  suspected_conflicts: []
+  required_actions:
+    - "Apply suggested README change."
+  suggested_tests: []
+  proposed_patch:
+    available: true
+    description: "Update README text."
+    patch: |
+      diff --git a/README.md b/README.md
+      @@ -1 +1 @@
+      -old
+      +new
+  uncertainty: []
+'@
+"#,
+        r#"cat >/dev/null
+cat <<'YAML'
+semantic_review:
+  risk_level: low
+  summary: "Proposed patch is available."
+  suspected_conflicts: []
+  required_actions:
+    - "Apply suggested README change."
+  suggested_tests: []
+  proposed_patch:
+    available: true
+    description: "Update README text."
+    patch: |
+      diff --git a/README.md b/README.md
+      @@ -1 +1 @@
+      -old
+      +new
+  uncertainty: []
+YAML
+"#,
+    );
+    configure_semantic_review_command(&repo, "proposed_command_reviewer", &command);
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    let mut output = Vec::new();
+    run_with_cwd(["aich", "review", &session.id], &repo, &mut output).expect("review");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("Proposed patch: available"));
+    assert!(output.contains("Fix plan: .aichestra/artifacts/merge-attempts/"));
+    assert!(output.contains("Patch artifact: .aichestra/artifacts/merge-attempts/"));
+    assert!(output.contains(&format!(
+        "Next: aich session rework {} --review semantic-review-",
+        session.id
+    )));
+    assert!(output.contains(&format!(
+        "Or approve current verified tree: aich approve {} --accept-current",
+        session.id
+    )));
 
     let _ = fs::remove_dir_all(repo);
 }
@@ -2420,6 +2600,7 @@ fn approve_records_exact_verified_tree_after_review() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -2472,11 +2653,403 @@ fn approve_requires_semantic_review_first() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
     .unwrap_err();
     assert!(matches!(err, CliError::Usage(message) if message.contains("aich review")));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn approve_requires_explicit_accept_current_when_review_has_proposed_patch() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with_adapter(
+        &ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &ProposedPatchSemanticReviewAdapter,
+    )
+    .expect("review");
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(message) if message.contains("aich session rework") && message.contains("--accept-current"))
+    );
+
+    let result = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: true,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve current");
+
+    assert_eq!(result.approval.merge_attempt_id, result.merge_attempt.id);
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn reject_records_human_rejection_and_blocks_verified_attempt() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+
+    let result = run_reject_with(&RejectOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+        reason: "The user-facing behavior is incomplete.".to_string(),
+    })
+    .expect("reject");
+
+    assert_eq!(result.merge_attempt.id, attempt.id);
+    assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Blocked);
+    assert_eq!(result.rejection.merge_attempt_id, attempt.id);
+    assert_eq!(result.rejection.rejected_by, DEFAULT_OPERATOR_ID);
+    assert_eq!(result.rejection.rejected_verified_tree_id, "verified-tree");
+    assert_eq!(
+        result.rejection.rejected_verified_commit_id,
+        "verified-commit"
+    );
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let blocked_attempt = ledger
+        .get_merge_attempt(&attempt.id)
+        .expect("get attempt")
+        .expect("attempt exists");
+    assert_eq!(blocked_attempt.status, MergeAttemptStatus::Blocked);
+    assert_eq!(
+        ledger
+            .list_rejections(&attempt.id)
+            .expect("list rejections"),
+        vec![result.rejection]
+    );
+    assert!(ledger
+        .list_approvals(&attempt.id)
+        .expect("list approvals")
+        .is_empty());
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "approval.rejected"
+            && event
+                .data_json
+                .contains("user-facing behavior is incomplete")
+    }));
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "merge.blocked" && event.data_json.contains("\"reason\":\"rejected\"")
+    }));
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(message) if message.contains("blocked") || message.contains("not verified"))
+    );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn reject_refuses_already_approved_attempt() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+
+    let err = run_reject_with(&RejectOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+        reason: "changed my mind".to_string(),
+    })
+    .unwrap_err();
+
+    assert!(matches!(err, CliError::Usage(message) if message.contains("already approved")));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_reopen_returns_rejected_candidate_to_running_state() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    let worktree_path = repo.join(&session.worktree_path);
+    fs::create_dir_all(&worktree_path).expect("create worktree");
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_reject_with(&RejectOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+        reason: "Needs another pass before merge.".to_string(),
+    })
+    .expect("reject");
+
+    let reopened = reopen_session_with(&SessionReopenOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("reopen");
+
+    assert_eq!(reopened.previous_status, "enqueued");
+    assert_eq!(reopened.session.status, SessionStatus::Running);
+    assert_eq!(reopened.latest_attempt.id, attempt.id);
+
+    let completed = complete_session_with(
+        &SessionCompleteOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockSessionCompleter::new(CompleteSessionWorktreeOutcome::Changes(
+            aich_git::CompletedSessionWorktree {
+                head_commit: "reopened-head".to_string(),
+                diff_stat: " README.md | 1 +\n 1 file changed, 1 insertion(+)\n".to_string(),
+                diff_patch: "diff --git a/README.md b/README.md\n+reopened\n".to_string(),
+                changed_files: vec![aich_git::GitChangedFile {
+                    path: "README.md".to_string(),
+                    change_type: "modified".to_string(),
+                    symbols_json: "[]".to_string(),
+                }],
+                committed_worktree_changes: true,
+            },
+        )),
+    )
+    .expect("complete reopened session");
+    assert_eq!(completed.session.status, SessionStatus::Enqueued);
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    assert!(ledger
+        .list_events()
+        .expect("events")
+        .iter()
+        .any(|event| event.name == "session.reopened"));
+
+    let mut queue = Vec::new();
+    render_queue(
+        &QueueOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        },
+        &mut queue,
+    )
+    .expect("queue");
+    let queue = String::from_utf8(queue).expect("utf8 queue");
+    assert!(queue.contains(&format!("- {} [enqueued]", session.id)));
+    assert!(queue.contains(&format!("next: aich preflight {}", session.id)));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_rework_runs_provider_with_fix_artifacts_and_requires_new_completion() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    let worktree_path = repo.join(&session.worktree_path);
+    fs::create_dir_all(&worktree_path).expect("create worktree");
+    let review_result = run_review_with_adapter(
+        &ReviewOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &ProposedPatchSemanticReviewAdapter,
+    )
+    .expect("review");
+    let command = write_agent_test_command(
+        &repo,
+        "rework-provider",
+        r#"$inputText = [Console]::In.ReadToEnd()
+if (-not $inputText.Contains('## Fix Plan Artifact')) {
+  [Console]::Error.WriteLine('missing fix plan')
+  exit 2
+}
+if (-not $inputText.Contains('## Proposed Patch Artifact')) {
+  [Console]::Error.WriteLine('missing patch artifact')
+  exit 3
+}
+Set-Content -Path reworked.txt -Value 'reworked'
+"#,
+        r###"input=$(cat)
+case "$input" in
+  *"## Fix Plan Artifact"*) ;;
+  *) echo "missing fix plan" >&2; exit 2 ;;
+esac
+case "$input" in
+  *"## Proposed Patch Artifact"*) ;;
+  *) echo "missing patch artifact" >&2; exit 3 ;;
+esac
+printf '%s\n' reworked > reworked.txt
+"###,
+    );
+    configure_provider_command(&repo, "codex", &command);
+
+    let result = run_session_rework_with(&SessionReworkOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        review_id: review_result.semantic_review.id.clone(),
+        operator_id: None,
+    })
+    .expect("rework");
+
+    assert!(result.success);
+    assert_eq!(result.session.status, SessionStatus::Running);
+    assert!(worktree_path.join("reworked.txt").exists());
+    let input = fs::read_to_string(&result.input_path).expect("read rework input");
+    assert!(input.contains("Apply the proposed README wording fix."));
+    assert!(input.contains("+new"));
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let blocked_attempt = ledger
+        .get_merge_attempt(&attempt.id)
+        .expect("get attempt")
+        .expect("attempt exists");
+    assert_eq!(blocked_attempt.status, MergeAttemptStatus::Blocked);
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "session.rework.completed"
+            && event.data_json.contains(&review_result.semantic_review.id)
+    }));
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: true,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(message) if message.contains("not verified") || message.contains("blocked"))
+    );
+
+    let completed = complete_session_with(
+        &SessionCompleteOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockSessionCompleter::new(CompleteSessionWorktreeOutcome::Changes(
+            aich_git::CompletedSessionWorktree {
+                head_commit: "reworked-head".to_string(),
+                diff_stat: " README.md | 1 +\n 1 file changed, 1 insertion(+)\n".to_string(),
+                diff_patch: "diff --git a/README.md b/README.md\n+reworked\n".to_string(),
+                changed_files: vec![aich_git::GitChangedFile {
+                    path: "README.md".to_string(),
+                    change_type: "modified".to_string(),
+                    symbols_json: "[]".to_string(),
+                }],
+                committed_worktree_changes: true,
+            },
+        )),
+    )
+    .expect("complete after rework");
+    assert_eq!(completed.session.status, SessionStatus::Enqueued);
+
+    let mut queue = Vec::new();
+    render_queue(
+        &QueueOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        },
+        &mut queue,
+    )
+    .expect("queue");
+    let queue = String::from_utf8(queue).expect("utf8 queue");
+    assert!(queue.contains(&format!("- {} [enqueued]", session.id)));
+    assert!(queue.contains(&format!("next: aich preflight {}", session.id)));
 
     let _ = fs::remove_dir_all(repo);
 }
@@ -2505,6 +3078,7 @@ fn apply_uses_approved_verified_commit_and_marks_applied() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -2588,6 +3162,7 @@ fn apply_recovers_when_verified_commit_is_already_on_main() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -2654,6 +3229,7 @@ fn apply_retries_when_applying_but_main_has_not_moved() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -2715,6 +3291,7 @@ fn apply_recovery_rejects_unexpected_main_for_applying_attempt() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -2773,6 +3350,7 @@ fn apply_finalizes_partially_recorded_applied_attempt() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -2920,6 +3498,7 @@ fn session_abandon_prevents_applying_approved_candidate() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -2979,6 +3558,7 @@ fn session_cleanup_removes_applied_session_worktree_branch_and_sandboxes() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -3250,6 +3830,7 @@ fn session_prune_cleans_only_applied_sessions() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -3398,6 +3979,7 @@ fn apply_refuses_when_queue_lock_is_held() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -3500,6 +4082,7 @@ fn apply_wrong_branch_error_includes_recovery_hint() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -3551,6 +4134,7 @@ fn apply_rejects_when_main_moved_after_approval() {
             db_path: None,
             session_id: session.id.clone(),
             operator_id: None,
+            accept_current: false,
         },
         &MockGitRepository,
     )
@@ -3618,6 +4202,9 @@ fn queue_shows_human_readable_candidate_states() {
             merge_attempt_id: "merge-session-verified".to_string(),
             risk_level: SemanticRiskLevel::Low,
             report_path: Some(".aichestra/artifacts/review-session-verified.yaml".to_string()),
+            proposed_patch_available: false,
+            fix_plan_artifact: None,
+            patch_artifact: None,
             created_at_ms: now_millis(),
         })
         .expect("insert verified review");
@@ -3739,8 +4326,74 @@ fn queue_shows_blocked_check_recovery_guidance() {
     assert!(output.contains("blocked_reason: checks_failed"));
     assert!(output.contains("recovery: Sandbox check(s) failed: test."));
     assert!(output.contains("test stderr: .aichestra/artifacts/merge-attempts/merge-session-blocked-check/checks/0-test.stderr"));
+    assert!(output.contains("Run `aich session reopen session-blocked-check`"));
     assert!(output.contains("Run `aich session complete session-blocked-check` after the fix"));
-    assert!(output.contains("then run aich session complete session-blocked-check"));
+    assert!(output.contains("next: aich session reopen session-blocked-check"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn queue_shows_rejected_recovery_guidance() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    insert_queue_candidate(
+        &ledger,
+        "session-rejected",
+        SessionStatus::Enqueued,
+        Some(MergeAttemptStatus::Verified),
+        false,
+    );
+    ledger
+        .insert_semantic_review(&SemanticReview {
+            id: "review-session-rejected".to_string(),
+            merge_attempt_id: "merge-session-rejected".to_string(),
+            risk_level: SemanticRiskLevel::Medium,
+            report_path: Some(".aichestra/artifacts/rejected-review.yaml".to_string()),
+            proposed_patch_available: false,
+            fix_plan_artifact: None,
+            patch_artifact: None,
+            created_at_ms: now_millis(),
+        })
+        .expect("insert review");
+    ledger
+        .update_merge_attempt_status(
+            "merge-session-rejected",
+            MergeAttemptStatus::Blocked,
+            now_millis(),
+        )
+        .expect("block rejected");
+    ledger
+        .append_event(
+            &NewEvent::new(EventName::MergeBlocked)
+                .with_subject("merge_attempt", "merge-session-rejected")
+                .with_data_json(
+                    "{\"operator_id\":\"local-user\",\"session_id\":\"session-rejected\",\"reason\":\"rejected\"}",
+                ),
+        )
+        .expect("blocked event");
+
+    let mut output = Vec::new();
+    render_queue(
+        &QueueOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+        },
+        &mut output,
+    )
+    .expect("render queue");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("blocked_reason: rejected"));
+    assert!(output.contains("recovery: A human rejected the verified candidate before apply."));
+    assert!(output.contains("semantic review: .aichestra/artifacts/rejected-review.yaml"));
+    assert!(output.contains("Run `aich session reopen session-rejected`"));
+    assert!(output.contains("next: aich session reopen session-rejected"));
 
     let _ = fs::remove_dir_all(repo);
 }

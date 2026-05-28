@@ -112,10 +112,12 @@ flowchart TB
 9. The candidate is mechanically merged using the same strategy that will be used to apply.
 10. Checks run in the sandbox and store stdout/stderr artifacts.
 11. `aich review` calls the semantic review adapter, then writes a report from the manifest, related applied/queued manifests, diff evidence, mechanical merge result, configured prompt, and sandbox check results. Required checks form the gate, while optional checks remain review evidence. The default MVP adapter is local and deterministic; provider-backed LLM adapters must preserve the same advisory boundary.
-12. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
-13. `aich apply` acquires the same local `merge-queue` lock, then fast-forwards main to the approved verified commit only after rechecking main has not moved.
-14. A candidate that should not continue can be withdrawn with `aich session abandon <session-id>`, which marks the session `abandoned` and removes it from the queue view without touching main.
-15. After apply or abandon, `aich session cleanup <session-id>` or `aich session prune --applied|--inactive` can remove session worktrees, session branches, and related sandbox worktrees. No-op and failed-start sessions can also be cleaned explicitly, or pruned with `aich session prune --inactive`.
+12. If semantic review produces a proposed patch or fix plan, Aichestra stores it as an artifact and requires the user to choose rework or explicit current-tree approval before normal approval can continue.
+13. `aich approve` records human approval for the exact verified tree/commit, including the operator identity.
+14. If the user decides the verified candidate should not be applied, `aich reject <session-id> --reason TEXT` records a human rejection and blocks that verified attempt. `aich session reopen <session-id>` returns the session to `running` so the session worktree can be revised and completed again.
+15. `aich apply` acquires the same local `merge-queue` lock, then fast-forwards main to the approved verified commit only after rechecking main has not moved.
+16. A candidate that should not continue can be withdrawn with `aich session abandon <session-id>`, which marks the session `abandoned` and removes it from the queue view without touching main.
+17. After apply or abandon, `aich session cleanup <session-id>` or `aich session prune --applied|--inactive` can remove session worktrees, session branches, and related sandbox worktrees. No-op and failed-start sessions can also be cleaned explicitly, or pruned with `aich session prune --inactive`.
 
 ## Safety boundary
 
@@ -136,6 +138,8 @@ The MVP is local and non-adversarial. It does not harden the machine against mal
 - Preflight runs configured checks inside the integration sandbox through the `aich-check` runner with explicit `required`, timeout, and environment settings. Required check failures or timeouts block verification; optional check failures are recorded for review without bypassing the required gate.
 - Ledger updates that record related state transitions, evidence rows, and events are grouped in SQLite transaction boundaries so partial metadata is less likely after ordinary write failures.
 - Semantic review is advisory evidence. The default local adapter is deterministic, the command adapter can delegate to any provider wrapper, and the LLM adapter can run provider CLIs such as Codex with stdin/YAML report contracts. Any path can block on explicit blocker risk, but it does not approve or apply changes.
+- Proposed patch artifacts from semantic review are advisory evidence. Rework runs only in the session worktree and must produce a new candidate that passes the normal queue gates.
+- Human rejection records an explicit local decision against the current verified candidate and marks that attempt blocked. Reopening only makes the session worktree editable again; it does not approve, apply, or reuse the old verified tree.
 - Approval records refer to the verified candidate tree/commit, not merely the original session branch.
 - Apply refuses a dirty main worktree and refuses any verified commit whose tree does not match the approved tree id.
 - Apply can recover an interrupted `applying` transition only when configured main is still at `main_before` or already at the approved verified commit.
@@ -158,3 +162,13 @@ Aichestra prevents structural breakage caused by parallel LLM coding workflows:
 - no unreviewed semantic risk report applied silently
 
 It does not guarantee business correctness when tests and review are insufficient.
+
+## Crate Boundaries
+
+The MVP now keeps the first layer of merge/review orchestration outside the CLI crate:
+
+- `aich-llm` owns the Semantic Review report contract, YAML parser, proposed-patch model, review input model, related-manifest model, and diff patch context model.
+- `aich-merge` owns pure merge-queue state classification and review/approval readiness checks for merge attempts.
+- `aich-cli` still performs command parsing, ledger transactions, artifact writes, provider process execution, and user-facing rendering.
+
+This is an incremental split. Git mutation, SQLite durability, and artifact storage remain in the existing CLI orchestration path until those behaviors can be moved without weakening the verified-tree rule.

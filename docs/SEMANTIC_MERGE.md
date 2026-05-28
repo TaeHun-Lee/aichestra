@@ -98,7 +98,10 @@ semantic_review:
     - "cargo test auth_login"
   proposed_patch:
     available: false
-    path: null
+    description: ""
+    fix_plan_artifact: ""
+    patch_artifact: ""
+    patch: ""
   uncertainty:
     - "No call graph index is available in MVP; review is based on manifests and diffs."
 ```
@@ -116,7 +119,7 @@ MVP starts with semantic review report generation only.
 
 The review input artifact includes the candidate manifest separately from the related manifest bundle. It also includes a `Patch Context` section sourced from `change_manifest.evidence.diff_patch_artifact`; small patches are included in full, while large patches are capped and retain the artifact path for manual inspection. Related manifests are labeled as `applied` or `queued`, include session and latest-attempt metadata when available, and are evidence for stale assumptions or cross-session conflicts; they do not by themselves approve, block, or reorder the queue.
 
-The report records the adapter reviewer id and `llm_executed` flag so the user can distinguish local deterministic evidence from a provider-backed Semantic Merge LLM review. Future LLM adapters should consume the same evidence bundle and return the same risk/report shape. They remain advisory and cannot approve, apply, reorder the queue, or bypass the integration-sandbox checks.
+The report records the adapter reviewer id and `llm_executed` flag so the user can distinguish local deterministic evidence from a provider-backed Semantic Merge LLM review. If the adapter returns `proposed_patch.available: true`, Aichestra stores a generated fix-plan artifact and, when inline `proposed_patch.patch` is present, a generated patch artifact under the merge-attempt artifact directory. Future LLM adapters should consume the same evidence bundle and return the same risk/report shape. They remain advisory and cannot approve, apply, reorder the queue, or bypass the integration-sandbox checks.
 
 The adapter is configured in `.aichestra/config.yaml`:
 
@@ -136,18 +139,18 @@ semantic_review:
 
 `aich init` writes the default semantic review prompt under `.aichestra/prompts/semantic-merge-review.md`. The rendered adapter input also begins with the required YAML output contract so provider-backed reviewers still receive the parser contract even if a target repo has an older or missing prompt file. A provider response that contains prose instead of a `semantic_review:` document is recorded as a blocked reviewer failure.
 
-Automatic patch application is optional and should remain behind explicit human approval. If a proposed patch is applied, the resulting tree becomes a new candidate and must go through checks again.
+Automatic patch application is not part of the MVP path. If a proposed patch or fix plan is produced, `aich approve <session-id>` refuses by default and asks the user to choose either `aich session rework <session-id> --review <semantic-review-id>` or `aich approve <session-id> --accept-current`. Rework runs the configured provider in the existing session worktree with the fix artifacts as input, then the resulting session changes must go through `complete`, `preflight`, `review`, `approve`, and `apply` again.
 
-## CLI implementation boundaries
+## Implementation boundaries
 
-The CLI semantic review code keeps the orchestration path separate from provider and report details:
+Semantic review is being split across crates in small steps:
 
-- `adapter`: local, command, and LLM adapter execution
-- `config`: `.aichestra/config.yaml` semantic review settings
-- `parser`: command/LLM YAML output parsing
-- `report`: local report construction and review artifact rendering
+- `aich-llm`: report contract structs, proposed patch model, command/LLM YAML output parsing, review input model, related manifest model, and diff patch context model
+- `aich-cli::semantic_review::adapter`: local, command, and LLM adapter process execution
+- `aich-cli::semantic_review::config`: `.aichestra/config.yaml` semantic review settings
+- `aich-cli::semantic_review::report`: local deterministic review construction and artifact rendering
 
-This split is internal only. The external review contract remains the same `semantic_review:` YAML report shape.
+The external review contract remains the same `semantic_review:` YAML report shape. The split does not make the reviewer authoritative; it still cannot approve, apply, reorder the queue, or bypass sandbox checks.
 
 ## Local reviewer risk heuristics
 
@@ -200,3 +203,7 @@ Human review should show:
 The user should approve with awareness of semantic risk.
 
 `aich approve <session-id>` can approve `low`, `medium`, or `high` semantic review results, because those risks remain advisory. A `blocked` semantic review marks the merge attempt blocked and must be resolved before approval.
+
+When the latest review includes a proposed patch, approval requires `--accept-current` to make clear that the operator is approving the already verified tree without applying the reviewer proposal.
+
+If the human reviewer decides the verified candidate should not continue, `aich reject <session-id> --reason TEXT` records that decision and blocks the verified attempt. The recovery path is `aich session reopen <session-id>`, revise the session worktree, then repeat `session complete -> preflight -> review -> approve -> apply`. Reopen does not apply reviewer suggestions automatically and does not carry the old verified tree forward.

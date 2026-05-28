@@ -7,11 +7,11 @@ use aich_core::{
 };
 use aich_git::GitRepository;
 use aich_ledger::Ledger;
+use aich_merge::ensure_attempt_can_be_approved as merge_ensure_attempt_can_be_approved;
 
 use crate::config::{main_branch_from_config, main_branch_ref};
 use crate::formatting::json_escape;
 use crate::options::ApproveOptions;
-use crate::semantic_review::ensure_attempt_can_be_reviewed;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, open_existing_ledger, resolve_active_operator, ApproveRunResult, CliError,
@@ -66,6 +66,12 @@ where
             attempt.id
         )));
     }
+    if latest_review.proposed_patch_available && !options.accept_current {
+        return Err(CliError::Usage(format!(
+            "semantic review '{}' produced a proposed patch or fix plan. Choose one path before approving:\n  rework: aich session rework {} --review {}\n  accept current verified tree: aich approve {} --accept-current",
+            latest_review.id, session.id, latest_review.id, session.id
+        )));
+    }
 
     let main_branch = main_branch_from_config(&config_path)?;
     let current_main = git_repo
@@ -94,12 +100,13 @@ where
         &NewEvent::new(EventName::ApprovalRequested)
             .with_subject("merge_attempt", attempt.id.clone())
             .with_data_json(format!(
-                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"verified_tree_id\":\"{}\",\"verified_commit_id\":\"{}\",\"semantic_risk_level\":\"{}\"}}",
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"verified_tree_id\":\"{}\",\"verified_commit_id\":\"{}\",\"semantic_risk_level\":\"{}\",\"accepted_current_despite_proposed_patch\":{}}}",
                 json_escape(&operator.id),
                 json_escape(&session.id),
                 json_escape(&approval.approved_verified_tree_id),
                 json_escape(&approval.approved_verified_commit_id),
-                json_escape(attempt.semantic_risk_level.as_deref().unwrap_or("unknown"))
+                json_escape(attempt.semantic_risk_level.as_deref().unwrap_or("unknown")),
+                latest_review.proposed_patch_available && options.accept_current
             )),
     )?;
     ledger.insert_approval(&approval)?;
@@ -133,24 +140,6 @@ pub(crate) fn latest_approval(
 }
 
 pub(crate) fn ensure_attempt_can_be_approved(attempt: &MergeAttempt) -> Result<(), CliError> {
-    ensure_attempt_can_be_reviewed(attempt)?;
-    if attempt
-        .semantic_risk_level
-        .as_deref()
-        .unwrap_or("")
-        .is_empty()
-    {
-        return Err(CliError::Usage(format!(
-            "merge attempt '{}' has no semantic risk result; run `aich review {}` first",
-            attempt.id, attempt.session_id
-        )));
-    }
-    if attempt.semantic_risk_level.as_deref() == Some(SemanticRiskLevel::Blocked.as_str()) {
-        return Err(CliError::Usage(format!(
-            "merge attempt '{}' is blocked by semantic review",
-            attempt.id
-        )));
-    }
-
-    Ok(())
+    merge_ensure_attempt_can_be_approved(attempt)
+        .map_err(|error| CliError::Usage(error.to_string()))
 }

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS schema_metadata (
 );
 
 INSERT INTO schema_metadata (key, value)
-VALUES ('schema_version', '4')
+VALUES ('schema_version', '5')
 ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
 CREATE TABLE IF NOT EXISTS operators (
@@ -101,6 +101,9 @@ CREATE TABLE IF NOT EXISTS semantic_reviews (
   merge_attempt_id TEXT NOT NULL REFERENCES merge_attempts(id) ON DELETE CASCADE,
   risk_level TEXT NOT NULL,
   report_path TEXT,
+  proposed_patch_available INTEGER NOT NULL DEFAULT 0,
+  fix_plan_artifact TEXT,
+  patch_artifact TEXT,
   created_at_ms INTEGER NOT NULL
 );
 
@@ -126,6 +129,7 @@ CREATE TABLE IF NOT EXISTS approvals (
   approved_verified_tree_id TEXT NOT NULL,
   approved_verified_commit_id TEXT NOT NULL,
   decision TEXT NOT NULL,
+  reason TEXT,
   created_at_ms INTEGER NOT NULL,
   CHECK (decision IN ('approved', 'rejected')),
   CHECK (length(approved_verified_tree_id) > 0),
@@ -158,5 +162,5 @@ CREATE INDEX IF NOT EXISTS idx_event_log_subject
 CREATE INDEX IF NOT EXISTS idx_merge_attempts_session
   ON merge_attempts(session_id, created_at_ms);
 
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;
 "#;

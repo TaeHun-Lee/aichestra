@@ -12,6 +12,10 @@ use aich_core::{
     SemanticReview, Session, SessionStatus,
 };
 use aich_ledger::MergeAttemptSemanticReviewUpdate;
+use aich_llm::{
+    DiffPatchContext, RelatedChangeManifest, RelatedChangeManifestRelation, SemanticReviewInput,
+};
+use aich_merge::ensure_attempt_can_be_reviewed as merge_ensure_attempt_can_be_reviewed;
 
 use crate::formatting::{
     display_path_for_ledger, json_escape, path_from_ledger, read_optional_text, sha256_hex,
@@ -30,17 +34,18 @@ use config::{
     semantic_review_adapter_config_from_config, semantic_review_prompt_path_from_config,
     SemanticReviewAdapterConfig, SemanticReviewAdapterKind,
 };
-use report::{
-    render_semantic_review_input, render_semantic_review_yaml, DiffPatchContext,
-    RelatedChangeManifest, RelatedChangeManifestRelation,
-};
+use report::{render_semantic_review_input, render_semantic_review_yaml};
 
-pub(crate) use adapter::{SemanticReviewAdapter, SemanticReviewAdapterRequest};
+pub(crate) use adapter::SemanticReviewAdapter;
+pub(crate) use aich_llm::LocalSemanticReviewReport;
+#[cfg(test)]
+pub(crate) use aich_llm::ProposedPatch;
+pub(crate) use aich_llm::SemanticReviewAdapterRequest;
 #[cfg(test)]
 pub(crate) use config::codex_semantic_review_command;
 #[cfg(test)]
-pub(crate) use report::{build_local_semantic_review_report, LocalSemanticReviewReport};
-pub(crate) use report::{SemanticReviewInput, SemanticReviewReportMetadata};
+pub(crate) use report::build_local_semantic_review_report;
+pub(crate) use report::SemanticReviewReportMetadata;
 
 pub(crate) fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError> {
     let config_path = options.repo_root.join(".aichestra/config.yaml");
@@ -181,7 +186,6 @@ where
         prompt_path: &prompt_path,
         prompt_content: prompt_content.as_deref(),
     };
-    let report = adapter.review(&adapter_request)?;
     let created_at_ms = now_millis();
     let review_id = next_semantic_review_id(created_at_ms);
     let artifact_dir = aichestra_dir
@@ -189,9 +193,11 @@ where
         .join("merge-attempts")
         .join(&attempt.id);
     fs::create_dir_all(&artifact_dir)?;
+    let mut report = adapter.review(&adapter_request)?;
     let input_path = artifact_dir.join(format!("{review_id}-input.md"));
     let report_path = artifact_dir.join(format!("{review_id}.yaml"));
     fs::write(&input_path, input)?;
+    persist_proposed_patch_artifacts(&options.repo_root, &artifact_dir, &review_id, &mut report)?;
     let report_yaml = render_semantic_review_yaml(
         &review_id,
         &session,
@@ -211,6 +217,9 @@ where
         merge_attempt_id: attempt.id.clone(),
         risk_level: report.risk_level,
         report_path: Some(display_path_for_ledger(&options.repo_root, &report_path)),
+        proposed_patch_available: report.proposed_patch.available,
+        fix_plan_artifact: report.proposed_patch.fix_plan_artifact.clone(),
+        patch_artifact: report.proposed_patch.patch_artifact.clone(),
         created_at_ms,
     };
     let block_levels = semantic_block_levels_from_config(&config_path)?;
@@ -232,14 +241,15 @@ where
         &NewEvent::new(EventName::MergeSemanticReviewCompleted)
             .with_subject("merge_attempt", attempt.id.clone())
             .with_data_json(format!(
-                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{}}}",
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{},\"proposed_patch_available\":{}}}",
                 json_escape(&operator.id),
                 json_escape(&session.id),
                 json_escape(&semantic_review.id),
                 json_escape(adapter.reviewer_id()),
                 adapter.llm_executed(),
                 report.risk_level.as_str(),
-                blocked
+                blocked,
+                semantic_review.proposed_patch_available
             )),
     )?;
     if blocked {
@@ -268,8 +278,79 @@ where
         summary: report.summary,
         required_actions: report.required_actions,
         suggested_tests: report.suggested_tests,
+        proposed_patch_available: report.proposed_patch.available,
+        fix_plan_artifact: report.proposed_patch.fix_plan_artifact,
+        patch_artifact: report.proposed_patch.patch_artifact,
         blocked,
     })
+}
+
+fn persist_proposed_patch_artifacts(
+    repo_root: &Path,
+    artifact_dir: &Path,
+    review_id: &str,
+    report: &mut LocalSemanticReviewReport,
+) -> Result<(), CliError> {
+    if !report.proposed_patch.available {
+        report.proposed_patch.fix_plan_artifact = None;
+        report.proposed_patch.patch_artifact = None;
+        report.proposed_patch.patch = None;
+        return Ok(());
+    }
+
+    let patch_artifact = match report.proposed_patch.patch.as_deref() {
+        Some(patch) => {
+            let patch_path = artifact_dir.join(format!("{review_id}-proposed.patch"));
+            fs::write(&patch_path, patch)?;
+            Some(display_path_for_ledger(repo_root, &patch_path))
+        }
+        None => None,
+    };
+
+    report.proposed_patch.patch_artifact = patch_artifact;
+    let fix_plan_path = artifact_dir.join(format!("{review_id}-fix-plan.md"));
+    fs::write(&fix_plan_path, render_fix_plan_artifact(review_id, report))?;
+    report.proposed_patch.fix_plan_artifact =
+        Some(display_path_for_ledger(repo_root, &fix_plan_path));
+    report.proposed_patch.patch = None;
+    Ok(())
+}
+
+fn render_fix_plan_artifact(review_id: &str, report: &LocalSemanticReviewReport) -> String {
+    let mut output = String::new();
+    output.push_str("# Semantic Review Proposed Fix\n\n");
+    output.push_str(&format!("- review_id: `{review_id}`\n"));
+    output.push_str(&format!("- risk_level: `{}`\n", report.risk_level.as_str()));
+    output.push_str(&format!("- summary: {}\n", report.summary));
+    if let Some(description) = report.proposed_patch.description.as_deref() {
+        output.push_str(&format!("- proposed_patch: {description}\n"));
+    } else {
+        output.push_str(
+            "- proposed_patch: Semantic reviewer requested rework without a description.\n",
+        );
+    }
+    if let Some(patch_artifact) = report.proposed_patch.patch_artifact.as_deref() {
+        output.push_str(&format!("- patch_artifact: `{patch_artifact}`\n"));
+    }
+
+    output.push_str("\n## Required Actions\n\n");
+    append_markdown_list(&mut output, &report.required_actions);
+    output.push_str("\n## Suggested Tests\n\n");
+    append_markdown_list(&mut output, &report.suggested_tests);
+    output.push_str("\n## Uncertainty\n\n");
+    append_markdown_list(&mut output, &report.uncertainty);
+    output
+}
+
+fn append_markdown_list(output: &mut String, values: &[String]) {
+    if values.is_empty() {
+        output.push_str("- none\n");
+        return;
+    }
+
+    for value in values {
+        output.push_str(&format!("- {value}\n"));
+    }
 }
 
 fn diff_patch_context_from_manifest(
@@ -392,30 +473,6 @@ fn read_related_change_manifest(
 }
 
 pub(crate) fn ensure_attempt_can_be_reviewed(attempt: &MergeAttempt) -> Result<(), CliError> {
-    if attempt.status != MergeAttemptStatus::Verified {
-        return Err(CliError::Usage(format!(
-            "merge attempt '{}' is not verified; run `aich preflight {}` again",
-            attempt.id, attempt.session_id
-        )));
-    }
-    if !attempt.checks_passed {
-        return Err(CliError::Usage(format!(
-            "merge attempt '{}' did not pass checks; fix the candidate and run preflight again",
-            attempt.id
-        )));
-    }
-    if attempt.verified_tree_id.as_deref().unwrap_or("").is_empty()
-        || attempt
-            .verified_commit_id
-            .as_deref()
-            .unwrap_or("")
-            .is_empty()
-    {
-        return Err(CliError::Usage(format!(
-            "merge attempt '{}' has no verified tree/commit; run `aich preflight {}` again",
-            attempt.id, attempt.session_id
-        )));
-    }
-
-    Ok(())
+    merge_ensure_attempt_can_be_reviewed(attempt)
+        .map_err(|error| CliError::Usage(error.to_string()))
 }
