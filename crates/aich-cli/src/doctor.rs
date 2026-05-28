@@ -164,7 +164,7 @@ pub(crate) fn run_doctor(options: &DoctorOptions) -> Result<DoctorRunResult, Cli
         ),
     }
 
-    match queue_entries(&ledger) {
+    match queue_entries(&ledger, None) {
         Ok(entries) => {
             add_doctor_check(
                 &mut checks,

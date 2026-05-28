@@ -45,6 +45,7 @@ Core behavior:
 - Change Manifest review/edit UX before semantic review
 - queue-head preflight with a durable SQLite queue lock
 - integration sandbox checks before approval
+- preflight check policy fingerprints that force re-preflight when required check settings change
 - semantic review through `local`, `command`, or `llm` adapters
 - review, approval, and apply summaries that show the exact verified commit/tree, checks, changed files, and next command
 - human approval for the exact verified tree/commit
@@ -106,6 +107,8 @@ cargo run -p aich-cli -- apply <session-id>
 
 Semantic review records the evidence fingerprint it reviewed, including the manifest id/hash, verified candidate identity, changed files, and sandbox check evidence. If any of that evidence changes after review, `aich approve` refuses until review is rerun, and `aich queue` shows `aich review <session-id>` as the next action.
 
+Preflight also records the check policy fingerprint from `.aichestra/config.yaml`. If check commands, `required`, timeout, or explicit environment settings change after preflight, `aich review`, `aich approve`, and `aich apply` refuse the stale candidate and `aich queue` points back to `aich preflight <session-id>`.
+
 Reject and revise a verified candidate instead of applying it:
 
 ```bash
@@ -156,7 +159,7 @@ semantic_review:
 
 `providers.<name>.command` is executed with the session worktree as `cwd`; the session task input is sent on stdin and stdout/stderr are stored as artifacts.
 
-`checks.commands[]` is parsed as structured YAML. `required: true` checks form the sandbox gate; failures or timeouts block preflight. `required: false` checks are recorded for review but do not block verification. Use `timeout_seconds` or `timeout_ms` for time limits, and `env` to pass explicit environment variables to the sandbox check process.
+`checks.commands[]` is parsed as structured YAML. `required: true` checks form the sandbox gate; failures or timeouts block preflight. `required: false` checks are recorded for review but do not block verification. Use `timeout_seconds` or `timeout_ms` for time limits, and `env` to pass explicit environment variables to the sandbox check process. These fields are part of the preflight check policy fingerprint, so changing them requires a fresh preflight before review, approval, or apply can proceed.
 
 `semantic_review.adapter` supports:
 

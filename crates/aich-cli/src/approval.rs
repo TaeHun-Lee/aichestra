@@ -15,6 +15,7 @@ use crate::manifest::{
     latest_change_manifest, semantic_review_evidence_fingerprint, semantic_review_stale_reasons,
 };
 use crate::options::ApproveOptions;
+use crate::preflight::ensure_preflight_check_policy_current;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, load_verified_candidate_summary, open_existing_ledger,
@@ -56,6 +57,7 @@ where
         ))
     })?;
     ensure_attempt_can_be_approved(&attempt)?;
+    ensure_preflight_check_policy_current(&attempt, &config_path, &session.id)?;
 
     let semantic_reviews = ledger.list_semantic_reviews(&attempt.id)?;
     let Some(latest_review) = semantic_reviews.last() else {

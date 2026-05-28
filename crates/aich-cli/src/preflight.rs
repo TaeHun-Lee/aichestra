@@ -10,7 +10,10 @@ use aich_git::{
 };
 use aich_ledger::{Ledger, MergeAttemptResultUpdate};
 
-use crate::checks::{check_commands_from_config, persist_preflight_checks};
+use crate::checks::{
+    check_commands_from_config, check_policy_fingerprint, check_policy_fingerprint_from_config,
+    check_policy_stale_reasons, persist_preflight_checks,
+};
 use crate::config::{main_branch_from_config, main_branch_ref};
 use crate::formatting::json_escape;
 use crate::options::PreflightOptions;
@@ -59,8 +62,10 @@ where
             session.id, session.id
         )));
     }
+    let check_commands = check_commands_from_config(&config_path)?;
+    let current_check_policy_fingerprint = check_policy_fingerprint(&check_commands);
     let _queue_lock = acquire_merge_queue_lock(&ledger, "preflight", &session.id)?;
-    ensure_preflight_queue_position(&ledger, &session.id)?;
+    ensure_preflight_queue_position(&ledger, &session.id, &current_check_policy_fingerprint)?;
 
     let main_branch = main_branch_from_config(&config_path)?;
     let main_ref = main_branch_ref(&main_branch);
@@ -89,6 +94,7 @@ where
         main_before_commit: main_before.clone(),
         candidate_commit: candidate_commit.clone(),
         apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+        check_policy_fingerprint: Some(current_check_policy_fingerprint.clone()),
         verified_tree_id: None,
         verified_commit_id: None,
         checks_passed: false,
@@ -100,16 +106,16 @@ where
         &NewEvent::new(EventName::MergePreflightStarted)
             .with_subject("merge_attempt", attempt.id.clone())
             .with_data_json(format!(
-                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"main_before_commit\":\"{}\",\"candidate_commit\":\"{}\"}}",
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"main_before_commit\":\"{}\",\"candidate_commit\":\"{}\",\"check_policy_fingerprint\":\"{}\"}}",
                 json_escape(&operator.id),
                 json_escape(&session.id),
                 json_escape(&main_before),
-                json_escape(&candidate_commit)
+                json_escape(&candidate_commit),
+                json_escape(&current_check_policy_fingerprint)
             )),
     )?;
     tx.commit()?;
 
-    let check_commands = check_commands_from_config(&config_path)?;
     let outcome = match preflight_runner.run_preflight(&PreflightRequest {
         repo_path: options.repo_root.clone(),
         sandbox_path: sandbox_path.clone(),
@@ -183,8 +189,12 @@ fn next_merge_attempt_id(created_at_ms: i64) -> String {
     format!("merge-attempt-{created_at_ms}-{counter}")
 }
 
-fn ensure_preflight_queue_position(ledger: &Ledger, session_id: &str) -> Result<(), CliError> {
-    let entries = queue_entries(ledger)?;
+fn ensure_preflight_queue_position(
+    ledger: &Ledger,
+    session_id: &str,
+    current_check_policy_fingerprint: &str,
+) -> Result<(), CliError> {
+    let entries = queue_entries(ledger, Some(current_check_policy_fingerprint))?;
 
     if let Some(blocking) = entries.iter().find(|entry| {
         entry.session.id != session_id
@@ -241,6 +251,31 @@ fn ensure_preflight_queue_position(ledger: &Ledger, session_id: &str) -> Result<
     }
 
     Ok(())
+}
+
+pub(crate) fn ensure_preflight_check_policy_current(
+    attempt: &MergeAttempt,
+    config_path: &Path,
+    session_id: &str,
+) -> Result<(), CliError> {
+    let current_fingerprint = check_policy_fingerprint_from_config(config_path)?;
+    let stale_reasons = check_policy_stale_reasons(
+        attempt.check_policy_fingerprint.as_deref(),
+        &current_fingerprint,
+    );
+    if stale_reasons.is_empty() {
+        return Ok(());
+    }
+
+    let reasons = stale_reasons
+        .iter()
+        .map(|reason| reason.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(CliError::Usage(format!(
+        "Preflight check policy for merge attempt '{}' is stale ({reasons}). Run `aich preflight {}` again, then rerun review/approval before applying.",
+        attempt.id, session_id
+    )))
 }
 
 struct PreflightFinishContext<'a> {

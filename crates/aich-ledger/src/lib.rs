@@ -175,6 +175,11 @@ impl Ledger {
             "ALTER TABLE semantic_reviews ADD COLUMN review_evidence_fingerprint TEXT",
         )?;
         self.ensure_column(
+            "merge_attempts",
+            "check_policy_fingerprint",
+            "ALTER TABLE merge_attempts ADD COLUMN check_policy_fingerprint TEXT",
+        )?;
+        self.ensure_column(
             "approvals",
             "reason",
             "ALTER TABLE approvals ADD COLUMN reason TEXT",
@@ -639,10 +644,10 @@ impl Ledger {
             r#"
             INSERT INTO merge_attempts (
               id, session_id, status, main_before_commit, candidate_commit, apply_strategy,
-              verified_tree_id, verified_commit_id, checks_passed, semantic_risk_level,
-              created_at_ms, updated_at_ms
+              check_policy_fingerprint, verified_tree_id, verified_commit_id, checks_passed,
+              semantic_risk_level, created_at_ms, updated_at_ms
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             params![
                 &attempt.id,
@@ -651,6 +656,7 @@ impl Ledger {
                 &attempt.main_before_commit,
                 &attempt.candidate_commit,
                 &attempt.apply_strategy,
+                &attempt.check_policy_fingerprint,
                 &attempt.verified_tree_id,
                 &attempt.verified_commit_id,
                 if attempt.checks_passed { 1_i64 } else { 0_i64 },
@@ -754,7 +760,8 @@ impl Ledger {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT id, session_id, status, main_before_commit, candidate_commit, apply_strategy,
-                   verified_tree_id, verified_commit_id, checks_passed, semantic_risk_level
+                   check_policy_fingerprint, verified_tree_id, verified_commit_id, checks_passed,
+                   semantic_risk_level
             FROM merge_attempts
             WHERE id = ?1
             "#,
@@ -774,7 +781,8 @@ impl Ledger {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT id, session_id, status, main_before_commit, candidate_commit, apply_strategy,
-                   verified_tree_id, verified_commit_id, checks_passed, semantic_risk_level
+                   check_policy_fingerprint, verified_tree_id, verified_commit_id, checks_passed,
+                   semantic_risk_level
             FROM merge_attempts
             WHERE session_id = ?1
             ORDER BY created_at_ms ASC, id ASC
@@ -1208,7 +1216,7 @@ fn merge_attempt_from_row(row: &Row<'_>) -> rusqlite::Result<MergeAttempt> {
             Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
         )
     })?;
-    let checks_passed: i64 = row.get(8)?;
+    let checks_passed: i64 = row.get(9)?;
 
     Ok(MergeAttempt {
         id: row.get(0)?,
@@ -1217,10 +1225,11 @@ fn merge_attempt_from_row(row: &Row<'_>) -> rusqlite::Result<MergeAttempt> {
         main_before_commit: row.get(3)?,
         candidate_commit: row.get(4)?,
         apply_strategy: row.get(5)?,
-        verified_tree_id: row.get(6)?,
-        verified_commit_id: row.get(7)?,
+        check_policy_fingerprint: row.get(6)?,
+        verified_tree_id: row.get(7)?,
+        verified_commit_id: row.get(8)?,
         checks_passed: checks_passed != 0,
-        semantic_risk_level: row.get(9)?,
+        semantic_risk_level: row.get(10)?,
     })
 }
 
@@ -1364,6 +1373,40 @@ mod tests {
 
         assert!(columns.contains(&"required".to_string()));
         assert!(columns.contains(&"timed_out".to_string()));
+
+        drop(ledger);
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn migrates_existing_merge_attempt_check_policy_column() {
+        let db_path = unique_db_path();
+        let conn = Connection::open(&db_path).expect("open raw db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE merge_attempts (
+              id TEXT PRIMARY KEY,
+              session_id TEXT NOT NULL,
+              status TEXT NOT NULL,
+              main_before_commit TEXT NOT NULL,
+              candidate_commit TEXT NOT NULL,
+              apply_strategy TEXT NOT NULL,
+              verified_tree_id TEXT,
+              verified_commit_id TEXT,
+              checks_passed INTEGER NOT NULL DEFAULT 0,
+              semantic_risk_level TEXT,
+              created_at_ms INTEGER NOT NULL,
+              updated_at_ms INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("create old merge_attempts table");
+        drop(conn);
+
+        let ledger = Ledger::open(&db_path).expect("open ledger");
+        let columns = table_columns(&ledger, "merge_attempts");
+
+        assert!(columns.contains(&"check_policy_fingerprint".to_string()));
 
         drop(ledger);
         let _ = fs::remove_file(db_path);
@@ -1620,6 +1663,7 @@ mod tests {
             main_before_commit: "main-before".to_string(),
             candidate_commit: "head-commit".to_string(),
             apply_strategy: "merge_no_ff_commit".to_string(),
+            check_policy_fingerprint: Some("check-policy".to_string()),
             verified_tree_id: None,
             verified_commit_id: None,
             checks_passed: false,

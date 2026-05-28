@@ -10,6 +10,7 @@ use crate::approval::{ensure_attempt_can_be_approved, latest_approval};
 use crate::config::{main_branch_from_config, main_branch_ref};
 use crate::formatting::json_escape;
 use crate::options::ApplyOptions;
+use crate::preflight::ensure_preflight_check_policy_current;
 use crate::queue::acquire_merge_queue_lock;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
@@ -104,6 +105,7 @@ where
     }
 
     ensure_attempt_can_be_approved(&attempt)?;
+    ensure_preflight_check_policy_current(&attempt, &config_path, &locked_session.id)?;
     assert_verified_candidate_can_apply(&attempt, &approval, &current_main)
         .map_err(|error| CliError::Usage(apply_violation_message(&session.id, &error)))?;
 

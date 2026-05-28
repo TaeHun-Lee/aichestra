@@ -277,6 +277,7 @@ mod tests {
             main_before_commit: "main".to_string(),
             candidate_commit: "head".to_string(),
             apply_strategy: "merge_no_ff_commit".to_string(),
+            check_policy_fingerprint: Some("check-policy".to_string()),
             verified_tree_id: verified.then(|| "tree".to_string()),
             verified_commit_id: verified.then(|| "verified".to_string()),
             checks_passed: verified,

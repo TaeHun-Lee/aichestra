@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS merge_attempts (
   main_before_commit TEXT NOT NULL,
   candidate_commit TEXT NOT NULL,
   apply_strategy TEXT NOT NULL,
+  check_policy_fingerprint TEXT,
   verified_tree_id TEXT,
   verified_commit_id TEXT,
   checks_passed INTEGER NOT NULL DEFAULT 0,
@@ -168,5 +169,5 @@ CREATE INDEX IF NOT EXISTS idx_event_log_subject
 CREATE INDEX IF NOT EXISTS idx_merge_attempts_session
   ON merge_attempts(session_id, created_at_ms);
 
-PRAGMA user_version = 7;
+PRAGMA user_version = 8;
 "#;

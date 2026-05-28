@@ -79,6 +79,11 @@ fn preflight_records_verified_attempt_and_check_artifacts() {
         Some("verified-commit")
     );
     assert!(result.merge_attempt.checks_passed);
+    let expected_check_policy_fingerprint = current_check_policy_fingerprint(&repo);
+    assert_eq!(
+        result.merge_attempt.check_policy_fingerprint.as_deref(),
+        Some(expected_check_policy_fingerprint.as_str())
+    );
     assert_eq!(result.check_results.len(), 1);
     assert_eq!(result.check_results[0].result, CheckResultStatus::Passed);
     assert!(result.check_results[0]
@@ -224,6 +229,7 @@ fn preflight_refuses_while_verified_candidate_is_pending() {
     .expect("init");
     let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-verified",
         SessionStatus::Enqueued,
@@ -277,6 +283,7 @@ fn preflight_allows_refreshing_same_verified_candidate() {
                 main_before_commit: "old-main".to_string(),
                 candidate_commit: "head-commit".to_string(),
                 apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+                check_policy_fingerprint: Some(current_check_policy_fingerprint(&repo)),
                 verified_tree_id: Some("old-tree".to_string()),
                 verified_commit_id: Some("old-commit".to_string()),
                 checks_passed: true,

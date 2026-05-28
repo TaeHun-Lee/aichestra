@@ -8,7 +8,7 @@ use aich_ledger::Ledger;
 
 use crate::command_line::parse_check_command;
 use crate::config::{load_config, AichestraCheckCommandConfig};
-use crate::formatting::display_path_for_ledger;
+use crate::formatting::{display_path_for_ledger, sha256_hex};
 use crate::CliError;
 
 pub(crate) fn persist_preflight_checks(
@@ -77,6 +77,59 @@ pub(crate) fn check_commands_from_config(
     }
 
     Ok(commands)
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum CheckPolicyStaleReason {
+    LegacyCheckPolicyEvidence,
+    CheckPolicyChanged,
+}
+
+impl CheckPolicyStaleReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyCheckPolicyEvidence => "legacy_check_policy_evidence",
+            Self::CheckPolicyChanged => "check_policy_changed",
+        }
+    }
+}
+
+pub(crate) fn check_policy_fingerprint_from_config(config_path: &Path) -> Result<String, CliError> {
+    let commands = check_commands_from_config(config_path)?;
+    Ok(check_policy_fingerprint(&commands))
+}
+
+pub(crate) fn check_policy_fingerprint(commands: &[CheckCommand]) -> String {
+    let mut input = String::new();
+    for (index, command) in commands.iter().enumerate() {
+        push_field(&mut input, "index", &index.to_string());
+        push_field(&mut input, "name", &command.name);
+        push_field(&mut input, "program", &command.program);
+        for (arg_index, arg) in command.args.iter().enumerate() {
+            push_field(&mut input, &format!("arg.{arg_index}"), arg);
+        }
+        push_field(&mut input, "required", &command.required.to_string());
+        match command.timeout_ms {
+            Some(timeout_ms) => push_field(&mut input, "timeout_ms", &timeout_ms.to_string()),
+            None => push_field(&mut input, "timeout_ms", "none"),
+        }
+        for (key, value) in &command.env {
+            push_field(&mut input, &format!("env.{key}"), value);
+        }
+        input.push('\n');
+    }
+    sha256_hex(input.as_bytes())
+}
+
+pub(crate) fn check_policy_stale_reasons(
+    stored_fingerprint: Option<&str>,
+    current_fingerprint: &str,
+) -> Vec<CheckPolicyStaleReason> {
+    match stored_fingerprint {
+        Some(stored) if stored == current_fingerprint => Vec::new(),
+        Some(_) => vec![CheckPolicyStaleReason::CheckPolicyChanged],
+        None => vec![CheckPolicyStaleReason::LegacyCheckPolicyEvidence],
+    }
 }
 
 fn check_command_from_config(
@@ -168,6 +221,13 @@ fn sanitize_artifact_name(value: &str) -> String {
     } else {
         sanitized
     }
+}
+
+fn push_field(output: &mut String, key: &str, value: &str) {
+    output.push_str(key);
+    output.push('\0');
+    output.push_str(value);
+    output.push('\0');
 }
 
 #[cfg(test)]

@@ -306,6 +306,130 @@ fn approve_refuses_stale_semantic_review_after_verified_candidate_changes() {
 }
 
 #[test]
+fn review_refuses_stale_preflight_after_check_policy_changes() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    configure_single_check(
+        &repo,
+        "new-required-check",
+        "cargo test --all --locked",
+        true,
+    );
+
+    let err = run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("check_policy_changed") && message.contains("aich preflight")),
+        "{err}"
+    );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn approve_refuses_stale_preflight_after_check_policy_changes() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    configure_single_check(
+        &repo,
+        "new-required-check",
+        "cargo test --all --locked",
+        true,
+    );
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("check_policy_changed") && message.contains("aich preflight")),
+        "{err}"
+    );
+
+    let preflight_runner =
+        MockPreflightRunner::new(PreflightOutcome::Verified(aich_git::PreflightVerified {
+            verified_tree_id: "verified-tree-after-policy-change".to_string(),
+            verified_commit_id: "verified-commit-after-policy-change".to_string(),
+            checks: vec![PreflightCheckOutput {
+                name: "new-required-check".to_string(),
+                command: "cargo test --all --locked".to_string(),
+                required: true,
+                timed_out: false,
+                passed: true,
+                code: Some(0),
+                stdout: "ok\n".to_string(),
+                stderr: String::new(),
+            }],
+        }));
+    run_preflight_with(
+        &PreflightOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+        &preflight_runner,
+    )
+    .expect("refresh preflight");
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review after refresh");
+    let result = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve after refresh");
+
+    assert_eq!(
+        result.approval.approved_verified_commit_id,
+        "verified-commit-after-policy-change"
+    );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn approve_requires_explicit_accept_current_when_review_has_proposed_patch() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -560,6 +684,68 @@ fn apply_uses_approved_verified_commit_and_marks_applied() {
         .expect("events")
         .iter()
         .any(|event| event.name == "merge.applied"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn apply_refuses_when_check_policy_changes_after_approval() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve");
+    configure_single_check(
+        &repo,
+        "new-required-check",
+        "cargo test --all --locked",
+        true,
+    );
+    let applier = MockVerifiedCommitApplier::new(AppliedVerifiedCommit {
+        applied_commit_id: "verified-commit".to_string(),
+        applied_tree_id: "verified-tree".to_string(),
+        stdout: String::new(),
+        stderr: String::new(),
+    });
+
+    let err = run_apply_with(
+        &ApplyOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockGitRepository,
+        &applier,
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("check_policy_changed") && message.contains("aich preflight")),
+        "{err}"
+    );
+    assert!(applier.requests.borrow().is_empty());
 
     let _ = fs::remove_dir_all(repo);
 }

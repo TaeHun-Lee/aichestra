@@ -250,6 +250,11 @@ fn verified_candidate_fingerprint(attempt: &MergeAttempt) -> String {
     push_field(&mut input, "apply_strategy", &attempt.apply_strategy);
     push_option_field(
         &mut input,
+        "check_policy_fingerprint",
+        attempt.check_policy_fingerprint.as_deref(),
+    );
+    push_option_field(
+        &mut input,
         "verified_tree_id",
         attempt.verified_tree_id.as_deref(),
     );

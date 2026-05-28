@@ -24,6 +24,7 @@ use crate::formatting::{
 };
 use crate::manifest::{parse_manifest_diff_patch_artifact, semantic_review_evidence_fingerprint};
 use crate::options::ReviewOptions;
+use crate::preflight::ensure_preflight_check_policy_current;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, next_semantic_review_id, open_existing_ledger, resolve_active_operator,
@@ -140,6 +141,7 @@ where
         ))
     })?;
     ensure_attempt_can_be_reviewed(&attempt)?;
+    ensure_preflight_check_policy_current(&attempt, &config_path, &session.id)?;
 
     let patch_set = ledger.list_patch_sets(&session.id)?.into_iter().last();
     let changed_files = match patch_set.as_ref() {

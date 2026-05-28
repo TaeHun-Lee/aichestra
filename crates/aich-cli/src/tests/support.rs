@@ -414,6 +414,7 @@ fn seed_verified_review_candidate(
         main_before_commit: "base-commit".to_string(),
         candidate_commit: "head-commit".to_string(),
         apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+        check_policy_fingerprint: Some(current_check_policy_fingerprint(repo)),
         verified_tree_id: Some("verified-tree".to_string()),
         verified_commit_id: Some("verified-commit".to_string()),
         checks_passed: true,
@@ -444,7 +445,8 @@ fn configure_semantic_review_command(repo: &Path, reviewer_id: &str, command: &s
     fs::write(
             repo.join(".aichestra/config.yaml"),
             format!(
-                "semantic_review:\n  adapter: command\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  risk_block_levels:\n    - blocked\n"
+                "{}semantic_review:\n  adapter: command\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  risk_block_levels:\n    - blocked\n",
+                default_checks_config_yaml()
             ),
         )
         .expect("write semantic review config");
@@ -454,7 +456,8 @@ fn configure_semantic_review_llm(repo: &Path, reviewer_id: &str, provider: &str,
     fs::write(
             repo.join(".aichestra/config.yaml"),
             format!(
-                "semantic_review:\n  adapter: llm\n  reviewer_provider: {provider}\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  risk_block_levels:\n    - blocked\n"
+                "{}semantic_review:\n  adapter: llm\n  reviewer_provider: {provider}\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  risk_block_levels:\n    - blocked\n",
+                default_checks_config_yaml()
             ),
         )
         .expect("write semantic review llm config");
@@ -470,7 +473,8 @@ fn configure_semantic_review_llm_with_timeout(
     fs::write(
             repo.join(".aichestra/config.yaml"),
             format!(
-                "semantic_review:\n  adapter: llm\n  reviewer_provider: {provider}\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  timeout_ms: {timeout_ms}\n  risk_block_levels:\n    - blocked\n"
+                "{}semantic_review:\n  adapter: llm\n  reviewer_provider: {provider}\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  timeout_ms: {timeout_ms}\n  risk_block_levels:\n    - blocked\n",
+                default_checks_config_yaml()
             ),
         )
         .expect("write semantic review llm timeout config");
@@ -485,6 +489,21 @@ fn configure_provider_command(repo: &Path, provider: &str, command: &str) {
         ),
     )
     .expect("write provider command config");
+}
+
+fn configure_single_check(repo: &Path, name: &str, command: &str, required: bool) {
+    fs::write(
+        repo.join(".aichestra/config.yaml"),
+        format!(
+            "checks:\n  commands:\n    - name: {name}\n      command: {}\n      required: {required}\n      timeout_seconds: 30\n",
+            yaml_single_quote(command)
+        ),
+    )
+    .expect("write check config");
+}
+
+fn default_checks_config_yaml() -> &'static str {
+    "checks:\n  commands:\n    - name: fmt\n      command: cargo fmt --all -- --check\n      required: true\n      timeout_seconds: 600\n    - name: clippy\n      command: cargo clippy --all-targets -- -D warnings\n      required: true\n      timeout_seconds: 600\n    - name: test\n      command: cargo test --all\n      required: true\n      timeout_seconds: 600\n"
 }
 
 fn yaml_single_quote(value: &str) -> String {
@@ -780,6 +799,7 @@ fn mark_seeded_candidate_applied(repo: &Path, session: &Session) {
             .clone()
             .unwrap_or_else(|| "head-commit".to_string()),
         apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+        check_policy_fingerprint: Some(current_check_policy_fingerprint(repo)),
         verified_tree_id: Some(format!("{}-tree", session.id)),
         verified_commit_id: Some(format!("{}-verified", session.id)),
         checks_passed: true,
@@ -794,6 +814,7 @@ fn mark_seeded_candidate_applied(repo: &Path, session: &Session) {
 }
 
 fn insert_queue_candidate(
+    repo: &Path,
     ledger: &Ledger,
     id: &str,
     session_status: SessionStatus,
@@ -832,6 +853,7 @@ fn insert_queue_candidate(
         main_before_commit: "base-commit".to_string(),
         candidate_commit: format!("{id}-head"),
         apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+        check_policy_fingerprint: Some(current_check_policy_fingerprint(repo)),
         verified_tree_id: needs_verified_ids.then(|| format!("{id}-tree")),
         verified_commit_id: needs_verified_ids.then(|| format!("{id}-verified")),
         checks_passed: needs_verified_ids,
@@ -853,6 +875,11 @@ fn insert_queue_candidate(
             })
             .expect("insert queue approval");
     }
+}
+
+fn current_check_policy_fingerprint(repo: &Path) -> String {
+    crate::checks::check_policy_fingerprint_from_config(&repo.join(".aichestra/config.yaml"))
+        .expect("check policy fingerprint")
 }
 
 fn write_semantic_review_test_command(

@@ -54,6 +54,8 @@ Editing a Change Manifest does not change the candidate patch, verified commit, 
 
 Every semantic review stores fingerprints for the evidence it reviewed: Change Manifest id/hash, verified candidate fields, changed files, sandbox check results, and an aggregate review-evidence fingerprint. If any of those inputs change after review, the previous review becomes stale. `aich approve <session-id>` refuses stale review evidence and asks the operator to rerun `aich review <session-id>`. `aich queue` also points the candidate back to review instead of approval when it detects stale review evidence.
 
+The merge attempt separately stores the preflight check policy fingerprint. If `.aichestra/config.yaml` check commands, required flags, timeouts, or explicit environment settings change after preflight, Aichestra treats the verified attempt as stale before semantic review can be trusted. The operator must rerun `aich preflight <session-id>` and then run semantic review again.
+
 ## Semantic Merge LLM role
 
 The Semantic Merge LLM is an advisory reviewer and patch planner.
@@ -139,7 +141,7 @@ MVP starts with semantic review report generation only.
 
 The review input artifact includes the candidate manifest separately from the related manifest bundle. It also includes a `Patch Context` section sourced from `change_manifest.evidence.diff_patch_artifact`; small patches are included in full, while large patches are capped and retain the artifact path for manual inspection. Related manifests are labeled as `applied` or `queued`, include session and latest-attempt metadata when available, and are evidence for stale assumptions or cross-session conflicts; they do not by themselves approve, block, or reorder the queue.
 
-The `semantic_reviews` ledger row records `change_manifest_id`, `change_manifest_hash`, `verified_candidate_fingerprint`, `changed_files_fingerprint`, `check_results_fingerprint`, and `review_evidence_fingerprint` so later approval can verify that the report still corresponds to the current evidence bundle.
+The `merge_attempts` ledger row records the preflight `check_policy_fingerprint`. The `semantic_reviews` ledger row records `change_manifest_id`, `change_manifest_hash`, `verified_candidate_fingerprint`, `changed_files_fingerprint`, `check_results_fingerprint`, and `review_evidence_fingerprint` so later approval can verify that the report still corresponds to the current evidence bundle.
 
 The report records the adapter reviewer id and `llm_executed` flag so the user can distinguish local deterministic evidence from a provider-backed Semantic Merge LLM review. If the adapter returns `proposed_patch.available: true`, Aichestra stores a generated fix-plan artifact and, when inline `proposed_patch.patch` is present, a generated patch artifact under the merge-attempt artifact directory. Future LLM adapters should consume the same evidence bundle and return the same risk/report shape. They remain advisory and cannot approve, apply, reorder the queue, or bypass the integration-sandbox checks.
 

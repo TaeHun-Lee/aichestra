@@ -11,6 +11,7 @@ fn queue_shows_human_readable_candidate_states() {
     let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
 
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-enqueued",
         SessionStatus::Enqueued,
@@ -18,6 +19,7 @@ fn queue_shows_human_readable_candidate_states() {
         false,
     );
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-preflight",
         SessionStatus::Enqueued,
@@ -25,6 +27,7 @@ fn queue_shows_human_readable_candidate_states() {
         false,
     );
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-verified",
         SessionStatus::Enqueued,
@@ -50,6 +53,7 @@ fn queue_shows_human_readable_candidate_states() {
         })
         .expect("insert verified review");
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-blocked",
         SessionStatus::Enqueued,
@@ -57,6 +61,7 @@ fn queue_shows_human_readable_candidate_states() {
         false,
     );
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-approved",
         SessionStatus::Enqueued,
@@ -64,6 +69,7 @@ fn queue_shows_human_readable_candidate_states() {
         true,
     );
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-applying",
         SessionStatus::Enqueued,
@@ -71,6 +77,7 @@ fn queue_shows_human_readable_candidate_states() {
         true,
     );
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-applied",
         SessionStatus::Completed,
@@ -151,6 +158,43 @@ fn queue_points_stale_semantic_review_back_to_review() {
 }
 
 #[test]
+fn queue_points_stale_preflight_check_policy_back_to_preflight() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+    configure_single_check(
+        &repo,
+        "new-required-check",
+        "cargo test --all --locked",
+        true,
+    );
+
+    let options = QueueOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    };
+    let mut output = Vec::new();
+    render_queue(&options, &mut output).expect("render queue");
+    let output = String::from_utf8(output).expect("utf8 output");
+
+    assert!(output.contains("preflight_stale: yes (check_policy_changed)"));
+    assert!(output.contains("next: aich preflight session-review"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn queue_shows_blocked_check_recovery_guidance() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {
@@ -160,6 +204,7 @@ fn queue_shows_blocked_check_recovery_guidance() {
     .expect("init");
     let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-blocked-check",
         SessionStatus::Enqueued,
@@ -227,6 +272,7 @@ fn queue_shows_rejected_recovery_guidance() {
     .expect("init");
     let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-rejected",
         SessionStatus::Enqueued,
@@ -490,6 +536,7 @@ fn doctor_warns_when_apply_recovery_is_pending() {
     .expect("init");
     let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
     insert_queue_candidate(
+        &repo,
         &ledger,
         "session-applying",
         SessionStatus::Enqueued,

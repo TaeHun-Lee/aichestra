@@ -79,6 +79,7 @@ fn local_review_blocks_invalid_change_manifest_yaml() {
         main_before_commit: "base-commit".to_string(),
         candidate_commit: "head-commit".to_string(),
         apply_strategy: PREFLIGHT_APPLY_STRATEGY.to_string(),
+        check_policy_fingerprint: Some("check-policy".to_string()),
         verified_tree_id: Some("tree".to_string()),
         verified_commit_id: Some("commit".to_string()),
         checks_passed: true,

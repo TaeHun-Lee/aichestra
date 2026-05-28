@@ -90,6 +90,8 @@ Applied candidates are omitted from the queue view because they no longer requir
 The pure state classification for these labels lives in `aich-merge`; `aich-cli` renders the labels and recovery guidance.
 Pure blocked-reason inference from merge evidence, such as blocker semantic review, failed required checks, or missing verified commit/tree, also lives in `aich-merge`; `aich-cli` still prefers explicit event-log reasons when they exist.
 
+When a verified or approved candidate was created under an older check policy, `aich queue` keeps the candidate visible but reports `preflight_stale` and points the next action back to `aich preflight <session-id>`. This prevents an approval or apply from using a tree that never passed the current required-check policy.
+
 ## Queue lock
 
 `aich preflight <session-id>` and `aich apply <session-id>` acquire the durable local `merge-queue` lock before reading or mutating merge-queue state. The lock is stored in SQLite under `queue_locks` with the holder id, operation, optional session id, and acquisition timestamp.
@@ -131,15 +133,19 @@ If the merge fails, record conflict files and block.
 3. Runs `git merge --no-ff --no-commit <candidate_commit>` in the sandbox.
 4. Commits the merged sandbox result as the verified candidate commit.
 5. Runs configured checks from `.aichestra/config.yaml` inside the sandbox through the `aich-check` runner. Each check supports `required`, `timeout_seconds` or `timeout_ms`, and `env`.
-6. Stores check stdout/stderr artifacts and the resulting merge attempt status.
+6. Stores the normalized check policy fingerprint, check stdout/stderr artifacts, and the resulting merge attempt status.
 
-If the mechanical merge conflicts, or any required check fails or times out, the merge attempt is marked `blocked`. Optional checks are still recorded as evidence, but their failure does not mark the candidate blocked. If all required checks pass, the merge attempt stores `verified_tree_id` and `verified_commit_id` and is marked `verified`. Ledger updates that belong to one transition, such as preflight start, preflight finish, review result, approval, and apply finalization, are grouped in SQLite transaction boundaries.
+If the mechanical merge conflicts, or any required check fails or times out, the merge attempt is marked `blocked`. Optional checks are still recorded as evidence, but their failure does not mark the candidate blocked. If all required checks pass, the merge attempt stores `verified_tree_id`, `verified_commit_id`, and the check policy fingerprint, then is marked `verified`. Ledger updates that belong to one transition, such as preflight start, preflight finish, review result, approval, and apply finalization, are grouped in SQLite transaction boundaries.
+
+The check policy fingerprint covers the configured check order, name, command program/args, `required`, timeout, and explicit `env` values after config normalization. If this fingerprint differs from the current `.aichestra/config.yaml`, the verified candidate is stale. `aich review`, `aich approve`, and `aich apply` refuse it and point back to `aich preflight <session-id>`. `aich queue` reports this as `preflight_stale: yes (check_policy_changed)` or `legacy_check_policy_evidence` for attempts created before the fingerprint existed.
 
 ## Review implementation
 
 `aich review <session-id>` runs after a verified preflight attempt exists and before approval. The MVP command selects the latest verified merge attempt for the session, loads the Change Manifest, changed-file evidence, patch summary, bounded patch hunk context from the recorded diff patch artifact, verified tree/commit ids, and sandbox check results, then writes a semantic review report artifact under `.aichestra/artifacts/merge-attempts/<merge-attempt-id>/`.
 
 Each semantic review row stores fingerprints for the evidence the reviewer saw: Change Manifest id/hash, verified candidate fields, changed-file evidence, sandbox check evidence, and an aggregate review-evidence fingerprint. If any of that evidence changes after review, the existing review is stale. Approval refuses until `aich review <session-id>` is rerun against the current evidence.
+
+Review also requires the preflight check policy to still match the current config. If the gate policy changed, semantic review is not run against old check evidence; the candidate must be preflighted again first.
 
 The default local MVP reviewer is deterministic and conservative. It records `llm_executed: false`, flags missing or drifted manifest evidence as `blocked`, flags shared API/config/schema/dependency surfaces as `high`, and otherwise keeps generated-from-diff manifests at least `medium` risk because semantic intent is incomplete.
 
@@ -156,6 +162,7 @@ If the review includes `proposed_patch.available: true`, Aichestra writes a fix-
 - the latest merge attempt is `verified`
 - sandbox checks passed
 - verified tree and commit ids are present
+- the check policy used by preflight still matches the current `.aichestra/config.yaml`
 - semantic review has been recorded
 - semantic review was run against the current Change Manifest id/hash, verified candidate, changed files, and sandbox check evidence
 - semantic review did not block the attempt
@@ -181,6 +188,7 @@ Before apply:
 - ensure main has not moved since `main_before`
 - ensure human approval refers to the verified merge attempt
 - ensure the approved tree/commit ids match the preflight record
+- ensure the check policy used by preflight still matches the current `.aichestra/config.yaml`
 - ensure the main worktree is checked out to configured `git.main_branch`
 - ensure the main worktree is clean
 

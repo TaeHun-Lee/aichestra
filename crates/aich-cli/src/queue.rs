@@ -9,6 +9,7 @@ use aich_core::{
 use aich_ledger::{EventRecord, Ledger};
 use aich_merge::{infer_queue_blocked_reason, queue_candidate_status};
 
+use crate::checks::{check_policy_fingerprint_from_config, check_policy_stale_reasons};
 use crate::formatting::{json_escape, json_string_field, short_hash};
 use crate::manifest::{
     latest_change_manifest, semantic_review_evidence_fingerprint, semantic_review_stale_reasons,
@@ -26,6 +27,7 @@ pub(crate) struct QueueEntry {
     pub(crate) latest_attempt: Option<MergeAttempt>,
     pub(crate) latest_approval: Option<Approval>,
     pub(crate) latest_review: Option<SemanticReview>,
+    pub(crate) preflight_stale_reasons: Vec<String>,
     pub(crate) review_stale_reasons: Vec<String>,
     pub(crate) check_results: Vec<CheckResult>,
     pub(crate) blocked_recovery: Option<BlockedRecovery>,
@@ -49,7 +51,13 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
     }
 
     let ledger = Ledger::open(&db_path)?;
-    let entries = queue_entries(&ledger)?;
+    let config_path = options.repo_root.join(".aichestra/config.yaml");
+    let current_check_policy_fingerprint = if config_path.exists() {
+        Some(check_policy_fingerprint_from_config(&config_path)?)
+    } else {
+        None
+    };
+    let entries = queue_entries(&ledger, current_check_policy_fingerprint.as_deref())?;
     let summary = queue_status_summary(&entries);
     let queue_lock = ledger.get_queue_lock(MERGE_QUEUE_LOCK_NAME)?;
     let now = now_millis();
@@ -164,6 +172,13 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
                 }
             }
         }
+        if !entry.preflight_stale_reasons.is_empty() {
+            writeln!(
+                out,
+                "  preflight_stale: yes ({})",
+                entry.preflight_stale_reasons.join(", ")
+            )?;
+        }
         if let Some(approval) = entry.latest_approval.as_ref() {
             writeln!(
                 out,
@@ -276,7 +291,10 @@ struct QueueStatusSummary {
     blocked: usize,
 }
 
-pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError> {
+pub(crate) fn queue_entries(
+    ledger: &Ledger,
+    current_check_policy_fingerprint: Option<&str>,
+) -> Result<Vec<QueueEntry>, CliError> {
     let mut entries = Vec::new();
     let events = ledger.list_events()?;
 
@@ -301,6 +319,19 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
                 .last();
             check_results = ledger.list_check_results(&attempt.id)?;
         }
+        let preflight_stale_reasons = latest_attempt
+            .as_ref()
+            .zip(current_check_policy_fingerprint)
+            .map(|(attempt, current_fingerprint)| {
+                check_policy_stale_reasons(
+                    attempt.check_policy_fingerprint.as_deref(),
+                    current_fingerprint,
+                )
+                .into_iter()
+                .map(|reason| reason.as_str().to_string())
+                .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let review_stale_reasons = latest_review
             .as_ref()
             .zip(latest_manifest.as_ref())
@@ -345,6 +376,7 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
             latest_attempt,
             latest_approval,
             latest_review,
+            preflight_stale_reasons,
             review_stale_reasons,
             check_results,
             blocked_recovery,
@@ -558,6 +590,9 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
             "aich apply {} (retry or finalize interrupted apply; unlock a stale queue lock first if needed)",
             entry.session.id
         ),
+        "verified" | "approved" if !entry.preflight_stale_reasons.is_empty() => {
+            format!("aich preflight {}", entry.session.id)
+        }
         "verified" if !entry.review_stale_reasons.is_empty() => {
             format!("aich review {}", entry.session.id)
         }
