@@ -514,7 +514,10 @@ fn native_cleanup_prunes_registered_worktree_when_directory_is_missing() {
 
     assert!(outcome.session_worktree_removed);
     assert!(outcome.branch_deleted);
-    assert!(!git(&repo, &["worktree", "list", "--porcelain"]).contains("session-1"));
+    let worktree_list = git(&repo, &["worktree", "list", "--porcelain"]);
+    assert!(!worktree_list
+        .lines()
+        .any(|line| line == format!("worktree {}", session_worktree.display())));
 
     fs::remove_dir_all(temp_dir).expect("remove temp repo");
 }

@@ -314,6 +314,16 @@ fn init_creates_state_directories_config_db_and_event() {
     assert!(repo.join(".aichestra/artifacts").is_dir());
     assert!(repo.join(".aichestra/sandboxes").is_dir());
     assert!(repo.join(".aichestra/worktrees").is_dir());
+    assert!(repo.join(".aichestra/prompts/change-manifest.md").exists());
+    assert!(repo
+        .join(".aichestra/prompts/semantic-merge-review.md")
+        .exists());
+    assert!(repo
+        .join(".aichestra/templates/change-manifest.yaml")
+        .exists());
+    assert!(repo
+        .join(".aichestra/schemas/change-manifest.schema.yaml")
+        .exists());
     assert!(repo.join(".aichestra/aichestra.db").exists());
 
     let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
@@ -2028,6 +2038,9 @@ fn review_uses_injected_semantic_review_adapter() {
         .report_path
         .with_file_name(format!("{}-input.md", result.semantic_review.id));
     let input = fs::read_to_string(input_path).expect("read input");
+    assert!(input.contains("## Adapter Output Contract"));
+    assert!(input.contains("Return only a YAML document"));
+    assert!(input.contains("semantic_review:"));
     assert!(input.contains("- reviewer: `mock_llm_reviewer`"));
     assert!(input.contains("- llm_executed: `true`"));
 
@@ -3554,6 +3567,15 @@ fn queue_shows_human_readable_candidate_states() {
         Some(MergeAttemptStatus::Verified),
         false,
     );
+    ledger
+        .insert_semantic_review(&SemanticReview {
+            id: "review-session-verified".to_string(),
+            merge_attempt_id: "merge-session-verified".to_string(),
+            risk_level: SemanticRiskLevel::Low,
+            report_path: Some(".aichestra/artifacts/review-session-verified.yaml".to_string()),
+            created_at_ms: now_millis(),
+        })
+        .expect("insert verified review");
     insert_queue_candidate(
         &ledger,
         "session-blocked",
@@ -3603,7 +3625,8 @@ fn queue_shows_human_readable_candidate_states() {
     assert!(output.contains("- session-approved [approved]"));
     assert!(output.contains("- session-applying [applying]"));
     assert!(output.contains("next: aich preflight session-enqueued"));
-    assert!(output.contains("next: aich review session-verified"));
+    assert!(output.contains("review: review-session-verified (low)"));
+    assert!(output.contains("next: aich approve session-verified"));
     assert!(output.contains("next: aich apply session-approved"));
     assert!(output.contains("next: aich apply session-applying"));
     assert!(!output.contains("session-applied ["));

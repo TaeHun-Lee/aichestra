@@ -133,6 +133,8 @@ semantic_review:
 
 `adapter: llm` is the built-in LLM wrapper path. With `reviewer_provider: codex`, Aichestra runs `codex exec` non-interactively with a read-only sandbox, no command approval, the rendered review input on stdin, and the same YAML output contract. Custom LLM providers can use `adapter: llm` with an explicit `command`, which lets a local wrapper call any provider while keeping the same audit artifacts and blocking behavior.
 
+`aich init` writes the default semantic review prompt under `.aichestra/prompts/semantic-merge-review.md`. The rendered adapter input also begins with the required YAML output contract so provider-backed reviewers still receive the parser contract even if a target repo has an older or missing prompt file. A provider response that contains prose instead of a `semantic_review:` document is recorded as a blocked reviewer failure.
+
 Automatic patch application is optional and should remain behind explicit human approval. If a proposed patch is applied, the resulting tree becomes a new candidate and must go through checks again.
 
 ## CLI implementation boundaries

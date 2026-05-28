@@ -49,7 +49,10 @@ use apply::run_apply_with;
 use approval::run_approve_with;
 use auth::run_auth_command;
 pub(crate) use auth::{ensure_default_operator, resolve_active_operator};
-use config::DEFAULT_CONFIG;
+use config::{
+    DEFAULT_CHANGE_MANIFEST_PROMPT, DEFAULT_CHANGE_MANIFEST_SCHEMA,
+    DEFAULT_CHANGE_MANIFEST_TEMPLATE, DEFAULT_CONFIG, DEFAULT_SEMANTIC_REVIEW_PROMPT,
+};
 use doctor::{render_doctor, run_doctor};
 use formatting::yes_no;
 #[cfg(test)]
@@ -566,6 +569,9 @@ fn init_repo(options: &InitOptions) -> Result<InitResult, CliError> {
     fs::create_dir_all(aichestra_dir.join("artifacts"))?;
     fs::create_dir_all(aichestra_dir.join("sandboxes"))?;
     fs::create_dir_all(aichestra_dir.join("worktrees"))?;
+    fs::create_dir_all(aichestra_dir.join("prompts"))?;
+    fs::create_dir_all(aichestra_dir.join("templates"))?;
+    fs::create_dir_all(aichestra_dir.join("schemas"))?;
 
     let config_path = aichestra_dir.join("config.yaml");
     let config_created = if config_path.exists() {
@@ -574,6 +580,26 @@ fn init_repo(options: &InitOptions) -> Result<InitResult, CliError> {
         fs::write(&config_path, DEFAULT_CONFIG)?;
         true
     };
+    ensure_default_file(
+        &aichestra_dir.join("prompts").join("change-manifest.md"),
+        DEFAULT_CHANGE_MANIFEST_PROMPT,
+    )?;
+    ensure_default_file(
+        &aichestra_dir
+            .join("prompts")
+            .join("semantic-merge-review.md"),
+        DEFAULT_SEMANTIC_REVIEW_PROMPT,
+    )?;
+    ensure_default_file(
+        &aichestra_dir.join("templates").join("change-manifest.yaml"),
+        DEFAULT_CHANGE_MANIFEST_TEMPLATE,
+    )?;
+    ensure_default_file(
+        &aichestra_dir
+            .join("schemas")
+            .join("change-manifest.schema.yaml"),
+        DEFAULT_CHANGE_MANIFEST_SCHEMA,
+    )?;
 
     let db_path = options
         .db_path
@@ -588,6 +614,13 @@ fn init_repo(options: &InitOptions) -> Result<InitResult, CliError> {
         db_path,
         config_created,
     })
+}
+
+fn ensure_default_file(path: &Path, contents: &str) -> Result<(), CliError> {
+    if !path.exists() {
+        fs::write(path, contents)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn next_semantic_review_id(created_at_ms: i64) -> String {

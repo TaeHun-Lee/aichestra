@@ -31,13 +31,17 @@ Your job is to find semantic conflicts that Git may not detect. You are advisory
 
 ## Output format
 
-Return YAML:
+Return only YAML. Do not include Markdown headings, prose, analysis notes, verdict text,
+or fenced code blocks. The first non-whitespace characters in your response must be
+`semantic_review:`.
+
+Use this shape:
 
 ```yaml
 semantic_review:
   session_id: ""
   merge_attempt_id: ""
-  risk_level: "low | medium | high | blocked"
+  risk_level: "medium"
   summary: ""
   suspected_conflicts:
     - type: "api_contract_change | stale_assumption | behavior_conflict | test_gap | config_conflict | manifest_mismatch | unknown"
@@ -56,6 +60,7 @@ semantic_review:
 
 ## Rules
 
+- Choose exactly one `risk_level`: `low`, `medium`, `high`, or `blocked`.
 - Do not say the merge is safe only because there is no textual Git conflict.
 - If tests were not run in the latest-main sandbox, treat that as a risk.
 - Required check failures or timeouts are blocker evidence. Optional check failures are review evidence, but they do not by themselves prove the verified tree failed the required gate.

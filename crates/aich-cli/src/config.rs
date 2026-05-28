@@ -89,6 +89,23 @@ safety:
   refuse_force_push_features: true
 "#;
 
+pub(crate) const DEFAULT_CHANGE_MANIFEST_PROMPT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.aichestra/prompts/change-manifest.md"
+));
+pub(crate) const DEFAULT_SEMANTIC_REVIEW_PROMPT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.aichestra/prompts/semantic-merge-review.md"
+));
+pub(crate) const DEFAULT_CHANGE_MANIFEST_TEMPLATE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.aichestra/templates/change-manifest.yaml"
+));
+pub(crate) const DEFAULT_CHANGE_MANIFEST_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../.aichestra/schemas/change-manifest.schema.yaml"
+));
+
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct AichestraConfig {
     pub(crate) git: Option<AichestraGitConfig>,

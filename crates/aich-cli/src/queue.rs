@@ -535,6 +535,7 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
             "aich apply {} (retry or finalize interrupted apply; unlock a stale queue lock first if needed)",
             entry.session.id
         ),
+        "verified" if entry.latest_review.is_some() => format!("aich approve {}", entry.session.id),
         "verified" => format!("aich review {}", entry.session.id),
         "approved" => format!("aich apply {}", entry.session.id),
         "blocked" => format!(

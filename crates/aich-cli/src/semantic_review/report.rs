@@ -312,6 +312,7 @@ pub(crate) struct SemanticReviewInput<'a> {
 pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> String {
     let mut output = String::new();
     output.push_str("# Semantic Review Input\n\n");
+    append_adapter_output_contract(&mut output, input.session, input.attempt);
     output.push_str(&format!("- reviewer: `{}`\n", input.reviewer_id));
     output.push_str(&format!("- llm_executed: `{}`\n", input.llm_executed));
     output.push_str(&format!("- session_id: `{}`\n", input.session.id));
@@ -423,6 +424,33 @@ pub(super) fn render_semantic_review_input(input: SemanticReviewInput<'_>) -> St
     }
 
     output
+}
+
+fn append_adapter_output_contract(output: &mut String, session: &Session, attempt: &MergeAttempt) {
+    output.push_str("## Adapter Output Contract\n\n");
+    output.push_str(
+        "Return only a YAML document. Do not include Markdown headings, prose, analysis notes, verdict text, or fenced code blocks.\n",
+    );
+    output.push_str("The first non-whitespace characters of stdout must be `semantic_review:`.\n");
+    output.push_str("Choose exactly one risk_level: `low`, `medium`, `high`, or `blocked`.\n\n");
+    output.push_str("```yaml\n");
+    output.push_str("semantic_review:\n");
+    output.push_str(&format!("  session_id: {}\n", yaml_quote(&session.id)));
+    output.push_str(&format!(
+        "  merge_attempt_id: {}\n",
+        yaml_quote(&attempt.id)
+    ));
+    output.push_str("  risk_level: \"medium\"\n");
+    output.push_str("  summary: \"\"\n");
+    output.push_str("  suspected_conflicts: []\n");
+    output.push_str("  required_actions: []\n");
+    output.push_str("  suggested_tests: []\n");
+    output.push_str("  proposed_patch:\n");
+    output.push_str("    available: false\n");
+    output.push_str("    description: \"\"\n");
+    output.push_str("    patch_artifact: \"\"\n");
+    output.push_str("  uncertainty: []\n");
+    output.push_str("```\n\n");
 }
 
 fn append_related_change_manifest(output: &mut String, related: &RelatedChangeManifest) {
