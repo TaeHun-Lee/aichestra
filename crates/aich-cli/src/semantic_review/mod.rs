@@ -65,6 +65,7 @@ pub(crate) fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult
             kind: SemanticReviewAdapterKind::Command,
             reviewer_id,
             command,
+            timeout_ms,
             ..
         } => {
             let command = command.ok_or_else(|| {
@@ -76,6 +77,7 @@ pub(crate) fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult
             let adapter = CommandSemanticReviewAdapter::new(
                 reviewer_id.unwrap_or_else(|| COMMAND_SEMANTIC_REVIEWER.to_string()),
                 command,
+                timeout_ms,
             );
             run_review_with_adapter(options, &adapter)
         }
@@ -91,6 +93,7 @@ pub(crate) fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult
                     .unwrap_or_else(|| format!("{provider}_{LLM_SEMANTIC_REVIEWER}")),
                 provider,
                 command,
+                config.timeout_ms,
             );
             run_review_with_adapter(options, &adapter)
         }

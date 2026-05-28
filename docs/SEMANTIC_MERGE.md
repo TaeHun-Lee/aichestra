@@ -131,9 +131,10 @@ semantic_review:
   model: optional-provider-model
   profile: optional-provider-profile
   command: your-review-command --flag
+  timeout_seconds: 600
 ```
 
-`adapter: command` is provider-agnostic. Aichestra passes the rendered review input artifact to the command on stdin and expects stdout to contain a `semantic_review:` YAML document matching the report schema. The report is parsed with `serde_yaml` into a structured report model; malformed YAML, missing `risk_level`, missing `summary`, invalid risk values, or incorrectly typed lists are rejected. The command is executed directly as a program plus args, not through a shell. If the command exits non-zero or returns an invalid report, Aichestra records a `blocked` semantic review so the candidate cannot be approved or applied until the reviewer configuration/output is fixed.
+`adapter: command` is provider-agnostic. Aichestra passes the rendered review input artifact to the command on stdin and expects stdout to contain a `semantic_review:` YAML document matching the report schema. The report is parsed with `serde_yaml` into a structured report model; malformed YAML, missing `risk_level`, missing `summary`, invalid risk values, or incorrectly typed lists are rejected. The command is executed directly as a program plus args, not through a shell. If the command exits non-zero, times out via `timeout_ms` or `timeout_seconds`, or returns an invalid report, Aichestra records a `blocked` semantic review so the candidate cannot be approved or applied until the reviewer configuration/output is fixed.
 
 `adapter: llm` is the built-in LLM wrapper path. With `reviewer_provider: codex`, Aichestra runs `codex exec` non-interactively with a read-only sandbox, no command approval, the rendered review input on stdin, and the same YAML output contract. Custom LLM providers can use `adapter: llm` with an explicit `command`, which lets a local wrapper call any provider while keeping the same audit artifacts and blocking behavior.
 

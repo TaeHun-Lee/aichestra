@@ -69,6 +69,7 @@ semantic_review:
   adapter: local
   reviewer_id: local_mvp_static_reviewer
   prompt_path: .aichestra/prompts/semantic-merge-review.md
+  timeout_seconds: 600
   risk_block_levels:
     - blocked
   allow_patch_suggestions: true
@@ -154,6 +155,8 @@ pub(crate) struct AichestraSemanticReviewConfig {
     pub(crate) profile: Option<String>,
     pub(crate) command: Option<String>,
     pub(crate) prompt_path: Option<String>,
+    pub(crate) timeout_ms: Option<u64>,
+    pub(crate) timeout_seconds: Option<u64>,
     pub(crate) risk_block_levels: Option<Vec<String>>,
 }
 

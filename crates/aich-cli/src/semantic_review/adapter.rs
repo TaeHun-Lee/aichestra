@@ -1,6 +1,8 @@
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use aich_llm::{
     render_semantic_review_input, LocalSemanticReviewReport, SemanticReviewAdapterRequest,
@@ -57,13 +59,19 @@ impl SemanticReviewAdapter for LocalSemanticReviewAdapter {
 pub(super) struct CommandSemanticReviewAdapter {
     reviewer_id: String,
     command: ProcessCommandSpec,
+    timeout_ms: Option<u64>,
 }
 
 impl CommandSemanticReviewAdapter {
-    pub(super) fn new(reviewer_id: String, command: ProcessCommandSpec) -> Self {
+    pub(super) fn new(
+        reviewer_id: String,
+        command: ProcessCommandSpec,
+        timeout_ms: Option<u64>,
+    ) -> Self {
         Self {
             reviewer_id,
             command,
+            timeout_ms,
         }
     }
 }
@@ -97,17 +105,21 @@ impl SemanticReviewAdapter for CommandSemanticReviewAdapter {
             prompt_path: request.prompt_path,
             prompt_content: request.prompt_content,
         });
-        let output =
-            match run_semantic_review_command(&self.command, &review_input, request.repo_root) {
-                Ok(output) => output,
-                Err(error) => {
-                    return Ok(command_semantic_review_failure_report(
-                        "Semantic review command could not run.",
-                        error,
-                        &self.command,
-                    ));
-                }
-            };
+        let output = match run_semantic_review_command(
+            &self.command,
+            &review_input,
+            request.repo_root,
+            self.timeout_ms,
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                return Ok(command_semantic_review_failure_report(
+                    "Semantic review command could not run.",
+                    error,
+                    &self.command,
+                ));
+            }
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -142,14 +154,21 @@ pub(super) struct LlmSemanticReviewAdapter {
     reviewer_id: String,
     provider: String,
     command: ProcessCommandSpec,
+    timeout_ms: Option<u64>,
 }
 
 impl LlmSemanticReviewAdapter {
-    pub(super) fn new(reviewer_id: String, provider: String, command: ProcessCommandSpec) -> Self {
+    pub(super) fn new(
+        reviewer_id: String,
+        provider: String,
+        command: ProcessCommandSpec,
+        timeout_ms: Option<u64>,
+    ) -> Self {
         Self {
             reviewer_id,
             provider,
             command,
+            timeout_ms,
         }
     }
 }
@@ -183,18 +202,22 @@ impl SemanticReviewAdapter for LlmSemanticReviewAdapter {
             prompt_path: request.prompt_path,
             prompt_content: request.prompt_content,
         });
-        let output =
-            match run_semantic_review_command(&self.command, &review_input, request.repo_root) {
-                Ok(output) => output,
-                Err(error) => {
-                    return Ok(llm_semantic_review_failure_report(
-                        "Semantic review LLM adapter could not run.",
-                        error,
-                        &self.provider,
-                        &self.command,
-                    ));
-                }
-            };
+        let output = match run_semantic_review_command(
+            &self.command,
+            &review_input,
+            request.repo_root,
+            self.timeout_ms,
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                return Ok(llm_semantic_review_failure_report(
+                    "Semantic review LLM adapter could not run.",
+                    error,
+                    &self.provider,
+                    &self.command,
+                ));
+            }
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -232,6 +255,7 @@ fn run_semantic_review_command(
     command_spec: &ProcessCommandSpec,
     review_input: &str,
     working_dir: &Path,
+    timeout_ms: Option<u64>,
 ) -> Result<Output, String> {
     let mut child = Command::new(&command_spec.program)
         .args(&command_spec.args)
@@ -247,33 +271,93 @@ fn run_semantic_review_command(
             )
         })?;
 
-    let write_result = match child.stdin.take() {
-        Some(mut stdin) => stdin.write_all(review_input.as_bytes()).map_err(|error| {
-            format!(
-                "failed to write review input to semantic review command `{}` stdin: {error}",
-                command_spec.display()
-            )
+    let input = review_input.as_bytes().to_vec();
+    let command_display = command_spec.display();
+    let write_handle = match child.stdin.take() {
+        Some(mut stdin) => thread::spawn(move || {
+            stdin.write_all(&input).map_err(|error| {
+                format!(
+                    "failed to write review input to semantic review command `{command_display}` stdin: {error}"
+                )
+            })
         }),
-        None => Err(format!(
-            "failed to open stdin for semantic review command `{}`",
-            command_spec.display()
-        )),
+        None => {
+            return Err(format!(
+                "failed to open stdin for semantic review command `{}`",
+                command_spec.display()
+            ))
+        }
     };
 
-    let output = child.wait_with_output().map_err(|error| {
+    let output_result = wait_with_optional_timeout(child, command_spec, timeout_ms);
+    let write_result = write_handle.join().map_err(|_| {
         format!(
-            "failed to wait for semantic review command `{}`: {error}",
+            "semantic review command `{}` stdin writer panicked",
             command_spec.display()
         )
     })?;
+    let output = output_result?;
 
     if let Err(error) = write_result {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "{error}; stderr: {}",
-            truncate_for_report(stderr.trim(), 1_000)
-        ));
+        if output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "{error}; stderr: {}",
+                truncate_for_report(stderr.trim(), 1_000)
+            ));
+        }
     }
 
     Ok(output)
+}
+
+fn wait_with_optional_timeout(
+    mut child: std::process::Child,
+    command_spec: &ProcessCommandSpec,
+    timeout_ms: Option<u64>,
+) -> Result<Output, String> {
+    let Some(timeout_ms) = timeout_ms else {
+        return child.wait_with_output().map_err(|error| {
+            format!(
+                "failed to wait for semantic review command `{}`: {error}",
+                command_spec.display()
+            )
+        });
+    };
+
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_status)) => {
+                return child.wait_with_output().map_err(|error| {
+                    format!(
+                        "failed to collect semantic review command `{}` output: {error}",
+                        command_spec.display()
+                    )
+                });
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let output = child.wait_with_output().map_err(|error| {
+                    format!(
+                        "semantic review command `{}` timed out after {timeout_ms}ms and failed to collect output after kill: {error}",
+                        command_spec.display()
+                    )
+                })?;
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!(
+                    "semantic review command `{}` timed out after {timeout_ms}ms; stderr: {}",
+                    command_spec.display(),
+                    truncate_for_report(stderr.trim(), 1_000)
+                ));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Err(error) => {
+                return Err(format!(
+                    "failed to wait for semantic review command `{}`: {error}",
+                    command_spec.display()
+                ));
+            }
+        }
+    }
 }

@@ -969,6 +969,22 @@ fn configure_semantic_review_llm(repo: &Path, reviewer_id: &str, provider: &str,
         .expect("write semantic review llm config");
 }
 
+fn configure_semantic_review_llm_with_timeout(
+    repo: &Path,
+    reviewer_id: &str,
+    provider: &str,
+    command: &str,
+    timeout_ms: u64,
+) {
+    fs::write(
+            repo.join(".aichestra/config.yaml"),
+            format!(
+                "semantic_review:\n  adapter: llm\n  reviewer_provider: {provider}\n  reviewer_id: {reviewer_id}\n  command: {command}\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  timeout_ms: {timeout_ms}\n  risk_block_levels:\n    - blocked\n"
+            ),
+        )
+        .expect("write semantic review llm timeout config");
+}
+
 fn configure_provider_command(repo: &Path, provider: &str, command: &str) {
     fs::write(
         repo.join(".aichestra/config.yaml"),
@@ -2846,6 +2862,165 @@ YAML
             .len(),
         1
     );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn review_blocks_when_llm_adapter_returns_prose_instead_of_yaml() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let command = write_semantic_review_test_command(
+        &repo,
+        "prose-llm-semantic-review",
+        r#"[Console]::In.ReadToEnd() | Out-Null
+[Console]::Out.WriteLine('The candidate looks fine, but this is not YAML.')
+"#,
+        r#"cat >/dev/null
+printf '%s\n' 'The candidate looks fine, but this is not YAML.'
+"#,
+    );
+    configure_semantic_review_llm(&repo, "prose_llm_reviewer", "custom", &command);
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    let result = run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+
+    assert_eq!(
+        result.semantic_review.risk_level,
+        SemanticRiskLevel::Blocked
+    );
+    assert!(result.blocked);
+    assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Blocked);
+    assert!(result
+        .summary
+        .contains("Semantic review LLM adapter returned an invalid report"));
+
+    let report = fs::read_to_string(&result.report_path).expect("read report");
+    assert!(report.contains("reviewer: \"prose_llm_reviewer\""));
+    assert!(report.contains("llm_reviewer_failure"));
+    assert!(report.contains("missing semantic_review root"));
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    assert_eq!(
+        ledger
+            .list_semantic_reviews(&attempt.id)
+            .expect("semantic reviews")
+            .len(),
+        1
+    );
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "merge.blocked" && event.data_json.contains("semantic_review")
+    }));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn review_blocks_when_llm_adapter_exits_nonzero() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let command = write_semantic_review_test_command(
+        &repo,
+        "failing-llm-semantic-review",
+        r#"[Console]::In.ReadToEnd() | Out-Null
+[Console]::Error.WriteLine('provider failed before YAML')
+exit 9
+"#,
+        r#"cat >/dev/null
+printf '%s\n' 'provider failed before YAML' >&2
+exit 9
+"#,
+    );
+    configure_semantic_review_llm(&repo, "failing_llm_reviewer", "custom", &command);
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    let result = run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+
+    assert_eq!(
+        result.semantic_review.risk_level,
+        SemanticRiskLevel::Blocked
+    );
+    assert!(result.blocked);
+    assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Blocked);
+    assert!(result
+        .summary
+        .contains("Semantic review LLM adapter exited with a non-zero status"));
+
+    let report = fs::read_to_string(&result.report_path).expect("read report");
+    assert!(report.contains("llm_reviewer_failure"));
+    assert!(report.contains("provider failed before YAML"));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn review_blocks_when_llm_adapter_times_out() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let command = write_semantic_review_test_command(
+        &repo,
+        "timeout-llm-semantic-review",
+        r#"while ($true) {
+  Start-Sleep -Milliseconds 100
+}
+"#,
+        r#"while :; do :; done
+"#,
+    );
+    configure_semantic_review_llm_with_timeout(
+        &repo,
+        "timeout_llm_reviewer",
+        "custom",
+        &command,
+        50,
+    );
+    let (session, _attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    let result = run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+
+    assert_eq!(
+        result.semantic_review.risk_level,
+        SemanticRiskLevel::Blocked
+    );
+    assert!(result.blocked);
+    assert_eq!(result.merge_attempt.status, MergeAttemptStatus::Blocked);
+    assert!(result
+        .summary
+        .contains("Semantic review LLM adapter could not run"));
+
+    let report = fs::read_to_string(&result.report_path).expect("read report");
+    assert!(report.contains("llm_reviewer_failure"));
+    assert!(report.contains("timed out after 50ms"));
 
     let _ = fs::remove_dir_all(repo);
 }

@@ -137,6 +137,7 @@ git:
 
 semantic_review:
   adapter: local
+  timeout_seconds: 600
   risk_block_levels:
     - blocked
 ```
@@ -152,6 +153,8 @@ semantic_review:
 - `local`: deterministic MVP reviewer
 - `command`: external command that returns a `semantic_review:` YAML document on stdout
 - `llm`: provider wrapper path; the built-in `codex` provider uses non-interactive read-only `codex exec`
+
+Use `semantic_review.timeout_seconds` or `semantic_review.timeout_ms` to bound command and LLM reviewer execution. Non-zero exit, timeout, or invalid YAML records a blocked semantic review.
 
 ## Recovery
 

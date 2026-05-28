@@ -141,7 +141,7 @@ If the mechanical merge conflicts, or any required check fails or times out, the
 
 The default local MVP reviewer is deterministic and conservative. It records `llm_executed: false`, flags missing or drifted manifest evidence as `blocked`, flags shared API/config/schema/dependency surfaces as `high`, and otherwise keeps generated-from-diff manifests at least `medium` risk because semantic intent is incomplete.
 
-`semantic_review.adapter: command` delegates review to a configured command that reads the rendered review input from stdin and returns `semantic_review:` YAML on stdout. `semantic_review.adapter: llm` uses the same contract for LLM providers; the built-in `codex` provider runs `codex exec` non-interactively in read-only mode, while custom providers can supply an explicit command. If a command or LLM adapter fails, exits non-zero, or returns an invalid report, the review result is recorded as `blocked`.
+`semantic_review.adapter: command` delegates review to a configured command that reads the rendered review input from stdin and returns `semantic_review:` YAML on stdout. `semantic_review.adapter: llm` uses the same contract for LLM providers; the built-in `codex` provider runs `codex exec` non-interactively in read-only mode, while custom providers can supply an explicit command. If a command or LLM adapter fails, exits non-zero, times out via `timeout_ms` or `timeout_seconds`, or returns an invalid report, the review result is recorded as `blocked`.
 
 If the configured `semantic_review.risk_block_levels` contains the produced risk level, the merge attempt is marked `blocked`. By default only `blocked` risk blocks the attempt. Non-blocking risks remain advisory evidence for the later human approval gate.
 

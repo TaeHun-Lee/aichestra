@@ -56,6 +56,7 @@ semantic_review:
   adapter: local
   reviewer_id: local_mvp_static_reviewer
   prompt_path: .aichestra/prompts/semantic-merge-review.md
+  timeout_seconds: 600
   risk_block_levels:
     - blocked
   allow_patch_suggestions: true

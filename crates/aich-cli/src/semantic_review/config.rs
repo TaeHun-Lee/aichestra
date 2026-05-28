@@ -21,6 +21,7 @@ pub(super) struct SemanticReviewAdapterConfig {
     pub(super) model: Option<String>,
     pub(super) profile: Option<String>,
     pub(super) command: Option<ProcessCommandSpec>,
+    pub(super) timeout_ms: Option<u64>,
 }
 
 pub(super) fn semantic_review_adapter_config_from_config(
@@ -51,6 +52,10 @@ pub(super) fn semantic_review_adapter_config_from_config(
         model: trim_config_value(semantic_review.model),
         profile: trim_config_value(semantic_review.profile),
         command,
+        timeout_ms: semantic_review_timeout_ms(
+            semantic_review.timeout_ms,
+            semantic_review.timeout_seconds,
+        )?,
     })
 }
 
@@ -152,6 +157,25 @@ fn semantic_review_config(config_path: &Path) -> Result<AichestraSemanticReviewC
     Ok(load_config(config_path)?
         .semantic_review
         .unwrap_or_default())
+}
+
+fn semantic_review_timeout_ms(
+    timeout_ms: Option<u64>,
+    timeout_seconds: Option<u64>,
+) -> Result<Option<u64>, CliError> {
+    match (timeout_ms, timeout_seconds) {
+        (Some(_), Some(_)) => Err(CliError::Usage(
+            "semantic_review must use only one of timeout_ms or timeout_seconds".to_string(),
+        )),
+        (Some(0), None) | (None, Some(0)) => Err(CliError::Usage(
+            "semantic_review timeout must be greater than zero".to_string(),
+        )),
+        (Some(value), None) => Ok(Some(value)),
+        (None, Some(value)) => value.checked_mul(1_000).map(Some).ok_or_else(|| {
+            CliError::Usage("semantic_review.timeout_seconds is too large".to_string())
+        }),
+        (None, None) => Ok(None),
+    }
 }
 
 fn trim_config_value(value: Option<String>) -> Option<String> {
