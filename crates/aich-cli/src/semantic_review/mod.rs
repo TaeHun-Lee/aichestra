@@ -22,7 +22,7 @@ use aich_merge::ensure_attempt_can_be_reviewed as merge_ensure_attempt_can_be_re
 use crate::formatting::{
     display_path_for_ledger, json_escape, path_from_ledger, read_optional_text, sha256_hex,
 };
-use crate::manifest::parse_manifest_diff_patch_artifact;
+use crate::manifest::{parse_manifest_diff_patch_artifact, semantic_review_evidence_fingerprint};
 use crate::options::ReviewOptions;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
@@ -202,6 +202,8 @@ where
     let report_path = artifact_dir.join(format!("{review_id}.yaml"));
     fs::write(&input_path, input)?;
     persist_proposed_patch_artifacts(&options.repo_root, &artifact_dir, &review_id, &mut report)?;
+    let evidence_fingerprint =
+        semantic_review_evidence_fingerprint(&manifest, &attempt, &changed_files, &check_results);
     let report_yaml = render_semantic_review_yaml(
         &review_id,
         &session,
@@ -223,6 +225,12 @@ where
         report_path: Some(display_path_for_ledger(&options.repo_root, &report_path)),
         change_manifest_id: Some(manifest.id.clone()),
         change_manifest_hash: manifest.manifest_hash.clone(),
+        verified_candidate_fingerprint: Some(
+            evidence_fingerprint.verified_candidate_fingerprint.clone(),
+        ),
+        changed_files_fingerprint: Some(evidence_fingerprint.changed_files_fingerprint.clone()),
+        check_results_fingerprint: Some(evidence_fingerprint.check_results_fingerprint.clone()),
+        review_evidence_fingerprint: Some(evidence_fingerprint.review_evidence_fingerprint.clone()),
         proposed_patch_available: report.proposed_patch.available,
         fix_plan_artifact: report.proposed_patch.fix_plan_artifact.clone(),
         patch_artifact: report.proposed_patch.patch_artifact.clone(),
@@ -247,7 +255,7 @@ where
         &NewEvent::new(EventName::MergeSemanticReviewCompleted)
             .with_subject("merge_attempt", attempt.id.clone())
             .with_data_json(format!(
-                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{},\"proposed_patch_available\":{},\"change_manifest_id\":\"{}\",\"change_manifest_hash\":\"{}\"}}",
+                "{{\"operator_id\":\"{}\",\"session_id\":\"{}\",\"semantic_review_id\":\"{}\",\"reviewer\":\"{}\",\"llm_executed\":{},\"risk_level\":\"{}\",\"blocked\":{},\"proposed_patch_available\":{},\"change_manifest_id\":\"{}\",\"change_manifest_hash\":\"{}\",\"review_evidence_fingerprint\":\"{}\"}}",
                 json_escape(&operator.id),
                 json_escape(&session.id),
                 json_escape(&semantic_review.id),
@@ -257,7 +265,8 @@ where
                 blocked,
                 semantic_review.proposed_patch_available,
                 json_escape(&manifest.id),
-                json_escape(manifest.manifest_hash.as_deref().unwrap_or(""))
+                json_escape(manifest.manifest_hash.as_deref().unwrap_or("")),
+                json_escape(&evidence_fingerprint.review_evidence_fingerprint)
             )),
     )?;
     if blocked {

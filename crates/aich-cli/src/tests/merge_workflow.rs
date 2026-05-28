@@ -129,7 +129,7 @@ fn approve_refuses_stale_semantic_review_after_manifest_edit() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, CliError::Usage(ref message) if message.contains("Change Manifest changed after semantic review") && message.contains("aich review")),
+        matches!(err, CliError::Usage(ref message) if message.contains("Semantic review") && message.contains("manifest_changed") && message.contains("aich review")),
         "{err}"
     );
 
@@ -153,6 +153,154 @@ fn approve_refuses_stale_semantic_review_after_manifest_edit() {
     .expect("approve after fresh review");
 
     assert_eq!(result.approval.merge_attempt_id, result.merge_attempt.id);
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn approve_refuses_stale_semantic_review_after_check_evidence_changes() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    ledger
+        .insert_check_result(&CheckResult {
+            id: "check-after-review".to_string(),
+            merge_attempt_id: attempt.id.clone(),
+            name: "extra".to_string(),
+            command: "cargo clippy --all-targets".to_string(),
+            required: false,
+            timed_out: false,
+            result: CheckResultStatus::Passed,
+            stdout_artifact: None,
+            stderr_artifact: None,
+            created_at_ms: now_millis(),
+        })
+        .expect("insert check after review");
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("checks_changed") && message.contains("aich review")),
+        "{err}"
+    );
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("rerun review");
+    let result = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve after fresh review");
+
+    assert_eq!(result.approval.merge_attempt_id, result.merge_attempt.id);
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn approve_refuses_stale_semantic_review_after_verified_candidate_changes() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let (session, attempt) = seed_verified_review_candidate(&repo, "README.md", true);
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("review");
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    ledger
+        .update_merge_attempt_result(aich_ledger::MergeAttemptResultUpdate {
+            id: &attempt.id,
+            status: MergeAttemptStatus::Verified,
+            verified_tree_id: Some("verified-tree-after-review"),
+            verified_commit_id: Some("verified-commit-after-review"),
+            checks_passed: true,
+            semantic_risk_level: Some("medium"),
+            updated_at_ms: now_millis(),
+        })
+        .expect("update verified candidate");
+
+    let err = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CliError::Usage(ref message) if message.contains("verified_candidate_changed") && message.contains("aich review")),
+        "{err}"
+    );
+
+    run_review_with(&ReviewOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        session_id: session.id.clone(),
+        operator_id: None,
+    })
+    .expect("rerun review");
+    let result = run_approve_with(
+        &ApproveOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+            accept_current: false,
+        },
+        &MockGitRepository,
+    )
+    .expect("approve after fresh review");
+
+    assert_eq!(
+        result.approval.approved_verified_commit_id,
+        "verified-commit-after-review"
+    );
 
     let _ = fs::remove_dir_all(repo);
 }

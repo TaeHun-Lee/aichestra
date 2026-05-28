@@ -155,6 +155,26 @@ impl Ledger {
             "ALTER TABLE semantic_reviews ADD COLUMN change_manifest_hash TEXT",
         )?;
         self.ensure_column(
+            "semantic_reviews",
+            "verified_candidate_fingerprint",
+            "ALTER TABLE semantic_reviews ADD COLUMN verified_candidate_fingerprint TEXT",
+        )?;
+        self.ensure_column(
+            "semantic_reviews",
+            "changed_files_fingerprint",
+            "ALTER TABLE semantic_reviews ADD COLUMN changed_files_fingerprint TEXT",
+        )?;
+        self.ensure_column(
+            "semantic_reviews",
+            "check_results_fingerprint",
+            "ALTER TABLE semantic_reviews ADD COLUMN check_results_fingerprint TEXT",
+        )?;
+        self.ensure_column(
+            "semantic_reviews",
+            "review_evidence_fingerprint",
+            "ALTER TABLE semantic_reviews ADD COLUMN review_evidence_fingerprint TEXT",
+        )?;
+        self.ensure_column(
             "approvals",
             "reason",
             "ALTER TABLE approvals ADD COLUMN reason TEXT",
@@ -776,9 +796,10 @@ impl Ledger {
             INSERT INTO semantic_reviews (
               id, merge_attempt_id, risk_level, report_path, proposed_patch_available,
               fix_plan_artifact, patch_artifact, change_manifest_id, change_manifest_hash,
-              created_at_ms
+              verified_candidate_fingerprint, changed_files_fingerprint,
+              check_results_fingerprint, review_evidence_fingerprint, created_at_ms
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             "#,
             params![
                 &review.id,
@@ -794,6 +815,10 @@ impl Ledger {
                 &review.patch_artifact,
                 &review.change_manifest_id,
                 &review.change_manifest_hash,
+                &review.verified_candidate_fingerprint,
+                &review.changed_files_fingerprint,
+                &review.check_results_fingerprint,
+                &review.review_evidence_fingerprint,
                 review.created_at_ms,
             ],
         )?;
@@ -805,7 +830,9 @@ impl Ledger {
             r#"
             SELECT id, merge_attempt_id, risk_level, report_path, created_at_ms,
                    proposed_patch_available, fix_plan_artifact, patch_artifact,
-                   change_manifest_id, change_manifest_hash
+                   change_manifest_id, change_manifest_hash, verified_candidate_fingerprint,
+                   changed_files_fingerprint, check_results_fingerprint,
+                   review_evidence_fingerprint
             FROM semantic_reviews
             WHERE merge_attempt_id = ?1
             ORDER BY created_at_ms ASC, id ASC
@@ -1219,6 +1246,10 @@ fn semantic_review_from_row(row: &Row<'_>) -> rusqlite::Result<SemanticReview> {
         patch_artifact: row.get(7)?,
         change_manifest_id: row.get(8)?,
         change_manifest_hash: row.get(9)?,
+        verified_candidate_fingerprint: row.get(10)?,
+        changed_files_fingerprint: row.get(11)?,
+        check_results_fingerprint: row.get(12)?,
+        review_evidence_fingerprint: row.get(13)?,
     })
 }
 
@@ -1364,6 +1395,10 @@ mod tests {
         assert!(columns.contains(&"patch_artifact".to_string()));
         assert!(columns.contains(&"change_manifest_id".to_string()));
         assert!(columns.contains(&"change_manifest_hash".to_string()));
+        assert!(columns.contains(&"verified_candidate_fingerprint".to_string()));
+        assert!(columns.contains(&"changed_files_fingerprint".to_string()));
+        assert!(columns.contains(&"check_results_fingerprint".to_string()));
+        assert!(columns.contains(&"review_evidence_fingerprint".to_string()));
 
         drop(ledger);
         let _ = fs::remove_file(db_path);
@@ -1631,6 +1666,10 @@ mod tests {
             report_path: Some(".aichestra/artifacts/review.yaml".to_string()),
             change_manifest_id: Some("manifest-1".to_string()),
             change_manifest_hash: Some("reviewed-hash".to_string()),
+            verified_candidate_fingerprint: Some("candidate-fingerprint".to_string()),
+            changed_files_fingerprint: Some("changed-files-fingerprint".to_string()),
+            check_results_fingerprint: Some("check-results-fingerprint".to_string()),
+            review_evidence_fingerprint: Some("review-evidence-fingerprint".to_string()),
             proposed_patch_available: true,
             fix_plan_artifact: Some(".aichestra/artifacts/review-fix-plan.md".to_string()),
             patch_artifact: Some(".aichestra/artifacts/review.patch".to_string()),

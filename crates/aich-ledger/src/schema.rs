@@ -103,6 +103,10 @@ CREATE TABLE IF NOT EXISTS semantic_reviews (
   report_path TEXT,
   change_manifest_id TEXT,
   change_manifest_hash TEXT,
+  verified_candidate_fingerprint TEXT,
+  changed_files_fingerprint TEXT,
+  check_results_fingerprint TEXT,
+  review_evidence_fingerprint TEXT,
   proposed_patch_available INTEGER NOT NULL DEFAULT 0,
   fix_plan_artifact TEXT,
   patch_artifact TEXT,
@@ -164,5 +168,5 @@ CREATE INDEX IF NOT EXISTS idx_event_log_subject
 CREATE INDEX IF NOT EXISTS idx_merge_attempts_session
   ON merge_attempts(session_id, created_at_ms);
 
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;
 "#;

@@ -2,12 +2,15 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use aich_core::{ChangeManifest, ChangedFile, ContextSnapshot, PatchSet, SemanticReview, Session};
+use aich_core::{
+    ChangeManifest, ChangedFile, CheckResult, ContextSnapshot, MergeAttempt, PatchSet,
+    SemanticReview, Session,
+};
 use aich_ledger::Ledger;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use crate::formatting::{display_path_for_ledger, hex_lower, yaml_quote};
+use crate::formatting::{display_path_for_ledger, hex_lower, sha256_hex, yaml_quote};
 use crate::{CliError, CHANGE_MANIFEST_VALIDATION_STATUS, CONTEXT_SNAPSHOT_FILES};
 
 #[derive(Debug, Deserialize)]
@@ -114,21 +117,115 @@ pub(crate) fn latest_change_manifest(
     Ok(ledger.list_change_manifests(session_id)?.into_iter().last())
 }
 
-pub(crate) fn semantic_review_is_stale_for_manifest(
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct SemanticReviewEvidenceFingerprint {
+    pub(crate) verified_candidate_fingerprint: String,
+    pub(crate) changed_files_fingerprint: String,
+    pub(crate) check_results_fingerprint: String,
+    pub(crate) review_evidence_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum SemanticReviewStaleReason {
+    LegacyReviewEvidence,
+    ManifestChanged,
+    VerifiedCandidateChanged,
+    ChangedFilesChanged,
+    CheckResultsChanged,
+    ReviewEvidenceChanged,
+}
+
+impl SemanticReviewStaleReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyReviewEvidence => "legacy_review_evidence",
+            Self::ManifestChanged => "manifest_changed",
+            Self::VerifiedCandidateChanged => "verified_candidate_changed",
+            Self::ChangedFilesChanged => "changed_files_changed",
+            Self::CheckResultsChanged => "checks_changed",
+            Self::ReviewEvidenceChanged => "review_evidence_changed",
+        }
+    }
+}
+
+pub(crate) fn semantic_review_evidence_fingerprint(
+    manifest: &ChangeManifest,
+    attempt: &MergeAttempt,
+    changed_files: &[ChangedFile],
+    check_results: &[CheckResult],
+) -> SemanticReviewEvidenceFingerprint {
+    let verified_candidate_fingerprint = verified_candidate_fingerprint(attempt);
+    let changed_files_fingerprint = changed_files_fingerprint(changed_files);
+    let check_results_fingerprint = check_results_fingerprint(check_results);
+    let review_evidence_fingerprint = review_evidence_fingerprint(
+        manifest,
+        &verified_candidate_fingerprint,
+        &changed_files_fingerprint,
+        &check_results_fingerprint,
+    );
+
+    SemanticReviewEvidenceFingerprint {
+        verified_candidate_fingerprint,
+        changed_files_fingerprint,
+        check_results_fingerprint,
+        review_evidence_fingerprint,
+    }
+}
+
+pub(crate) fn semantic_review_stale_reasons(
     review: &SemanticReview,
     manifest: &ChangeManifest,
-) -> bool {
+    fingerprint: &SemanticReviewEvidenceFingerprint,
+) -> Vec<SemanticReviewStaleReason> {
+    let mut reasons = Vec::new();
     if review.change_manifest_id.as_deref() != Some(manifest.id.as_str()) {
-        return true;
+        reasons.push(SemanticReviewStaleReason::ManifestChanged);
     }
 
-    match (
+    if match (
         review.change_manifest_hash.as_deref(),
         manifest.manifest_hash.as_deref(),
     ) {
         (Some(review_hash), Some(manifest_hash)) => review_hash != manifest_hash,
         _ => true,
+    } {
+        reasons.push(SemanticReviewStaleReason::ManifestChanged);
     }
+
+    if review.verified_candidate_fingerprint.as_deref()
+        != Some(fingerprint.verified_candidate_fingerprint.as_str())
+    {
+        reasons.push(SemanticReviewStaleReason::VerifiedCandidateChanged);
+    }
+    if review.changed_files_fingerprint.as_deref()
+        != Some(fingerprint.changed_files_fingerprint.as_str())
+    {
+        reasons.push(SemanticReviewStaleReason::ChangedFilesChanged);
+    }
+    if review.check_results_fingerprint.as_deref()
+        != Some(fingerprint.check_results_fingerprint.as_str())
+    {
+        reasons.push(SemanticReviewStaleReason::CheckResultsChanged);
+    }
+    if review.review_evidence_fingerprint.as_deref()
+        != Some(fingerprint.review_evidence_fingerprint.as_str())
+    {
+        reasons.push(SemanticReviewStaleReason::ReviewEvidenceChanged);
+    }
+
+    if review.change_manifest_id.is_none()
+        || review.change_manifest_hash.is_none()
+        || review.verified_candidate_fingerprint.is_none()
+        || review.changed_files_fingerprint.is_none()
+        || review.check_results_fingerprint.is_none()
+        || review.review_evidence_fingerprint.is_none()
+    {
+        reasons.push(SemanticReviewStaleReason::LegacyReviewEvidence);
+    }
+
+    reasons.sort_by_key(|reason| reason.as_str());
+    reasons.dedup();
+    reasons
 }
 
 pub(crate) fn shared_contract_files(changed_files: &[ChangedFile]) -> Vec<String> {
@@ -137,6 +234,134 @@ pub(crate) fn shared_contract_files(changed_files: &[ChangedFile]) -> Vec<String
         .filter(|file| is_shared_contract_path(&file.path))
         .map(|file| file.path.clone())
         .collect()
+}
+
+fn verified_candidate_fingerprint(attempt: &MergeAttempt) -> String {
+    let mut input = String::new();
+    push_field(&mut input, "merge_attempt_id", &attempt.id);
+    push_field(&mut input, "session_id", &attempt.session_id);
+    push_field(&mut input, "status", attempt.status.as_str());
+    push_field(
+        &mut input,
+        "main_before_commit",
+        &attempt.main_before_commit,
+    );
+    push_field(&mut input, "candidate_commit", &attempt.candidate_commit);
+    push_field(&mut input, "apply_strategy", &attempt.apply_strategy);
+    push_option_field(
+        &mut input,
+        "verified_tree_id",
+        attempt.verified_tree_id.as_deref(),
+    );
+    push_option_field(
+        &mut input,
+        "verified_commit_id",
+        attempt.verified_commit_id.as_deref(),
+    );
+    push_field(
+        &mut input,
+        "checks_passed",
+        &attempt.checks_passed.to_string(),
+    );
+    sha256_hex(input.as_bytes())
+}
+
+fn changed_files_fingerprint(changed_files: &[ChangedFile]) -> String {
+    let mut rows = changed_files
+        .iter()
+        .map(|file| {
+            let mut row = String::new();
+            push_field(&mut row, "path", &file.path);
+            push_field(&mut row, "change_type", &file.change_type);
+            push_field(&mut row, "symbols_json", &file.symbols_json);
+            row
+        })
+        .collect::<Vec<_>>();
+    rows.sort();
+    sha256_hex(rows.join("\n").as_bytes())
+}
+
+fn check_results_fingerprint(check_results: &[CheckResult]) -> String {
+    let mut rows = check_results
+        .iter()
+        .map(|check| {
+            let mut row = String::new();
+            push_field(&mut row, "id", &check.id);
+            push_field(&mut row, "merge_attempt_id", &check.merge_attempt_id);
+            push_field(&mut row, "name", &check.name);
+            push_field(&mut row, "command", &check.command);
+            push_field(&mut row, "required", &check.required.to_string());
+            push_field(&mut row, "timed_out", &check.timed_out.to_string());
+            push_field(&mut row, "result", check.result.as_str());
+            push_option_field(
+                &mut row,
+                "stdout_artifact",
+                check.stdout_artifact.as_deref(),
+            );
+            push_option_field(
+                &mut row,
+                "stderr_artifact",
+                check.stderr_artifact.as_deref(),
+            );
+            push_field(&mut row, "created_at_ms", &check.created_at_ms.to_string());
+            row
+        })
+        .collect::<Vec<_>>();
+    rows.sort();
+    sha256_hex(rows.join("\n").as_bytes())
+}
+
+fn review_evidence_fingerprint(
+    manifest: &ChangeManifest,
+    verified_candidate_fingerprint: &str,
+    changed_files_fingerprint: &str,
+    check_results_fingerprint: &str,
+) -> String {
+    let mut input = String::new();
+    push_field(&mut input, "change_manifest_id", &manifest.id);
+    push_option_field(
+        &mut input,
+        "change_manifest_hash",
+        manifest.manifest_hash.as_deref(),
+    );
+    push_field(
+        &mut input,
+        "verified_candidate_fingerprint",
+        verified_candidate_fingerprint,
+    );
+    push_field(
+        &mut input,
+        "changed_files_fingerprint",
+        changed_files_fingerprint,
+    );
+    push_field(
+        &mut input,
+        "check_results_fingerprint",
+        check_results_fingerprint,
+    );
+    sha256_hex(input.as_bytes())
+}
+
+fn push_field(output: &mut String, key: &str, value: &str) {
+    output.push_str(key);
+    output.push('\0');
+    output.push_str(value);
+    output.push('\0');
+}
+
+fn push_option_field(output: &mut String, key: &str, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            output.push_str(key);
+            output.push_str("\0some\0");
+            output.push_str(value);
+            output.push('\0');
+        }
+        None => {
+            output.push_str(key);
+            output.push_str("\0none\0");
+        }
+    }
 }
 
 fn is_shared_contract_path(path: &str) -> bool {

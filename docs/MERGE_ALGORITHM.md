@@ -139,7 +139,7 @@ If the mechanical merge conflicts, or any required check fails or times out, the
 
 `aich review <session-id>` runs after a verified preflight attempt exists and before approval. The MVP command selects the latest verified merge attempt for the session, loads the Change Manifest, changed-file evidence, patch summary, bounded patch hunk context from the recorded diff patch artifact, verified tree/commit ids, and sandbox check results, then writes a semantic review report artifact under `.aichestra/artifacts/merge-attempts/<merge-attempt-id>/`.
 
-Each semantic review row stores the Change Manifest id and hash that the reviewer saw. If the manifest artifact is edited after review, the existing review is stale evidence. Approval refuses until `aich review <session-id>` is rerun against the current manifest.
+Each semantic review row stores fingerprints for the evidence the reviewer saw: Change Manifest id/hash, verified candidate fields, changed-file evidence, sandbox check evidence, and an aggregate review-evidence fingerprint. If any of that evidence changes after review, the existing review is stale. Approval refuses until `aich review <session-id>` is rerun against the current evidence.
 
 The default local MVP reviewer is deterministic and conservative. It records `llm_executed: false`, flags missing or drifted manifest evidence as `blocked`, flags shared API/config/schema/dependency surfaces as `high`, and otherwise keeps generated-from-diff manifests at least `medium` risk because semantic intent is incomplete.
 
@@ -157,7 +157,7 @@ If the review includes `proposed_patch.available: true`, Aichestra writes a fix-
 - sandbox checks passed
 - verified tree and commit ids are present
 - semantic review has been recorded
-- semantic review was run against the current Change Manifest id/hash
+- semantic review was run against the current Change Manifest id/hash, verified candidate, changed files, and sandbox check evidence
 - semantic review did not block the attempt
 - current main still matches the preflight `main_before_commit`
 - no unresolved proposed patch exists, unless the operator passed `--accept-current`

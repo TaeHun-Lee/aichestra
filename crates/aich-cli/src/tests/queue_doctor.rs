@@ -39,6 +39,10 @@ fn queue_shows_human_readable_candidate_states() {
             report_path: Some(".aichestra/artifacts/review-session-verified.yaml".to_string()),
             change_manifest_id: None,
             change_manifest_hash: None,
+            verified_candidate_fingerprint: None,
+            changed_files_fingerprint: None,
+            check_results_fingerprint: None,
+            review_evidence_fingerprint: None,
             proposed_patch_available: false,
             fix_plan_artifact: None,
             patch_artifact: None,
@@ -140,7 +144,7 @@ fn queue_points_stale_semantic_review_back_to_review() {
     render_queue(&options, &mut output).expect("render queue");
     let output = String::from_utf8(output).expect("utf8 output");
 
-    assert!(output.contains("review_stale: yes (Change Manifest changed after review)"));
+    assert!(output.contains("review_stale: yes (manifest_changed"));
     assert!(output.contains("next: aich review session-review"));
 
     let _ = fs::remove_dir_all(repo);
@@ -237,6 +241,10 @@ fn queue_shows_rejected_recovery_guidance() {
             report_path: Some(".aichestra/artifacts/rejected-review.yaml".to_string()),
             change_manifest_id: None,
             change_manifest_hash: None,
+            verified_candidate_fingerprint: None,
+            changed_files_fingerprint: None,
+            check_results_fingerprint: None,
+            review_evidence_fingerprint: None,
             proposed_patch_available: false,
             fix_plan_artifact: None,
             patch_artifact: None,

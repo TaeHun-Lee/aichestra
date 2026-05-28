@@ -10,7 +10,9 @@ use aich_ledger::{EventRecord, Ledger};
 use aich_merge::{infer_queue_blocked_reason, queue_candidate_status};
 
 use crate::formatting::{json_escape, json_string_field, short_hash};
-use crate::manifest::{latest_change_manifest, semantic_review_is_stale_for_manifest};
+use crate::manifest::{
+    latest_change_manifest, semantic_review_evidence_fingerprint, semantic_review_stale_reasons,
+};
 use crate::options::{QueueOptions, QueueUnlockOptions};
 use crate::{
     ledger_path, CliError, QueueUnlockResult, MERGE_QUEUE_LOCK_NAME, MILLIS_PER_SECOND,
@@ -24,7 +26,7 @@ pub(crate) struct QueueEntry {
     pub(crate) latest_attempt: Option<MergeAttempt>,
     pub(crate) latest_approval: Option<Approval>,
     pub(crate) latest_review: Option<SemanticReview>,
-    pub(crate) review_stale: bool,
+    pub(crate) review_stale_reasons: Vec<String>,
     pub(crate) check_results: Vec<CheckResult>,
     pub(crate) blocked_recovery: Option<BlockedRecovery>,
 }
@@ -145,10 +147,11 @@ pub(crate) fn render_queue<W: Write>(options: &QueueOptions, out: &mut W) -> Res
                 review.id,
                 review.risk_level.as_str()
             )?;
-            if entry.review_stale {
+            if !entry.review_stale_reasons.is_empty() {
                 writeln!(
                     out,
-                    "  review_stale: yes (Change Manifest changed after review)"
+                    "  review_stale: yes ({})",
+                    entry.review_stale_reasons.join(", ")
                 )?;
             }
             if review.proposed_patch_available {
@@ -283,6 +286,11 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
         let mut latest_approval = None;
         let mut latest_review = None;
         let latest_manifest = latest_change_manifest(ledger, &session.id)?;
+        let patch_set = ledger.list_patch_sets(&session.id)?.into_iter().last();
+        let changed_files = match patch_set.as_ref() {
+            Some(patch_set) => ledger.list_changed_files(&patch_set.id)?,
+            None => Vec::new(),
+        };
         let mut check_results = Vec::new();
 
         if let Some(attempt) = latest_attempt.as_ref() {
@@ -293,12 +301,23 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
                 .last();
             check_results = ledger.list_check_results(&attempt.id)?;
         }
-        let review_stale = latest_review
+        let review_stale_reasons = latest_review
             .as_ref()
             .zip(latest_manifest.as_ref())
-            .is_some_and(|(review, manifest)| {
-                semantic_review_is_stale_for_manifest(review, manifest)
-            });
+            .zip(latest_attempt.as_ref())
+            .map(|((review, manifest), attempt)| {
+                let fingerprint = semantic_review_evidence_fingerprint(
+                    manifest,
+                    attempt,
+                    &changed_files,
+                    &check_results,
+                );
+                semantic_review_stale_reasons(review, manifest, &fingerprint)
+                    .into_iter()
+                    .map(|reason| reason.as_str().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         let Some(status) =
             queue_candidate_status(&session, latest_attempt.as_ref(), latest_approval.as_ref())
@@ -326,7 +345,7 @@ pub(crate) fn queue_entries(ledger: &Ledger) -> Result<Vec<QueueEntry>, CliError
             latest_attempt,
             latest_approval,
             latest_review,
-            review_stale,
+            review_stale_reasons,
             check_results,
             blocked_recovery,
         });
@@ -539,7 +558,9 @@ pub(crate) fn queue_next_action(entry: &QueueEntry) -> String {
             "aich apply {} (retry or finalize interrupted apply; unlock a stale queue lock first if needed)",
             entry.session.id
         ),
-        "verified" if entry.review_stale => format!("aich review {}", entry.session.id),
+        "verified" if !entry.review_stale_reasons.is_empty() => {
+            format!("aich review {}", entry.session.id)
+        }
         "verified"
             if entry
                 .latest_review

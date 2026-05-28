@@ -11,7 +11,9 @@ use aich_merge::ensure_attempt_can_be_approved as merge_ensure_attempt_can_be_ap
 
 use crate::config::{main_branch_from_config, main_branch_ref};
 use crate::formatting::json_escape;
-use crate::manifest::{latest_change_manifest, semantic_review_is_stale_for_manifest};
+use crate::manifest::{
+    latest_change_manifest, semantic_review_evidence_fingerprint, semantic_review_stale_reasons,
+};
 use crate::options::ApproveOptions;
 use crate::session::ensure_session_not_abandoned;
 use crate::{
@@ -74,9 +76,23 @@ where
             session.id, session.id
         ))
     })?;
-    if semantic_review_is_stale_for_manifest(latest_review, &latest_manifest) {
+    let candidate_summary = load_verified_candidate_summary(&ledger, &session.id, &attempt.id)?;
+    let evidence_fingerprint = semantic_review_evidence_fingerprint(
+        &latest_manifest,
+        &attempt,
+        &candidate_summary.changed_files,
+        &candidate_summary.check_results,
+    );
+    let stale_reasons =
+        semantic_review_stale_reasons(latest_review, &latest_manifest, &evidence_fingerprint);
+    if !stale_reasons.is_empty() {
+        let reasons = stale_reasons
+            .iter()
+            .map(|reason| reason.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(CliError::Usage(format!(
-            "Change Manifest changed after semantic review '{}'. Run `aich review {}` again before approval.",
+            "Semantic review '{}' is stale ({reasons}). Run `aich review {}` again before approval.",
             latest_review.id, session.id
         )));
     }
@@ -137,8 +153,6 @@ where
             )),
     )?;
     tx.commit()?;
-
-    let candidate_summary = load_verified_candidate_summary(&ledger, &session.id, &attempt.id)?;
 
     Ok(ApproveRunResult {
         approval,
