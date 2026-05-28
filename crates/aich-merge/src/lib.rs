@@ -2,7 +2,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 use aich_core::{
-    Approval, MergeAttempt, MergeAttemptStatus, SemanticRiskLevel, Session, SessionStatus,
+    Approval, CheckResult, CheckResultStatus, MergeAttempt, MergeAttemptStatus, SemanticReview,
+    SemanticRiskLevel, Session, SessionStatus,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,6 +62,47 @@ pub fn queue_candidate_status(
         },
         None if session.status == SessionStatus::Enqueued => Some(QueueCandidateStatus::Enqueued),
         None => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum QueueBlockedReason {
+    SemanticReview,
+    ChecksFailed,
+    MechanicalConflict,
+    Unknown,
+}
+
+impl QueueBlockedReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SemanticReview => "semantic_review",
+            Self::ChecksFailed => "checks_failed",
+            Self::MechanicalConflict => "mechanical_conflict",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+pub fn infer_queue_blocked_reason(
+    attempt: &MergeAttempt,
+    latest_review: Option<&SemanticReview>,
+    check_results: &[CheckResult],
+) -> QueueBlockedReason {
+    if latest_review
+        .map(|review| review.risk_level == SemanticRiskLevel::Blocked)
+        .unwrap_or(false)
+    {
+        QueueBlockedReason::SemanticReview
+    } else if check_results
+        .iter()
+        .any(|check| check.required && check.result == CheckResultStatus::Failed)
+    {
+        QueueBlockedReason::ChecksFailed
+    } else if attempt.verified_commit_id.is_none() || attempt.verified_tree_id.is_none() {
+        QueueBlockedReason::MechanicalConflict
+    } else {
+        QueueBlockedReason::Unknown
     }
 }
 
@@ -242,6 +284,34 @@ mod tests {
         }
     }
 
+    fn check(required: bool, result: CheckResultStatus) -> CheckResult {
+        CheckResult {
+            id: "check-1".to_string(),
+            merge_attempt_id: "merge-1".to_string(),
+            name: "test".to_string(),
+            command: "cargo test --all".to_string(),
+            required,
+            timed_out: false,
+            result,
+            stdout_artifact: None,
+            stderr_artifact: None,
+            created_at_ms: 1,
+        }
+    }
+
+    fn review(risk_level: SemanticRiskLevel) -> SemanticReview {
+        SemanticReview {
+            id: "review-1".to_string(),
+            merge_attempt_id: "merge-1".to_string(),
+            risk_level,
+            report_path: None,
+            proposed_patch_available: false,
+            fix_plan_artifact: None,
+            patch_artifact: None,
+            created_at_ms: 1,
+        }
+    }
+
     #[test]
     fn reports_human_queue_statuses() {
         let enqueued = session(SessionStatus::Enqueued, Some("head"));
@@ -276,6 +346,30 @@ mod tests {
                 None
             ),
             None
+        );
+    }
+
+    #[test]
+    fn infers_blocked_reason_from_merge_evidence() {
+        assert_eq!(
+            infer_queue_blocked_reason(
+                &attempt(MergeAttemptStatus::Blocked),
+                Some(&review(SemanticRiskLevel::Blocked)),
+                &[]
+            ),
+            QueueBlockedReason::SemanticReview
+        );
+        assert_eq!(
+            infer_queue_blocked_reason(
+                &attempt(MergeAttemptStatus::Blocked),
+                None,
+                &[check(true, CheckResultStatus::Failed)]
+            ),
+            QueueBlockedReason::ChecksFailed
+        );
+        assert_eq!(
+            infer_queue_blocked_reason(&attempt(MergeAttemptStatus::Blocked), None, &[]),
+            QueueBlockedReason::MechanicalConflict
         );
     }
 

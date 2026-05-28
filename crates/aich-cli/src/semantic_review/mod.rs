@@ -13,7 +13,9 @@ use aich_core::{
 };
 use aich_ledger::MergeAttemptSemanticReviewUpdate;
 use aich_llm::{
+    render_proposed_fix_plan_artifact, render_semantic_review_input, render_semantic_review_yaml,
     DiffPatchContext, RelatedChangeManifest, RelatedChangeManifestRelation, SemanticReviewInput,
+    SemanticReviewReportMetadata,
 };
 use aich_merge::ensure_attempt_can_be_reviewed as merge_ensure_attempt_can_be_reviewed;
 
@@ -34,7 +36,6 @@ use config::{
     semantic_review_adapter_config_from_config, semantic_review_prompt_path_from_config,
     SemanticReviewAdapterConfig, SemanticReviewAdapterKind,
 };
-use report::{render_semantic_review_input, render_semantic_review_yaml};
 
 pub(crate) use adapter::SemanticReviewAdapter;
 pub(crate) use aich_llm::LocalSemanticReviewReport;
@@ -45,7 +46,6 @@ pub(crate) use aich_llm::SemanticReviewAdapterRequest;
 pub(crate) use config::codex_semantic_review_command;
 #[cfg(test)]
 pub(crate) use report::build_local_semantic_review_report;
-pub(crate) use report::SemanticReviewReportMetadata;
 
 pub(crate) fn run_review_with(options: &ReviewOptions) -> Result<ReviewRunResult, CliError> {
     let config_path = options.repo_root.join(".aichestra/config.yaml");
@@ -202,11 +202,11 @@ where
         &review_id,
         &session,
         &attempt,
-        &operator,
         &report,
         SemanticReviewReportMetadata {
             reviewer_id: adapter.reviewer_id(),
             llm_executed: adapter.llm_executed(),
+            operator_id: &operator.id,
             input_artifact: &display_path_for_ledger(&options.repo_root, &input_path),
         },
     );
@@ -309,48 +309,14 @@ fn persist_proposed_patch_artifacts(
 
     report.proposed_patch.patch_artifact = patch_artifact;
     let fix_plan_path = artifact_dir.join(format!("{review_id}-fix-plan.md"));
-    fs::write(&fix_plan_path, render_fix_plan_artifact(review_id, report))?;
+    fs::write(
+        &fix_plan_path,
+        render_proposed_fix_plan_artifact(review_id, report),
+    )?;
     report.proposed_patch.fix_plan_artifact =
         Some(display_path_for_ledger(repo_root, &fix_plan_path));
     report.proposed_patch.patch = None;
     Ok(())
-}
-
-fn render_fix_plan_artifact(review_id: &str, report: &LocalSemanticReviewReport) -> String {
-    let mut output = String::new();
-    output.push_str("# Semantic Review Proposed Fix\n\n");
-    output.push_str(&format!("- review_id: `{review_id}`\n"));
-    output.push_str(&format!("- risk_level: `{}`\n", report.risk_level.as_str()));
-    output.push_str(&format!("- summary: {}\n", report.summary));
-    if let Some(description) = report.proposed_patch.description.as_deref() {
-        output.push_str(&format!("- proposed_patch: {description}\n"));
-    } else {
-        output.push_str(
-            "- proposed_patch: Semantic reviewer requested rework without a description.\n",
-        );
-    }
-    if let Some(patch_artifact) = report.proposed_patch.patch_artifact.as_deref() {
-        output.push_str(&format!("- patch_artifact: `{patch_artifact}`\n"));
-    }
-
-    output.push_str("\n## Required Actions\n\n");
-    append_markdown_list(&mut output, &report.required_actions);
-    output.push_str("\n## Suggested Tests\n\n");
-    append_markdown_list(&mut output, &report.suggested_tests);
-    output.push_str("\n## Uncertainty\n\n");
-    append_markdown_list(&mut output, &report.uncertainty);
-    output
-}
-
-fn append_markdown_list(output: &mut String, values: &[String]) {
-    if values.is_empty() {
-        output.push_str("- none\n");
-        return;
-    }
-
-    for value in values {
-        output.push_str(&format!("- {value}\n"));
-    }
 }
 
 fn diff_patch_context_from_manifest(

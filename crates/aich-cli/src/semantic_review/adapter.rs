@@ -2,7 +2,10 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
-use aich_llm::{LocalSemanticReviewReport, SemanticReviewAdapterRequest, SemanticReviewInput};
+use aich_llm::{
+    render_semantic_review_input, LocalSemanticReviewReport, SemanticReviewAdapterRequest,
+    SemanticReviewInput,
+};
 
 use crate::command_line::ProcessCommandSpec;
 use crate::formatting::truncate_for_report;
@@ -11,7 +14,7 @@ use crate::{CliError, LOCAL_SEMANTIC_REVIEWER};
 use super::parser::parse_semantic_review_command_report;
 use super::report::{
     build_local_semantic_review_report, command_semantic_review_failure_report,
-    llm_semantic_review_failure_report, render_semantic_review_input,
+    llm_semantic_review_failure_report,
 };
 
 pub(crate) trait SemanticReviewAdapter {

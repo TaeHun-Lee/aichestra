@@ -145,10 +145,11 @@ Automatic patch application is not part of the MVP path. If a proposed patch or 
 
 Semantic review is being split across crates in small steps:
 
-- `aich-llm`: report contract structs, proposed patch model, command/LLM YAML output parsing, review input model, related manifest model, and diff patch context model
+- `aich-llm`: report contract structs, proposed patch model, command/LLM YAML output parsing, review input model, related manifest model, diff patch context model, provider-facing review input rendering, stored semantic-review YAML report rendering, and proposed-fix-plan artifact content rendering
 - `aich-cli::semantic_review::adapter`: local, command, and LLM adapter process execution
 - `aich-cli::semantic_review::config`: `.aichestra/config.yaml` semantic review settings
-- `aich-cli::semantic_review::report`: local deterministic review construction and artifact rendering
+- `aich-cli::semantic_review::report`: local deterministic review construction and reviewer failure reports
+- `aich-cli::semantic_review`: ledger reads/writes, artifact file placement, and adapter orchestration
 
 The external review contract remains the same `semantic_review:` YAML report shape. The split does not make the reviewer authoritative; it still cannot approve, apply, reorder the queue, or bypass sandbox checks.
 

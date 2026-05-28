@@ -88,6 +88,7 @@ Choose one strategy and keep it consistent.
 Applied candidates are omitted from the queue view because they no longer require merge-queue action.
 
 The pure state classification for these labels lives in `aich-merge`; `aich-cli` renders the labels and recovery guidance.
+Pure blocked-reason inference from merge evidence, such as blocker semantic review, failed required checks, or missing verified commit/tree, also lives in `aich-merge`; `aich-cli` still prefers explicit event-log reasons when they exist.
 
 ## Queue lock
 

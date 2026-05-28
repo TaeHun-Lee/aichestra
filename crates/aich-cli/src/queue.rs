@@ -4,10 +4,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use aich_core::clock::now_millis;
 use aich_core::{
     Approval, CheckResult, CheckResultStatus, EventName, MergeAttempt, MergeAttemptStatus,
-    NewEvent, QueueLock, SemanticReview, SemanticRiskLevel, Session, SessionStatus,
+    NewEvent, QueueLock, SemanticReview, Session, SessionStatus,
 };
 use aich_ledger::{EventRecord, Ledger};
-use aich_merge::queue_candidate_status;
+use aich_merge::{infer_queue_blocked_reason, queue_candidate_status};
 
 use crate::formatting::{json_escape, json_string_field, short_hash};
 use crate::options::{QueueOptions, QueueUnlockOptions};
@@ -385,8 +385,11 @@ fn blocked_recovery_for_queue_entry(
         return None;
     }
 
-    let reason = latest_blocked_reason(attempt, events)
-        .unwrap_or_else(|| infer_blocked_reason(attempt, latest_review, check_results));
+    let reason = latest_blocked_reason(attempt, events).unwrap_or_else(|| {
+        infer_queue_blocked_reason(attempt, latest_review, check_results)
+            .as_str()
+            .to_string()
+    });
     let failed_checks: Vec<&CheckResult> = check_results
         .iter()
         .filter(|check| check.required && check.result == CheckResultStatus::Failed)
@@ -506,28 +509,6 @@ fn latest_blocked_reason(attempt: &MergeAttempt, events: &[EventRecord]) -> Opti
         })
         .and_then(|event| json_string_field(&event.data_json, "reason"))
         .filter(|reason| !reason.trim().is_empty())
-}
-
-fn infer_blocked_reason(
-    attempt: &MergeAttempt,
-    latest_review: Option<&SemanticReview>,
-    check_results: &[CheckResult],
-) -> String {
-    if latest_review
-        .map(|review| review.risk_level == SemanticRiskLevel::Blocked)
-        .unwrap_or(false)
-    {
-        "semantic_review".to_string()
-    } else if check_results
-        .iter()
-        .any(|check| check.required && check.result == CheckResultStatus::Failed)
-    {
-        "checks_failed".to_string()
-    } else if attempt.verified_commit_id.is_none() || attempt.verified_tree_id.is_none() {
-        "mechanical_conflict".to_string()
-    } else {
-        "unknown".to_string()
-    }
 }
 
 fn merge_attempt_artifact(attempt_id: &str, artifact_name: &str) -> String {

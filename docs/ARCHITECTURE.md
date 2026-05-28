@@ -168,7 +168,8 @@ It does not guarantee business correctness when tests and review are insufficien
 The MVP now keeps the first layer of merge/review orchestration outside the CLI crate:
 
 - `aich-llm` owns the Semantic Review report contract, YAML parser, proposed-patch model, review input model, related-manifest model, and diff patch context model.
-- `aich-merge` owns pure merge-queue state classification and review/approval readiness checks for merge attempts.
-- `aich-cli` still performs command parsing, ledger transactions, artifact writes, provider process execution, and user-facing rendering.
+- `aich-llm` also renders the provider-facing Semantic Review input, the stored Semantic Review YAML report, and proposed-fix-plan artifact content. The CLI decides where those artifacts are written.
+- `aich-merge` owns pure merge-queue state classification, blocked-reason inference from merge evidence, and review/approval readiness checks for merge attempts.
+- `aich-cli` still performs command parsing, ledger transactions, artifact file writes, provider process execution, and user-facing rendering.
 
 This is an incremental split. Git mutation, SQLite durability, and artifact storage remain in the existing CLI orchestration path until those behaviors can be moved without weakening the verified-tree rule.
