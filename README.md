@@ -229,7 +229,7 @@ Or use the wrapper scripts:
 ./scripts/acceptance-tmp-md.sh
 ```
 
-Run the real Codex worker + Codex Change Manifest generator + Codex semantic-review smoke in a temporary clone with:
+Run the real Codex worker + Codex Change Manifest generator/regenerator + Codex semantic-review smoke in a temporary clone with:
 
 ```bash
 ./scripts/llm-smoke-dogfood.sh

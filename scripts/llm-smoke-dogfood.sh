@@ -250,9 +250,35 @@ expect_fail_log preflight-b-before-a "$AICH_BIN" preflight "$SESSION_B"
 require_log_contains "$LAST_LOG" "while session '$SESSION_A' is verified"
 
 log "Running actual Codex LLM semantic review for session A"
-run_log review-a "$AICH_BIN" review "$SESSION_A"
+run_log review-a-initial "$AICH_BIN" review "$SESSION_A"
 REPORT_A="$(extract_report_path "$LAST_LOG")"
 [[ -n "$REPORT_A" ]] || die "failed to parse session A review report path"
+require_file_contains "$REPORT_A" "llm_executed: true"
+require_file_contains "$REPORT_A" 'reviewer: "codex_llm_smoke_reviewer"'
+
+log "Regenerating session A manifest with actual Codex and proving the prior review is stale"
+cp .aichestra/config.yaml "$LOG_DIR/config-before-regenerate-a.yaml"
+perl -0pi -e \
+  's/generator_id: codex_llm_smoke_manifest_generator/generator_id: codex_llm_smoke_manifest_regenerator/' \
+  .aichestra/config.yaml
+run_log regenerate-a "$AICH_BIN" manifest regenerate "$SESSION_A"
+require_log_contains "$LAST_LOG" "Regenerated Change Manifest"
+require_log_contains "$LAST_LOG" "Ledger status: generated_by_llm"
+cp "$LOG_DIR/config-before-regenerate-a.yaml" .aichestra/config.yaml
+run_log manifest-show-a-regenerated "$AICH_BIN" manifest show "$SESSION_A"
+require_log_contains "$LAST_LOG" "validation_status: generated_by_llm"
+require_log_contains "$LAST_LOG" "generator_id: codex_llm_smoke_manifest_regenerator"
+require_log_contains "$LAST_LOG" "generator_adapter: llm"
+require_log_contains "$LAST_LOG" "change-manifest-input.md (present)"
+require_log_contains "$LAST_LOG" "change-manifest-stdout.txt (present)"
+expect_fail_log approve-a-stale-review "$AICH_BIN" approve "$SESSION_A"
+require_log_contains "$LAST_LOG" "stale"
+require_log_contains "$LAST_LOG" "manifest_changed"
+
+log "Rerunning actual Codex LLM semantic review for session A after manifest regenerate"
+run_log review-a "$AICH_BIN" review "$SESSION_A"
+REPORT_A="$(extract_report_path "$LAST_LOG")"
+[[ -n "$REPORT_A" ]] || die "failed to parse regenerated session A review report path"
 require_file_contains "$REPORT_A" "llm_executed: true"
 require_file_contains "$REPORT_A" 'reviewer: "codex_llm_smoke_reviewer"'
 run_log approve-a "$AICH_BIN" approve "$SESSION_A"
