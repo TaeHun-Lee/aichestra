@@ -215,6 +215,14 @@ Or use the wrapper scripts:
 ./scripts/acceptance-tmp-md.sh
 ```
 
+Run the real Codex worker + Codex semantic-review smoke in a temporary clone with:
+
+```bash
+./scripts/llm-smoke-dogfood.sh
+```
+
+This script requires an authenticated `codex` CLI and network access. It keeps the temporary smoke repo by default so artifacts and LLM review reports can be inspected; set `AICH_SMOKE_KEEP=0` to delete it after a successful run.
+
 ## Checks
 
 ```bash
