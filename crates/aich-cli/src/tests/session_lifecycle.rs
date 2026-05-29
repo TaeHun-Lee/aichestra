@@ -624,6 +624,21 @@ YAML
                 .contains("\"validation_status\":\"generated_by_command\"")
     }));
 
+    let show_output = run_cli(&repo, ["aich", "manifest", "show", &session.id]);
+    assert!(show_output.contains("Generation evidence:"));
+    assert!(show_output.contains("validation_status: generated_by_command"));
+    assert!(show_output.contains("generator_id: command_manifest_tester"));
+    assert!(show_output.contains("generator_adapter: command"));
+    assert!(show_output.contains("artifacts:"));
+    assert!(show_output.contains("input: "));
+    assert!(show_output.contains("change-manifest-input.md (present)"));
+    assert!(show_output.contains("stdout: "));
+    assert!(show_output.contains("change-manifest-stdout.txt (present)"));
+    assert!(show_output.contains("stderr: "));
+    assert!(show_output.contains("change-manifest-stderr.txt (present)"));
+    assert!(show_output.contains("generated_draft: "));
+    assert!(show_output.contains("change-manifest.generated.yaml (present)"));
+
     let _ = fs::remove_dir_all(repo);
 }
 

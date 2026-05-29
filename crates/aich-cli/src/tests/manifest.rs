@@ -19,6 +19,11 @@ fn manifest_show_reports_hash_and_diff_evidence() {
     assert!(output.contains("Manifest vs diff: ok"));
     assert!(output.contains("Changed files: 1"));
     assert!(output.contains("  - README.md"));
+    assert!(output.contains("Generation evidence:"));
+    assert!(output.contains("validation_status: generated_from_diff"));
+    assert!(output.contains("generator_id: -"));
+    assert!(output.contains("generator_adapter: -"));
+    assert!(!output.contains("change-manifest-input.md"));
     assert!(output.contains("Next edit: aich manifest edit session-review"));
 
     let _ = fs::remove_dir_all(repo);

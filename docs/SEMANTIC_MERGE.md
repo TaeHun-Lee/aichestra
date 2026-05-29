@@ -47,7 +47,7 @@ Manifest-vs-diff validation parses the Change Manifest as YAML and compares actu
 
 ## Change Manifest review/edit UX
 
-`aich manifest show <session-id>` is the human inspection step for the latest Change Manifest. It reports the artifact path, ledger validation status, hash status, YAML parse status, changed-file evidence, manifest-vs-diff mismatches, intent summary, and risk level. `--content` also prints the YAML artifact.
+`aich manifest show <session-id>` is the human inspection step for the latest Change Manifest. It reports the artifact path, ledger validation status, hash status, YAML parse status, changed-file evidence, manifest-vs-diff mismatches, intent summary, risk level, and generation evidence. For `generated_by_command` or `generated_by_llm` manifests, it also points to the manifest-generation input, stdout, stderr, and generated-draft artifacts so the operator can audit what the provider saw and returned without using `--content`. `--content` also prints the YAML artifact.
 
 `aich manifest edit <session-id>` lets the operator update reviewable intent fields without hand-editing ledger metadata:
 

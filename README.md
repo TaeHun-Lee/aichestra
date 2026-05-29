@@ -105,7 +105,7 @@ cargo run -p aich-cli -- approve <session-id>
 cargo run -p aich-cli -- apply <session-id>
 ```
 
-`aich manifest show` reports the latest Change Manifest artifact, ledger hash status, YAML parse status, changed files, manifest-vs-diff evidence, intent summary, and risk level. `aich manifest edit` updates the YAML artifact through structured fields such as `--set-intent-summary`, `--set-risk-level`, `--add-risk`, and `--add-test`, then records the new artifact hash and `manifest.updated` event. Editing the manifest does not change the candidate patch or verified tree; rerun `aich review <session-id>` before approval.
+`aich manifest show` reports the latest Change Manifest artifact, ledger hash status, YAML parse status, changed files, manifest-vs-diff evidence, intent summary, risk level, generator metadata, and provider-backed manifest generation artifacts when present. `aich manifest edit` updates the YAML artifact through structured fields such as `--set-intent-summary`, `--set-risk-level`, `--add-risk`, and `--add-test`, then records the new artifact hash and `manifest.updated` event. Editing the manifest does not change the candidate patch or verified tree; rerun `aich review <session-id>` before approval.
 
 Semantic review records the evidence fingerprint it reviewed, including the manifest id/hash, verified candidate identity, changed files, and sandbox check evidence. If any of that evidence changes after review, `aich approve` and `aich apply` refuse until review is rerun, and `aich queue` shows `aich review <session-id>` as the next action.
 

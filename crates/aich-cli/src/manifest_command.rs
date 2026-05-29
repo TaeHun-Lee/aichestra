@@ -12,8 +12,13 @@ use crate::options::{ManifestEditOptions, ManifestShowOptions};
 use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, open_existing_ledger, resolve_active_operator, CliError,
-    CHANGE_MANIFEST_REVIEWED_STATUS,
+    CHANGE_MANIFEST_COMMAND_STATUS, CHANGE_MANIFEST_LLM_STATUS, CHANGE_MANIFEST_REVIEWED_STATUS,
 };
+
+const MANIFEST_GENERATION_INPUT_FILE: &str = "change-manifest-input.md";
+const MANIFEST_GENERATION_STDOUT_FILE: &str = "change-manifest-stdout.txt";
+const MANIFEST_GENERATION_STDERR_FILE: &str = "change-manifest-stderr.txt";
+const MANIFEST_GENERATION_DRAFT_FILE: &str = "change-manifest.generated.yaml";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ManifestShowResult {
@@ -28,8 +33,24 @@ pub(crate) struct ManifestShowResult {
     pub(crate) missing_files: Vec<String>,
     pub(crate) intent_summary: Option<String>,
     pub(crate) risk_level: Option<String>,
+    pub(crate) generation_evidence: ManifestGenerationEvidence,
     pub(crate) next_validation_command: String,
     pub(crate) include_content: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ManifestGenerationEvidence {
+    pub(crate) validation_status: Option<String>,
+    pub(crate) generator_id: Option<String>,
+    pub(crate) generator_adapter: Option<String>,
+    pub(crate) artifacts: Vec<ManifestGenerationArtifact>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ManifestGenerationArtifact {
+    pub(crate) label: String,
+    pub(crate) path: PathBuf,
+    pub(crate) exists: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -78,6 +99,8 @@ pub(crate) fn run_manifest_show(
     let risk_level = yaml_value
         .as_ref()
         .and_then(|value| nested_value_text(value, &["change_manifest", "risks", "level"]));
+    let generation_evidence =
+        manifest_generation_evidence(yaml_value.as_ref(), &manifest, &manifest_path);
 
     let (diff_evidence_status, missing_files) = match content.as_deref() {
         None => ("missing artifact".to_string(), Vec::new()),
@@ -111,6 +134,7 @@ pub(crate) fn run_manifest_show(
         missing_files,
         intent_summary,
         risk_level,
+        generation_evidence,
         next_validation_command,
         include_content: options.include_content,
     })
@@ -150,6 +174,50 @@ pub(crate) fn write_manifest_show<W: Write>(
         "Risk level: {}",
         result.risk_level.as_deref().unwrap_or("-")
     )?;
+    writeln!(out, "Generation evidence:")?;
+    writeln!(
+        out,
+        "  validation_status: {}",
+        result
+            .generation_evidence
+            .validation_status
+            .as_deref()
+            .unwrap_or("-")
+    )?;
+    writeln!(
+        out,
+        "  generator_id: {}",
+        result
+            .generation_evidence
+            .generator_id
+            .as_deref()
+            .unwrap_or("-")
+    )?;
+    writeln!(
+        out,
+        "  generator_adapter: {}",
+        result
+            .generation_evidence
+            .generator_adapter
+            .as_deref()
+            .unwrap_or("-")
+    )?;
+    if !result.generation_evidence.artifacts.is_empty() {
+        writeln!(out, "  artifacts:")?;
+        for artifact in &result.generation_evidence.artifacts {
+            writeln!(
+                out,
+                "    - {}: {} ({})",
+                artifact.label,
+                artifact.path.display(),
+                if artifact.exists {
+                    "present"
+                } else {
+                    "missing"
+                }
+            )?;
+        }
+    }
     writeln!(
         out,
         "Next edit: aich manifest edit {} --set-intent-summary \"...\"",
@@ -411,6 +479,78 @@ fn manifest_hash_status(content: Option<&str>, expected: Option<&str>) -> String
             }
         }
     }
+}
+
+fn manifest_generation_evidence(
+    yaml_value: Option<&Value>,
+    manifest: &ChangeManifest,
+    manifest_path: &Path,
+) -> ManifestGenerationEvidence {
+    let validation_status = yaml_value
+        .and_then(|value| {
+            nested_value_text(value, &["change_manifest", "evidence", "validation_status"])
+        })
+        .or_else(|| Some(manifest.validation_status.clone()));
+    let generator_id = yaml_value.and_then(|value| {
+        nested_value_text(value, &["change_manifest", "evidence", "generator_id"])
+    });
+    let generator_adapter = yaml_value.and_then(|value| {
+        nested_value_text(value, &["change_manifest", "evidence", "generator_adapter"])
+    });
+    let artifacts = if manifest_was_provider_generated(
+        manifest.validation_status.as_str(),
+        validation_status.as_deref(),
+        generator_adapter.as_deref(),
+    ) {
+        manifest_generation_artifacts(manifest_path)
+    } else {
+        Vec::new()
+    };
+
+    ManifestGenerationEvidence {
+        validation_status,
+        generator_id,
+        generator_adapter,
+        artifacts,
+    }
+}
+
+fn manifest_was_provider_generated(
+    ledger_status: &str,
+    evidence_status: Option<&str>,
+    generator_adapter: Option<&str>,
+) -> bool {
+    matches!(
+        ledger_status,
+        CHANGE_MANIFEST_COMMAND_STATUS | CHANGE_MANIFEST_LLM_STATUS
+    ) || matches!(
+        evidence_status,
+        Some(CHANGE_MANIFEST_COMMAND_STATUS | CHANGE_MANIFEST_LLM_STATUS)
+    ) || matches!(generator_adapter, Some("command" | "llm"))
+}
+
+fn manifest_generation_artifacts(manifest_path: &Path) -> Vec<ManifestGenerationArtifact> {
+    let Some(artifact_dir) = manifest_path.parent() else {
+        return Vec::new();
+    };
+
+    [
+        ("input", MANIFEST_GENERATION_INPUT_FILE),
+        ("stdout", MANIFEST_GENERATION_STDOUT_FILE),
+        ("stderr", MANIFEST_GENERATION_STDERR_FILE),
+        ("generated_draft", MANIFEST_GENERATION_DRAFT_FILE),
+    ]
+    .into_iter()
+    .map(|(label, file_name)| {
+        let path = artifact_dir.join(file_name);
+        let exists = path.exists();
+        ManifestGenerationArtifact {
+            label: label.to_string(),
+            path,
+            exists,
+        }
+    })
+    .collect()
 }
 
 fn resolve_user_path(repo_root: &Path, path: &Path) -> PathBuf {
