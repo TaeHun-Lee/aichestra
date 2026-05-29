@@ -480,6 +480,17 @@ fn configure_semantic_review_llm_with_timeout(
         .expect("write semantic review llm timeout config");
 }
 
+fn configure_manifest_command(repo: &Path, generator_id: &str, command: &str) {
+    fs::write(
+        repo.join(".aichestra/config.yaml"),
+        format!(
+            "manifest:\n  adapter: command\n  generator_id: {generator_id}\n  command: {}\n  prompt_path: .aichestra/prompts/change-manifest.md\n  timeout_seconds: 30\n",
+            yaml_single_quote(command)
+        ),
+    )
+    .expect("write manifest command config");
+}
+
 fn configure_provider_command(repo: &Path, provider: &str, command: &str) {
     fs::write(
         repo.join(".aichestra/config.yaml"),

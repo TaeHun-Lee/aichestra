@@ -11,7 +11,10 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::formatting::{display_path_for_ledger, hex_lower, sha256_hex, yaml_quote};
-use crate::{CliError, CHANGE_MANIFEST_VALIDATION_STATUS, CONTEXT_SNAPSHOT_FILES};
+use crate::{
+    CliError, CHANGE_MANIFEST_VALIDATION_STATUS, CONTEXT_SNAPSHOT_FILES,
+    GENERATED_CHANGE_MANIFEST_GENERATOR,
+};
 
 #[derive(Debug, Deserialize)]
 struct ChangeManifestDocument {
@@ -538,6 +541,11 @@ pub(crate) fn render_change_manifest(
         "    validation_status: {}\n",
         yaml_quote(CHANGE_MANIFEST_VALIDATION_STATUS)
     ));
+    output.push_str(&format!(
+        "    generator_id: {}\n",
+        yaml_quote(GENERATED_CHANGE_MANIFEST_GENERATOR)
+    ));
+    output.push_str("    generator_adapter: \"generated\"\n");
     output
 }
 

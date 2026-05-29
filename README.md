@@ -152,6 +152,11 @@ providers:
 git:
   main_branch: main
 
+manifest:
+  adapter: generated
+  prompt_path: .aichestra/prompts/change-manifest.md
+  timeout_seconds: 600
+
 semantic_review:
   adapter: local
   timeout_seconds: 600
@@ -162,6 +167,14 @@ semantic_review:
 `git.main_branch` is resolved as `refs/heads/<branch>`. `aich apply` expects the main worktree to be on that configured branch.
 
 `providers.<name>.command` is executed with the session worktree as `cwd`; the session task input is sent on stdin and stdout/stderr are stored as artifacts.
+
+`manifest.adapter` controls Change Manifest creation during `aich session complete`:
+
+- `generated`: deterministic draft from goal and Git diff evidence
+- `command`: runs `manifest.command` with a rendered manifest-generation input on stdin and expects `change_manifest:` YAML on stdout
+- `llm`: provider wrapper path; the built-in `codex` provider uses non-interactive read-only `codex exec`
+
+Provider-backed manifest output is not trusted blindly. Aichestra preserves session identity, commit ids, diff artifact paths, context hash, generator metadata, and validation status from local evidence, then rejects completion if the provider manifest omits any actual changed file from structured manifest fields.
 
 `checks.commands[]` is parsed as structured YAML. `required: true` checks form the sandbox gate; failures or timeouts block preflight. `required: false` checks are recorded for review but do not block verification. Use `timeout_seconds` or `timeout_ms` for time limits, and `env` to pass explicit environment variables to the sandbox check process. These fields are part of the preflight check policy fingerprint, so changing them requires a fresh preflight before review, approval, or apply can proceed.
 
@@ -215,7 +228,7 @@ Or use the wrapper scripts:
 ./scripts/acceptance-tmp-md.sh
 ```
 
-Run the real Codex worker + Codex semantic-review smoke in a temporary clone with:
+Run the real Codex worker + Codex Change Manifest generator + Codex semantic-review smoke in a temporary clone with:
 
 ```bash
 ./scripts/llm-smoke-dogfood.sh

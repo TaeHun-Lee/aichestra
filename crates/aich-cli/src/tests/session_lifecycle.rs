@@ -415,6 +415,309 @@ fn session_complete_records_patchset_manifest_and_enqueues_session() {
 }
 
 #[test]
+fn session_complete_uses_command_manifest_adapter_and_preserves_trusted_evidence() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let command = write_agent_test_command(
+        &repo,
+        "manifest-command-success",
+        r#"$inputText = [Console]::In.ReadToEnd()
+if (-not $inputText.Contains('Generated Manifest Draft')) {
+  [Console]::Error.WriteLine('missing generated draft')
+  exit 2
+}
+if (-not $inputText.Contains('agent stdout for manifest')) {
+  [Console]::Error.WriteLine('missing agent stdout')
+  exit 3
+}
+@'
+change_manifest:
+  session_id: "wrong-session"
+  goal: "wrong goal"
+  provider: "wrong-provider"
+  branch: "wrong-branch"
+  base_commit: "wrong-base"
+  head_commit: "wrong-head"
+  patch_id: "wrong-patch"
+  intent:
+    summary: "Command manifest summary"
+    reason: "The command adapter used actual diff and agent artifacts."
+    expected_behavior:
+      - "run symbol is documented"
+    non_goals: []
+  changed_areas:
+    - file: "src/lib.rs"
+      change_type: "modified"
+      symbols:
+        - "run"
+      purpose: "Document the run symbol."
+      semantic_impact: "No public behavior change."
+      before: "old docs"
+      after: "new docs"
+  newly_created_files: []
+  deleted_or_renamed_files: []
+  compatibility_notes:
+    breaking_change: false
+    migration_required: []
+    backward_compatibility: "compatible"
+  tests:
+    added: []
+    executed:
+      - command: "not run"
+        result: "skipped"
+        output_artifact: ""
+  risks:
+    level: "low"
+    items: []
+  uncertainty: []
+  evidence:
+    diff_stat_artifact: "wrong-stat"
+    diff_patch_artifact: "wrong-patch"
+    context_snapshot_hash: "wrong-context"
+    validation_status: "wrong-status"
+'@
+"#,
+        r#"input=$(cat)
+case "$input" in
+  *"Generated Manifest Draft"*) ;;
+  *) echo "missing generated draft" >&2; exit 2 ;;
+esac
+case "$input" in
+  *"agent stdout for manifest"*) ;;
+  *) echo "missing agent stdout" >&2; exit 3 ;;
+esac
+cat <<'YAML'
+change_manifest:
+  session_id: "wrong-session"
+  goal: "wrong goal"
+  provider: "wrong-provider"
+  branch: "wrong-branch"
+  base_commit: "wrong-base"
+  head_commit: "wrong-head"
+  patch_id: "wrong-patch"
+  intent:
+    summary: "Command manifest summary"
+    reason: "The command adapter used actual diff and agent artifacts."
+    expected_behavior:
+      - "run symbol is documented"
+    non_goals: []
+  changed_areas:
+    - file: "src/lib.rs"
+      change_type: "modified"
+      symbols:
+        - "run"
+      purpose: "Document the run symbol."
+      semantic_impact: "No public behavior change."
+      before: "old docs"
+      after: "new docs"
+  newly_created_files: []
+  deleted_or_renamed_files: []
+  compatibility_notes:
+    breaking_change: false
+    migration_required: []
+    backward_compatibility: "compatible"
+  tests:
+    added: []
+    executed:
+      - command: "not run"
+        result: "skipped"
+        output_artifact: ""
+  risks:
+    level: "low"
+    items: []
+  uncertainty: []
+  evidence:
+    diff_stat_artifact: "wrong-stat"
+    diff_patch_artifact: "wrong-patch"
+    context_snapshot_hash: "wrong-context"
+    validation_status: "wrong-status"
+YAML
+"#,
+    );
+    configure_manifest_command(&repo, "command_manifest_tester", &command);
+
+    let start_options = SessionStartOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+        goal: "capture command manifest".to_string(),
+        provider: "codex".to_string(),
+        target_path: Some("src/lib.rs".to_string()),
+        operator_id: None,
+    };
+    let git = MockGitRepository;
+    let worktrees = MockWorktreeManager::new();
+    let session = start_session_with(&start_options, &git, &worktrees)
+        .expect("start session")
+        .session;
+
+    let run_dir = repo
+        .join(".aichestra/artifacts/sessions")
+        .join(&session.id)
+        .join("runs")
+        .join("999-manifest-test");
+    fs::create_dir_all(&run_dir).expect("create fake agent run dir");
+    fs::write(run_dir.join("input.md"), "agent input").expect("write run input");
+    fs::write(run_dir.join("stdout.txt"), "agent stdout for manifest").expect("write stdout");
+    fs::write(run_dir.join("stderr.txt"), "").expect("write stderr");
+    fs::write(run_dir.join("metadata.json"), "{}").expect("write metadata");
+
+    let result = complete_session_with(
+        &SessionCompleteOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockSessionCompleter::new(CompleteSessionWorktreeOutcome::Changes(
+            aich_git::CompletedSessionWorktree {
+                head_commit: "head-commit".to_string(),
+                diff_stat: " src/lib.rs | 1 +\n 1 file changed, 1 insertion(+)\n".to_string(),
+                diff_patch: "diff --git a/src/lib.rs b/src/lib.rs\n+pub fn run() {}\n".to_string(),
+                changed_files: vec![aich_git::GitChangedFile {
+                    path: "src/lib.rs".to_string(),
+                    change_type: "modified".to_string(),
+                    symbols_json: "[\"run\"]".to_string(),
+                }],
+                committed_worktree_changes: true,
+            },
+        )),
+    )
+    .expect("complete session with command manifest");
+
+    let manifest = result.change_manifest.expect("manifest");
+    assert_eq!(manifest.validation_status, CHANGE_MANIFEST_COMMAND_STATUS);
+    let manifest_path = result.manifest_path.expect("manifest path");
+    let content = fs::read_to_string(&manifest_path).expect("read manifest");
+    assert!(content.contains("summary: Command manifest summary"));
+    assert!(content.contains(&format!("session_id: {}", session.id)));
+    assert!(content.contains("goal: capture command manifest"));
+    assert!(content.contains("provider: codex"));
+    assert!(content.contains("base_commit: base-commit"));
+    assert!(content.contains("head_commit: head-commit"));
+    assert!(content.contains("validation_status: generated_by_command"));
+    assert!(content.contains("generator_id: command_manifest_tester"));
+    assert!(content.contains("generator_adapter: command"));
+    assert!(content.contains("diff_stat_artifact: .aichestra/artifacts/sessions/"));
+    assert!(content.contains("diff_patch_artifact: .aichestra/artifacts/sessions/"));
+    assert!(content.contains("src/lib.rs"));
+    assert!(!content.contains("wrong-head"));
+    assert!(!content.contains("wrong-context"));
+
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let loaded_manifest = ledger
+        .list_change_manifests(&session.id)
+        .expect("list manifests")
+        .pop()
+        .expect("manifest row");
+    assert_eq!(
+        loaded_manifest.validation_status,
+        CHANGE_MANIFEST_COMMAND_STATUS
+    );
+    assert!(ledger.list_events().expect("events").iter().any(|event| {
+        event.name == "manifest.validated"
+            && event
+                .data_json
+                .contains("\"validation_status\":\"generated_by_command\"")
+    }));
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
+fn session_complete_refuses_provider_manifest_that_omits_changed_files() {
+    let repo = unique_temp_dir();
+    init_repo(&InitOptions {
+        repo_root: repo.clone(),
+        db_path: None,
+    })
+    .expect("init");
+    let command = write_agent_test_command(
+        &repo,
+        "manifest-command-missing-file",
+        r#"@'
+change_manifest:
+  intent:
+    summary: "missing files"
+  changed_areas: []
+  newly_created_files: []
+  deleted_or_renamed_files: []
+'@
+"#,
+        r#"cat <<'YAML'
+change_manifest:
+  intent:
+    summary: "missing files"
+  changed_areas: []
+  newly_created_files: []
+  deleted_or_renamed_files: []
+YAML
+"#,
+    );
+    configure_manifest_command(&repo, "bad_manifest_tester", &command);
+
+    let session = start_session_with(
+        &SessionStartOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            goal: "bad manifest".to_string(),
+            provider: "codex".to_string(),
+            target_path: Some("src/lib.rs".to_string()),
+            operator_id: None,
+        },
+        &MockGitRepository,
+        &MockWorktreeManager::new(),
+    )
+    .expect("start session")
+    .session;
+
+    let err = complete_session_with(
+        &SessionCompleteOptions {
+            repo_root: repo.clone(),
+            db_path: None,
+            session_id: session.id.clone(),
+            operator_id: None,
+        },
+        &MockSessionCompleter::new(CompleteSessionWorktreeOutcome::Changes(
+            aich_git::CompletedSessionWorktree {
+                head_commit: "head-commit".to_string(),
+                diff_stat: " src/lib.rs | 1 +\n 1 file changed, 1 insertion(+)\n".to_string(),
+                diff_patch: "diff --git a/src/lib.rs b/src/lib.rs\n+pub fn run() {}\n".to_string(),
+                changed_files: vec![aich_git::GitChangedFile {
+                    path: "src/lib.rs".to_string(),
+                    change_type: "modified".to_string(),
+                    symbols_json: "[\"run\"]".to_string(),
+                }],
+                committed_worktree_changes: true,
+            },
+        )),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(err, CliError::Usage(message) if message.contains("missing changed file(s)") && message.contains("src/lib.rs"))
+    );
+    let ledger = Ledger::open(repo.join(".aichestra/aichestra.db")).expect("open ledger");
+    let loaded = ledger
+        .get_session(&session.id)
+        .expect("get session")
+        .expect("session exists");
+    assert_eq!(loaded.status, SessionStatus::Running);
+    assert_eq!(
+        ledger
+            .list_change_manifests(&session.id)
+            .expect("list manifests")
+            .len(),
+        0
+    );
+
+    let _ = fs::remove_dir_all(repo);
+}
+
+#[test]
 fn session_complete_marks_noop_when_no_changes_exist() {
     let repo = unique_temp_dir();
     init_repo(&InitOptions {

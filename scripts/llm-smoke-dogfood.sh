@@ -109,6 +109,10 @@ extract_report_path() {
   extract_field "$1" "Report: "
 }
 
+extract_manifest_path() {
+  extract_field "$1" "Change Manifest: "
+}
+
 extract_main_before() {
   extract_field "$1" "Main before: "
 }
@@ -161,9 +165,12 @@ cd "$SMOKE_REPO"
 SMOKE_MAIN_BRANCH="$(git branch --show-current)"
 [[ -n "$SMOKE_MAIN_BRANCH" ]] || die "smoke clone is detached; expected a branch checkout"
 
-log "Configuring fixture and LLM semantic review"
+log "Configuring fixture, LLM Change Manifest, and LLM semantic review"
 SMOKE_MAIN_BRANCH="$SMOKE_MAIN_BRANCH" perl -0pi -e \
   's/(^git:\n  main_branch: ).*/$1$ENV{SMOKE_MAIN_BRANCH}/m' \
+  .aichestra/config.yaml
+perl -0pi -e \
+  's/^manifest:\n(?:  .*\n)*\nchecks:/manifest:\n  required: true\n  validate_against_diff: true\n  warn_on_context_hash_change: true\n  block_on_manifest_diff_mismatch: false\n  adapter: llm\n  generator_provider: codex\n  generator_id: codex_llm_smoke_manifest_generator\n  prompt_path: .aichestra\/prompts\/change-manifest.md\n  timeout_seconds: 600\n\nchecks:/m' \
   .aichestra/config.yaml
 perl -0pi -e \
   's/^semantic_review:\n(?:  adapter: .*\n)?(?:  reviewer_provider: .*\n)?(?:  reviewer_id: .*\n)?/semantic_review:\n  adapter: llm\n  reviewer_provider: codex\n  reviewer_id: codex_llm_smoke_reviewer\n/m' \
@@ -216,9 +223,23 @@ require_file_contains ".aichestra/worktrees/$SESSION_B/tmp.md" \
   "LLM_B_STATUS: completed by actual Codex session B"
 require_session_changed_only_tmp "$SESSION_B"
 
-log "Completing both LLM-produced candidates"
+log "Completing both LLM-produced candidates with actual Codex manifest generation"
 run_log complete-a "$AICH_BIN" session complete "$SESSION_A"
+MANIFEST_A="$(extract_manifest_path "$LAST_LOG")"
+[[ -n "$MANIFEST_A" ]] || die "failed to parse session A manifest path"
+require_log_contains "$LAST_LOG" "Manifest status: generated_by_llm"
+require_file_contains "$MANIFEST_A" "validation_status: generated_by_llm"
+require_file_contains "$MANIFEST_A" "generator_id: codex_llm_smoke_manifest_generator"
+require_file_contains "$MANIFEST_A" "generator_adapter: llm"
+require_file_contains "$MANIFEST_A" "tmp.md"
 run_log complete-b "$AICH_BIN" session complete "$SESSION_B"
+MANIFEST_B="$(extract_manifest_path "$LAST_LOG")"
+[[ -n "$MANIFEST_B" ]] || die "failed to parse session B manifest path"
+require_log_contains "$LAST_LOG" "Manifest status: generated_by_llm"
+require_file_contains "$MANIFEST_B" "validation_status: generated_by_llm"
+require_file_contains "$MANIFEST_B" "generator_id: codex_llm_smoke_manifest_generator"
+require_file_contains "$MANIFEST_B" "generator_adapter: llm"
+require_file_contains "$MANIFEST_B" "tmp.md"
 run_log queue-enqueued "$AICH_BIN" queue
 require_log_contains "$LAST_LOG" "$SESSION_A [enqueued]"
 require_log_contains "$LAST_LOG" "$SESSION_B [enqueued]"

@@ -50,3 +50,11 @@ change_manifest:
 
   uncertainty:
     - string
+
+  evidence:
+    diff_stat_artifact: path_required
+    diff_patch_artifact: path_required
+    context_snapshot_hash: sha256_required
+    validation_status: enum(generated_from_diff, generated_by_command, generated_by_llm, reviewed_by_operator)
+    generator_id: string_optional
+    generator_adapter: enum(generated, command, llm)

@@ -43,3 +43,11 @@ change_manifest:
     items: []
 
   uncertainty: []
+
+  evidence:
+    diff_stat_artifact: ""
+    diff_patch_artifact: ""
+    context_snapshot_hash: ""
+    validation_status: "generated_from_diff"
+    generator_id: ""
+    generator_adapter: ""

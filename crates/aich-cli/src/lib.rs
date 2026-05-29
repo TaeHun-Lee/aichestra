@@ -36,6 +36,7 @@ mod config;
 mod doctor;
 mod formatting;
 mod manifest;
+mod manifest_adapter;
 mod manifest_command;
 mod options;
 mod preflight;
@@ -93,7 +94,12 @@ pub(crate) const QUEUE_LOCK_STALE_AFTER_MS: i64 = 30 * 60 * MILLIS_PER_SECOND;
 pub(crate) const DEFAULT_OPERATOR_ID: &str = "local-user";
 pub(crate) const DEFAULT_OPERATOR_NAME: &str = "Local User";
 pub(crate) const CHANGE_MANIFEST_VALIDATION_STATUS: &str = "generated_from_diff";
+pub(crate) const CHANGE_MANIFEST_COMMAND_STATUS: &str = "generated_by_command";
+pub(crate) const CHANGE_MANIFEST_LLM_STATUS: &str = "generated_by_llm";
 pub(crate) const CHANGE_MANIFEST_REVIEWED_STATUS: &str = "reviewed_by_operator";
+pub(crate) const GENERATED_CHANGE_MANIFEST_GENERATOR: &str = "generated_diff_manifest";
+pub(crate) const COMMAND_CHANGE_MANIFEST_GENERATOR: &str = "command_change_manifest_adapter";
+pub(crate) const LLM_CHANGE_MANIFEST_GENERATOR: &str = "llm_change_manifest_generator";
 pub(crate) const LOCAL_SEMANTIC_REVIEWER: &str = "local_mvp_static_reviewer";
 pub(crate) const COMMAND_SEMANTIC_REVIEWER: &str = "command_semantic_review_adapter";
 pub(crate) const LLM_SEMANTIC_REVIEWER: &str = "llm_semantic_review_adapter";
@@ -743,6 +749,9 @@ fn run_session_command<W: Write>(args: &[String], cwd: &Path, out: &mut W) -> Re
             }
             if let Some(manifest_path) = result.manifest_path.as_ref() {
                 writeln!(out, "Change Manifest: {}", manifest_path.display())?;
+                if let Some(manifest) = result.change_manifest.as_ref() {
+                    writeln!(out, "Manifest status: {}", manifest.validation_status)?;
+                }
             }
             Ok(())
         }

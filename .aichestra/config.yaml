@@ -34,6 +34,10 @@ manifest:
   validate_against_diff: true
   warn_on_context_hash_change: true
   block_on_manifest_diff_mismatch: false
+  adapter: generated
+  generator_id: generated_diff_manifest
+  prompt_path: .aichestra/prompts/change-manifest.md
+  timeout_seconds: 600
 
 checks:
   # These are for this Aichestra implementation repo.

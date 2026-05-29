@@ -28,9 +28,20 @@ The manifest is useful but not authoritative. Actual diff data always wins.
 
 ## MVP manifest generation
 
-`aich session complete <session-id>` creates a generated Change Manifest draft from the session goal and actual Git diff metadata. It records the base commit, head commit, changed files, diff artifacts, and context snapshot hash with `validation_status: generated_from_diff`.
+`aich session complete <session-id>` always creates a generated Change Manifest draft from the session goal and actual Git diff metadata. It records the base commit, head commit, changed files, diff artifacts, and context snapshot hash. With the default `manifest.adapter: generated`, this draft is stored directly with `validation_status: generated_from_diff`.
 
 This generated manifest is evidence, not final proof of intent. It includes MVP changed-symbol hints extracted from Git diff hunk headers and changed declaration lines, but those hints are heuristic. It still does not prove semantic impact, so human review or a later LLM manifest-edit step must fill in intent details before relying on it for semantic merge decisions.
+
+`manifest.adapter: command` and `manifest.adapter: llm` let completion ask a provider to generate or enrich the manifest before it is stored. The adapter input includes:
+
+- the generated manifest draft
+- actual diff stat and patch artifacts
+- changed-file and changed-symbol evidence
+- context snapshot hash
+- latest `aich session run` stdout/stderr artifacts when present
+- the configured Change Manifest prompt
+
+Provider-backed manifest output is evidence, not authority. Aichestra parses the returned `change_manifest:` YAML, overwrites trusted identity and evidence fields from local completion data, stores generator metadata under `change_manifest.evidence`, and records `validation_status: generated_by_command` or `generated_by_llm`. If the provider output is invalid YAML or does not declare every actual changed file in structured manifest fields, `aich session complete` refuses before enqueueing the candidate.
 
 Manifest-vs-diff validation parses the Change Manifest as YAML and compares actual changed files against structured fields such as `change_manifest.changed_areas[].file`, `newly_created_files`, and `deleted_or_renamed_files`. It does not treat arbitrary string containment as proof that a file was declared. Invalid YAML or missing structured file evidence is a manifest mismatch.
 

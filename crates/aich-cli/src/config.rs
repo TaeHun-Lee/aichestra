@@ -49,6 +49,10 @@ manifest:
   validate_against_diff: true
   warn_on_context_hash_change: true
   block_on_manifest_diff_mismatch: false
+  adapter: generated
+  generator_id: generated_diff_manifest
+  prompt_path: .aichestra/prompts/change-manifest.md
+  timeout_seconds: 600
 
 checks:
   commands:
@@ -113,6 +117,7 @@ pub(crate) struct AichestraConfig {
     pub(crate) providers: Option<HashMap<String, AichestraProviderConfig>>,
     pub(crate) sessions: Option<AichestraSessionConfig>,
     pub(crate) checks: Option<AichestraChecksConfig>,
+    pub(crate) manifest: Option<AichestraManifestConfig>,
     pub(crate) semantic_review: Option<AichestraSemanticReviewConfig>,
 }
 
@@ -144,6 +149,19 @@ pub(crate) struct AichestraCheckCommandConfig {
     pub(crate) timeout_ms: Option<u64>,
     pub(crate) timeout_seconds: Option<u64>,
     pub(crate) env: Option<HashMap<String, String>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(crate) struct AichestraManifestConfig {
+    pub(crate) adapter: Option<String>,
+    pub(crate) generator_provider: Option<String>,
+    pub(crate) generator_id: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) profile: Option<String>,
+    pub(crate) command: Option<String>,
+    pub(crate) prompt_path: Option<String>,
+    pub(crate) timeout_ms: Option<u64>,
+    pub(crate) timeout_seconds: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

@@ -20,6 +20,7 @@ use crate::formatting::{
     comparable_path, display_path_for_ledger, json_escape, path_from_ledger, sha256_hex,
 };
 use crate::manifest::{context_snapshot_hash, render_change_manifest};
+use crate::manifest_adapter::{build_change_manifest_content, ChangeManifestBuildRequest};
 use crate::options::{
     SessionAbandonOptions, SessionCleanupOptions, SessionCompleteOptions, SessionPruneOptions,
     SessionReopenOptions, SessionStartOptions,
@@ -28,7 +29,7 @@ use crate::queue::acquire_merge_queue_lock;
 use crate::{
     latest_merge_attempt, ledger_path, open_existing_ledger, resolve_active_operator, CliError,
     SessionAbandonResult, SessionCleanupResult, SessionCompleteResult, SessionPruneResult,
-    SessionReopenResult, SessionStartResult, CHANGE_MANIFEST_VALIDATION_STATUS,
+    SessionReopenResult, SessionStartResult,
 };
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -248,7 +249,7 @@ where
                 created_at_ms,
             };
 
-            let manifest_content = render_change_manifest(
+            let generated_manifest_content = render_change_manifest(
                 &session,
                 &patch_set,
                 &changed_files,
@@ -257,6 +258,22 @@ where
                 &diff_patch_path,
                 &options.repo_root,
             );
+            let built_manifest = build_change_manifest_content(ChangeManifestBuildRequest {
+                repo_root: &options.repo_root,
+                aichestra_dir: &aichestra_dir,
+                config_path: &config_path,
+                artifact_dir: &artifact_dir,
+                session: &session,
+                patch_set: &patch_set,
+                changed_files: &changed_files,
+                context_snapshot: &context_snapshot,
+                generated_manifest: &generated_manifest_content,
+                diff_stat: &changes.diff_stat,
+                diff_patch: &changes.diff_patch,
+                diff_stat_path: &diff_stat_path,
+                diff_patch_path: &diff_patch_path,
+            })?;
+            let manifest_content = built_manifest.content;
             fs::write(&manifest_path, &manifest_content)?;
             let manifest_hash = sha256_hex(manifest_content.as_bytes());
             let change_manifest = ChangeManifest {
@@ -264,7 +281,7 @@ where
                 session_id: session.id.clone(),
                 manifest_path: display_path_for_ledger(&options.repo_root, &manifest_path),
                 manifest_hash: Some(manifest_hash),
-                validation_status: CHANGE_MANIFEST_VALIDATION_STATUS.to_string(),
+                validation_status: built_manifest.validation_status.clone(),
                 created_at_ms,
             };
 
@@ -327,7 +344,7 @@ where
                     .with_data_json(format!(
                         "{{\"manifest_id\":\"{}\",\"validation_status\":\"{}\"}}",
                         json_escape(&change_manifest.id),
-                        CHANGE_MANIFEST_VALIDATION_STATUS
+                        json_escape(&change_manifest.validation_status)
                     )),
             )?;
             ledger.append_event(
