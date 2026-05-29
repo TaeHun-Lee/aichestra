@@ -284,6 +284,72 @@ fn native_complete_refuses_configured_main_branch() {
 }
 
 #[test]
+fn native_complete_refuses_in_progress_merge() {
+    let temp_dir = unique_temp_dir("aich-git-complete-in-progress-merge");
+    let repo = init_test_repo(&temp_dir);
+
+    fs::write(repo.join("file.txt"), "base\n").expect("write base file");
+    git(&repo, &["add", "file.txt"]);
+    git(&repo, &["commit", "-q", "-m", "initial"]);
+    git(&repo, &["branch", "-M", "main"]);
+    let base_commit = git(&repo, &["rev-parse", "HEAD"]);
+
+    let session_worktree = repo.join(".aichestra/worktrees/session-1");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "aich/session/session-1",
+            &session_worktree.display().to_string(),
+            &base_commit,
+        ],
+    );
+
+    fs::write(session_worktree.join("file.txt"), "session\n").expect("write session file");
+    git(&session_worktree, &["add", "file.txt"]);
+    git(&session_worktree, &["commit", "-q", "-m", "session change"]);
+
+    fs::write(repo.join("file.txt"), "main\n").expect("write main file");
+    git(&repo, &["add", "file.txt"]);
+    git(&repo, &["commit", "-q", "-m", "main change"]);
+
+    let merge = Command::new("git")
+        .arg("-C")
+        .arg(&session_worktree)
+        .args(["merge", "main"])
+        .output()
+        .expect("run conflicting merge");
+    assert!(
+        !merge.status.success(),
+        "merge unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&merge.stdout),
+        String::from_utf8_lossy(&merge.stderr)
+    );
+
+    let err = NativeGitWorktreeManager
+        .complete_session_worktree(&CompleteSessionWorktreeRequest {
+            session_id: "session-1".to_string(),
+            worktree_path: session_worktree,
+            session_branch: "aich/session/session-1".to_string(),
+            main_branch: "main".to_string(),
+            base_commit,
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        err,
+        WorktreeError::InvalidRequest(message)
+            if message.contains("in-progress Git operation (merge)")
+                && message.contains("finish the merge and commit")
+                && message.contains("git merge --abort")
+    ));
+
+    fs::remove_dir_all(temp_dir).expect("remove temp repo");
+}
+
+#[test]
 fn native_apply_refuses_wrong_main_branch_checkout() {
     let temp_dir = unique_temp_dir("aich-git-apply-wrong-branch");
     let repo = init_test_repo(&temp_dir);

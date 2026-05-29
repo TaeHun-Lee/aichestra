@@ -86,6 +86,8 @@ cargo test -p aich-cli command_adapter_cli_e2e_parallel_tmp_md_sessions_are_sequ
 
 `aich session complete <session-id>` is the candidate creation boundary. It inspects the session worktree, commits any dirty tracked or unignored untracked changes on the session branch, records the patch set and generated Change Manifest, and marks sessions with real diffs as `enqueued`. Changed symbols are captured with MVP diff heuristics from hunk headers and changed declaration lines, then stored as `changed_files.symbols_json` and rendered into the generated manifest. If the session branch has no diff from its recorded base commit, the session is marked `noop` and does not enter the merge queue.
 
+Completion refuses session worktrees with an in-progress Git operation such as merge, rebase, cherry-pick, or revert state. The operator must finish and commit the operation, or abort it with the corresponding Git command, before Aichestra will record a candidate.
+
 ## Queue display
 
 `aich queue` is a read-only view of candidates that still need merge-queue attention. It combines session status, the latest merge attempt, semantic review evidence, and approval records into human-facing states:

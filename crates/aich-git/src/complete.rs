@@ -1,10 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use crate::{
     current_branch_name, git_diff_has_changes, run_git_stdout, run_git_success,
     run_git_success_with_config, NativeGitWorktreeManager, WorktreeError,
 };
-use std::path::PathBuf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GitChangedFile {
@@ -51,6 +51,7 @@ impl SessionWorktreeCompleter for NativeGitWorktreeManager {
     ) -> Result<CompleteSessionWorktreeOutcome, WorktreeError> {
         validate_complete_session_worktree_request(request)?;
         ensure_session_worktree_branch(request)?;
+        ensure_no_in_progress_git_operation(&request.worktree_path)?;
 
         let mut committed_worktree_changes = false;
         let status = run_git_stdout(
@@ -111,6 +112,94 @@ impl SessionWorktreeCompleter for NativeGitWorktreeManager {
                 committed_worktree_changes,
             },
         ))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GitOperationProbe {
+    operation: &'static str,
+    git_path: &'static str,
+    guidance: &'static str,
+}
+
+const IN_PROGRESS_GIT_OPERATIONS: &[GitOperationProbe] = &[
+    GitOperationProbe {
+        operation: "merge",
+        git_path: "MERGE_HEAD",
+        guidance: "finish the merge and commit the result, or run `git merge --abort`",
+    },
+    GitOperationProbe {
+        operation: "rebase",
+        git_path: "REBASE_HEAD",
+        guidance: "run `git rebase --continue`, or run `git rebase --abort`",
+    },
+    GitOperationProbe {
+        operation: "rebase",
+        git_path: "rebase-merge",
+        guidance: "run `git rebase --continue`, or run `git rebase --abort`",
+    },
+    GitOperationProbe {
+        operation: "rebase",
+        git_path: "rebase-apply",
+        guidance: "run `git rebase --continue`, or run `git rebase --abort`",
+    },
+    GitOperationProbe {
+        operation: "cherry-pick",
+        git_path: "CHERRY_PICK_HEAD",
+        guidance: "run `git cherry-pick --continue`, or run `git cherry-pick --abort`",
+    },
+    GitOperationProbe {
+        operation: "revert",
+        git_path: "REVERT_HEAD",
+        guidance: "run `git revert --continue`, or run `git revert --abort`",
+    },
+];
+
+fn ensure_no_in_progress_git_operation(worktree_path: &Path) -> Result<(), WorktreeError> {
+    let mut detected = Vec::new();
+    for probe in IN_PROGRESS_GIT_OPERATIONS {
+        if git_operation_path(worktree_path, probe.git_path)?.exists() {
+            detected.push(*probe);
+        }
+    }
+
+    if detected.is_empty() {
+        return Ok(());
+    }
+
+    detected.sort_by_key(|probe| probe.operation);
+    detected.dedup_by_key(|probe| probe.operation);
+    let operations = detected
+        .iter()
+        .map(|probe| probe.operation)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let guidance = detected
+        .iter()
+        .map(|probe| probe.guidance)
+        .collect::<Vec<_>>()
+        .join("; ");
+
+    Err(WorktreeError::InvalidRequest(format!(
+        "session worktree has an in-progress Git operation ({operations}); refuse to complete until it is resolved. {guidance}."
+    )))
+}
+
+fn git_operation_path(worktree_path: &Path, git_path: &str) -> Result<PathBuf, WorktreeError> {
+    let path = run_git_stdout(worktree_path, &["rev-parse", "--git-path", git_path])?
+        .trim()
+        .to_string();
+    if path.is_empty() {
+        return Err(WorktreeError::InvalidRequest(format!(
+            "git rev-parse --git-path {git_path} returned an empty path"
+        )));
+    }
+
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(worktree_path.join(path))
     }
 }
 
