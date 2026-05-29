@@ -1,14 +1,20 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use aich_core::clock::now_millis;
 use aich_core::{ChangeManifest, EventName, MergeAttemptStatus, NewEvent, Operator, Session};
 use serde_yaml::{Mapping, Value};
 
 use crate::approval::latest_approval;
 use crate::formatting::{json_escape, path_from_ledger, read_optional_text, sha256_hex};
-use crate::manifest::{changed_files_missing_from_manifest, parse_manifest_diff_evidence};
-use crate::options::{ManifestEditOptions, ManifestShowOptions};
+use crate::manifest::{
+    changed_files_missing_from_manifest, context_snapshot_hash, parse_manifest_diff_evidence,
+    render_change_manifest,
+};
+use crate::manifest_adapter::{build_change_manifest_content, ChangeManifestBuildRequest};
+use crate::options::{ManifestEditOptions, ManifestRegenerateOptions, ManifestShowOptions};
 use crate::session::ensure_session_not_abandoned;
 use crate::{
     latest_merge_attempt, open_existing_ledger, resolve_active_operator, CliError,
@@ -19,6 +25,8 @@ const MANIFEST_GENERATION_INPUT_FILE: &str = "change-manifest-input.md";
 const MANIFEST_GENERATION_STDOUT_FILE: &str = "change-manifest-stdout.txt";
 const MANIFEST_GENERATION_STDERR_FILE: &str = "change-manifest-stderr.txt";
 const MANIFEST_GENERATION_DRAFT_FILE: &str = "change-manifest.generated.yaml";
+
+static MANIFEST_REGENERATE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ManifestShowResult {
@@ -60,6 +68,16 @@ pub(crate) struct ManifestEditResult {
     pub(crate) manifest: ChangeManifest,
     pub(crate) manifest_path: PathBuf,
     pub(crate) changed_fields: Vec<String>,
+    pub(crate) next_validation_command: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ManifestRegenerateResult {
+    pub(crate) session: Session,
+    pub(crate) operator: Operator,
+    pub(crate) manifest: ChangeManifest,
+    pub(crate) manifest_path: PathBuf,
+    pub(crate) validation_status: String,
     pub(crate) next_validation_command: String,
 }
 
@@ -256,7 +274,7 @@ pub(crate) fn run_manifest_edit(
     let mut manifest = latest_change_manifest(&ledger, &session.id)?;
     let manifest_path = path_from_ledger(&options.repo_root, &manifest.manifest_path);
 
-    ensure_manifest_edit_allowed(&ledger, &session.id)?;
+    ensure_manifest_mutation_allowed(&ledger, &session.id, "edited", "editing")?;
 
     let original_or_replacement = match options.content_file.as_ref() {
         Some(path) => fs::read_to_string(resolve_user_path(&options.repo_root, path))?,
@@ -398,6 +416,183 @@ pub(crate) fn write_manifest_edit<W: Write>(
     Ok(())
 }
 
+pub(crate) fn run_manifest_regenerate(
+    options: &ManifestRegenerateOptions,
+) -> Result<ManifestRegenerateResult, CliError> {
+    let aichestra_dir = options.repo_root.join(".aichestra");
+    let config_path = aichestra_dir.join("config.yaml");
+    if !config_path.exists() {
+        return Err(CliError::Usage(format!(
+            "Aichestra config not found at {}; run `aich init` first",
+            config_path.display()
+        )));
+    }
+
+    let (_db_path, ledger) = open_existing_ledger(&options.repo_root, &options.db_path)?;
+    let operator = resolve_active_operator(&ledger, options.operator_id.as_deref())?;
+    let session = ledger.get_session(&options.session_id)?.ok_or_else(|| {
+        CliError::Usage(format!("session '{}' does not exist", options.session_id))
+    })?;
+    ensure_session_not_abandoned(&session, "regenerated")?;
+    ensure_manifest_mutation_allowed(&ledger, &session.id, "regenerated", "regenerating")?;
+
+    let mut manifest = latest_change_manifest(&ledger, &session.id)?;
+    let patch_set = ledger
+        .list_patch_sets(&session.id)?
+        .into_iter()
+        .last()
+        .ok_or_else(|| {
+            CliError::Usage(format!(
+                "session '{}' has no patch set; run `aich session complete {}` first",
+                session.id, session.id
+            ))
+        })?;
+    let changed_files = ledger.list_changed_files(&patch_set.id)?;
+    let manifest_path = path_from_ledger(&options.repo_root, &manifest.manifest_path);
+    let artifact_dir = manifest_path.parent().ok_or_else(|| {
+        CliError::Usage(format!(
+            "Change Manifest path '{}' has no artifact directory",
+            manifest.manifest_path
+        ))
+    })?;
+    let diff_stat_path = artifact_dir.join("diff.stat");
+    let diff_patch_path = artifact_dir.join("diff.patch");
+    if !diff_stat_path.exists() || !diff_patch_path.exists() {
+        return Err(CliError::Usage(format!(
+            "Change Manifest regeneration requires existing diff artifacts at {} and {}",
+            diff_stat_path.display(),
+            diff_patch_path.display()
+        )));
+    }
+    let diff_stat = fs::read_to_string(&diff_stat_path)?;
+    let diff_patch = fs::read_to_string(&diff_patch_path)?;
+
+    let created_at_ms = now_millis();
+    let regenerate_counter = MANIFEST_REGENERATE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let regenerate_artifact_dir = artifact_dir.join(format!(
+        "change-manifest-regenerate-{created_at_ms}-{regenerate_counter}"
+    ));
+    fs::create_dir_all(&regenerate_artifact_dir)?;
+    let context_snapshot = aich_core::ContextSnapshot {
+        id: format!(
+            "context-{}-manifest-regen-{created_at_ms}-{regenerate_counter}",
+            session.id
+        ),
+        session_id: Some(session.id.clone()),
+        hash_algorithm: "sha256".to_string(),
+        snapshot_hash: context_snapshot_hash(&options.repo_root)?,
+        created_at_ms,
+    };
+    let generated_manifest_content = render_change_manifest(
+        &session,
+        &patch_set,
+        &changed_files,
+        &context_snapshot,
+        &diff_stat_path,
+        &diff_patch_path,
+        &options.repo_root,
+    );
+    let built_manifest = build_change_manifest_content(ChangeManifestBuildRequest {
+        repo_root: &options.repo_root,
+        aichestra_dir: &aichestra_dir,
+        config_path: &config_path,
+        artifact_dir: &regenerate_artifact_dir,
+        session: &session,
+        patch_set: &patch_set,
+        changed_files: &changed_files,
+        context_snapshot: &context_snapshot,
+        generated_manifest: &generated_manifest_content,
+        diff_stat: &diff_stat,
+        diff_patch: &diff_patch,
+        diff_stat_path: &diff_stat_path,
+        diff_patch_path: &diff_patch_path,
+    })?;
+    let manifest_content = built_manifest.content;
+    promote_manifest_generation_artifacts(&regenerate_artifact_dir, artifact_dir)?;
+    fs::remove_dir_all(&regenerate_artifact_dir)?;
+    fs::write(&manifest_path, &manifest_content)?;
+    let manifest_hash = sha256_hex(manifest_content.as_bytes());
+
+    let tx = ledger.begin_immediate_transaction()?;
+    ledger.insert_context_snapshot(&context_snapshot)?;
+    ledger.update_change_manifest(
+        &manifest.id,
+        Some(&manifest_hash),
+        &built_manifest.validation_status,
+    )?;
+    ledger.append_event(
+        &NewEvent::new(EventName::ContextSnapshotCreated)
+            .with_subject("session", session.id.clone())
+            .with_data_json(format!(
+                "{{\"context_snapshot_id\":\"{}\",\"hash_algorithm\":\"sha256\",\"reason\":\"manifest_regenerate\"}}",
+                json_escape(&context_snapshot.id)
+            )),
+    )?;
+    ledger.append_event(
+        &NewEvent::new(EventName::ManifestUpdated)
+            .with_subject("session", session.id.clone())
+            .with_data_json(format!(
+                "{{\"operator_id\":\"{}\",\"manifest_id\":\"{}\",\"manifest_path\":\"{}\",\"manifest_hash\":\"{}\",\"validation_status\":\"{}\",\"update_kind\":\"regenerated\"}}",
+                json_escape(&operator.id),
+                json_escape(&manifest.id),
+                json_escape(&manifest.manifest_path),
+                json_escape(&manifest_hash),
+                json_escape(&built_manifest.validation_status)
+            )),
+    )?;
+    ledger.append_event(
+        &NewEvent::new(EventName::ManifestValidated)
+            .with_subject("session", session.id.clone())
+            .with_data_json(format!(
+                "{{\"manifest_id\":\"{}\",\"validation_status\":\"{}\",\"update_kind\":\"regenerated\"}}",
+                json_escape(&manifest.id),
+                json_escape(&built_manifest.validation_status)
+            )),
+    )?;
+    tx.commit()?;
+
+    manifest.manifest_hash = Some(manifest_hash);
+    manifest.validation_status = built_manifest.validation_status.clone();
+    let next_validation_command = next_validation_command(&ledger, &session.id)?;
+
+    Ok(ManifestRegenerateResult {
+        session,
+        operator,
+        manifest,
+        manifest_path,
+        validation_status: built_manifest.validation_status,
+        next_validation_command,
+    })
+}
+
+pub(crate) fn write_manifest_regenerate<W: Write>(
+    result: &ManifestRegenerateResult,
+    out: &mut W,
+) -> Result<(), CliError> {
+    writeln!(out, "Regenerated Change Manifest")?;
+    writeln!(out, "Session: {}", result.session.id)?;
+    writeln!(out, "Operator: {}", result.operator.id)?;
+    writeln!(out, "Manifest: {}", result.manifest.id)?;
+    writeln!(out, "Path: {}", result.manifest_path.display())?;
+    writeln!(
+        out,
+        "Hash: {}",
+        result.manifest.manifest_hash.as_deref().unwrap_or("-")
+    )?;
+    writeln!(out, "Ledger status: {}", result.validation_status)?;
+    writeln!(
+        out,
+        "Next: aich manifest show {} --content",
+        result.session.id
+    )?;
+    writeln!(
+        out,
+        "Then rerun validation before approval: {}",
+        result.next_validation_command
+    )?;
+    Ok(())
+}
+
 fn latest_change_manifest(
     ledger: &aich_ledger::Ledger,
     session_id: &str,
@@ -413,9 +608,11 @@ fn latest_change_manifest(
         })
 }
 
-fn ensure_manifest_edit_allowed(
+fn ensure_manifest_mutation_allowed(
     ledger: &aich_ledger::Ledger,
     session_id: &str,
+    action_past_tense: &str,
+    action_gerund: &str,
 ) -> Result<(), CliError> {
     let Some(attempt) = latest_merge_attempt(ledger, session_id)? else {
         return Ok(());
@@ -426,15 +623,16 @@ fn ensure_manifest_edit_allowed(
         MergeAttemptStatus::Applying | MergeAttemptStatus::Applied
     ) {
         return Err(CliError::Usage(format!(
-            "merge attempt '{}' is {} and its Change Manifest cannot be edited",
+            "merge attempt '{}' is {} and its Change Manifest cannot be {}",
             attempt.id,
-            attempt.status.as_str()
+            attempt.status.as_str(),
+            action_past_tense
         )));
     }
     if latest_approval(ledger, &attempt.id)?.is_some() {
         return Err(CliError::Usage(format!(
-            "merge attempt '{}' is already approved; reopen or rework before editing its Change Manifest",
-            attempt.id
+            "merge attempt '{}' is already approved; reopen or rework before {} its Change Manifest",
+            attempt.id, action_gerund
         )));
     }
 
@@ -551,6 +749,22 @@ fn manifest_generation_artifacts(manifest_path: &Path) -> Vec<ManifestGeneration
         }
     })
     .collect()
+}
+
+fn promote_manifest_generation_artifacts(from_dir: &Path, to_dir: &Path) -> Result<(), CliError> {
+    for file_name in [
+        MANIFEST_GENERATION_INPUT_FILE,
+        MANIFEST_GENERATION_STDOUT_FILE,
+        MANIFEST_GENERATION_STDERR_FILE,
+        MANIFEST_GENERATION_DRAFT_FILE,
+    ] {
+        let source = from_dir.join(file_name);
+        if source.exists() {
+            fs::copy(source, to_dir.join(file_name))?;
+        }
+    }
+
+    Ok(())
 }
 
 fn resolve_user_path(repo_root: &Path, path: &Path) -> PathBuf {

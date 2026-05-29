@@ -378,7 +378,13 @@ fn seed_verified_review_candidate(
         .join("review-seed");
     fs::create_dir_all(&artifact_dir).expect("artifact dir");
     let manifest_path = artifact_dir.join("change-manifest.yaml");
+    let diff_stat_path = artifact_dir.join("diff.stat");
     let diff_patch_path = artifact_dir.join("diff.patch");
+    fs::write(
+        &diff_stat_path,
+        format!(" {changed_file_path} | 1 +\n 1 file changed\n"),
+    )
+    .expect("write diff stat");
     let diff_patch_content = format!(
         "diff --git a/{changed_file_path} b/{changed_file_path}\n@@ -1 +1 @@\n+review candidate change\n"
     );
@@ -484,8 +490,10 @@ fn configure_manifest_command(repo: &Path, generator_id: &str, command: &str) {
     fs::write(
         repo.join(".aichestra/config.yaml"),
         format!(
-            "manifest:\n  adapter: command\n  generator_id: {generator_id}\n  command: {}\n  prompt_path: .aichestra/prompts/change-manifest.md\n  timeout_seconds: 30\n",
-            yaml_single_quote(command)
+            "{}manifest:\n  adapter: command\n  generator_id: {generator_id}\n  command: {}\n  prompt_path: .aichestra/prompts/change-manifest.md\n  timeout_seconds: 30\n{}",
+            default_checks_config_yaml(),
+            yaml_single_quote(command),
+            default_semantic_review_config_yaml()
         ),
     )
     .expect("write manifest command config");
@@ -515,6 +523,10 @@ fn configure_single_check(repo: &Path, name: &str, command: &str, required: bool
 
 fn default_checks_config_yaml() -> &'static str {
     "checks:\n  commands:\n    - name: fmt\n      command: cargo fmt --all -- --check\n      required: true\n      timeout_seconds: 600\n    - name: clippy\n      command: cargo clippy --all-targets -- -D warnings\n      required: true\n      timeout_seconds: 600\n    - name: test\n      command: cargo test --all\n      required: true\n      timeout_seconds: 600\n"
+}
+
+fn default_semantic_review_config_yaml() -> &'static str {
+    "semantic_review:\n  adapter: local\n  reviewer_id: local_mvp_static_reviewer\n  prompt_path: .aichestra/prompts/semantic-merge-review.md\n  timeout_seconds: 600\n  risk_block_levels:\n    - blocked\n"
 }
 
 fn yaml_single_quote(value: &str) -> String {

@@ -151,6 +151,14 @@ impl ManifestEditOptions {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct ManifestRegenerateOptions {
+    pub(crate) repo_root: PathBuf,
+    pub(crate) db_path: Option<PathBuf>,
+    pub(crate) session_id: String,
+    pub(crate) operator_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct ApproveOptions {
     pub(crate) repo_root: PathBuf,
     pub(crate) db_path: Option<PathBuf>,
@@ -1318,6 +1326,74 @@ pub(crate) fn parse_manifest_edit_options(
     }
 
     Ok(options)
+}
+
+pub(crate) fn parse_manifest_regenerate_options(
+    args: &[String],
+    cwd: &Path,
+) -> Result<ManifestRegenerateOptions, CliError> {
+    let mut repo_root = cwd.to_path_buf();
+    let mut db_path = None;
+    let mut session_id = None;
+    let mut operator_id = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--repo requires a path".to_string()));
+                };
+                repo_root = PathBuf::from(value);
+            }
+            "--db" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--db requires a path".to_string()));
+                };
+                db_path = Some(PathBuf::from(value));
+            }
+            "--operator" => {
+                index += 1;
+                let Some(value) = args.get(index) else {
+                    return Err(CliError::Usage("--operator requires an id".to_string()));
+                };
+                operator_id = Some(value.clone());
+            }
+            "-h" | "--help" => {
+                return Err(CliError::Usage(usage_text()));
+            }
+            value if value.starts_with('-') => {
+                return Err(CliError::Usage(format!(
+                    "unknown manifest regenerate option '{value}'\n\n{}",
+                    usage_text()
+                )));
+            }
+            value => {
+                if session_id.is_some() {
+                    return Err(CliError::Usage(
+                        "manifest regenerate accepts only one session id".to_string(),
+                    ));
+                }
+                session_id = Some(value.to_string());
+            }
+        }
+        index += 1;
+    }
+
+    let Some(session_id) = session_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CliError::Usage(
+            "manifest regenerate requires <session-id>".to_string(),
+        ));
+    };
+
+    Ok(ManifestRegenerateOptions {
+        repo_root,
+        db_path,
+        session_id,
+        operator_id,
+    })
 }
 
 pub(crate) fn parse_approve_options(

@@ -116,6 +116,12 @@ fn review_requires_session_id() {
 }
 
 #[test]
+fn manifest_regenerate_requires_session_id() {
+    let err = parse_manifest_regenerate_options(&[], Path::new(".")).unwrap_err();
+    assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));
+}
+
+#[test]
 fn approve_requires_session_id() {
     let err = parse_approve_options(&[], Path::new(".")).unwrap_err();
     assert!(matches!(err, CliError::Usage(message) if message.contains("<session-id>")));

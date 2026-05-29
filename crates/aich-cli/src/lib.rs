@@ -66,7 +66,8 @@ use manifest::{
     parse_manifest_diff_patch_artifact,
 };
 use manifest_command::{
-    run_manifest_edit, run_manifest_show, write_manifest_edit, write_manifest_show,
+    run_manifest_edit, run_manifest_regenerate, run_manifest_show, write_manifest_edit,
+    write_manifest_regenerate, write_manifest_show,
 };
 use options::*;
 use preflight::run_preflight_with;
@@ -871,6 +872,11 @@ fn run_manifest_command<W: Write>(
             let result = run_manifest_edit(&options)?;
             write_manifest_edit(&result, out)
         }
+        Some("regenerate") => {
+            let options = parse_manifest_regenerate_options(&args[1..], cwd)?;
+            let result = run_manifest_regenerate(&options)?;
+            write_manifest_regenerate(&result, out)
+        }
         Some("-h") | Some("--help") | None => Err(CliError::Usage(usage_text())),
         Some(command) => Err(CliError::Usage(format!(
             "unknown manifest command '{command}'\n\n{}",
@@ -1014,7 +1020,7 @@ fn write_usage<W: Write>(out: &mut W) -> Result<(), CliError> {
 }
 
 pub(crate) fn usage_text() -> String {
-    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session rework <session-id> --review REVIEW_ID [--operator ID] [--repo PATH] [--db PATH]\n  aich session reopen <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session abandon <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich manifest show <session-id> [--content] [--repo PATH] [--db PATH]\n  aich manifest edit <session-id> [--set-intent-summary TEXT] [--set-risk-level low|medium|high|blocked|unknown] [--add-risk TEXT] [--add-test TEXT] [--from-file PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--accept-current] [--operator ID] [--repo PATH] [--db PATH]\n  aich reject <session-id> --reason TEXT [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
+    "Usage:\n  aich init [--repo PATH] [--db PATH]\n  aich status [--repo PATH] [--db PATH] [--recent-events N]\n  aich doctor [--repo PATH] [--db PATH]\n  aich queue [--repo PATH] [--db PATH]\n  aich queue unlock --force [--reason TEXT] [--repo PATH] [--db PATH]\n  aich auth whoami [--operator ID] [--repo PATH] [--db PATH]\n  aich auth operator add --id ID [--name NAME] [--role owner|maintainer|reviewer] [--repo PATH] [--db PATH]\n  aich auth operator list [--repo PATH] [--db PATH]\n  aich session start --goal TEXT [--provider PROVIDER] [--target PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich session run <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session rework <session-id> --review REVIEW_ID [--operator ID] [--repo PATH] [--db PATH]\n  aich session reopen <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session complete <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session abandon <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich session cleanup <session-id> [--repo PATH] [--db PATH]\n  aich session prune --applied|--inactive [--repo PATH] [--db PATH]\n  aich preflight <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich review <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich manifest show <session-id> [--content] [--repo PATH] [--db PATH]\n  aich manifest edit <session-id> [--set-intent-summary TEXT] [--set-risk-level low|medium|high|blocked|unknown] [--add-risk TEXT] [--add-test TEXT] [--from-file PATH] [--operator ID] [--repo PATH] [--db PATH]\n  aich manifest regenerate <session-id> [--operator ID] [--repo PATH] [--db PATH]\n  aich approve <session-id> [--accept-current] [--operator ID] [--repo PATH] [--db PATH]\n  aich reject <session-id> --reason TEXT [--operator ID] [--repo PATH] [--db PATH]\n  aich apply <session-id> [--operator ID] [--repo PATH] [--db PATH]".to_string()
 }
 
 #[cfg(test)]
